@@ -193,6 +193,32 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Phase 3b sub-slice 11: step-count detector. Any terminal execution
+	// with > 10 events gets grouped as loops/step-count. Runs after the
+	// crash and time-budget checks, so it's the lowest-priority
+	// classification — an execution that crashed, took too long, AND
+	// emitted lots of events ends up classified as crashes (first match
+	// wins via the failure_group_id short-circuit). Threshold of 10 is
+	// artificially low for v0.0.1 demo visibility; production default
+	// 50+ per the concept doc.
+	if isTerminalStatus(patch.Status) {
+		count, err := h.Store.CountEventsForExecution(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("count events for step-count check failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if count > 10 {
+			if err := h.Store.GroupStepCountExceedance(r.Context(), executionID, authProjectID, count); err != nil {
+				h.Logger.Warn("step-count grouping failed (continuing)",
+					"execution_id", executionID,
+					"event_count", count,
+					"error", err.Error(),
+				)
+			}
+		}
+	}
+
 	h.Logger.Info("execution updated",
 		"execution_id", patch.ExecutionID,
 		"status", patch.Status,

@@ -780,6 +780,58 @@ func (s *SQLiteStore) GroupTimeBudgetExceedance(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
 }
 
+// stepCountSignature buckets event counts so high-step-count executions
+// cluster into a small number of groups rather than one group per
+// distinct count. Buckets: 10+, 50+, 100+, 500+, 5000+. Anything below
+// the threshold is filtered upstream in the handler.
+func stepCountSignature(count int) string {
+	switch {
+	case count < 50:
+		return "step_count_10+"
+	case count < 100:
+		return "step_count_50+"
+	case count < 500:
+		return "step_count_100+"
+	case count < 5_000:
+		return "step_count_500+"
+	default:
+		return "step_count_5000+"
+	}
+}
+
+// GroupStepCountExceedance upserts a failure_group with
+// failure_class=loops and an event-count-bucketed signature. Same
+// idempotency contract as the other groupers — runs in the handler
+// AFTER both crash and time-budget checks, so it's the lowest-priority
+// classification of the three.
+func (s *SQLiteStore) GroupStepCountExceedance(
+	ctx context.Context,
+	executionID, projectID string,
+	eventCount int,
+) error {
+	signature := stepCountSignature(eventCount)
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
+}
+
+// CountEventsForExecution returns the number of event rows recorded
+// against a single execution_id. Used by the step-count detector and
+// (eventually) the replay UI's header.
+func (s *SQLiteStore) CountEventsForExecution(
+	ctx context.Context,
+	executionID string,
+) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM events WHERE execution_id = ?`,
+		executionID,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count events: %w", err)
+	}
+	return n, nil
+}
+
 // ListFailureGroups returns failure_groups for a project, sorted by
 // most-recent first. Caller is responsible for sensible limit/offset
 // bounds (handler enforces a max-limit ceiling).
