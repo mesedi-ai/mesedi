@@ -164,6 +164,7 @@ func main() {
 	// Phase 3a — failure_group read surface (auth-required).
 	mux.Handle("GET /failure-groups", privateHandler)
 	mux.Handle("GET /failure-groups/{id}", privateHandler)
+	mux.Handle("GET /failure-groups/{id}/executions", privateHandler)
 
 	// Top-level middleware: recover from panics, log every request.
 	root := api.NewTopChain(logger)(mux)

@@ -107,11 +107,17 @@ type Store interface {
 	// Events (batch ingest path is the hot one; single-event ingest is for tests).
 	SaveEvents(ctx context.Context, batch []events.Event) error
 
-	// Failure groups (Phase 3a — crash detection).
+	// Failure groups (Phase 3a — crash detection, Phase 3b/4 — loops).
 	// GroupCrashedExecution upserts a failure_group for the (project,
-	// failure_class, signature) tuple and links the execution into it.
+	// failure_class=crashes, signature) tuple and links the execution.
 	// Idempotent: re-calling with an already-grouped execution is a no-op.
 	GroupCrashedExecution(ctx context.Context, executionID, projectID, signature string) error
+	// GroupTimeBudgetExceedance upserts a failure_group with
+	// failure_class=loops and a duration-bucketed signature. Same
+	// idempotency contract as GroupCrashedExecution — an execution
+	// already linked to a group (e.g., already grouped as a crash) is
+	// a no-op; crash classification wins over time-budget overlap.
+	GroupTimeBudgetExceedance(ctx context.Context, executionID, projectID string, durationMs int64) error
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). For pagination, pass limit +
 	// offset; default to limit=50 in callers.
