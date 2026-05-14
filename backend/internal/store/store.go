@@ -128,6 +128,20 @@ type Store interface {
 	// detector and the Phase-9 replay UI's "this run produced N
 	// events" header.
 	CountEventsForExecution(ctx context.Context, executionID string) (int, error)
+	// SetExecutionCost writes a computed estimated_cost_usd onto an
+	// execution. Called after the cost-aggregator sums LLM tokens from
+	// events. No-op if the value is non-positive.
+	SetExecutionCost(ctx context.Context, executionID string, cost float64) error
+	// FindFirstFailedToolName returns the tool_name of the first
+	// tool_call event with payload.status="failed" in this execution,
+	// or empty string if no failed tool calls exist. Used by the
+	// tool-failures detector to classify executions where a tool
+	// failed silently (agent caught the exception, ran to completion).
+	FindFirstFailedToolName(ctx context.Context, executionID string) (string, error)
+	// GroupToolFailure upserts a failure_group with
+	// failure_class=tool_failures and signature=toolName. Same
+	// idempotency contract as the other groupers.
+	GroupToolFailure(ctx context.Context, executionID, projectID, toolName string) error
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). For pagination, pass limit +
 	// offset; default to limit=50 in callers.
