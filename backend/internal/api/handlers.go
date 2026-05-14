@@ -177,6 +177,22 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Phase 3b sub-slice 10: time-budget detector. Any terminal execution
+	// whose duration exceeded the threshold gets grouped as loops/time-budget.
+	// Runs AFTER the crash check so a crashed-and-slow execution is
+	// classified as crashes (the idempotency check in the store short-
+	// circuits this call). The threshold is hardcoded at 1s for v0.0.1;
+	// production default will be 60s, configurable per-project later.
+	if isTerminalStatus(patch.Status) && patch.DurationMs > 1000 {
+		if err := h.Store.GroupTimeBudgetExceedance(r.Context(), executionID, authProjectID, patch.DurationMs); err != nil {
+			h.Logger.Warn("time-budget grouping failed (continuing)",
+				"execution_id", executionID,
+				"duration_ms", patch.DurationMs,
+				"error", err.Error(),
+			)
+		}
+	}
+
 	h.Logger.Info("execution updated",
 		"execution_id", patch.ExecutionID,
 		"status", patch.Status,
@@ -533,6 +549,23 @@ func (h *Handlers) HandleStats(w http.ResponseWriter, r *http.Request) {
 		"crashed_24h":         crashed24h,
 		"open_failure_groups": len(groups),
 	})
+}
+
+// isTerminalStatus returns true for any execution status that means
+// "the agent run is over." Detection passes (time-budget, future
+// drift / cost-velocity) only fire on terminal statuses — running
+// executions don't have a final duration yet.
+func isTerminalStatus(s events.ExecutionStatus) bool {
+	switch s {
+	case events.StatusCompleted,
+		events.StatusCrashed,
+		events.StatusHalted,
+		events.StatusTimeout,
+		events.StatusValidationFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 // parseIntQuery returns the integer value of a URL query parameter,
