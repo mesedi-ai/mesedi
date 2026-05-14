@@ -86,6 +86,18 @@ type Store interface {
 	CreateExecution(ctx context.Context, exec *events.Execution) error
 	UpdateExecution(ctx context.Context, exec *events.Execution) error
 	GetExecution(ctx context.Context, executionID string) (*events.Execution, error)
+	// ListExecutions returns the project's executions sorted by
+	// started_at DESC (most recent first). Pagination via limit/offset.
+	ListExecutions(ctx context.Context, projectID string, limit, offset int) ([]*events.Execution, error)
+	// ListEventsForExecution returns the events recorded against a
+	// single execution, sorted by sequence ASC. Used by the dashboard's
+	// execution-detail view (Phase 3b polish + replay UI in Phase 9+).
+	ListEventsForExecution(ctx context.Context, executionID string) ([]*events.Event, error)
+	// CountExecutionsByStatusSince returns a count of executions with
+	// the given status that started_at >= cutoff. Used by dashboard
+	// stat cards (e.g. "crashed in last 24h"). cutoff = zero-time means
+	// "all-time count for that status."
+	CountExecutionsByStatusSince(ctx context.Context, projectID, status string, cutoff time.Time) (int, error)
 
 	// Events (batch ingest path is the hot one; single-event ingest is for tests).
 	SaveEvents(ctx context.Context, batch []events.Event) error

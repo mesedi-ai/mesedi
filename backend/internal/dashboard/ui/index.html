@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mesedi — Local Dev</title>
+  <style>
+    :root {
+      --bg:           #0f172a;
+      --surface:      #1e293b;
+      --surface-2:    #334155;
+      --border:       #475569;
+      --text:         #f1f5f9;
+      --text-muted:   #94a3b8;
+      --text-dim:     #64748b;
+      --accent:       #c9a646;
+      --danger:       #ef4444;
+      --danger-bg:    #7f1d1d;
+      --warning:      #f59e0b;
+      --warning-bg:   #78350f;
+      --success:      #10b981;
+      --success-bg:   #064e3b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 24px; border-bottom: 0.5px solid var(--border);
+      background: var(--surface);
+    }
+    .brand {
+      display: flex; align-items: center; gap: 24px;
+    }
+    .brand-name {
+      font-size: 17px; font-weight: 500; letter-spacing: -0.2px;
+    }
+    .project-chip {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 10px;
+      border: 0.5px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .dev-badge {
+      font-size: 10px;
+      padding: 3px 7px;
+      background: var(--warning-bg);
+      color: var(--warning);
+      border-radius: 4px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+    }
+    main {
+      padding: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 22px; font-weight: 500;
+      margin-bottom: 4px;
+    }
+    h1 .count {
+      font-weight: 400; color: var(--text-muted);
+      font-size: 16px; margin-left: 8px;
+    }
+    .subtitle {
+      font-size: 13px; color: var(--text-muted);
+      margin-bottom: 24px;
+    }
+    .reload-btn {
+      float: right;
+      padding: 6px 12px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .reload-btn:hover { background: var(--surface-2); }
+    .reload-btn:active { transform: translateY(1px); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    thead tr {
+      background: var(--surface-2);
+    }
+    th {
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td {
+      padding: 11px 14px;
+      font-size: 13px;
+      border-top: 0.5px solid var(--border);
+    }
+    td.mono {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .badge {
+      display: inline-block;
+      padding: 3px 9px;
+      font-size: 11px;
+      font-weight: 500;
+      border-radius: 4px;
+      text-transform: capitalize;
+    }
+    .badge-crash    { background: var(--danger-bg);  color: var(--danger); }
+    .badge-loop     { background: var(--warning-bg); color: var(--warning); }
+    .badge-tool     { background: var(--warning-bg); color: var(--warning); }
+    .badge-default  { background: var(--surface-2);  color: var(--text-muted); }
+    .num {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    .empty {
+      padding: 60px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .empty strong { color: var(--text); font-weight: 500; }
+    .error {
+      padding: 24px;
+      background: var(--danger-bg);
+      color: var(--text);
+      border-radius: 8px;
+      font-family: "SF Mono", monospace;
+      font-size: 12px;
+      margin-bottom: 24px;
+    }
+    footer {
+      margin-top: 60px;
+      padding: 20px 24px;
+      border-top: 0.5px solid var(--border);
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="brand-name">Mesedi</span>
+      <span class="project-chip">
+        <span>Local Dev</span>
+        <span style="color: var(--text-dim);">·</span>
+        <span style="font-family: monospace; font-size: 12px;">proj-dev</span>
+      </span>
+    </div>
+    <span class="dev-badge">DEV ONLY · LOCALHOST</span>
+  </header>
+  <main>
+    <button class="reload-btn" onclick="loadData()">↻ Reload</button>
+    <h1>Failure groups <span class="count" id="count"></span></h1>
+    <p class="subtitle">Crash signatures observed across all executions. Click a row to see the sample execution that triggered the group.</p>
+    <div id="content"></div>
+  </main>
+  <footer>
+    Mesedi local-dev dashboard prototype · Phase 3a · served from the backend binary at /ui/
+  </footer>
+
+  <script>
+    // DEV-ONLY hardcoded dev bearer token. The backend auto-bootstraps
+    // this key on first run (see bootstrapDevProject in cmd/api/main.go).
+    // Never use this pattern in a production dashboard.
+    const DEV_KEY = "mesedi_sk_dev_local_only";
+    const BASE_URL = "";  // same-origin: the dashboard is served by the backend itself
+
+    function fmtDate(s) {
+      if (!s) return "—";
+      const d = new Date(s);
+      const now = new Date();
+      const diffMs = now - d;
+      const diffMin = Math.round(diffMs / 60000);
+      if (diffMin < 1) return "just now";
+      if (diffMin < 60) return diffMin + "m ago";
+      const diffHr = Math.round(diffMin / 60);
+      if (diffHr < 24) return diffHr + "h ago";
+      const diffDays = Math.round(diffHr / 24);
+      return diffDays + "d ago";
+    }
+
+    function badgeForClass(cls) {
+      if (cls === "crashes") return "badge-crash";
+      if (cls === "loops") return "badge-loop";
+      if (cls.includes("tool")) return "badge-tool";
+      return "badge-default";
+    }
+
+    function renderEmpty(container) {
+      container.innerHTML = '<div class="empty">' +
+        '<strong>No failure groups yet.</strong><br>' +
+        'Run an agent that crashes to see grouping in action:<br>' +
+        '<code style="font-size: 12px; color: var(--accent);">cd ~/mesedi/sdk-python/sandbox && python3 real_agent.py</code>' +
+        '</div>';
+    }
+
+    function renderTable(container, groups) {
+      const rows = groups.map(g => {
+        return '<tr>' +
+          '<td><span class="badge ' + badgeForClass(g.failure_class) + '">' + g.failure_class + '</span></td>' +
+          '<td class="mono">' + g.signature + '</td>' +
+          '<td class="num">' + g.event_count + '</td>' +
+          '<td class="num">' + g.affected_executions + '</td>' +
+          '<td>' + fmtDate(g.first_seen) + '</td>' +
+          '<td>' + fmtDate(g.last_seen) + '</td>' +
+          '<td class="mono">' + (g.sample_execution_id || "—") + '</td>' +
+        '</tr>';
+      }).join("");
+      container.innerHTML = '<table>' +
+        '<thead><tr>' +
+          '<th>Class</th>' +
+          '<th>Signature</th>' +
+          '<th class="num">Events</th>' +
+          '<th class="num">Affected</th>' +
+          '<th>First seen</th>' +
+          '<th>Last seen</th>' +
+          '<th>Sample execution</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>';
+    }
+
+    async function loadData() {
+      const content = document.getElementById("content");
+      const countEl = document.getElementById("count");
+      content.innerHTML = '<div class="empty">Loading…</div>';
+
+      try {
+        const r = await fetch(BASE_URL + "/failure-groups", {
+          headers: {
+            "Authorization": "Bearer " + DEV_KEY,
+            "X-Mesedi-Schema-Version": "1",
+          },
+        });
+        if (!r.ok) {
+          const body = await r.text();
+          content.innerHTML = '<div class="error">HTTP ' + r.status + ': ' + body + '</div>';
+          countEl.textContent = "";
+          return;
+        }
+        const data = await r.json();
+        const groups = data.failure_groups || [];
+        countEl.textContent = groups.length === 1 ? "(1)" : "(" + groups.length + ")";
+        if (groups.length === 0) {
+          renderEmpty(content);
+          return;
+        }
+        renderTable(content, groups);
+      } catch (e) {
+        content.innerHTML = '<div class="error">Fetch failed: ' + e.message +
+          '<br>Is the backend running on localhost:8080?</div>';
+        countEl.textContent = "";
+      }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
