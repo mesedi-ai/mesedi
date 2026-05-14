@@ -89,6 +89,11 @@ type Store interface {
 	// ListExecutions returns the project's executions sorted by
 	// started_at DESC (most recent first). Pagination via limit/offset.
 	ListExecutions(ctx context.Context, projectID string, limit, offset int) ([]*events.Execution, error)
+	// ListExecutionsByFailureGroup returns executions whose
+	// failure_group_id matches groupID, sorted by started_at DESC.
+	// Caller should verify (group.project_id == auth_project_id) BEFORE
+	// calling — this method does NOT enforce project scoping.
+	ListExecutionsByFailureGroup(ctx context.Context, groupID string, limit, offset int) ([]*events.Execution, error)
 	// ListEventsForExecution returns the events recorded against a
 	// single execution, sorted by sequence ASC. Used by the dashboard's
 	// execution-detail view (Phase 3b polish + replay UI in Phase 9+).
