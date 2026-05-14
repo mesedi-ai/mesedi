@@ -35,6 +35,42 @@ type APIKey struct {
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
+// Failure-class constants. One value per detector that produces a
+// failure_group. Crashes is the only class wired into the backend
+// detector today; loops / tool_failures / etc. come online as their
+// Phase-3+ detectors land. Keep this list in sync with the SDK side
+// (mesedi-python events.EventType) when adding new classes.
+const (
+	FailureClassCrashes      = "crashes"
+	FailureClassLoops        = "loops"
+	FailureClassToolFailures = "tool_failures"
+	FailureClassValidator    = "validator_failures"
+	FailureClassDrift        = "drift"
+	FailureClassCostVelocity = "cost_velocity"
+	FailureClassInjection    = "prompt_injection"
+)
+
+// FailureGroup is a deduplicated cluster of failures sharing the same
+// signature within a project + failure_class. The first crashed
+// execution that matches an unseen signature creates a new group; every
+// subsequent identical crash bumps the counters and updates last_seen.
+//
+// group_id is derived deterministically from (project_id, failure_class,
+// signature), so the same signature always maps to the same group_id
+// across runs and restarts — no UUID coordination required.
+type FailureGroup struct {
+	GroupID            string     `json:"group_id"`
+	ProjectID          string     `json:"project_id"`
+	FailureClass       string     `json:"failure_class"`
+	Signature          string     `json:"signature"`
+	FirstSeen          time.Time  `json:"first_seen"`
+	LastSeen           time.Time  `json:"last_seen"`
+	EventCount         int        `json:"event_count"`
+	AffectedExecutions int        `json:"affected_executions"`
+	CostWastedUSD      *float64   `json:"cost_wasted_usd,omitempty"`
+	SampleExecutionID  string     `json:"sample_execution_id,omitempty"`
+}
+
 // Store is the abstract persistence interface. Phase 1.5 minimal surface;
 // will grow as later phases add read-side queries (list executions,
 // failure groups, aggregations, etc.).
