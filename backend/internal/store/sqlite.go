@@ -470,20 +470,56 @@ func (s *SQLiteStore) ListExecutions(
 		return nil, fmt.Errorf("query executions: %w", err)
 	}
 	defer rows.Close()
+	return scanExecutionRows(rows)
+}
 
+// ListExecutionsByFailureGroup returns executions whose failure_group_id
+// matches groupID, sorted by started_at DESC. Caller is expected to have
+// already verified that the group belongs to the auth context's project
+// (this method does not enforce project scoping — the failure_group_id
+// column on executions IS already scoped to a project by virtue of the
+// failure_groups foreign key, but we never reach into that here).
+func (s *SQLiteStore) ListExecutionsByFailureGroup(
+	ctx context.Context,
+	groupID string,
+	limit, offset int,
+) ([]*events.Execution, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			execution_id, project_id, status,
+			started_at, ended_at,
+			duration_ms, total_tokens_in, total_tokens_out,
+			estimated_cost_usd, sdk_language, sdk_version, crash_signature
+		FROM executions
+		WHERE failure_group_id = ?
+		ORDER BY started_at DESC
+		LIMIT ? OFFSET ?
+	`, groupID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("query executions by failure_group: %w", err)
+	}
+	defer rows.Close()
+	return scanExecutionRows(rows)
+}
+
+// scanExecutionRows is the shared row-iteration helper for both the
+// project-scoped and failure-group-scoped execution list queries. Both
+// queries return identical column ordering, so the scanning logic is
+// truly shared (not just copy-paste).
+func scanExecutionRows(rows *sql.Rows) ([]*events.Execution, error) {
 	var out []*events.Execution
 	for rows.Next() {
 		var (
-			e            events.Execution
-			startedAt    string
-			endedAt      sql.NullString
-			durationMs   sql.NullInt64
-			tokensIn     sql.NullInt64
-			tokensOut    sql.NullInt64
-			costUSD      sql.NullFloat64
-			sdkLang      sql.NullString
-			sdkVer       sql.NullString
-			crashSig     sql.NullString
+			e          events.Execution
+			startedAt  string
+			endedAt    sql.NullString
+			durationMs sql.NullInt64
+			tokensIn   sql.NullInt64
+			tokensOut  sql.NullInt64
+			costUSD    sql.NullFloat64
+			sdkLang    sql.NullString
+			sdkVer     sql.NullString
+			crashSig   sql.NullString
 		)
 		if err := rows.Scan(
 			&e.ExecutionID, &e.ProjectID, &e.Status,

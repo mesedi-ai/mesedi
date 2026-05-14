@@ -404,7 +404,7 @@
         return;
       }
       const rows = groups.map(g =>
-        '<tr>' +
+        '<tr class="clickable" onclick="showFailureGroupDetail(\'' + escapeHtml(g.group_id) + '\')">' +
           '<td><span class="badge ' + badgeForClass(g.failure_class) + '">' + escapeHtml(g.failure_class) + '</span></td>' +
           '<td class="mono">' + escapeHtml(g.signature) + '</td>' +
           '<td class="num">' + fmtNum(g.event_count) + '</td>' +
@@ -570,6 +570,103 @@
         default:
           return p.name || "—";
       }
+    }
+
+    // ── FAILURE GROUP DETAIL VIEW ──────────────────────────────────────
+
+    async function showFailureGroupDetail(groupID) {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <a class="back-link" onclick="showOverview()">← Overview</a>
+        <div class="page-head">
+          <div>
+            <h1>Failure group</h1>
+            <div class="subtitle mono">${escapeHtml(groupID)}</div>
+          </div>
+          <button class="reload-btn" onclick="showFailureGroupDetail('${escapeHtml(groupID)}')">↻ Reload</button>
+        </div>
+        <div id="group-detail-content"><div class="empty">Loading…</div></div>
+      `;
+      try {
+        const [group, execsResp] = await Promise.all([
+          fetchJSON("/failure-groups/" + encodeURIComponent(groupID)),
+          fetchJSON("/failure-groups/" + encodeURIComponent(groupID) + "/executions?limit=200"),
+        ]);
+        renderFailureGroupDetail(group, execsResp.executions || []);
+      } catch (e) {
+        document.getElementById("group-detail-content").innerHTML =
+          '<div class="error">Fetch failed: ' + e.message + '</div>';
+      }
+    }
+
+    function renderFailureGroupDetail(g, execs) {
+      const c = document.getElementById("group-detail-content");
+
+      const meta = `
+        <div class="meta-grid">
+          <div class="meta-cell">
+            <div class="meta-label">Failure class</div>
+            <div class="meta-value"><span class="badge ${badgeForClass(g.failure_class)}">${escapeHtml(g.failure_class)}</span></div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Signature</div>
+            <div class="meta-value mono">${escapeHtml(g.signature)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Event count</div>
+            <div class="meta-value">${fmtNum(g.event_count)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Affected executions</div>
+            <div class="meta-value">${fmtNum(g.affected_executions)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">First seen</div>
+            <div class="meta-value">${fmtDateExact(g.first_seen)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Last seen</div>
+            <div class="meta-value">${fmtDateExact(g.last_seen)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Sample execution</div>
+            <div class="meta-value mono">${escapeHtml(g.sample_execution_id || "—")}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Cost wasted</div>
+            <div class="meta-value">${g.cost_wasted_usd ? '$' + g.cost_wasted_usd.toFixed(4) : "—"}</div>
+          </div>
+        </div>
+      `;
+
+      const execsSection = `
+        <div class="section">
+          <div class="section-head"><div class="section-title">Affected executions<span class="count"> (${execs.length})</span></div></div>
+          <div class="section-desc">Every execution linked to this failure group. Click any row to drill into its event timeline.</div>
+          ${execs.length === 0
+            ? '<div class="empty"><strong>No executions linked.</strong><br>Group exists but no execution has been associated yet.</div>'
+            : renderAffectedExecsTable(execs)
+          }
+        </div>
+      `;
+
+      c.innerHTML = meta + execsSection;
+    }
+
+    function renderAffectedExecsTable(execs) {
+      const rows = execs.map(e =>
+        '<tr class="clickable" onclick="showExecutionDetail(\'' + escapeHtml(e.execution_id) + '\')">' +
+          '<td class="mono">' + escapeHtml(e.execution_id) + '</td>' +
+          '<td><span class="badge ' + badgeForStatus(e.status) + '">' + escapeHtml(e.status) + '</span></td>' +
+          '<td class="num">' + fmtDuration(e.duration_ms) + '</td>' +
+          '<td>' + escapeHtml(e.sdk_language || "—") + '</td>' +
+          '<td>' + fmtDate(e.started_at) + '</td>' +
+        '</tr>').join("");
+      return '<table><thead><tr>' +
+        '<th>Execution</th><th>Status</th>' +
+        '<th class="num">Duration</th>' +
+        '<th>SDK</th><th>Started</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
     }
 
     // ── BOOT ───────────────────────────────────────────────────────────

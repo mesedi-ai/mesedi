@@ -52,6 +52,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Phase 3a — read-side failure_group surface for the dashboard.
 	mux.HandleFunc("GET /failure-groups", h.HandleListFailureGroups)
 	mux.HandleFunc("GET /failure-groups/{id}", h.HandleGetFailureGroup)
+	// Phase 3b sub-slice 9 — executions inside a failure_group.
+	mux.HandleFunc("GET /failure-groups/{id}/executions", h.HandleListExecutionsInFailureGroup)
 }
 
 // HandleCreateExecution accepts an Execution at the agent's entry point
@@ -431,6 +433,60 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 		"ok":        true,
 		"execution": exec,
 		"events":    evts,
+	})
+}
+
+// HandleListExecutionsInFailureGroup returns the executions that belong
+// to a given failure_group. Verifies cross-tenant access by first
+// fetching the group and confirming group.project_id == auth project —
+// 404 if it doesn't match (don't leak group_id existence).
+func (h *Handlers) HandleListExecutionsInFailureGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := r.PathValue("id")
+	if groupID == "" {
+		writeError(w, http.StatusBadRequest, "group_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	// Authorization: verify the group belongs to the caller's project.
+	group, err := h.Store.GetFailureGroup(r.Context(), groupID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "failure group not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if group.ProjectID != authProjectID {
+		writeError(w, http.StatusNotFound, "failure group not found")
+		return
+	}
+
+	limit := parseIntQuery(r, "limit", 50, 1, 200)
+	offset := parseIntQuery(r, "offset", 0, 0, 1_000_000)
+
+	execs, err := h.Store.ListExecutionsByFailureGroup(r.Context(), groupID, limit, offset)
+	if err != nil {
+		h.Logger.Error("list executions by failure_group failed",
+			"group_id", groupID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"executions": execs,
+		"count":      len(execs),
+		"limit":      limit,
+		"offset":     offset,
+		"group_id":   groupID,
 	})
 }
 
