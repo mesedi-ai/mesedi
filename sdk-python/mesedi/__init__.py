@@ -9,28 +9,31 @@ Public API:
 
     @mesedi.wrap
         Decorator that records a function call as an agent execution.
-        Submits POST /executions on entry and PATCH /executions/{id} on
-        exit (completed or crashed) via the async shipper thread.
-        Re-raises any caught exception transparently.
+        Submits start/complete/crash to the async shipper thread; pushes
+        an execution context that @tool and instrumented LLM calls read.
+
+    @mesedi.tool
+        Decorator that records a function call as a tool_call event,
+        attached to the surrounding @mesedi.wrap execution.
+
+    mesedi.instrument_anthropic()
+        Patch the Anthropic SDK's Messages.create to emit llm_call
+        events automatically. Opt-in; call once at process startup.
 
     mesedi.flush(timeout=5.0)
-        Block until the background shipper has drained all events
-        submitted so far. Useful at end of scripts or in tests.
+        Block until the background shipper has drained all events.
 
     mesedi.MesediClient
-        Explicit client for advanced usage (e.g., multiple projects,
-        custom batching, manual sync HTTP calls). Most callers should
-        use mesedi.configure() + @mesedi.wrap instead.
+        Explicit client for advanced usage.
 
     mesedi.Event, mesedi.Execution
-        Dataclasses mirroring the backend's wire format. Useful when
-        emitting events manually rather than via decorators.
+        Dataclasses mirroring the backend's wire format.
 
     mesedi.EventType, mesedi.Status
-        Enums for event_type and execution status. Match the Go
-        constants in backend/internal/events/types.go exactly.
+        Enums for event_type and execution status.
 """
 
+from mesedi.anthropic_integration import instrument_anthropic
 from mesedi.client import MesediClient, configure, flush, get_client
 from mesedi.events import (
     Event,
@@ -39,9 +42,10 @@ from mesedi.events import (
     Status,
     utcnow_rfc3339,
 )
+from mesedi.tool import tool
 from mesedi.wrap import wrap
 
-__version__ = "0.0.2"
+__version__ = "0.0.4"
 
 __all__ = [
     "MesediClient",
@@ -52,6 +56,8 @@ __all__ = [
     "configure",
     "flush",
     "get_client",
+    "instrument_anthropic",
+    "tool",
     "utcnow_rfc3339",
     "wrap",
     "__version__",
