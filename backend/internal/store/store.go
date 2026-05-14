@@ -90,6 +90,19 @@ type Store interface {
 	// Events (batch ingest path is the hot one; single-event ingest is for tests).
 	SaveEvents(ctx context.Context, batch []events.Event) error
 
+	// Failure groups (Phase 3a — crash detection).
+	// GroupCrashedExecution upserts a failure_group for the (project,
+	// failure_class, signature) tuple and links the execution into it.
+	// Idempotent: re-calling with an already-grouped execution is a no-op.
+	GroupCrashedExecution(ctx context.Context, executionID, projectID, signature string) error
+	// ListFailureGroups returns the project's failure groups sorted by
+	// last_seen DESC (most recent first). For pagination, pass limit +
+	// offset; default to limit=50 in callers.
+	ListFailureGroups(ctx context.Context, projectID string, limit, offset int) ([]*FailureGroup, error)
+	// GetFailureGroup returns a single failure_group by id. Returns
+	// ErrNotFound if absent.
+	GetFailureGroup(ctx context.Context, groupID string) (*FailureGroup, error)
+
 	// Lifecycle.
 	Close() error
 	Ping(ctx context.Context) error
