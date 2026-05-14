@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"mesedi/backend/internal/events"
+	"mesedi/backend/internal/pricing"
 	"mesedi/backend/internal/store"
 )
 
@@ -215,6 +216,66 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					"event_count", count,
 					"error", err.Error(),
 				)
+			}
+		}
+	}
+
+	// Phase 3b sub-slice 13: tool-failures detector. If any tool_call
+	// event in the execution had payload.status="failed", classify the
+	// execution as tool_failures with signature=tool_name. Different
+	// from crashes (where the exception escaped @wrap) — tool-failures
+	// catches the silent-degradation pattern where the agent recovers
+	// from a tool exception and ran to completion but produced
+	// degraded output. Runs after the loop detectors so an execution
+	// that BOTH had a failed tool AND was a runaway loop classifies
+	// as the loop (loops are higher-priority — they waste more).
+	if isTerminalStatus(patch.Status) {
+		toolName, err := h.Store.FindFirstFailedToolName(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("find failed tool for detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if toolName != "" {
+			if err := h.Store.GroupToolFailure(r.Context(), executionID, authProjectID, toolName); err != nil {
+				h.Logger.Warn("tool-failure grouping failed (continuing)",
+					"execution_id", executionID,
+					"tool_name", toolName,
+					"error", err.Error(),
+				)
+			}
+		}
+	}
+
+	// Phase 3b sub-slice 12: cost computation. If the SDK didn't pre-fill
+	// estimated_cost_usd, walk the execution's llm_call events, sum tokens
+	// by model, compute total cost via the pricing table, write the result
+	// back to the execution row. Failure-group rollups (cost_wasted_usd)
+	// are then a live SUM in the ListFailureGroups query — no separate
+	// rollup table to maintain. Best-effort: a failure during cost
+	// computation never fails the PATCH.
+	if isTerminalStatus(patch.Status) && patch.EstimatedCostUSD == 0 {
+		evts, err := h.Store.ListEventsForExecution(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("list events for cost compute failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else {
+			cost := computeExecutionCost(evts)
+			if cost > 0 {
+				if err := h.Store.SetExecutionCost(r.Context(), executionID, cost); err != nil {
+					h.Logger.Warn("set execution cost failed",
+						"execution_id", executionID,
+						"computed_cost_usd", cost,
+						"error", err.Error(),
+					)
+				} else {
+					h.Logger.Info("execution cost computed",
+						"execution_id", executionID,
+						"cost_usd", cost,
+					)
+				}
 			}
 		}
 	}
@@ -575,6 +636,39 @@ func (h *Handlers) HandleStats(w http.ResponseWriter, r *http.Request) {
 		"crashed_24h":         crashed24h,
 		"open_failure_groups": len(groups),
 	})
+}
+
+// computeExecutionCost sums the estimated USD cost across every
+// llm_call event in the slice. Each event's payload is unmarshaled into
+// a small struct extracting only the three fields cost-computation
+// needs (model, input_tokens, output_tokens); everything else is
+// ignored, so changes to the payload schema (adding fields) don't
+// affect this code.
+//
+// Events with unknown models contribute 0 (pricing.ComputeLLMCost
+// returns 0 for keys not in the pricing table). Events whose payload
+// fails to unmarshal are skipped silently — a single malformed event
+// shouldn't break cost computation for the whole execution.
+func computeExecutionCost(evts []*events.Event) float64 {
+	total := 0.0
+	for _, e := range evts {
+		if e.EventType != events.EventTypeLLMCall {
+			continue
+		}
+		if len(e.Payload) == 0 {
+			continue
+		}
+		var p struct {
+			Model        string `json:"model"`
+			InputTokens  int    `json:"input_tokens"`
+			OutputTokens int    `json:"output_tokens"`
+		}
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			continue
+		}
+		total += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)
+	}
+	return total
 }
 
 // isTerminalStatus returns true for any execution status that means

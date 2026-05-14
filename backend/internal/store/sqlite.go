@@ -832,9 +832,89 @@ func (s *SQLiteStore) CountEventsForExecution(
 	return n, nil
 }
 
+// SetExecutionCost writes a computed estimated_cost_usd onto an
+// execution row. No-op if cost is non-positive (we don't want to
+// overwrite an existing positive cost with 0 from a model whose
+// pricing isn't in the table). Used by the post-PATCH cost aggregator
+// in HandleUpdateExecution.
+func (s *SQLiteStore) SetExecutionCost(
+	ctx context.Context,
+	executionID string,
+	cost float64,
+) error {
+	if cost <= 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(
+		ctx,
+		`UPDATE executions SET estimated_cost_usd = ? WHERE execution_id = ?`,
+		cost,
+		executionID,
+	)
+	if err != nil {
+		return fmt.Errorf("set execution cost: %w", err)
+	}
+	return nil
+}
+
+// FindFirstFailedToolName returns the tool_name of the first (lowest
+// sequence) tool_call event with payload.status = "failed" for the
+// given execution. Returns "" with nil error if no failed tool calls
+// exist.
+//
+// Uses SQLite's JSON1 extension (json_extract) so we don't have to
+// scan-and-unmarshal Go-side. The events table's payload column is
+// stored as BLOB but JSON1 reads it transparently as JSON text.
+func (s *SQLiteStore) FindFirstFailedToolName(
+	ctx context.Context,
+	executionID string,
+) (string, error) {
+	var toolName sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT json_extract(payload, '$.tool_name')
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'tool_call'
+		  AND json_extract(payload, '$.status') = 'failed'
+		ORDER BY sequence ASC
+		LIMIT 1
+	`, executionID).Scan(&toolName)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find first failed tool: %w", err)
+	}
+	if !toolName.Valid {
+		return "", nil
+	}
+	return toolName.String, nil
+}
+
+// GroupToolFailure upserts a failure_group with
+// failure_class=tool_failures and signature=toolName. Same idempotency
+// contract as the other groupers — if the execution is already linked
+// to a higher-priority group (crash, time-budget, step-count), this is
+// a no-op.
+func (s *SQLiteStore) GroupToolFailure(
+	ctx context.Context,
+	executionID, projectID, toolName string,
+) error {
+	if toolName == "" {
+		return fmt.Errorf("toolName required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassToolFailures, toolName)
+}
+
 // ListFailureGroups returns failure_groups for a project, sorted by
 // most-recent first. Caller is responsible for sensible limit/offset
 // bounds (handler enforces a max-limit ceiling).
+//
+// cost_wasted_usd is computed live as SUM(executions.estimated_cost_usd)
+// across all executions linked to the group. The stored
+// failure_groups.cost_wasted_usd column is currently unused — kept for
+// a future "manual override / human-adjusted" path. For now the
+// computed sum always wins.
 func (s *SQLiteStore) ListFailureGroups(
 	ctx context.Context,
 	projectID string,
@@ -842,13 +922,16 @@ func (s *SQLiteStore) ListFailureGroups(
 ) ([]*FailureGroup, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
-			group_id, project_id, failure_class, signature,
-			first_seen, last_seen,
-			event_count, affected_executions,
-			cost_wasted_usd, sample_execution_id
-		FROM failure_groups
-		WHERE project_id = ?
-		ORDER BY last_seen DESC
+			fg.group_id, fg.project_id, fg.failure_class, fg.signature,
+			fg.first_seen, fg.last_seen,
+			fg.event_count, fg.affected_executions,
+			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
+			fg.sample_execution_id
+		FROM failure_groups fg
+		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
+		WHERE fg.project_id = ?
+		GROUP BY fg.group_id
+		ORDER BY fg.last_seen DESC
 		LIMIT ? OFFSET ?
 	`, projectID, limit, offset)
 	if err != nil {
@@ -868,18 +951,22 @@ func (s *SQLiteStore) ListFailureGroups(
 }
 
 // GetFailureGroup returns a single failure_group by its deterministic id.
+// Same cost-computation path as ListFailureGroups.
 func (s *SQLiteStore) GetFailureGroup(
 	ctx context.Context,
 	groupID string,
 ) (*FailureGroup, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
-			group_id, project_id, failure_class, signature,
-			first_seen, last_seen,
-			event_count, affected_executions,
-			cost_wasted_usd, sample_execution_id
-		FROM failure_groups
-		WHERE group_id = ?
+			fg.group_id, fg.project_id, fg.failure_class, fg.signature,
+			fg.first_seen, fg.last_seen,
+			fg.event_count, fg.affected_executions,
+			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
+			fg.sample_execution_id
+		FROM failure_groups fg
+		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
+		WHERE fg.group_id = ?
+		GROUP BY fg.group_id
 	`, groupID)
 	g, err := scanFailureGroup(row)
 	if err == sql.ErrNoRows {
@@ -921,7 +1008,11 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 	}
 	g.FirstSeen, _ = time.Parse(time.RFC3339, firstSeen)
 	g.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
-	if costWasted.Valid {
+	if costWasted.Valid && costWasted.Float64 > 0 {
+		// Only surface a positive computed cost. The COALESCE on the
+		// SQL side makes Valid always true, so this prevents zero
+		// values from leaking into the JSON as "cost_wasted_usd: 0"
+		// when there's no actual cost to show.
 		v := costWasted.Float64
 		g.CostWastedUSD = &v
 	}
