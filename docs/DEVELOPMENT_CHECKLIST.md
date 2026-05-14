@@ -46,6 +46,7 @@ Time-ordered record of milestones actually shipped. Updated continuously as work
 - **2026-05-14 PM** — **Mesedi first end-to-end "customer" run.** `sdk-python/sandbox/fake_agent.py` — 100-line throwaway exploration that hits the backend as an agent would: `POST /executions` → 10 alternating `llm_call`/`tool_call` events via `POST /events` → `PATCH /executions/{id}` complete. Uses real bearer-token auth with `mesedi_sk_dev_local_only`. All 11 requests returned 200; SQLite verified 10 rows with correct event types and sequences (1-10). First time the entire stack exercised as a product. Not the Phase 2 SDK — that's the real `@wrap` decorator package; this sandbox script informs its design.
 - **2026-05-14 PM** — **Schema-versioning header shipped (`X-Mesedi-Schema-Version: 1`).** New `schemaVersionMiddleware` in the auth chain. Soft-mode policy: missing header accepted (assumed v1), present-but-unsupported version rejected with 400 + informative message ("unsupported X-Mesedi-Schema-Version 99 (this backend accepts: 1)"). All three paths smoke-tested. Fake agent updated to send the header by default. Policy tightens to "missing → 400" once real SDK ships with the header set automatically. `CurrentSchemaVersion = "1"` constant in `internal/api/middleware.go` is the bump point for future breaking changes.
 - **2026-05-14 PM** — **Per-project rate limiting shipped (token bucket, in-memory).** New `internal/api/ratelimit.go` — `tokenBucket` (sync.Mutex per project) + `rateLimiter` (sync.RWMutex map). Defaults: 100 burst capacity, 10 tokens/sec refill. Standard headers on every response: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`; `Retry-After: 1` added on 429. Rate-limit violations logged at warn level with project_id + method + path. Auth chain order: auth → schema version → rate limit → handler (rate limit requires project_id from context, so it must come after auth). Per-project overrides via `projects` table columns + Redis-backed storage deferred to multi-instance / scale-out slice — interface boundary at `tokenBucket.take()` stays stable across implementations.
+- **2026-05-14 PM** — **Mesedi Phase 2 sub-slice 1 shipped: real Python SDK v0.0.1.** Package at `sdk-python/`: `pyproject.toml` (hatchling backend), `mesedi/{__init__,client,events,wrap}.py`. Public API: `mesedi.configure(api_key=..., base_url=...)` (with `MESEDI_API_KEY` / `MESEDI_BASE_URL` env-var fallbacks); `@mesedi.wrap` decorator that records execution start/complete/crash with stable crash signatures (SHA-256 of exception class + traceback top, truncated to 16 hex); `MesediClient` for explicit use; `Event`/`Execution` dataclasses mirroring the Go wire format. Synchronous v1 — ~70ms HTTP-roundtrip overhead per wrapped call on first invocation, drops to single-digit ms after connection warm-up. Async event buffer (background flusher thread) deferred to next sub-slice. Fail-open posture: backend errors during observation are logged but never block the wrapped agent. End-to-end smoke-tested via new `sandbox/real_agent.py`: successful agent returns cleanly with `status=completed, duration_ms=122`; crashing agent re-raises original `ValueError` to caller and records `status=crashed, crash_signature=d1fb70c59043fd45`. SQLite-verified.
 - **2026-05-14 PM** — **Branding folder cleaned up.** `favicon_package/site.webmanifest` no longer says "My Website" — proper Mesedi metadata + dark theme/background colors (#0F172A) matching the logo treatment. `mesedi-logo1.png` renamed to `mesedi-mark-transparent.png` (distinct from `mesedi-logo-mark-only.png` which is the mark on a dark backdrop). Favicon package confirmed complete for 2024 web standards (favicon.ico + 16/32/192/512 PNGs + apple-touch-icon + site.webmanifest); legacy assets `safari-pinned-tab.svg` (Safari pinned-tab only) and `browserconfig.xml` (deprecated Edge tiles) not needed.
 - **2026-05-14 PM** — **Dashboard mockup reviewed (Phase 3b destination).** Visualized the project-overview view as it would look once all 7 failure-class detectors exist: 4 metric cards (executions, open failure groups, cost wasted, P95 latency) + 7 detector cards with status badges + recent executions table with status pills (completed / crashed / loop halted / timeout). This is the *Phase 8 end state* — Phase 3b's first dashboard is much leaner (executions list + crashes list only). Mockup confirms the visual story the product needs to tell: "Mesedi catches things and tells you exactly what they cost."
 
@@ -130,27 +131,28 @@ Goal: A single deployed Go service that accepts authenticated event POSTs and st
 
 Goal: A `mesedi` Python package on PyPI that integrates with one decorator and reports events to the backend.
 
-- [ ] **Package skeleton**:
-  - [ ] `pyproject.toml` (use `uv` or `hatch`)
-  - [ ] `mesedi/__init__.py` exporting `wrap`, `tool`, `checkpoint`, `validator`, `disabled`
-  - [ ] Type hints throughout; pass `mypy --strict`
-  - [ ] Test setup with `pytest`
-- [ ] **Core types**:
-  - [ ] `MesediClient` class (holds API key, base URL, http client)
-  - [ ] Event dataclasses matching backend Go structs
-  - [ ] Async event buffer (in-memory deque with size cap)
-- [ ] **Async event shipper**:
+- [x] **Package skeleton** — **DONE 2026-05-14 PM**:
+  - [x] `pyproject.toml` (hatchling backend; PEP 660 editable installs work via `pip install -e .` once pip is 23+)
+  - [x] `mesedi/__init__.py` exporting `wrap`, `MesediClient`, `Event`, `Execution`, `EventType`, `Status`, `configure`, `get_client`, `utcnow_rfc3339`
+  - [x] Type hints throughout (mypy strict-compatible; `from __future__ import annotations` for 3.9 forward-ref support)
+  - [ ] Test setup with `pytest` — deferred to next sub-slice (alongside async shipper)
+- [x] **Core types** — **DONE 2026-05-14 PM**:
+  - [x] `MesediClient` class (api_key, base_url, httpx.Client with bearer + schema-version headers; key-format validation matching backend)
+  - [x] Event + Execution dataclasses mirroring backend Go structs (Optional fields drop from PATCH body to satisfy strict-decode)
+  - [ ] Async event buffer (in-memory deque with size cap) — deferred to next sub-slice
+- [ ] **Async event shipper** — DEFERRED to next Phase-2 sub-slice:
   - [ ] Background daemon thread that flushes buffer every 250ms or when buffer hits 100 events
   - [ ] Uses `httpx` with connection pooling
   - [ ] Retry with exponential backoff on transient failures
   - [ ] Graceful shutdown via `atexit` hook (flush remaining events)
-- [ ] **`@wrap` decorator**:
-  - [ ] Generates execution_id (UUID7 for time-ordering)
-  - [ ] Posts execution-started event
-  - [ ] Runs the wrapped function
-  - [ ] Captures exception → posts crashed event
-  - [ ] On normal return → posts completed event
-  - [ ] Returns function result unchanged
+- [x] **`@wrap` decorator** — **DONE 2026-05-14 PM** (synchronous v1):
+  - [x] Generates execution_id (UUID4 prefixed with `exec-`; UUID7 deferred — UUID4 is fine for v0.0.1)
+  - [x] Posts execution-started event
+  - [x] Runs the wrapped function
+  - [x] Captures exception → posts crashed event with stable crash_signature (SHA-256 of exception type + top 5 lines of traceback, truncated to 16 hex chars)
+  - [x] On normal return → posts completed event with duration_ms
+  - [x] Returns function result unchanged; re-raises exceptions with original traceback
+  - [x] **Fail-open posture:** observation failures (backend down, network flaky) are logged via `logging.getLogger("mesedi.wrap").warning(...)` but NEVER block the wrapped function
 - [ ] **Monkey-patch Anthropic SDK** (Anthropic first because most likely customer LLM):
   - [ ] On import, locate `anthropic.Anthropic.messages.create` and wrap it
   - [ ] Capture model, system prompt, messages, response, usage tokens, latency
