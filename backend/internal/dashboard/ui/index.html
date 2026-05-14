@@ -62,6 +62,89 @@
       border: 0.5px solid var(--warning-border);
       border-radius: 4px; font-weight: 500; letter-spacing: 0.5px;
     }
+    .nav-link {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 5px;
+    }
+    .nav-link:hover { color: var(--text); background: var(--surface-2); }
+
+    /* Settings page-specific bits */
+    .key-revealed {
+      padding: 14px 16px;
+      background: var(--success-bg);
+      border: 0.5px solid var(--success-border);
+      border-radius: 8px;
+      margin-bottom: 18px;
+    }
+    .key-revealed .label {
+      font-size: 11px;
+      color: var(--success);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .key-revealed .value {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      padding: 8px 10px;
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: 4px;
+      word-break: break-all;
+      user-select: all;
+    }
+    .key-revealed .warn {
+      font-size: 11px;
+      color: var(--warning);
+      margin-top: 8px;
+    }
+    .mint-form {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .mint-form input {
+      flex: 1;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 0.5px solid var(--border-2);
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    .mint-form input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .mint-form button {
+      padding: 8px 14px;
+      background: var(--accent);
+      border: 0.5px solid var(--accent);
+      color: var(--bg);
+      border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .mint-form button:hover { opacity: 0.9; }
+    .mint-form button:active { transform: translateY(1px); }
+    .revoke-btn {
+      padding: 4px 10px;
+      background: transparent;
+      border: 0.5px solid var(--danger-border);
+      color: var(--danger);
+      border-radius: 5px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .revoke-btn:hover { background: var(--danger-bg); }
     main { padding: 28px; max-width: 1280px; margin: 0 auto; }
 
     .page-head {
@@ -284,7 +367,11 @@
         <span style="font-family: monospace; font-size: 12px;">proj-dev</span>
       </span>
     </div>
-    <span class="dev-badge">DEV ONLY · LOCALHOST</span>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <a class="nav-link" onclick="showOverview()">Overview</a>
+      <a class="nav-link" onclick="showSettings()">Settings</a>
+      <span class="dev-badge">DEV ONLY · LOCALHOST</span>
+    </div>
   </header>
   <main id="main"></main>
   <footer>
@@ -675,6 +762,106 @@
         '<th class="num">Duration</th>' +
         '<th>SDK</th><th>Started</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    // ── SETTINGS VIEW (API key management) ─────────────────────────────
+
+    async function showSettings() {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <a class="back-link" onclick="showOverview()">← Overview</a>
+        <div class="page-head">
+          <div>
+            <h1>Settings · API keys</h1>
+            <div class="subtitle">Mint and revoke keys for this project. Raw key values are shown ONCE at mint time.</div>
+          </div>
+          <button class="reload-btn" onclick="showSettings()">↻ Reload</button>
+        </div>
+        <div id="mint-revealed"></div>
+        <div class="mint-form">
+          <input type="text" id="mint-name" placeholder="Label (optional) — e.g. 'production', 'staging', 'ci'" />
+          <button onclick="mintApiKey()">+ Mint new key</button>
+        </div>
+        <div id="keys-content"><div class="empty">Loading…</div></div>
+      `;
+      await refreshKeys();
+    }
+
+    async function refreshKeys() {
+      const c = document.getElementById("keys-content");
+      try {
+        const data = await fetchJSON("/api-keys");
+        const keys = data.api_keys || [];
+        if (keys.length === 0) {
+          c.innerHTML = '<div class="empty"><strong>No API keys yet.</strong><br>Mint one above.</div>';
+          return;
+        }
+        const rows = keys.map(k =>
+          '<tr>' +
+            '<td class="mono">' + escapeHtml(k.key_prefix) + '…</td>' +
+            '<td>' + escapeHtml(k.name || "—") + '</td>' +
+            '<td>' + fmtDate(k.created_at) + '</td>' +
+            '<td>' + (k.last_used_at ? fmtDate(k.last_used_at) : "never") + '</td>' +
+            '<td><button class="revoke-btn" onclick="revokeKey(\'' + escapeHtml(k.key_id) + '\', \'' + escapeHtml(k.key_prefix) + '\')">Revoke</button></td>' +
+          '</tr>'
+        ).join("");
+        c.innerHTML = '<table><thead><tr>' +
+          '<th>Prefix</th><th>Label</th><th>Created</th><th>Last used</th><th></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      } catch (e) {
+        c.innerHTML = '<div class="error">Fetch failed: ' + e.message + '</div>';
+      }
+    }
+
+    async function mintApiKey() {
+      const nameEl = document.getElementById("mint-name");
+      const name = nameEl.value.trim();
+      try {
+        const r = await fetch("/api-keys", {
+          method: "POST",
+          headers: {
+            ...HEADERS,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ name }),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        const data = await r.json();
+        document.getElementById("mint-revealed").innerHTML = `
+          <div class="key-revealed">
+            <div class="label">New key minted — copy this NOW</div>
+            <div class="value">${escapeHtml(data.raw_key)}</div>
+            <div class="warn">⚠ ${escapeHtml(data.warning || "Store this raw_key now — it will never be shown again.")}</div>
+          </div>
+        `;
+        nameEl.value = "";
+        await refreshKeys();
+      } catch (e) {
+        document.getElementById("mint-revealed").innerHTML =
+          '<div class="error">Mint failed: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function revokeKey(keyID, prefix) {
+      if (!confirm(`Revoke key ${prefix}…? Any clients still using it will start getting 401.`)) {
+        return;
+      }
+      try {
+        const r = await fetch("/api-keys/" + encodeURIComponent(keyID), {
+          method: "DELETE",
+          headers: HEADERS,
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        await refreshKeys();
+      } catch (e) {
+        alert("Revoke failed: " + e.message);
+      }
     }
 
     // ── BOOT ───────────────────────────────────────────────────────────

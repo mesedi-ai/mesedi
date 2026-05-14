@@ -231,6 +231,82 @@ func (s *SQLiteStore) TouchAPIKey(ctx context.Context, keyID string) error {
 	return err
 }
 
+// ListAPIKeysForProject returns every API key bound to the given
+// project, NEWEST first. key_hash is intentionally omitted from the
+// returned structs — that field is never serialized to clients or
+// callers; only the hash on the server's authoritative copy ever
+// touches the auth path.
+func (s *SQLiteStore) ListAPIKeysForProject(
+	ctx context.Context,
+	projectID string,
+) ([]*APIKey, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at
+		FROM api_keys
+		WHERE project_id = ?
+		ORDER BY created_at DESC
+	`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("query api_keys: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*APIKey
+	for rows.Next() {
+		var (
+			k          APIKey
+			createdAt  string
+			lastUsedAt sql.NullString
+			name       sql.NullString
+		)
+		if err := rows.Scan(
+			&k.KeyID, &k.ProjectID, &k.KeyPrefix,
+			&name, &createdAt, &lastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		if name.Valid {
+			k.Name = name.String
+		}
+		k.CreatedAt = parseFlexTime(createdAt)
+		if lastUsedAt.Valid {
+			t := parseFlexTime(lastUsedAt.String)
+			if !t.IsZero() {
+				k.LastUsedAt = &t
+			}
+		}
+		out = append(out, &k)
+	}
+	return out, rows.Err()
+}
+
+// DeleteAPIKey hard-deletes an API key, but ONLY if the key belongs
+// to the given project. Returns ErrNotFound if the key doesn't exist
+// OR if it belongs to a different project (don't leak existence
+// across tenants). After deletion the key's hash is gone — re-minting
+// requires a new random key.
+func (s *SQLiteStore) DeleteAPIKey(
+	ctx context.Context,
+	keyID, projectID string,
+) error {
+	res, err := s.db.ExecContext(
+		ctx,
+		`DELETE FROM api_keys WHERE key_id = ? AND project_id = ?`,
+		keyID, projectID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete api_key: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Execution operations
 // ─────────────────────────────────────────────────────────────────────────
@@ -637,6 +713,24 @@ func (s *SQLiteStore) CountExecutionsByStatusSince(
 // ─────────────────────────────────────────────────────────────────────────
 // Phase 3a — Failure groups (crash detection)
 // ─────────────────────────────────────────────────────────────────────────
+
+// parseFlexTime parses a timestamp written by either of the two
+// formats SQLite stores in our timestamp columns: RFC 3339 (our app-
+// inserted rows) or "YYYY-MM-DD HH:MM:SS" (rows inserted via SQLite's
+// datetime('now') default, like the bootstrap dev key). Returns zero
+// time if neither parse succeeds.
+func parseFlexTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return t
+	}
+	return time.Time{}
+}
 
 // deriveGroupID returns a deterministic group_id for a given
 // (project_id, failure_class, signature) tuple. Same inputs always
