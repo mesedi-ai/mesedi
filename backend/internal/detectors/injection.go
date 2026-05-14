@@ -26,23 +26,47 @@ type InjectionPattern struct {
 }
 
 // injectionPatterns is the ordered list of patterns. Order matters:
-// DetectInjection returns the FIRST match, so put the most specific
-// patterns first. Patterns are case-insensitive (`(?i)` prefix) unless
-// the literal case is part of the signature (e.g. `[INST]` tags).
+// DetectInjection returns the FIRST match, so the most-specific
+// patterns must come first.
 //
-// Naming convention: snake_case signatures so they look clean as the
-// failure_group signature column. New patterns: add to this list,
-// keep the (?i) flag for case-insensitive matching unless the literal
-// case is the attack vector.
+// Tier 1 (literal sentinels — high precision, low recall): patterns
+// that match literal strings rarely found in benign text. If we see
+// "[INST]" or "<<SYS>>" in user input, it's almost certainly an attack
+// trying to spoof a chat-template control token.
+//
+// Tier 2 (named jailbreak / mode phrases): "DAN", "developer mode" —
+// well-known persona overrides.
+//
+// Tier 3 (semantic role override): "you are now", "from now on you".
+// Could appear in benign roleplay; still worth flagging.
+//
+// Tier 4 (broad ignore/disregard catch-all): the lowest-precision
+// patterns last, so a prompt that's already matched something more
+// specific doesn't fall through into this generic bucket.
+//
+// Naming convention: snake_case signatures. New patterns: insert at
+// the tier where they belong, keep the `(?i)` flag unless the literal
+// case IS the attack vector.
 var injectionPatterns = []InjectionPattern{
+	// ── Tier 1: literal sentinels ────────────────────────────────────
 	{
-		Name:    "ignore_instructions",
-		Pattern: regexp.MustCompile(`(?i)ignore\s+(the\s+)?(previous|above|prior|earlier|all)`),
+		Name:    "instruction_tag",
+		Pattern: regexp.MustCompile(`\[INST\]|\[/INST\]|<<SYS>>|<</SYS>>`),
 	},
 	{
-		Name:    "ignore_instructions",
-		Pattern: regexp.MustCompile(`(?i)disregard\s+(the|your|all|previous|above)`),
+		Name:    "system_prompt_inject",
+		Pattern: regexp.MustCompile(`(?i)<\s*system\s*>|<\|system\|>|^\s*system\s*:`),
 	},
+	// ── Tier 2: named jailbreaks ─────────────────────────────────────
+	{
+		Name:    "jailbreak_dan",
+		Pattern: regexp.MustCompile(`(?i)do\s+anything\s+now|^DAN\s*$|act\s+as\s+DAN`),
+	},
+	{
+		Name:    "developer_mode",
+		Pattern: regexp.MustCompile(`(?i)developer\s+mode|jailbreak\s+mode|admin\s+mode`),
+	},
+	// ── Tier 3: role override ────────────────────────────────────────
 	{
 		Name:    "role_override",
 		Pattern: regexp.MustCompile(`(?i)you\s+are\s+now\s+`),
@@ -51,21 +75,14 @@ var injectionPatterns = []InjectionPattern{
 		Name:    "role_override",
 		Pattern: regexp.MustCompile(`(?i)from\s+now\s+on,?\s+you`),
 	},
+	// ── Tier 4: broad ignore/disregard catch-alls ────────────────────
 	{
-		Name:    "system_prompt_inject",
-		Pattern: regexp.MustCompile(`(?i)<\s*system\s*>|<\|system\|>|^\s*system\s*:`),
+		Name:    "ignore_instructions",
+		Pattern: regexp.MustCompile(`(?i)ignore\s+(the\s+)?(previous|above|prior|earlier|all)`),
 	},
 	{
-		Name:    "instruction_tag",
-		Pattern: regexp.MustCompile(`\[INST\]|\[/INST\]|<<SYS>>|<</SYS>>`),
-	},
-	{
-		Name:    "jailbreak_dan",
-		Pattern: regexp.MustCompile(`(?i)do\s+anything\s+now|^DAN\s*$|act\s+as\s+DAN`),
-	},
-	{
-		Name:    "developer_mode",
-		Pattern: regexp.MustCompile(`(?i)developer\s+mode|jailbreak\s+mode|admin\s+mode`),
+		Name:    "ignore_instructions",
+		Pattern: regexp.MustCompile(`(?i)disregard\s+(the|your|all|previous|above)`),
 	},
 }
 
