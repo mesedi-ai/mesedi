@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"mesedi/backend/internal/api"
+	"mesedi/backend/internal/dashboard"
 	"mesedi/backend/internal/store"
 )
 
@@ -139,6 +140,11 @@ func main() {
 	// /health is never blocked by an auth failure.
 	publicMux := http.NewServeMux()
 	publicMux.HandleFunc("GET /health", handleHealth(logger))
+	// Local-dev dashboard: served from embedded files in the backend
+	// binary itself, so same-origin (no CORS gymnastics) and no
+	// separate web server needed. NOT the production dashboard — see
+	// internal/dashboard/dashboard.go for the posture statement.
+	publicMux.Handle("GET /ui/", dashboard.Handler())
 
 	privateMux := http.NewServeMux()
 	handlers := api.New(logger, st)
@@ -147,6 +153,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /health", publicMux)
+	mux.Handle("GET /ui/", publicMux)
 	mux.Handle("POST /executions", privateHandler)
 	mux.Handle("PATCH /executions/{id}", privateHandler)
 	mux.Handle("POST /events", privateHandler)
