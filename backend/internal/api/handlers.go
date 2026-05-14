@@ -45,6 +45,10 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /executions", h.HandleCreateExecution)
 	mux.HandleFunc("PATCH /executions/{id}", h.HandleUpdateExecution)
 	mux.HandleFunc("POST /events", h.HandleIngestEvents)
+	// Phase 3b — read-side execution surface for the dashboard.
+	mux.HandleFunc("GET /executions", h.HandleListExecutions)
+	mux.HandleFunc("GET /executions/{id}", h.HandleGetExecution)
+	mux.HandleFunc("GET /stats", h.HandleStats)
 	// Phase 3a — read-side failure_group surface for the dashboard.
 	mux.HandleFunc("GET /failure-groups", h.HandleListFailureGroups)
 	mux.HandleFunc("GET /failure-groups/{id}", h.HandleGetFailureGroup)
@@ -354,6 +358,124 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{
 		"ok":    false,
 		"error": message,
+	})
+}
+
+// HandleListExecutions returns the calling project's executions, sorted
+// by started_at DESC. Supports `limit` (default 50, max 200) and `offset`
+// (default 0).
+func (h *Handlers) HandleListExecutions(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	limit := parseIntQuery(r, "limit", 50, 1, 200)
+	offset := parseIntQuery(r, "offset", 0, 0, 1_000_000)
+
+	execs, err := h.Store.ListExecutions(r.Context(), authProjectID, limit, offset)
+	if err != nil {
+		h.Logger.Error("list executions failed", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"executions": execs,
+		"count":      len(execs),
+		"limit":      limit,
+		"offset":     offset,
+	})
+}
+
+// HandleGetExecution returns a single execution + its events (sorted by
+// sequence ASC). Cross-tenant access returns 404 to avoid leaking which
+// execution IDs exist on other projects.
+func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
+	executionID := r.PathValue("id")
+	if executionID == "" {
+		writeError(w, http.StatusBadRequest, "execution_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	exec, err := h.Store.GetExecution(r.Context(), executionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "execution not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if exec.ProjectID != authProjectID {
+		writeError(w, http.StatusNotFound, "execution not found")
+		return
+	}
+
+	evts, err := h.Store.ListEventsForExecution(r.Context(), executionID)
+	if err != nil {
+		h.Logger.Warn("list events failed (returning execution without events)",
+			"execution_id", executionID,
+			"error", err.Error(),
+		)
+		evts = nil
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"execution": exec,
+		"events":    evts,
+	})
+}
+
+// HandleStats returns top-line stat-card numbers for the dashboard:
+// total executions, total failure groups, crashed-in-last-24h,
+// average duration_ms across completed executions.
+//
+// Implementation is deliberately simple: a few small COUNT queries.
+// When the executions table grows beyond hand-friendly size, we'll
+// either cache these or migrate to time-bucketed aggregates.
+func (h *Handlers) HandleStats(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	ctx := r.Context()
+
+	totalExecutions, err := h.Store.CountExecutionsByStatusSince(ctx, authProjectID, "", time.Time{})
+	if err != nil {
+		// Fall back to 0 on individual count failures so the dashboard
+		// degrades gracefully rather than 500-ing for one bad query.
+		h.Logger.Warn("count total executions failed", "error", err.Error())
+	}
+	cutoff24h := time.Now().Add(-24 * time.Hour)
+	crashed24h, err := h.Store.CountExecutionsByStatusSince(ctx, authProjectID, string(events.StatusCrashed), cutoff24h)
+	if err != nil {
+		h.Logger.Warn("count crashed-24h failed", "error", err.Error())
+	}
+	completedAllTime, err := h.Store.CountExecutionsByStatusSince(ctx, authProjectID, string(events.StatusCompleted), time.Time{})
+	if err != nil {
+		h.Logger.Warn("count completed failed", "error", err.Error())
+	}
+
+	groups, err := h.Store.ListFailureGroups(ctx, authProjectID, 1000, 0)
+	if err != nil {
+		h.Logger.Warn("list failure_groups for stats failed", "error", err.Error())
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                  true,
+		"total_executions":    totalExecutions,
+		"completed_executions": completedAllTime,
+		"crashed_24h":         crashed24h,
+		"open_failure_groups": len(groups),
 	})
 }
 

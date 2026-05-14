@@ -445,6 +445,160 @@ func nullFloat(v float64) any {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Read-side executions queries (Phase 3b dashboard)
+// ─────────────────────────────────────────────────────────────────────────
+
+// ListExecutions returns the project's executions sorted by
+// started_at DESC (most recent first), paginated.
+func (s *SQLiteStore) ListExecutions(
+	ctx context.Context,
+	projectID string,
+	limit, offset int,
+) ([]*events.Execution, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			execution_id, project_id, status,
+			started_at, ended_at,
+			duration_ms, total_tokens_in, total_tokens_out,
+			estimated_cost_usd, sdk_language, sdk_version, crash_signature
+		FROM executions
+		WHERE project_id = ?
+		ORDER BY started_at DESC
+		LIMIT ? OFFSET ?
+	`, projectID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("query executions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*events.Execution
+	for rows.Next() {
+		var (
+			e            events.Execution
+			startedAt    string
+			endedAt      sql.NullString
+			durationMs   sql.NullInt64
+			tokensIn     sql.NullInt64
+			tokensOut    sql.NullInt64
+			costUSD      sql.NullFloat64
+			sdkLang      sql.NullString
+			sdkVer       sql.NullString
+			crashSig     sql.NullString
+		)
+		if err := rows.Scan(
+			&e.ExecutionID, &e.ProjectID, &e.Status,
+			&startedAt, &endedAt,
+			&durationMs, &tokensIn, &tokensOut,
+			&costUSD, &sdkLang, &sdkVer, &crashSig,
+		); err != nil {
+			return nil, err
+		}
+		e.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
+		if endedAt.Valid {
+			t, _ := time.Parse(time.RFC3339, endedAt.String)
+			e.EndedAt = &t
+		}
+		if durationMs.Valid {
+			e.DurationMs = durationMs.Int64
+		}
+		if tokensIn.Valid {
+			e.TotalTokensIn = int(tokensIn.Int64)
+		}
+		if tokensOut.Valid {
+			e.TotalTokensOut = int(tokensOut.Int64)
+		}
+		if costUSD.Valid {
+			e.EstimatedCostUSD = costUSD.Float64
+		}
+		if sdkLang.Valid {
+			e.SDKLanguage = sdkLang.String
+		}
+		if sdkVer.Valid {
+			e.SDKVersion = sdkVer.String
+		}
+		if crashSig.Valid {
+			e.CrashSignature = crashSig.String
+		}
+		out = append(out, &e)
+	}
+	return out, rows.Err()
+}
+
+// ListEventsForExecution returns the events recorded against a single
+// execution, sorted by sequence ASC (oldest first — matching the order
+// they were emitted by the agent).
+func (s *SQLiteStore) ListEventsForExecution(
+	ctx context.Context,
+	executionID string,
+) ([]*events.Event, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			event_id, execution_id, event_type, sequence,
+			timestamp, duration_ms, payload
+		FROM events
+		WHERE execution_id = ?
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("query events: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*events.Event
+	for rows.Next() {
+		var (
+			e            events.Event
+			ts           string
+			durationMs   sql.NullInt64
+			payloadBytes []byte
+		)
+		if err := rows.Scan(
+			&e.EventID, &e.ExecutionID, &e.EventType, &e.Sequence,
+			&ts, &durationMs, &payloadBytes,
+		); err != nil {
+			return nil, err
+		}
+		e.Timestamp, _ = time.Parse(time.RFC3339, ts)
+		if durationMs.Valid {
+			e.DurationMs = durationMs.Int64
+		}
+		if len(payloadBytes) > 0 {
+			e.Payload = json.RawMessage(payloadBytes)
+		}
+		out = append(out, &e)
+	}
+	return out, rows.Err()
+}
+
+// CountExecutionsByStatusSince returns the number of executions for the
+// given project, optionally filtered by status and/or cutoff. An empty
+// status string means "any status." A zero cutoff means "all time."
+// All four combinations are supported.
+func (s *SQLiteStore) CountExecutionsByStatusSince(
+	ctx context.Context,
+	projectID, status string,
+	cutoff time.Time,
+) (int, error) {
+	query := "SELECT COUNT(*) FROM executions WHERE project_id = ?"
+	args := []any{projectID}
+
+	if status != "" {
+		query += " AND status = ?"
+		args = append(args, status)
+	}
+	if !cutoff.IsZero() {
+		query += " AND started_at >= ?"
+		args = append(args, cutoff.UTC().Format(time.RFC3339))
+	}
+
+	var n int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count executions: %w", err)
+	}
+	return n, nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Phase 3a — Failure groups (crash detection)
 // ─────────────────────────────────────────────────────────────────────────
 

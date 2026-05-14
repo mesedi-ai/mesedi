@@ -157,6 +157,10 @@ func main() {
 	mux.Handle("POST /executions", privateHandler)
 	mux.Handle("PATCH /executions/{id}", privateHandler)
 	mux.Handle("POST /events", privateHandler)
+	// Phase 3b — read-side execution + stats surface for the dashboard.
+	mux.Handle("GET /executions", privateHandler)
+	mux.Handle("GET /executions/{id}", privateHandler)
+	mux.Handle("GET /stats", privateHandler)
 	// Phase 3a — failure_group read surface (auth-required).
 	mux.Handle("GET /failure-groups", privateHandler)
 	mux.Handle("GET /failure-groups/{id}", privateHandler)

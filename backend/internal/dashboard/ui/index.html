@@ -9,17 +9,28 @@
       --bg:           #0f172a;
       --surface:      #1e293b;
       --surface-2:    #334155;
-      --border:       #475569;
+      --surface-3:    #475569;
+      --border:       #334155;
+      --border-2:     #475569;
       --text:         #f1f5f9;
       --text-muted:   #94a3b8;
       --text-dim:     #64748b;
       --accent:       #c9a646;
       --danger:       #ef4444;
-      --danger-bg:    #7f1d1d;
+      --danger-bg:    rgba(239, 68, 68, 0.15);
+      --danger-border:rgba(239, 68, 68, 0.35);
       --warning:      #f59e0b;
-      --warning-bg:   #78350f;
+      --warning-bg:   rgba(245, 158, 11, 0.15);
+      --warning-border:rgba(245, 158, 11, 0.35);
       --success:      #10b981;
-      --success-bg:   #064e3b;
+      --success-bg:   rgba(16, 185, 129, 0.15);
+      --success-border:rgba(16, 185, 129, 0.35);
+      --info:         #60a5fa;
+      --info-bg:      rgba(96, 165, 250, 0.15);
+      --info-border:  rgba(96, 165, 250, 0.35);
+      --purple:       #a78bfa;
+      --purple-bg:    rgba(167, 139, 250, 0.15);
+      --purple-border:rgba(167, 139, 250, 0.35);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -32,131 +43,231 @@
     }
     header {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 24px; border-bottom: 0.5px solid var(--border);
+      padding: 14px 28px; border-bottom: 0.5px solid var(--border);
       background: var(--surface);
     }
-    .brand {
-      display: flex; align-items: center; gap: 24px;
-    }
-    .brand-name {
-      font-size: 17px; font-weight: 500; letter-spacing: -0.2px;
-    }
+    .brand { display: flex; align-items: center; gap: 24px; }
+    .brand-name { font-size: 17px; font-weight: 500; letter-spacing: -0.2px; }
     .project-chip {
       display: flex; align-items: center; gap: 8px;
       padding: 5px 10px;
-      border: 0.5px solid var(--border);
+      border: 0.5px solid var(--border-2);
       border-radius: 6px;
       font-size: 13px;
       color: var(--text-muted);
     }
     .dev-badge {
-      font-size: 10px;
-      padding: 3px 7px;
-      background: var(--warning-bg);
-      color: var(--warning);
-      border-radius: 4px;
-      font-weight: 500;
-      letter-spacing: 0.5px;
+      font-size: 10px; padding: 3px 7px;
+      background: var(--warning-bg); color: var(--warning);
+      border: 0.5px solid var(--warning-border);
+      border-radius: 4px; font-weight: 500; letter-spacing: 0.5px;
     }
-    main {
-      padding: 24px;
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-    h1 {
-      font-size: 22px; font-weight: 500;
-      margin-bottom: 4px;
-    }
-    h1 .count {
-      font-weight: 400; color: var(--text-muted);
-      font-size: 16px; margin-left: 8px;
-    }
-    .subtitle {
-      font-size: 13px; color: var(--text-muted);
+    main { padding: 28px; max-width: 1280px; margin: 0 auto; }
+
+    .page-head {
+      display: flex; justify-content: space-between; align-items: flex-end;
       margin-bottom: 24px;
     }
+    h1 { font-size: 24px; font-weight: 500; margin-bottom: 4px; }
+    .subtitle { font-size: 13px; color: var(--text-muted); }
+    .back-link {
+      display: inline-block;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+    .back-link:hover { color: var(--text); }
     .reload-btn {
-      float: right;
-      padding: 6px 12px;
+      padding: 7px 14px;
       background: var(--surface);
-      border: 0.5px solid var(--border);
+      border: 0.5px solid var(--border-2);
       color: var(--text);
       border-radius: 6px;
-      font-size: 13px;
+      font-size: 13px; font-family: inherit;
       cursor: pointer;
-      font-family: inherit;
     }
-    .reload-btn:hover { background: var(--surface-2); }
+    .reload-btn:hover { background: var(--surface-2); border-color: var(--surface-3); }
     .reload-btn:active { transform: translateY(1px); }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 32px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    .stat-label {
+      font-size: 12px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .stat-value {
+      font-size: 28px; font-weight: 500;
+      font-variant-numeric: tabular-nums;
+      margin-top: 4px;
+    }
+    .stat-sub { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .stat-sub.bad { color: var(--danger); }
+    .stat-sub.good { color: var(--success); }
+
+    .section { margin-bottom: 36px; }
+    .section-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .section-title { font-size: 16px; font-weight: 500; }
+    .section-title .count {
+      font-weight: 400; color: var(--text-muted);
+      font-size: 14px; margin-left: 8px;
+    }
+    .section-desc {
+      font-size: 12px; color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
       background: var(--surface);
       border: 0.5px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       overflow: hidden;
     }
-    thead tr {
-      background: var(--surface-2);
-    }
+    thead tr { background: var(--surface-2); }
     th {
-      text-align: left;
-      padding: 10px 14px;
-      font-size: 12px;
-      font-weight: 500;
+      text-align: left; padding: 10px 14px;
+      font-size: 11px; font-weight: 500;
       color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      text-transform: uppercase; letter-spacing: 0.5px;
     }
     td {
       padding: 11px 14px;
       font-size: 13px;
       border-top: 0.5px solid var(--border);
     }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: var(--surface-2); }
     td.mono {
       font-family: "SF Mono", Menlo, monospace;
       font-size: 12px;
       color: var(--text-muted);
     }
+    .num { font-variant-numeric: tabular-nums; text-align: right; }
+
     .badge {
       display: inline-block;
       padding: 3px 9px;
-      font-size: 11px;
-      font-weight: 500;
+      font-size: 11px; font-weight: 500;
       border-radius: 4px;
+      border: 0.5px solid transparent;
       text-transform: capitalize;
     }
-    .badge-crash    { background: var(--danger-bg);  color: var(--danger); }
-    .badge-loop     { background: var(--warning-bg); color: var(--warning); }
-    .badge-tool     { background: var(--warning-bg); color: var(--warning); }
+    .badge-crash    { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+    .badge-loop     { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .badge-tool     { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
     .badge-default  { background: var(--surface-2);  color: var(--text-muted); }
-    .num {
-      font-variant-numeric: tabular-nums;
-      text-align: right;
-    }
+    .status-started   { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
+    .status-completed { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
+    .status-crashed   { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+    .status-halted    { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .status-timeout   { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .status-validation_failed { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-border); }
+
+    .evt-llm_call         { background: var(--purple-bg);  color: var(--purple);  border-color: var(--purple-border); }
+    .evt-tool_call        { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
+    .evt-checkpoint       { background: var(--surface-2);  color: var(--text-muted); }
+    .evt-validator_result { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
+    .evt-exception        { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+    .evt-drift_signal     { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .evt-injection_alert  { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+
     .empty {
       padding: 60px 24px;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 14px;
+      text-align: center; color: var(--text-muted); font-size: 14px;
     }
     .empty strong { color: var(--text); font-weight: 500; }
+    .empty code {
+      display: inline-block; margin-top: 8px;
+      font-size: 12px; color: var(--accent);
+      background: var(--surface); padding: 4px 8px;
+      border-radius: 4px;
+      border: 0.5px solid var(--border);
+    }
     .error {
-      padding: 24px;
+      padding: 18px 22px;
       background: var(--danger-bg);
       color: var(--text);
+      border: 0.5px solid var(--danger-border);
       border-radius: 8px;
       font-family: "SF Mono", monospace;
       font-size: 12px;
       margin-bottom: 24px;
     }
+
+    /* Detail-view styles */
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 28px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+    }
+    .meta-cell .meta-label {
+      font-size: 11px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .meta-cell .meta-value {
+      font-size: 15px; margin-top: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .meta-cell .meta-value.mono {
+      font-family: "SF Mono", Menlo, monospace; font-size: 13px;
+      color: var(--text-muted);
+    }
+    details.payload {
+      margin-top: 4px;
+    }
+    details.payload summary {
+      cursor: pointer; font-size: 11px; color: var(--text-muted);
+      list-style: none;
+    }
+    details.payload summary::-webkit-details-marker { display: none; }
+    details.payload summary:before {
+      content: "▸"; display: inline-block;
+      width: 12px; transition: transform 0.1s;
+      color: var(--text-dim);
+    }
+    details.payload[open] summary:before { transform: rotate(90deg); }
+    details.payload pre {
+      margin-top: 6px;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: 6px;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+
     footer {
       margin-top: 60px;
-      padding: 20px 24px;
+      padding: 24px 28px;
       border-top: 0.5px solid var(--border);
       text-align: center;
-      font-size: 11px;
-      color: var(--text-dim);
+      font-size: 11px; color: var(--text-dim);
     }
   </style>
 </head>
@@ -172,28 +283,24 @@
     </div>
     <span class="dev-badge">DEV ONLY · LOCALHOST</span>
   </header>
-  <main>
-    <button class="reload-btn" onclick="loadData()">↻ Reload</button>
-    <h1>Failure groups <span class="count" id="count"></span></h1>
-    <p class="subtitle">Crash signatures observed across all executions. Click a row to see the sample execution that triggered the group.</p>
-    <div id="content"></div>
-  </main>
+  <main id="main"></main>
   <footer>
-    Mesedi local-dev dashboard prototype · Phase 3a · served from the backend binary at /ui/
+    Mesedi local-dev dashboard prototype · Phase 3b sub-slice 8 · served from the backend binary at /ui/
   </footer>
 
   <script>
-    // DEV-ONLY hardcoded dev bearer token. The backend auto-bootstraps
-    // this key on first run (see bootstrapDevProject in cmd/api/main.go).
-    // Never use this pattern in a production dashboard.
     const DEV_KEY = "mesedi_sk_dev_local_only";
-    const BASE_URL = "";  // same-origin: the dashboard is served by the backend itself
+    const HEADERS = {
+      "Authorization": "Bearer " + DEV_KEY,
+      "X-Mesedi-Schema-Version": "1",
+    };
 
+    // ── helpers ────────────────────────────────────────────────────────
+    function fmtNum(n) { return new Intl.NumberFormat("en-US").format(n); }
     function fmtDate(s) {
       if (!s) return "—";
       const d = new Date(s);
-      const now = new Date();
-      const diffMs = now - d;
+      const diffMs = new Date() - d;
       const diffMin = Math.round(diffMs / 60000);
       if (diffMin < 1) return "just now";
       if (diffMin < 60) return diffMin + "m ago";
@@ -202,82 +309,271 @@
       const diffDays = Math.round(diffHr / 24);
       return diffDays + "d ago";
     }
-
+    function fmtDateExact(s) {
+      if (!s) return "—";
+      return new Date(s).toLocaleString();
+    }
+    function fmtDuration(ms) {
+      if (ms === null || ms === undefined || ms === 0) return "—";
+      if (ms < 1000) return ms + "ms";
+      return (ms / 1000).toFixed(1) + "s";
+    }
     function badgeForClass(cls) {
       if (cls === "crashes") return "badge-crash";
       if (cls === "loops") return "badge-loop";
-      if (cls.includes("tool")) return "badge-tool";
+      if (cls && cls.includes("tool")) return "badge-tool";
       return "badge-default";
     }
-
-    function renderEmpty(container) {
-      container.innerHTML = '<div class="empty">' +
-        '<strong>No failure groups yet.</strong><br>' +
-        'Run an agent that crashes to see grouping in action:<br>' +
-        '<code style="font-size: 12px; color: var(--accent);">cd ~/mesedi/sdk-python/sandbox && python3 real_agent.py</code>' +
-        '</div>';
+    function badgeForStatus(status) { return "status-" + (status || "default"); }
+    function escapeHtml(s) {
+      if (s === null || s === undefined) return "";
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
 
-    function renderTable(container, groups) {
-      const rows = groups.map(g => {
-        return '<tr>' +
-          '<td><span class="badge ' + badgeForClass(g.failure_class) + '">' + g.failure_class + '</span></td>' +
-          '<td class="mono">' + g.signature + '</td>' +
-          '<td class="num">' + g.event_count + '</td>' +
-          '<td class="num">' + g.affected_executions + '</td>' +
-          '<td>' + fmtDate(g.first_seen) + '</td>' +
-          '<td>' + fmtDate(g.last_seen) + '</td>' +
-          '<td class="mono">' + (g.sample_execution_id || "—") + '</td>' +
-        '</tr>';
-      }).join("");
-      container.innerHTML = '<table>' +
-        '<thead><tr>' +
-          '<th>Class</th>' +
-          '<th>Signature</th>' +
-          '<th class="num">Events</th>' +
-          '<th class="num">Affected</th>' +
-          '<th>First seen</th>' +
-          '<th>Last seen</th>' +
-          '<th>Sample execution</th>' +
-        '</tr></thead>' +
-        '<tbody>' + rows + '</tbody>' +
-      '</table>';
+    async function fetchJSON(path) {
+      const r = await fetch(path, { headers: HEADERS });
+      if (!r.ok) throw new Error("HTTP " + r.status + " from " + path);
+      return r.json();
     }
 
-    async function loadData() {
-      const content = document.getElementById("content");
-      const countEl = document.getElementById("count");
-      content.innerHTML = '<div class="empty">Loading…</div>';
+    // ── OVERVIEW VIEW ──────────────────────────────────────────────────
+
+    async function showOverview() {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <div class="page-head">
+          <div>
+            <h1>Overview</h1>
+            <div class="subtitle" id="last-refresh">Loading…</div>
+          </div>
+          <button class="reload-btn" onclick="showOverview()">↻ Reload</button>
+        </div>
+        <div class="stats-row">
+          <div class="stat-card"><div class="stat-label">Total executions</div><div class="stat-value" id="stat-total">—</div><div class="stat-sub">all time</div></div>
+          <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value" id="stat-completed">—</div><div class="stat-sub">all time</div></div>
+          <div class="stat-card"><div class="stat-label">Crashed · 24h</div><div class="stat-value" id="stat-crashed">—</div><div class="stat-sub" id="stat-crashed-sub">last 24 hours</div></div>
+          <div class="stat-card"><div class="stat-label">Open failure groups</div><div class="stat-value" id="stat-groups">—</div><div class="stat-sub">grouped signatures</div></div>
+        </div>
+        <div class="section">
+          <div class="section-head"><div class="section-title">Failure groups<span class="count" id="groups-count"></span></div></div>
+          <div class="section-desc">Crash signatures observed across all executions. Each row is a unique signature; bumping <em>Events</em> means another execution hit the same code path.</div>
+          <div id="groups-content"></div>
+        </div>
+        <div class="section">
+          <div class="section-head"><div class="section-title">Recent executions<span class="count" id="execs-count"></span></div></div>
+          <div class="section-desc">Most recent agent executions, newest first. Click a row to see its event timeline.</div>
+          <div id="execs-content"></div>
+        </div>
+      `;
 
       try {
-        const r = await fetch(BASE_URL + "/failure-groups", {
-          headers: {
-            "Authorization": "Bearer " + DEV_KEY,
-            "X-Mesedi-Schema-Version": "1",
-          },
-        });
-        if (!r.ok) {
-          const body = await r.text();
-          content.innerHTML = '<div class="error">HTTP ' + r.status + ': ' + body + '</div>';
-          countEl.textContent = "";
-          return;
-        }
-        const data = await r.json();
-        const groups = data.failure_groups || [];
-        countEl.textContent = groups.length === 1 ? "(1)" : "(" + groups.length + ")";
-        if (groups.length === 0) {
-          renderEmpty(content);
-          return;
-        }
-        renderTable(content, groups);
+        const [stats, groupsResp, execsResp] = await Promise.all([
+          fetchJSON("/stats"),
+          fetchJSON("/failure-groups"),
+          fetchJSON("/executions?limit=50"),
+        ]);
+        renderStats(stats);
+        renderGroups(groupsResp.failure_groups || []);
+        renderExecsTable(execsResp.executions || []);
+        document.getElementById("last-refresh").textContent =
+          "Last refresh: " + new Date().toLocaleTimeString();
       } catch (e) {
-        content.innerHTML = '<div class="error">Fetch failed: ' + e.message +
-          '<br>Is the backend running on localhost:8080?</div>';
-        countEl.textContent = "";
+        main.insertAdjacentHTML("afterbegin",
+          '<div class="error">Fetch failed: ' + e.message + '<br>Is the backend running?</div>');
       }
     }
 
-    loadData();
+    function renderStats(s) {
+      document.getElementById("stat-total").textContent = fmtNum(s.total_executions || 0);
+      document.getElementById("stat-completed").textContent = fmtNum(s.completed_executions || 0);
+      const crashed = s.crashed_24h || 0;
+      document.getElementById("stat-crashed").textContent = fmtNum(crashed);
+      document.getElementById("stat-crashed-sub").classList.toggle("bad", crashed > 0);
+      document.getElementById("stat-groups").textContent = fmtNum(s.open_failure_groups || 0);
+    }
+
+    function renderGroups(groups) {
+      const c = document.getElementById("groups-content");
+      document.getElementById("groups-count").textContent = " (" + groups.length + ")";
+      if (groups.length === 0) {
+        c.innerHTML = '<div class="empty"><strong>No failure groups yet.</strong></div>';
+        return;
+      }
+      const rows = groups.map(g =>
+        '<tr>' +
+          '<td><span class="badge ' + badgeForClass(g.failure_class) + '">' + escapeHtml(g.failure_class) + '</span></td>' +
+          '<td class="mono">' + escapeHtml(g.signature) + '</td>' +
+          '<td class="num">' + fmtNum(g.event_count) + '</td>' +
+          '<td class="num">' + fmtNum(g.affected_executions) + '</td>' +
+          '<td>' + fmtDate(g.first_seen) + '</td>' +
+          '<td>' + fmtDate(g.last_seen) + '</td>' +
+          '<td class="mono">' + escapeHtml(g.sample_execution_id || "—") + '</td>' +
+        '</tr>').join("");
+      c.innerHTML = '<table><thead><tr>' +
+        '<th>Class</th><th>Signature</th>' +
+        '<th class="num">Events</th><th class="num">Affected</th>' +
+        '<th>First seen</th><th>Last seen</th><th>Sample execution</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    function renderExecsTable(execs) {
+      const c = document.getElementById("execs-content");
+      document.getElementById("execs-count").textContent = " (" + execs.length + ")";
+      if (execs.length === 0) {
+        c.innerHTML = '<div class="empty"><strong>No executions yet.</strong></div>';
+        return;
+      }
+      const rows = execs.map(e =>
+        '<tr class="clickable" onclick="showExecutionDetail(\'' + escapeHtml(e.execution_id) + '\')">' +
+          '<td class="mono">' + escapeHtml(e.execution_id) + '</td>' +
+          '<td><span class="badge ' + badgeForStatus(e.status) + '">' + escapeHtml(e.status) + '</span></td>' +
+          '<td class="num">' + fmtDuration(e.duration_ms) + '</td>' +
+          '<td>' + escapeHtml(e.sdk_language || "—") + '</td>' +
+          '<td class="mono">' + escapeHtml(e.crash_signature || "—") + '</td>' +
+          '<td>' + fmtDate(e.started_at) + '</td>' +
+        '</tr>').join("");
+      c.innerHTML = '<table><thead><tr>' +
+        '<th>Execution</th><th>Status</th>' +
+        '<th class="num">Duration</th>' +
+        '<th>SDK</th><th>Crash signature</th><th>Started</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    // ── EXECUTION DETAIL VIEW ──────────────────────────────────────────
+
+    async function showExecutionDetail(executionID) {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <a class="back-link" onclick="showOverview()">← Overview</a>
+        <div class="page-head">
+          <div>
+            <h1>Execution detail</h1>
+            <div class="subtitle mono" id="exec-id">${escapeHtml(executionID)}</div>
+          </div>
+          <button class="reload-btn" onclick="showExecutionDetail('${escapeHtml(executionID)}')">↻ Reload</button>
+        </div>
+        <div id="detail-content"><div class="empty">Loading…</div></div>
+      `;
+      try {
+        const data = await fetchJSON("/executions/" + encodeURIComponent(executionID));
+        renderExecutionDetail(data.execution, data.events || []);
+      } catch (e) {
+        document.getElementById("detail-content").innerHTML =
+          '<div class="error">Fetch failed: ' + e.message + '</div>';
+      }
+    }
+
+    function renderExecutionDetail(exec, events) {
+      const c = document.getElementById("detail-content");
+
+      const meta = `
+        <div class="meta-grid">
+          <div class="meta-cell">
+            <div class="meta-label">Status</div>
+            <div class="meta-value"><span class="badge ${badgeForStatus(exec.status)}">${escapeHtml(exec.status)}</span></div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Duration</div>
+            <div class="meta-value">${fmtDuration(exec.duration_ms)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">SDK</div>
+            <div class="meta-value">${escapeHtml(exec.sdk_language || "—")} ${escapeHtml(exec.sdk_version || "")}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Crash signature</div>
+            <div class="meta-value mono">${escapeHtml(exec.crash_signature || "—")}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Started</div>
+            <div class="meta-value">${fmtDateExact(exec.started_at)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Ended</div>
+            <div class="meta-value">${fmtDateExact(exec.ended_at)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Tokens in / out</div>
+            <div class="meta-value">${fmtNum(exec.total_tokens_in || 0)} / ${fmtNum(exec.total_tokens_out || 0)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Estimated cost</div>
+            <div class="meta-value">${exec.estimated_cost_usd ? '$' + exec.estimated_cost_usd.toFixed(4) : "—"}</div>
+          </div>
+        </div>
+      `;
+
+      const eventsSection = `
+        <div class="section">
+          <div class="section-head"><div class="section-title">Event timeline<span class="count"> (${events.length})</span></div></div>
+          <div class="section-desc">Events recorded against this execution, in sequence order. Click ▸ to expand each event's payload.</div>
+          ${events.length === 0
+            ? '<div class="empty"><strong>No events recorded.</strong><br>This execution started + ended without emitting any tool/LLM/checkpoint events.</div>'
+            : renderEventsTimeline(events)
+          }
+        </div>
+      `;
+
+      c.innerHTML = meta + eventsSection;
+    }
+
+    function renderEventsTimeline(events) {
+      const rows = events.map(e => {
+        const summary = eventSummary(e);
+        const payloadJSON = e.payload
+          ? JSON.stringify(e.payload, null, 2)
+          : "(no payload)";
+        return `
+          <tr>
+            <td class="num">${e.sequence}</td>
+            <td><span class="badge evt-${e.event_type}">${escapeHtml(e.event_type)}</span></td>
+            <td>${escapeHtml(summary)}
+              <details class="payload">
+                <summary>payload</summary>
+                <pre>${escapeHtml(payloadJSON)}</pre>
+              </details>
+            </td>
+            <td class="num">${fmtDuration(e.duration_ms)}</td>
+            <td>${fmtDateExact(e.timestamp)}</td>
+          </tr>
+        `;
+      }).join("");
+      return `<table><thead><tr>
+        <th class="num">#</th><th>Event</th><th>Summary</th>
+        <th class="num">Duration</th><th>Time</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    // Extract a short human-readable summary from event payload.
+    // Different event types have different "identifying" fields.
+    function eventSummary(e) {
+      const p = e.payload || {};
+      switch (e.event_type) {
+        case "llm_call":
+          return (p.model || "?") +
+            (p.status === "failed" ? " (failed: " + (p.exception_type || "") + ")" : "") +
+            (p.input_tokens !== undefined ? " · " + p.input_tokens + " in / " + p.output_tokens + " out" : "");
+        case "tool_call":
+          return (p.tool_name || "?") +
+            (p.status === "failed" ? " (failed: " + (p.exception_type || "") + ")" : "");
+        case "checkpoint":
+          return p.name || "?";
+        case "validator_result":
+          return (p.name || "?") +
+            (p.passed === false ? " (failed: " + (p.message || "") + ")" : " (passed)");
+        case "exception":
+          return p.exception_type || "?";
+        default:
+          return p.name || "—";
+      }
+    }
+
+    // ── BOOT ───────────────────────────────────────────────────────────
+    showOverview();
   </script>
 </body>
 </html>
