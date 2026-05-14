@@ -54,6 +54,27 @@ curl -X PATCH http://localhost:8080/executions/exec-001 \
 
 Requests without `Authorization: Bearer` are rejected with 401. Requests with an unrecognized key are rejected with 401. Requests with the wrong project_id in the body (vs the auth-context project_id) are rejected with 403.
 
+### Wire-format version (`X-Mesedi-Schema-Version`)
+
+The Mesedi SDK SHOULD send `X-Mesedi-Schema-Version: 1` on every request to the protected ingest endpoints. The backend's current policy is "enforced if present":
+
+- Header missing → request accepted (assumed to be the current version; soft-mode for local curl smoke tests and the bring-up flow).
+- Header present and equals `1` → request accepted.
+- Header present and not `1` → rejected with 400 and a message naming the supported version(s).
+
+Smoke-test the negative path:
+
+```bash
+# Should return 400 with an informative error.
+curl -X POST http://localhost:8080/executions \
+  -H "Authorization: Bearer mesedi_sk_dev_local_only" \
+  -H "X-Mesedi-Schema-Version: 99" \
+  -H "Content-Type: application/json" \
+  -d '{"execution_id":"exec-schema-test","status":"started"}'
+```
+
+Once the real SDK ships with the header set by default, the policy tightens to "missing → 400" too — at that point any unversioned caller is a legacy bug worth surfacing loudly.
+
 ## Configuration
 
 12-factor environment variables. Copy `.env.example` to `.env` and fill in values when needed. Flags override env vars.

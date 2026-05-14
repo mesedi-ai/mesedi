@@ -38,12 +38,46 @@ func NewTopChain(logger *slog.Logger) Middleware {
 
 // NewAuthChain returns the inner middleware that runs ONLY on protected
 // routes (POST /executions, POST /events, PATCH /executions/{id}). Today
-// this is just bearer-token auth; per-project rate limiting and request-ID
-// generation will layer on top in future slices without touching callers.
+// this is bearer-token auth + schema-version enforcement; per-project
+// rate limiting and request-ID generation will layer on top in future
+// slices without touching callers.
 func NewAuthChain(_ *slog.Logger, s store.Store) Middleware {
 	return chain(
 		authMiddleware(s),
+		schemaVersionMiddleware(),
 	)
+}
+
+// CurrentSchemaVersion is the wire-format version this backend speaks.
+// Bump when a breaking change to event shape, execution shape, or response
+// envelope is introduced. SDKs SHOULD send X-Mesedi-Schema-Version on
+// every request; backends MUST reject requests whose declared version is
+// unsupported.
+const CurrentSchemaVersion = "1"
+
+// schemaVersionMiddleware enforces the X-Mesedi-Schema-Version header.
+//
+// Today's policy is "enforced if present": a missing header is accepted
+// (assumed to be the current version, for backward compat with curl smoke
+// tests and the bring-up README). A present-but-unsupported version is
+// rejected with 400.
+//
+// Once the real SDK ships with the header by default — i.e. once we can
+// assume any legitimate caller will set it — this policy tightens to
+// "missing → 400" as well. Until then, soft-mode minimizes friction
+// during local exploration.
+func schemaVersionMiddleware() Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			v := r.Header.Get("X-Mesedi-Schema-Version")
+			if v != "" && v != CurrentSchemaVersion {
+				writeError(w, http.StatusBadRequest,
+					"unsupported X-Mesedi-Schema-Version "+v+" (this backend accepts: "+CurrentSchemaVersion+")")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // Middleware is the standard http.Handler decorator signature.
