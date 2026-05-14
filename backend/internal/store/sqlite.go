@@ -964,6 +964,48 @@ func (s *SQLiteStore) GroupPromptInjection(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassInjection, patternName)
 }
 
+// costVelocityThresholdUSD is the absolute cost threshold at which an
+// execution is flagged as cost_velocity. Artificially low for v0.0.1
+// demo visibility — production would either raise this OR move to a
+// baseline-relative detector (Phase 5+).
+const costVelocityThresholdUSD = 0.001
+
+// costVelocitySignature buckets execution cost into order-of-magnitude
+// signatures so high-cost runs cluster sensibly. The lowest bucket
+// (cost_$0.001+) matches the threshold; anything cheaper is filtered
+// upstream in the handler.
+func costVelocitySignature(costUSD float64) string {
+	switch {
+	case costUSD < 0.01:
+		return "cost_$0.001+"
+	case costUSD < 0.10:
+		return "cost_$0.01+"
+	case costUSD < 1.00:
+		return "cost_$0.10+"
+	case costUSD < 10.00:
+		return "cost_$1+"
+	default:
+		return "cost_$10+"
+	}
+}
+
+// GroupCostVelocity upserts a failure_group with
+// failure_class=cost_velocity and a cost-bucketed signature. Same
+// idempotency contract — if the execution is already in a higher-
+// priority group (crash, loop, tool/validator failure), this is a
+// no-op.
+func (s *SQLiteStore) GroupCostVelocity(
+	ctx context.Context,
+	executionID, projectID string,
+	costUSD float64,
+) error {
+	if costUSD < costVelocityThresholdUSD {
+		return nil
+	}
+	signature := costVelocitySignature(costUSD)
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassCostVelocity, signature)
+}
+
 // ListFailureGroups returns failure_groups for a project, sorted by
 // most-recent first. Caller is responsible for sensible limit/offset
 // bounds (handler enforces a max-limit ceiling).

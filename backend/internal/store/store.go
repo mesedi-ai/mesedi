@@ -156,6 +156,12 @@ type Store interface {
 	// lives in internal/detectors/injection.go — this method just
 	// records the result.
 	GroupPromptInjection(ctx context.Context, executionID, projectID, patternName string) error
+	// GroupCostVelocity upserts a failure_group with
+	// failure_class=cost_velocity and a cost-bucketed signature
+	// (cost_$0.001+, cost_$0.01+, cost_$0.10+, cost_$1+, cost_$10+).
+	// V0.0.1 absolute-threshold version; Phase-5+ will swap to a
+	// proper baseline-relative detector.
+	GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64) error
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). For pagination, pass limit +
 	// offset; default to limit=50 in callers.

@@ -272,33 +272,68 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// Phase 3b sub-slice 12: cost computation. If the SDK didn't pre-fill
-	// estimated_cost_usd, walk the execution's llm_call events, sum tokens
-	// by model, compute total cost via the pricing table, write the result
-	// back to the execution row. Failure-group rollups (cost_wasted_usd)
-	// are then a live SUM in the ListFailureGroups query — no separate
-	// rollup table to maintain. Best-effort: a failure during cost
-	// computation never fails the PATCH.
-	if isTerminalStatus(patch.Status) && patch.EstimatedCostUSD == 0 {
+	// Phase 3b sub-slices 12 + 15: events-driven post-processing. Both
+	// cost computation and prompt-injection detection walk the same
+	// event list, so fetch ONCE and feed both. Best-effort throughout —
+	// failures here never fail the PATCH.
+	if isTerminalStatus(patch.Status) {
 		evts, err := h.Store.ListEventsForExecution(r.Context(), executionID)
 		if err != nil {
-			h.Logger.Warn("list events for cost compute failed",
+			h.Logger.Warn("list events for post-PATCH processing failed",
 				"execution_id", executionID,
 				"error", err.Error(),
 			)
 		} else {
-			cost := computeExecutionCost(evts)
-			if cost > 0 {
-				if err := h.Store.SetExecutionCost(r.Context(), executionID, cost); err != nil {
-					h.Logger.Warn("set execution cost failed",
+			// Sub-slice 12: cost computation. Skip if the SDK pre-filled
+			// estimated_cost_usd (caller knows better than us). The
+			// resolved cost (effectiveCost) flows into the cost-velocity
+			// detector below so we don't recompute.
+			effectiveCost := patch.EstimatedCostUSD
+			if effectiveCost == 0 {
+				cost := computeExecutionCost(evts)
+				if cost > 0 {
+					if err := h.Store.SetExecutionCost(r.Context(), executionID, cost); err != nil {
+						h.Logger.Warn("set execution cost failed",
+							"execution_id", executionID,
+							"computed_cost_usd", cost,
+							"error", err.Error(),
+						)
+					} else {
+						h.Logger.Info("execution cost computed",
+							"execution_id", executionID,
+							"cost_usd", cost,
+						)
+					}
+					effectiveCost = cost
+				}
+			}
+
+			// Sub-slice 16: cost-velocity detector. Any execution whose
+			// resolved cost exceeds the v0.0.1 absolute threshold gets
+			// grouped as cost_velocity with a cost-bucketed signature.
+			// Production version (Phase 5+) compares against a project
+			// rolling baseline rather than an absolute value.
+			if effectiveCost > 0 {
+				if err := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost); err != nil {
+					h.Logger.Warn("cost-velocity grouping failed (continuing)",
 						"execution_id", executionID,
-						"computed_cost_usd", cost,
+						"cost_usd", effectiveCost,
 						"error", err.Error(),
 					)
-				} else {
-					h.Logger.Info("execution cost computed",
+				}
+			}
+
+			// Sub-slice 15: prompt-injection detection. Scan each
+			// llm_call event's user_message + system_prompt for known
+			// injection patterns. First match wins; the pattern name
+			// becomes the failure_group signature so all executions
+			// hitting the same attack pattern cluster together.
+			if pattern, found := scanForInjection(evts); found {
+				if err := h.Store.GroupPromptInjection(r.Context(), executionID, authProjectID, pattern); err != nil {
+					h.Logger.Warn("prompt-injection grouping failed (continuing)",
 						"execution_id", executionID,
-						"cost_usd", cost,
+						"pattern", pattern,
+						"error", err.Error(),
 					)
 				}
 			}
@@ -694,6 +729,40 @@ func computeExecutionCost(evts []*events.Event) float64 {
 		total += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)
 	}
 	return total
+}
+
+// scanForInjection walks llm_call events looking for known prompt-
+// injection signatures in the user_message and system_prompt fields.
+// Returns the first matching pattern's name plus true; ("", false) if
+// nothing matched. The scan is ordered by event sequence so the first
+// injection chronologically wins.
+//
+// Both user_message and system_prompt are scanned because injections
+// can come from either side — a compromised system prompt is rarer
+// but more dangerous, so we want it caught.
+func scanForInjection(evts []*events.Event) (string, bool) {
+	for _, e := range evts {
+		if e.EventType != events.EventTypeLLMCall {
+			continue
+		}
+		if len(e.Payload) == 0 {
+			continue
+		}
+		var p struct {
+			UserMessage  string `json:"user_message"`
+			SystemPrompt string `json:"system_prompt"`
+		}
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			continue
+		}
+		if name, found := detectors.DetectInjection(p.UserMessage); found {
+			return name, true
+		}
+		if name, found := detectors.DetectInjection(p.SystemPrompt); found {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // isTerminalStatus returns true for any execution status that means
