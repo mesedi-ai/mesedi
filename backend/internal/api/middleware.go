@@ -38,13 +38,15 @@ func NewTopChain(logger *slog.Logger) Middleware {
 
 // NewAuthChain returns the inner middleware that runs ONLY on protected
 // routes (POST /executions, POST /events, PATCH /executions/{id}). Today
-// this is bearer-token auth + schema-version enforcement; per-project
-// rate limiting and request-ID generation will layer on top in future
-// slices without touching callers.
-func NewAuthChain(_ *slog.Logger, s store.Store) Middleware {
+// this is bearer-token auth, schema-version enforcement, and per-project
+// rate limiting (in that order — auth must run first to attach project_id
+// to context; the rate limiter consumes that). Request-ID generation
+// will layer on top in a future slice without touching callers.
+func NewAuthChain(logger *slog.Logger, s store.Store) Middleware {
 	return chain(
 		authMiddleware(s),
 		schemaVersionMiddleware(),
+		rateLimitMiddleware(logger),
 	)
 }
 
