@@ -45,6 +45,7 @@ Time-ordered record of milestones actually shipped. Updated continuously as work
 - **2026-05-14 PM** — **Monorepo consolidated.** Backend `.git` collapsed, top-level `/Users/robertcanario/mesedi/` initialized as a single local-only git repo covering `backend/`, `docs/`, `branding/`, `concept-idea/` (renamed from "concept idea" — no spaces in paths). Top-level `.gitignore` covers Go build artifacts, future SDK + dashboard subdirs, OS/editor noise. Initial commit + rename commit landed. No remote.
 - **2026-05-14 PM** — **Mesedi first end-to-end "customer" run.** `sdk-python/sandbox/fake_agent.py` — 100-line throwaway exploration that hits the backend as an agent would: `POST /executions` → 10 alternating `llm_call`/`tool_call` events via `POST /events` → `PATCH /executions/{id}` complete. Uses real bearer-token auth with `mesedi_sk_dev_local_only`. All 11 requests returned 200; SQLite verified 10 rows with correct event types and sequences (1-10). First time the entire stack exercised as a product. Not the Phase 2 SDK — that's the real `@wrap` decorator package; this sandbox script informs its design.
 - **2026-05-14 PM** — **Schema-versioning header shipped (`X-Mesedi-Schema-Version: 1`).** New `schemaVersionMiddleware` in the auth chain. Soft-mode policy: missing header accepted (assumed v1), present-but-unsupported version rejected with 400 + informative message ("unsupported X-Mesedi-Schema-Version 99 (this backend accepts: 1)"). All three paths smoke-tested. Fake agent updated to send the header by default. Policy tightens to "missing → 400" once real SDK ships with the header set automatically. `CurrentSchemaVersion = "1"` constant in `internal/api/middleware.go` is the bump point for future breaking changes.
+- **2026-05-14 PM** — **Per-project rate limiting shipped (token bucket, in-memory).** New `internal/api/ratelimit.go` — `tokenBucket` (sync.Mutex per project) + `rateLimiter` (sync.RWMutex map). Defaults: 100 burst capacity, 10 tokens/sec refill. Standard headers on every response: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`; `Retry-After: 1` added on 429. Rate-limit violations logged at warn level with project_id + method + path. Auth chain order: auth → schema version → rate limit → handler (rate limit requires project_id from context, so it must come after auth). Per-project overrides via `projects` table columns + Redis-backed storage deferred to multi-instance / scale-out slice — interface boundary at `tokenBucket.take()` stays stable across implementations.
 
 ---
 
@@ -76,7 +77,7 @@ Owner: solo founder.
 
 Goal: A single deployed Go service that accepts authenticated event POSTs and stores them in Postgres. No detection yet. Just ingest.
 
-**Status:** Phase 1 ingest surface + persistence + auth complete (local). Rate limiting + admin CLI next.
+**Status:** Phase 1 ingest surface + persistence + auth + rate limiting complete (local). Standalone admin CLI (cmd/admin) is the last open Phase 1 item.
 
 - [x] **Persistence layer (Phase 1.5)** — **DONE 2026-05-14** (SQLite local; Postgres swap later):
   - [x] `projects` table (project_id, name, created_at)
@@ -92,7 +93,7 @@ Goal: A single deployed Go service that accepts authenticated event POSTs and st
   - [x] `POST /executions` — creates an execution record (persisted)
   - [x] `PATCH /executions/{id}` — marks completed/crashed/halted (Go 1.22+ path-parameter syntax, persisted, idempotent)
   - [x] **Bearer token auth middleware** — **DONE 2026-05-14**. SHA-256 hash lookup against `api_keys.key_hash`, project_id + key_id attached to request context, async `last_used_at` touch. Three-layer routing: public (`/health`), private (auth-required), top (recover + request-log). Handlers use auth-context project_id as source of truth — body mismatch returns 403.
-  - [ ] Basic rate limiter — DEFERRED to Phase 1.5b (token-bucket per project, redis-less for local; redis-backed for prod)
+  - [x] **Basic rate limiter** — **DONE 2026-05-14 PM**. Token-bucket per project, in-memory for single-instance use (defaults: 100 burst capacity / 10 tokens/sec refill). Standard headers on every response (X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After on 429). Implementation in `internal/api/ratelimit.go` — `tokenBucket` (mutex-protected per-project) + `rateLimiter` (RWMutex-protected map). Auth chain order now: auth → schema version → rate limit → handler. Per-project overrides + Redis-backed implementation deferred to scale-out slice.
 - [x] **Event schema validation** — **DONE 2026-05-14** (`internal/events/types.go`):
   - [x] Event types as Go structs: 7 event types defined (LLMCall, ToolCall, Checkpoint, Exception, ValidatorResult, DriftSignal, InjectionAlert) + 7 typed payloads
   - [x] JSON unmarshal with strict validation (`DisallowUnknownFields`); rejects malformed events with 400
@@ -117,7 +118,9 @@ Goal: A single deployed Go service that accepts authenticated event POSTs and st
 
 **Acceptance (Phase 1.5 persistence + auth):** Events survive process restart (SQLite persistence verified). Bearer-token auth enforced on all ingest endpoints; cross-project leak prevention verified (mismatched project_id → 403). **DONE 2026-05-14.**
 
-**Acceptance (full Phase 1, awaiting next slice):** Basic rate limiter (token-bucket per project) added. Standalone bootstrap admin CLI for creating non-dev projects + minting keys.
+**Acceptance (Phase 1.5b rate limiting):** Per-project token bucket enforced on all authenticated routes. Standard rate-limit headers on every response. 429 + Retry-After on bucket exhaustion. **DONE 2026-05-14 PM.**
+
+**Acceptance (full Phase 1, awaiting next slice):** Standalone bootstrap admin CLI (cmd/admin) for creating non-dev projects + minting keys.
 
 ---
 

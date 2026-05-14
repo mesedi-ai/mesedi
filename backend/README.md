@@ -75,6 +75,49 @@ curl -X POST http://localhost:8080/executions \
 
 Once the real SDK ships with the header set by default, the policy tightens to "missing → 400" too — at that point any unversioned caller is a legacy bug worth surfacing loudly.
 
+### Rate limiting (per-project token bucket)
+
+Every authenticated request consumes 1 token from the calling project's bucket. The defaults are:
+
+- **Burst capacity:** 100 tokens (each project starts with a full bucket)
+- **Refill rate:** 10 tokens / second
+
+A well-behaved SDK (events buffered client-side, flushed in batches of ~100 every few hundred ms) never sees a 429. An infinite-loop agent without backoff hits 429 within ~10 seconds.
+
+Every response (200 and 429 alike) includes the standard headers:
+
+- `X-RateLimit-Limit` — bucket capacity
+- `X-RateLimit-Remaining` — tokens left after this request
+- `X-RateLimit-Reset` — Unix timestamp when the bucket would refill to full
+
+On 429, AWS-style `Retry-After: 1` is also set.
+
+Smoke-test the limit:
+
+```bash
+# Inspect headers on a single request:
+curl -i -X POST http://localhost:8080/executions \
+  -H "Authorization: Bearer mesedi_sk_dev_local_only" \
+  -H "X-Mesedi-Schema-Version: 1" \
+  -H "Content-Type: application/json" \
+  -d '{"execution_id":"exec-rl-headers","status":"started"}' \
+  2>&1 | grep -i "HTTP\|ratelimit\|retry"
+
+# Burst test: fire 200 requests, count status codes.
+# Expect ~100-140 200s and ~60-100 429s (depends on how fast curl runs).
+DEV_KEY="mesedi_sk_dev_local_only"
+for i in $(seq 1 200); do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    -X POST http://localhost:8080/executions \
+    -H "Authorization: Bearer $DEV_KEY" \
+    -H "X-Mesedi-Schema-Version: 1" \
+    -H "Content-Type: application/json" \
+    -d "{\"execution_id\":\"exec-rl-$i\",\"status\":\"started\"}"
+done | sort | uniq -c
+```
+
+Storage is in-memory today (single-instance only). Per-project overrides will eventually come from columns on the `projects` table; multi-instance deployments will swap the in-memory map for a Redis-backed implementation behind the same interface.
+
 ## Configuration
 
 12-factor environment variables. Copy `.env.example` to `.env` and fill in values when needed. Flags override env vars.
