@@ -906,6 +906,64 @@ func (s *SQLiteStore) GroupToolFailure(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassToolFailures, toolName)
 }
 
+// FindFirstFailedValidator returns the validator name from the first
+// (lowest-sequence) validator_result event with payload.passed = false
+// for the given execution. JSON1 boolean comparison: SQLite stores
+// JSON booleans as `true`/`false` text, so we compare against the
+// JSON-equivalent value json('false').
+func (s *SQLiteStore) FindFirstFailedValidator(
+	ctx context.Context,
+	executionID string,
+) (string, error) {
+	var name sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT json_extract(payload, '$.name')
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'validator_result'
+		  AND json_extract(payload, '$.passed') = 0
+		ORDER BY sequence ASC
+		LIMIT 1
+	`, executionID).Scan(&name)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find first failed validator: %w", err)
+	}
+	if !name.Valid {
+		return "", nil
+	}
+	return name.String, nil
+}
+
+// GroupValidatorFailure upserts a failure_group with
+// failure_class=validator_failures and signature=validatorName. Same
+// idempotency contract.
+func (s *SQLiteStore) GroupValidatorFailure(
+	ctx context.Context,
+	executionID, projectID, validatorName string,
+) error {
+	if validatorName == "" {
+		return fmt.Errorf("validatorName required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassValidator, validatorName)
+}
+
+// GroupPromptInjection upserts a failure_group with
+// failure_class=prompt_injection and signature=patternName. Detection
+// logic (regex pattern matching) lives in detectors/injection.go;
+// this method just records the classification.
+func (s *SQLiteStore) GroupPromptInjection(
+	ctx context.Context,
+	executionID, projectID, patternName string,
+) error {
+	if patternName == "" {
+		return fmt.Errorf("patternName required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassInjection, patternName)
+}
+
 // ListFailureGroups returns failure_groups for a project, sorted by
 // most-recent first. Caller is responsible for sensible limit/offset
 // bounds (handler enforces a max-limit ceiling).

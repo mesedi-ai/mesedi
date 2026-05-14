@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"time"
 
+	"mesedi/backend/internal/detectors"
 	"mesedi/backend/internal/events"
 	"mesedi/backend/internal/pricing"
 	"mesedi/backend/internal/store"
@@ -241,6 +242,30 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				h.Logger.Warn("tool-failure grouping failed (continuing)",
 					"execution_id", executionID,
 					"tool_name", toolName,
+					"error", err.Error(),
+				)
+			}
+		}
+	}
+
+	// Phase 3b sub-slice 14: validator-failures detector. If any
+	// validator_result event in the execution had payload.passed=false,
+	// classify the execution as validator_failures with
+	// signature=validator_name. Same silent-degradation family as
+	// tool-failures — the agent ran to completion but produced output
+	// that a downstream quality check failed.
+	if isTerminalStatus(patch.Status) {
+		validatorName, err := h.Store.FindFirstFailedValidator(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("find failed validator for detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if validatorName != "" {
+			if err := h.Store.GroupValidatorFailure(r.Context(), executionID, authProjectID, validatorName); err != nil {
+				h.Logger.Warn("validator-failure grouping failed (continuing)",
+					"execution_id", executionID,
+					"validator_name", validatorName,
 					"error", err.Error(),
 				)
 			}

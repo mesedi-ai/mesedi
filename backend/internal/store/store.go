@@ -150,6 +150,12 @@ type Store interface {
 	// GroupValidatorFailure upserts a failure_group with
 	// failure_class=validator_failures and signature=validatorName.
 	GroupValidatorFailure(ctx context.Context, executionID, projectID, validatorName string) error
+	// GroupPromptInjection upserts a failure_group with
+	// failure_class=prompt_injection and signature=patternName
+	// (e.g. "ignore_instructions", "role_override"). Detection logic
+	// lives in internal/detectors/injection.go — this method just
+	// records the result.
+	GroupPromptInjection(ctx context.Context, executionID, projectID, patternName string) error
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). For pagination, pass limit +
 	// offset; default to limit=50 in callers.
