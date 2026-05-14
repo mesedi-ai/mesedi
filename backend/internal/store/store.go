@@ -81,6 +81,15 @@ type Store interface {
 	CreateAPIKey(ctx context.Context, k *APIKey) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error)
 	TouchAPIKey(ctx context.Context, keyID string) error
+	// ListAPIKeysForProject returns all keys (minus the hash) for a
+	// project, sorted by created_at DESC. Used by the dashboard's
+	// settings → API keys page.
+	ListAPIKeysForProject(ctx context.Context, projectID string) ([]*APIKey, error)
+	// DeleteAPIKey revokes (hard-deletes) an API key by id, but ONLY
+	// if it belongs to the given project. Returns ErrNotFound if the
+	// key doesn't exist or belongs to a different project — protects
+	// against cross-tenant deletion via id-guessing.
+	DeleteAPIKey(ctx context.Context, keyID, projectID string) error
 
 	// Executions.
 	CreateExecution(ctx context.Context, exec *events.Execution) error
