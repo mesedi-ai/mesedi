@@ -9,12 +9,17 @@ Public API:
 
     @mesedi.wrap
         Decorator that records a function call as an agent execution.
-        Fires POST /executions on entry and PATCH /executions/{id} on
-        exit (completed or crashed). Re-raises any caught exception.
+        Submits POST /executions on entry and PATCH /executions/{id} on
+        exit (completed or crashed) via the async shipper thread.
+        Re-raises any caught exception transparently.
+
+    mesedi.flush(timeout=5.0)
+        Block until the background shipper has drained all events
+        submitted so far. Useful at end of scripts or in tests.
 
     mesedi.MesediClient
         Explicit client for advanced usage (e.g., multiple projects,
-        custom timeouts, manual event emission). Most callers should
+        custom batching, manual sync HTTP calls). Most callers should
         use mesedi.configure() + @mesedi.wrap instead.
 
     mesedi.Event, mesedi.Execution
@@ -26,7 +31,7 @@ Public API:
         constants in backend/internal/events/types.go exactly.
 """
 
-from mesedi.client import MesediClient, configure, get_client
+from mesedi.client import MesediClient, configure, flush, get_client
 from mesedi.events import (
     Event,
     EventType,
@@ -36,7 +41,7 @@ from mesedi.events import (
 )
 from mesedi.wrap import wrap
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 __all__ = [
     "MesediClient",
@@ -45,6 +50,7 @@ __all__ = [
     "Execution",
     "Status",
     "configure",
+    "flush",
     "get_client",
     "utcnow_rfc3339",
     "wrap",
