@@ -50,6 +50,38 @@ Time-ordered record of milestones actually shipped. Updated continuously as work
 - **2026-05-14 PM** — **Branding folder cleaned up.** `favicon_package/site.webmanifest` no longer says "My Website" — proper Mesedi metadata + dark theme/background colors (#0F172A) matching the logo treatment. `mesedi-logo1.png` renamed to `mesedi-mark-transparent.png` (distinct from `mesedi-logo-mark-only.png` which is the mark on a dark backdrop). Favicon package confirmed complete for 2024 web standards (favicon.ico + 16/32/192/512 PNGs + apple-touch-icon + site.webmanifest); legacy assets `safari-pinned-tab.svg` (Safari pinned-tab only) and `browserconfig.xml` (deprecated Edge tiles) not needed.
 - **2026-05-14 PM** — **Dashboard mockup reviewed (Phase 3b destination).** Visualized the project-overview view as it would look once all 7 failure-class detectors exist: 4 metric cards (executions, open failure groups, cost wasted, P95 latency) + 7 detector cards with status badges + recent executions table with status pills (completed / crashed / loop halted / timeout). This is the *Phase 8 end state* — Phase 3b's first dashboard is much leaner (executions list + crashes list only). Mockup confirms the visual story the product needs to tell: "Mesedi catches things and tells you exactly what they cost."
 
+- **2026-05-14 EVENING** — **Mesedi Phase 3 + much of Phase 4-7 shipped in one extended session (sub-slices 6 through 18).** Twelve sequential local-dev sub-slices, all SQLite-verified and dashboard-tested end-to-end. Detailed breakdown:
+  - **Sub-slice 6 — local-dev dashboard.** Single-file HTML/CSS/JS dashboard embedded in the Go binary via `go:embed`, served at `GET /ui/` (same-origin, no CORS gymnastics). Initial version showed only the `failure_groups` list. NOT the production dashboard — that's the deferred Next.js + Clerk surface for post-LOI.
+  - **Sub-slice 7 — read-side surface for the dashboard.** Backend: new `GET /executions` (list, paginated), `GET /executions/{id}` (detail with events), `GET /stats` (counts). Store interface gained `ListExecutions`, `ListEventsForExecution`, `CountExecutionsByStatusSince`. Dashboard expanded with 4 stat cards (Total / Completed / Crashed-24h / Open failure groups) and a Recent Executions table. Fixed a `Total Executions = 0` bug where `CountExecutionsByStatusSince` filtered on `status = ''` instead of treating empty as "any status."
+  - **Sub-slice 8 — execution detail drill-down.** Click any execution row → 8-cell metadata grid (status, duration, SDK, crash signature, started, ended, tokens in/out, estimated cost) + event-timeline table with type-colored badges (purple llm_call, blue tool_call, neutral checkpoint, green validator_result, red exception/injection). Each row exposes an expandable `▸ payload` JSON view.
+  - **Sub-slice 9 — failure-group detail drill-down.** Click a failure_group row → group metadata grid + Affected Executions table with click-through to execution detail. New backend endpoint `GET /failure-groups/{id}/executions` with cross-tenant 404 (verifies group.project_id == auth project before listing). `scanExecutionRows` shared helper extracted from `ListExecutions` for reuse.
+  - **Sub-slice 10 — time-budget detector (2nd failure class).** Refactored grouping logic into private `groupExecutionInternal` (failureClass + signature parameters). New `GroupTimeBudgetExceedance` wraps it with `failure_class=loops` and a duration-bucketed signature (`time_budget_1s+`, `_10s+`, `_60s+`, `_10m+`, `_1h+`). Threshold = 1000ms for v0.0.1 demo visibility. Crash-wins-over-time-budget enforced automatically via the `failure_group_id` short-circuit.
+  - **Sub-slice 11 — step-count detector (3rd failure class).** Any terminal execution with > 10 events groups as `loops` with count-bucketed signature (`step_count_10+`, `_50+`, `_100+`, `_500+`, `_5000+`). New `CountEventsForExecution` Store method.
+  - **Sub-slice 12 — cost computation.** New `internal/pricing/` package with model price table (Anthropic 4.x/3.5/3 + OpenAI gpt-4o/o1 families, USD per 1M tokens, case-insensitive prefix-match lookup, lastUpdated date stamp). After every terminal PATCH the handler walks `llm_call` events, sums (tokens × pricing), writes to `executions.estimated_cost_usd`. `ListFailureGroups` now LEFT-JOINs executions and SUMs cost for live `cost_wasted_usd` rollup — no separate rollup table.
+  - **Sub-slice 13 — tool-failures detector (4th failure class).** SQLite JSON1 query (`json_extract`) finds the first `tool_call` event with `payload.status="failed"`. New `FindFirstFailedToolName` + `GroupToolFailure`. Catches the "agent recovered from a failed tool" silent-degradation pattern.
+  - **Sub-slice 14 — validator-failures detector (5th failure class).** Same JSON1 pattern: finds first `validator_result` event with `payload.passed=false`. Signature = validator name → all executions failing the same check cluster together.
+  - **Sub-slice 15 — prompt-injection detector (6th failure class).** New `internal/detectors/` package with `injection.go` — tier-ordered regex patterns (Tier 1 literal sentinels `[INST]`/`<<SYS>>`, Tier 2 named jailbreaks DAN/developer-mode, Tier 3 role override "you are now"/"from now on", Tier 4 broad ignore/disregard catch-alls). `DetectInjection` returns the first match. Combined cost-compute + injection-scan in handler shares a single `ListEventsForExecution` fetch (saves one query per PATCH). Pattern-ordering bug caught in testing: original ordering put broad "disregard" patterns above specific `[INST]` patterns → fixed by tier-by-specificity ordering.
+  - **Sub-slice 16 — cost-velocity detector (7th failure class — 6 of 7 classes shipped).** v0.0.1 absolute-threshold version: any execution costing > $0.001 groups as `cost_velocity` with `cost_$0.001+` / `_$0.01+` / `_$0.10+` / `_$1+` / `_$10+` buckets. Phase-5+ refinement will swap to rolling-baseline comparison. Priority ordering tightened: injection (security) > cost-velocity (operational).
+  - **Sub-slice 17 — identical-call detector + dashboard badge polish.** Fourth and final Phase-4 loop sub-detector: hashes `(model + user_message)` per `llm_call`, if any hash recurs 3+ times in one execution → groups as `loops / identical_call_<8hex>`. Distinct repeated-prompt patterns get distinct signature hashes (verified: stuck_agent → `ca3b6bcf`, doubly_stuck_agent → `8d7173f8`). Dashboard polish: badge colors for the 4 newer classes (validator_failures→info-blue, prompt_injection→purple, cost_velocity→gold/accent, tool_failures→amber via explicit rule).
+  - **Sub-slice 18 — API key management UI.** Operator-side settings surface. Backend: new `ListAPIKeysForProject` + `DeleteAPIKey` Store methods (with cross-tenant guard), three new handlers (`HandleListAPIKeys`, `HandleCreateAPIKey`, `HandleRevokeAPIKey`), `parseFlexTime` helper to read both RFC3339 (app-inserted) and SQLite `datetime('now')` format (bootstrap dev key). Dashboard: Settings link in header, full key lifecycle (list → mint shows raw key ONCE with copy-friendly format + warning → revoke with confirm).
+
+  **Failure-class coverage status at end of session:**
+  - ✓ crashes (Phase 3a)
+  - ✓ loops — 3 of 4 sub-detectors (time_budget, step_count, identical_call). 4th (similar_call) deferred to embeddings slice.
+  - ✓ tool_failures
+  - ✓ validator_failures
+  - ✓ prompt_injection (regex-based, low-recall/high-precision)
+  - ✓ cost_velocity (absolute threshold; baseline-relative deferred)
+  - ✗ drift — deferred (requires embeddings + vector storage)
+
+  **Dashboard surface shipped:**
+  - Overview (4 stat cards + Failure groups table + Recent executions table)
+  - Execution detail (metadata grid + event timeline + JSON payload reveal)
+  - Failure-group detail (metadata grid + affected executions table)
+  - Settings · API keys (list / mint / revoke)
+
+  **End-to-end SQLite-verified:** 159 executions, 30 completed, 9 crashed in 24h, 13 failure groups across 6 distinct failure classes spanning all 7 concept-doc classes except drift. Real $ cost numbers populating execution detail. API key minting + revoking working through the dashboard against the live `mesedi_sk_dev_local_only` bootstrap key.
+
 ---
 
 ## Phase 0 — Pre-development setup (Days 1–2)
@@ -175,7 +207,11 @@ Goal: A `mesedi` Python package on PyPI that integrates with one decorator and r
 
 ---
 
-## Phase 3 — Crash detection + first dashboard pages (Days 13–17, ~5 days)
+## Phase 3 — Crash detection + first dashboard pages (Days 13–17, ~5 days) — **SHIPPED 2026-05-14 EVENING**
+
+**Status:** Phase 3a + 3b shipped end-to-end (local, no Clerk/Vercel — the deferred production-deploy slice still applies). See the EVENING entry in the progress log above for the full sub-slice breakdown.
+
+
 
 Goal: Backend groups crashes into failure groups; dashboard shows project list + execution list + crash detail.
 
@@ -219,7 +255,11 @@ Goal: Backend groups crashes into failure groups; dashboard shows project list +
 
 ---
 
-## Phase 4 — Loop detection (Days 18–22, ~5 days)
+## Phase 4 — Loop detection (Days 18–22, ~5 days) — **3 of 4 sub-detectors SHIPPED 2026-05-14 EVENING**
+
+**Status:** Time-budget (sub-slice 10), step-count (sub-slice 11), and identical-call (sub-slice 17) sub-detectors shipped. Similar-call (cosine similarity over embeddings) deferred to a single combined slice with drift detection (Phase 7) — both need the same external dependency (an embeddings API + vector storage column on `events`).
+
+
 
 Goal: Backend detects three loop sub-types and produces loop-class failure groups.
 
@@ -305,7 +345,11 @@ Three reasons audience-building cannot wait for Phase 14:
 
 ---
 
-## Phase 5 — Tool-call instrumentation + cost tracking (Days 23–27, ~5 days)
+## Phase 5 — Tool-call instrumentation + cost tracking (Days 23–27, ~5 days) — **SHIPPED 2026-05-14 EVENING (compressed)**
+
+**Status:** Tool-call instrumentation already lived in the Phase 2 SDK (`@tool` decorator + tool_call events). The Phase-5 tool-failures detector (sub-slice 13) + cost computation (sub-slice 12) + cost-velocity detector (sub-slice 16) all shipped this evening. Remaining Phase-5 items: per-project cost-velocity threshold configuration, cost-velocity baseline-relative detection (instead of v0.0.1 absolute threshold).
+
+
 
 Goal: Tool calls are captured per-call; per-tool failure rates are surfaced; per-execution running cost is tracked.
 
@@ -347,7 +391,11 @@ Goal: Tool calls are captured per-call; per-tool failure rates are surfaced; per
 
 ---
 
-## Phase 6 — Output validators (Days 28–32, ~5 days)
+## Phase 6 — Output validators (Days 28–32, ~5 days) — **PARTIALLY SHIPPED 2026-05-14 EVENING**
+
+**Status:** Validator emission (SDK `validator_result()` helper, Phase 2 sub-slice 5) + validator-failures detection (sub-slice 14) shipped. Remaining: built-in validator library (schema-conformance, output-not-empty, factuality checks) — currently every validator is user-defined. The detector and the failure_group surface are ready when those validators ship.
+
+
 
 Goal: Developers define output validators; failures are captured and grouped.
 
@@ -373,7 +421,11 @@ Goal: Developers define output validators; failures are captured and grouped.
 
 ---
 
-## Phase 7 — Drift detection (Days 33–37, ~5 days)
+## Phase 7 — Drift detection (Days 33–37, ~5 days) — **DEFERRED (only failure class not yet shipped)**
+
+**Status:** The lone holdout. Drift detection requires (a) an embeddings provider (OpenAI text-embedding-3-small at ~$0.02/1M tokens), (b) a vector storage column on `events` (pgvector for Postgres, blob+binary-encode for SQLite), and (c) a rolling-baseline comparison harness. Bundle with the deferred Phase-4 similar-call sub-detector since both need the same infrastructure.
+
+
 
 Goal: Multi-axis composite drift detection per the §4.5 spec.
 
@@ -407,7 +459,11 @@ Goal: Multi-axis composite drift detection per the §4.5 spec.
 
 ---
 
-## Phase 8 — Prompt-injection detection (Days 38–42, ~5 days)
+## Phase 8 — Prompt-injection detection (Days 38–42, ~5 days) — **REGEX-BASED VERSION SHIPPED 2026-05-14 EVENING**
+
+**Status:** Sub-slice 15 shipped the regex-pattern detector (`internal/detectors/injection.go`) with tier-ordered patterns. ML-based version (classifier model, semantic similarity to known attacks) deferred — the regex version is low-recall / high-precision by design, which matches what acquirer DD wants to see in a v0.0.1.
+
+
 
 Goal: Three-layer scan (input, tool-return, output) per the §4.7 spec.
 

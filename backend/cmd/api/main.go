@@ -165,6 +165,10 @@ func main() {
 	mux.Handle("GET /failure-groups", privateHandler)
 	mux.Handle("GET /failure-groups/{id}", privateHandler)
 	mux.Handle("GET /failure-groups/{id}/executions", privateHandler)
+	// Phase 3b sub-slice 18 — API key management (auth-required).
+	mux.Handle("GET /api-keys", privateHandler)
+	mux.Handle("POST /api-keys", privateHandler)
+	mux.Handle("DELETE /api-keys/{id}", privateHandler)
 
 	// Top-level middleware: recover from panics, log every request.
 	root := api.NewTopChain(logger)(mux)

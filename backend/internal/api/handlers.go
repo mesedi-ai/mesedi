@@ -58,6 +58,10 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /failure-groups/{id}", h.HandleGetFailureGroup)
 	// Phase 3b sub-slice 9 — executions inside a failure_group.
 	mux.HandleFunc("GET /failure-groups/{id}/executions", h.HandleListExecutionsInFailureGroup)
+	// Phase 3b sub-slice 18 — API key management surface.
+	mux.HandleFunc("GET /api-keys", h.HandleListAPIKeys)
+	mux.HandleFunc("POST /api-keys", h.HandleCreateAPIKey)
+	mux.HandleFunc("DELETE /api-keys/{id}", h.HandleRevokeAPIKey)
 }
 
 // HandleCreateExecution accepts an Execution at the agent's entry point
@@ -760,6 +764,121 @@ func computeExecutionCost(evts []*events.Event) float64 {
 		total += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)
 	}
 	return total
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// API key management (sub-slice 18)
+// ─────────────────────────────────────────────────────────────────────────
+
+// HandleListAPIKeys returns the calling project's API keys (without
+// the hash — never serialized).
+func (h *Handlers) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	keys, err := h.Store.ListAPIKeysForProject(r.Context(), authProjectID)
+	if err != nil {
+		h.Logger.Error("list api_keys failed", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"api_keys": keys,
+		"count":    len(keys),
+	})
+}
+
+// HandleCreateAPIKey mints a new API key for the calling project and
+// returns the RAW KEY VALUE ONCE — this is the only moment a caller
+// ever sees it. The server only persists the hash. Caller must store
+// the raw key immediately; a lost raw key requires a new mint.
+//
+// Request body (optional): {"name": "human-readable label"}.
+func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	var body struct {
+		Name string `json:"name,omitempty"`
+	}
+	// Empty body is fine — name is optional. Skip the strict-decode
+	// path here because the field is intentionally permissive.
+	if r.ContentLength > 0 {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+
+	rawKey, hash, prefix, err := MintAPIKey()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "mint key: "+err.Error())
+		return
+	}
+
+	keyID := "key-" + prefix[len("mesedi_sk_"):] + "-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	rec := &store.APIKey{
+		KeyID:     keyID,
+		ProjectID: authProjectID,
+		KeyHash:   hash,
+		KeyPrefix: prefix,
+		Name:      body.Name,
+	}
+	if err := h.Store.CreateAPIKey(r.Context(), rec); err != nil {
+		writeError(w, http.StatusInternalServerError, "persist key: "+err.Error())
+		return
+	}
+
+	h.Logger.Info("api key minted",
+		"key_id", keyID,
+		"prefix", prefix,
+		"project_id", authProjectID,
+		"name", body.Name,
+	)
+
+	// Return the raw key in this ONE response. The hash never leaves.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"key_id":   keyID,
+		"raw_key":  rawKey,
+		"prefix":   prefix,
+		"name":     body.Name,
+		"warning":  "Store this raw_key now — it will never be shown again.",
+	})
+}
+
+// HandleRevokeAPIKey hard-deletes an API key. Project-scoped via the
+// Store method's project_id guard.
+func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
+	keyID := r.PathValue("id")
+	if keyID == "" {
+		writeError(w, http.StatusBadRequest, "key_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	if err := h.Store.DeleteAPIKey(r.Context(), keyID, authProjectID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "api key not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.Logger.Info("api key revoked",
+		"key_id", keyID,
+		"project_id", authProjectID,
+	)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"key_id": keyID,
+	})
 }
 
 // scanForIdenticalCalls returns the short-hex hash of an LLM call
