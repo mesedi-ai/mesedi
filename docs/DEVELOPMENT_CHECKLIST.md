@@ -217,41 +217,44 @@ Goal: Backend groups crashes into failure groups; dashboard shows project list +
 
 ### 3a. Backend crash grouping (1.5 days)
 
-- [ ] **`failure_groups` table**:
-  - [ ] `group_id`, `project_id`, `failure_class`, `signature`, `first_seen`, `last_seen`, `event_count`, `affected_executions`, `cost_wasted_usd`
-- [ ] **Crash signature generator**:
-  - [ ] Hash exception type + first 5 lines of stack trace
-  - [ ] Deduplicate "same crash, different execution"
-- [ ] **Detector worker (`internal/detectors/crash.go`)**:
-  - [ ] Listens to Postgres `LISTEN/NOTIFY` for new `exception` events
-  - [ ] Computes signature, upserts into `failure_groups`, increments count
-- [ ] **API endpoint `GET /projects/:id/failure-groups`**: paginated, sorted by `last_seen desc`
-- [ ] **API endpoint `GET /failure-groups/:id`**: returns group detail + sample executions
+- [x] **`failure_groups` table** — **DONE 2026-05-14 EVENING** (migration `002_failure_groups.sql`):
+  - [x] `group_id`, `project_id`, `failure_class`, `signature`, `first_seen`, `last_seen`, `event_count`, `affected_executions`, `cost_wasted_usd` — all present; `sample_execution_id` column added as an extra for the dashboard's "sample affected execution" jump target
+- [x] **Crash signature generator** — **DONE 2026-05-14 PM** (SDK-side; backend uses identical formula for cross-language consistency):
+  - [x] SHA-256 of exception class name + first 5 lines of formatted traceback, truncated to 16 hex chars (`_crash_signature` in `sdk-python/mesedi/wrap.py`)
+  - [x] Deduplication via deterministic `deriveGroupID(project, class, signature)` — same signature on same project always maps to the same `group_id` across runs and restarts; no UUID coordination required
+- [x] **Crash-grouping invocation** — **DONE 2026-05-14 EVENING**. Implementation variant: v0.0.1 calls grouping synchronously from `HandleUpdateExecution` after the PATCH persists (works for SQLite single-writer). The standalone worker + Postgres `LISTEN/NOTIFY` path will be the swap-in for the multi-instance Postgres deployment slice.
+  - [ ] Listens to Postgres `LISTEN/NOTIFY` for new `exception` events — DEFERRED to Postgres deployment slice (current SQLite version uses inline call)
+  - [x] Computes signature, upserts into `failure_groups`, increments count — via `Store.GroupCrashedExecution` → private `groupExecutionInternal` shared with every detection class
+- [x] **API endpoint `GET /failure-groups`** — **DONE 2026-05-14 EVENING**. Paginated (`limit` + `offset`), sorted by `last_seen DESC`, project-scoped via auth context. Note: path simplified from `/projects/:id/failure-groups` to `/failure-groups` since the project is already implicit in the bearer token; rolling all key endpoints under the project resolves to the same shape but with one fewer URL segment.
+- [x] **API endpoint `GET /failure-groups/:id`** — **DONE 2026-05-14 EVENING**. Returns group detail with the `cost_wasted_usd` rollup. Sample-executions list available at `GET /failure-groups/:id/executions` (sub-slice 9).
 
 ### 3b. Dashboard MVP (3.5 days)
 
-- [ ] **Next.js app scaffolding**:
-  - [ ] Clerk auth integration; sign-up / sign-in / sign-out flows
-  - [ ] User table in Postgres mirrors Clerk's user IDs
-  - [ ] Each user has at least one project (auto-create on signup)
-- [ ] **Project switcher** in app header
-- [ ] **Pages**:
-  - [ ] `/` — redirect to most recent project's overview
-  - [ ] `/p/:projectId` — project overview (placeholder for now, will be filled in later phases)
-  - [ ] `/p/:projectId/executions` — paginated execution list (sortable by recency / status)
-  - [ ] `/p/:projectId/executions/:executionId` — execution detail (basic — list of events in a table, no replay UI yet)
-  - [ ] `/p/:projectId/crashes` — failure-group list, filter to crashes only
-  - [ ] `/p/:projectId/crashes/:groupId` — crash-group detail with sample executions
-  - [ ] `/p/:projectId/settings/api-keys` — list API keys, create new key
-- [ ] **API key management UI**:
-  - [ ] Generate new key — show prefix + full key ONCE on creation, never again
-  - [ ] Revoke key
-  - [ ] Last-used timestamp displayed
-- [ ] **Vercel deploy**:
-  - [ ] Connect repo, deploy to `app.mesedi.ai`
-  - [ ] Environment variables for `MESEDI_API_URL`, `CLERK_PUBLISHABLE_KEY`, etc.
+**Implementation variant:** Phase 3b's *original* plan was Next.js + Clerk on Vercel. The local-only posture during the Verdifax-outreach window made that impossible (no public deploys, no SaaS provisioning until post-LOI). Instead a **vanilla-HTML local-dev dashboard** was built — embedded in the Go binary via `go:embed`, served at `GET /ui/` on the backend itself (same-origin, no CORS). Every Phase-3b page below has a working vanilla-HTML equivalent. The Next.js + Clerk + Vercel slice still needs to ship post-LOI to deliver the production-grade multi-tenant dashboard.
 
-**Acceptance:** Sign up at `app.mesedi.ai`, create an API key, integrate the Python SDK in a test agent, trigger a deliberate exception, see the crash grouped on the dashboard's `/crashes` page with a working sample-execution detail view.
+- [ ] **Next.js app scaffolding** — DEFERRED to post-LOI:
+  - [ ] Clerk auth integration; sign-up / sign-in / sign-out flows — DEFERRED
+  - [ ] User table in Postgres mirrors Clerk's user IDs — DEFERRED
+  - [ ] Each user has at least one project (auto-create on signup) — DEFERRED (single bootstrapped `proj-dev` for v0.0.1)
+- [ ] **Project switcher** in app header — DEFERRED (single project; switcher lands with multi-tenant rollout)
+- [x] **Pages** — vanilla-HTML local-dev variants shipped 2026-05-14 EVENING (sub-slices 6-9, 17, 18) at `http://localhost:8080/ui/`; Next.js production versions deferred:
+  - [x] Overview page (equivalent of `/` and `/p/:projectId`) — 4 stat cards + Failure groups table + Recent executions table (sub-slices 6, 7)
+  - [x] Executions list (equivalent of `/p/:projectId/executions`) — Recent executions table on overview with click-through to detail; pagination via the `?limit=` query param on `GET /executions`
+  - [x] Execution detail (equivalent of `/p/:projectId/executions/:executionId`) — 8-cell metadata grid + event-timeline table with expandable JSON payload (sub-slice 8)
+  - [x] Failure-group list (equivalent of `/p/:projectId/crashes`) — superset: unified table showing ALL 6 detector classes, not just crashes
+  - [x] Failure-group detail (equivalent of `/p/:projectId/crashes/:groupId`) — metadata grid + affected-executions table with click-through (sub-slice 9)
+  - [x] API keys settings (equivalent of `/p/:projectId/settings/api-keys`) — sub-slice 18: list / mint / revoke
+- [x] **API key management UI** — **DONE 2026-05-14 EVENING** (sub-slice 18):
+  - [x] Generate new key — full raw key shown ONCE in mint response (prefix only thereafter via `key_prefix` column; hash never leaves the server)
+  - [x] Revoke key — confirm dialog → `DELETE /api-keys/:id` with cross-tenant guard (returns 404 if key belongs to a different project)
+  - [x] Last-used timestamp displayed in the table (touched async on every authenticated request)
+- [ ] **Vercel deploy** — DEFERRED to post-LOI:
+  - [ ] Connect repo, deploy to `app.mesedi.ai` — DEFERRED
+  - [ ] Environment variables for `MESEDI_API_URL`, `CLERK_PUBLISHABLE_KEY`, etc. — DEFERRED
+
+**Acceptance (local-dev variant):** Open `http://localhost:8080/ui/`, mint an API key from Settings, integrate the Python SDK in a test agent (`@mesedi.wrap` + `@mesedi.tool`), trigger a deliberate exception, see the crash grouped on the dashboard's Failure groups table with a working sample-execution drill-down. **DONE 2026-05-14 EVENING.**
+
+**Acceptance (full Phase 3b, awaiting post-LOI):** Sign up at `app.mesedi.ai`, create an API key, integrate the Python SDK in a test agent, trigger a deliberate exception, see the crash grouped on the dashboard's `/crashes` page with a working sample-execution detail view.
 
 ---
 
@@ -263,32 +266,33 @@ Goal: Backend groups crashes into failure groups; dashboard shows project list +
 
 Goal: Backend detects three loop sub-types and produces loop-class failure groups.
 
-- [ ] **SDK enhancements**:
-  - [ ] Capture full prompt + response content in `LLMCallEvent` (configurable PII redaction, default off)
-  - [ ] Add `step_number` to each event (monotonically increasing per execution)
-- [ ] **Backend embedding worker**:
-  - [ ] On each new LLM-call event, compute embedding via `openai.embeddings.create(model="text-embedding-3-small", ...)` (uses ~$0.00001 per call)
-  - [ ] Store in `events.embedding` column (pgvector)
-- [ ] **Loop detector worker (`internal/detectors/loop.go`)**:
-  - [ ] **Identical-call detector**: hash system+user prompt; if same hash appears 3+ times in 30s within same execution → emit loop alert
-  - [ ] **Similar-call detector**: pgvector cosine similarity > 0.95 to 3+ prior events in same execution → emit similar-loop alert
-  - [ ] **Step-count detector**: step_number > 50 (configurable per project) → emit step-budget alert
-  - [ ] **Time-budget detector**: now() - execution.started_at > 10min → emit time-budget alert
-- [ ] **Loop signature + grouping**:
-  - [ ] Signature = hash of system prompt + first 100 chars of user message
-  - [ ] Same logic as crash grouping but for loop class
-- [ ] **Dashboard `/loops` page**:
-  - [ ] List loop failure groups
-  - [ ] Detail page shows the repeated LLM call's prompt + response
-  - [ ] Cost-wasted estimate per group ("this loop pattern has cost you $4.32 across 7 executions")
-- [ ] **Per-project loop-detector config**:
+- [x] **SDK enhancements** — **DONE 2026-05-14 PM** (sub-slice 4 — Anthropic monkey-patch):
+  - [x] Full prompt + response content captured in `llm_call` event payload (model, system_prompt, user_message, response_text, all truncated to 1000 chars; input/output tokens, latency). Configurable PII redaction deferred to Phase 14+ polish slice.
+  - [x] `sequence` field on Event is the monotonically-increasing per-execution counter — functionally identical to `step_number`; renamed for consistency with the broader event-ordering semantics (`Event.Sequence` in `internal/events/types.go`).
+- [ ] **Backend embedding worker** — DEFERRED (bundles with similar-call + drift into a single embeddings-infrastructure slice):
+  - [ ] On each new LLM-call event, compute embedding via `openai.embeddings.create(model="text-embedding-3-small", ...)` — DEFERRED
+  - [ ] Store in `events.embedding` column (pgvector) — DEFERRED (embedding column not yet added; vector storage strategy depends on whether we stay on SQLite blob-encoded or move to Postgres + pgvector)
+- [x] **Loop detector logic** — 3 of 4 sub-detectors SHIPPED 2026-05-14 EVENING. Implementation variant: rather than a standalone `internal/detectors/loop.go` worker (which makes sense once LISTEN/NOTIFY arrives), the v0.0.1 detection runs inline in `HandleUpdateExecution`. Same correctness, fewer moving parts.
+  - [x] **Identical-call detector** (sub-slice 17): hash (model + user_message) per llm_call; if same hash recurs 3+ times in one execution → groups as `loops / identical_call_<8hex>`. v0.0.1 simplification: no 30-second time window (whole-execution count); the time window adds value only when executions can run for hours, which the v0.0.1 demos don't exercise.
+  - [ ] **Similar-call detector** — DEFERRED (needs embeddings)
+  - [x] **Step-count detector** (sub-slice 11): event count > 10 → groups as `loops / step_count_<bucket>` (10+ / 50+ / 100+ / 500+ / 5000+). v0.0.1 threshold artificially low (10) for demo visibility; production default 50+ per the concept doc.
+  - [x] **Time-budget detector** (sub-slice 10): duration_ms > 1000 → groups as `loops / time_budget_<bucket>` (1s+ / 10s+ / 60s+ / 10m+ / 1h+). v0.0.1 threshold = 1s for demo; production default 10min.
+- [x] **Loop signature + grouping** — **DONE 2026-05-14 EVENING** (sub-slices 10, 11, 17). Implementation variant: rather than one signature per loop ("hash of system prompt + first 100 chars of user message"), each sub-detector produces its own signature shape (`time_budget_<bucket>`, `step_count_<bucket>`, `identical_call_<8hex>`) so distinct loop bugs in the same project don't collapse into a single group. The `groupExecutionInternal` helper is shared with crash grouping. The original "system prompt + 100-char" signature is captured implicitly by `identical_call`'s hash of `(model + user_message)`.
+- [x] **Dashboard loops surface** — **DONE 2026-05-14 EVENING**. Implementation variant: instead of a dedicated `/loops` page, loops appear in the unified Failure groups table on Overview (color-badged amber). Rationale: with 7 classes a per-class-page proliferation is worse UX than a single filtered table; the Failure groups table works for all classes. A class filter / per-class deep-link is a small follow-up if it ever becomes needed.
+  - [x] List loop failure groups — visible in unified Failure groups table on Overview
+  - [x] Detail page shows the repeated LLM call's prompt + response — via the existing failure-group detail (sub-slice 9) → affected-execution detail (sub-slice 8) → event timeline with expandable payload, which shows the actual `user_message` and `response_text` for the repeated llm_call events
+  - [x] Cost-wasted estimate per group — `cost_wasted_usd` rollup via LEFT-JOIN SUM in `ListFailureGroups` (sub-slice 12). Real numbers populate when affected executions made instrumented LLM calls.
+- [ ] **Per-project loop-detector config** — DEFERRED. v0.0.1 thresholds are hardcoded constants in `internal/store/sqlite.go` (`timeBudgetThresholdMs = 1000`, identical-call threshold = 3 occurrences, step-count threshold = 10). Production adds config columns to the `projects` table:
   - [ ] Step budget (default 50, configurable 1-10000)
   - [ ] Time budget (default 10min, configurable)
-  - [ ] Similarity threshold (default 0.95, configurable)
-- [ ] **Tests**:
-  - [ ] Integration test: agent that deliberately loops 5 times → loop alert appears in dashboard within 5 seconds
+  - [ ] Similarity threshold (default 0.95, configurable) — bundles with embeddings infrastructure
+- [ ] **Tests** — manual sandbox verification done; automated pytest suite deferred:
+  - [x] Manual integration: `sandbox/slow_agent.py` (time_budget triggers), `sandbox/chatty_agent.py` (step_count triggers), `sandbox/identical_call_agent.py` (identical_call triggers with two distinct hashes). All three verified end-to-end against the live backend with SQLite-level checks. **DONE 2026-05-14 EVENING.**
+  - [ ] Automated pytest integration test — DEFERRED to test-suite slice
 
-**Acceptance:** Run a test agent with an intentional infinite loop. Within 30 seconds, dashboard shows a loop failure group with the looping prompt, repeat count, and estimated cost wasted.
+**Acceptance (3 of 4 loop sub-detectors):** Run an agent with intentional behavior in each category (long-running, many events, repeated prompt). Within seconds of the PATCH-to-completed, the dashboard's Failure groups table shows the matching `loops` group with the right signature bucket. **DONE 2026-05-14 EVENING for time_budget + step_count + identical_call.**
+
+**Acceptance (full Phase 4, awaiting embeddings slice):** Similar-call sub-detector lands so semantically-similar-but-not-identical repeated prompts also trigger.
 
 ---
 
