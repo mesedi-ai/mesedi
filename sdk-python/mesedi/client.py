@@ -1,16 +1,29 @@
 """
-MesediClient — synchronous HTTP client for the Mesedi backend.
+MesediClient — HTTP client + event shipper for the Mesedi backend.
 
-For v0.0.1 every API call is synchronous and blocking. That keeps the
-implementation small and dependency-light, at the cost of adding ~2 HTTP
-round-trips of latency to each `@wrap`-decorated agent call. The async
-event buffer (background flusher thread, batched event POSTs) lands in
-the next SDK sub-slice.
+The client owns two things:
 
-Authentication: bearer token, the same `mesedi_sk_...` format the
-backend mints. Wire-format version is fixed at "1" today; future
-breaking changes bump the X-Mesedi-Schema-Version constant and the
-backend tightens enforcement.
+  1. An ``httpx.Client`` for the underlying HTTP connection (with the
+     bearer token and schema-version header pre-configured).
+  2. An ``EventShipper`` background thread that buffers and dispatches
+     executions and events asynchronously.
+
+Two API tiers are exposed:
+
+  - **Async (default for @wrap):** ``submit_*()`` methods enqueue work
+    on the shipper and return immediately. The shipper handles batching,
+    retries, and graceful shutdown. Mesedi outages NEVER block the
+    caller.
+  - **Sync (advanced):** ``create_execution()`` / ``update_execution()``
+    / ``send_events()`` make the HTTP call inline and return the
+    parsed response body. Use these only when you need the backend's
+    response (e.g., to inspect the ``accepted`` / ``rejected`` count
+    from /events) or when running in a context where the shipper is
+    impractical (CLI tools, scripts).
+
+Authentication: bearer token (``mesedi_sk_...``). Wire-format version
+is fixed at "1" today; future breaking changes bump SCHEMA_VERSION and
+the backend tightens enforcement.
 """
 
 from __future__ import annotations
@@ -20,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from mesedi._shipper import EventShipper
 from mesedi.events import Event, Execution
 
 DEFAULT_BASE_URL = "http://localhost:8080"
@@ -34,13 +48,11 @@ _default_client: Optional["MesediClient"] = None
 
 
 class MesediClient:
-    """Synchronous HTTP client wrapping the Mesedi backend ingest endpoints.
+    """HTTP client + background shipper for the Mesedi backend.
 
     Thread-safety: the underlying httpx.Client is thread-safe for
-    concurrent use, so a single MesediClient can be shared across
-    threads. Each request is independent; there is no client-side state
-    that mutates per call (today). When the async event buffer lands,
-    that buffer will be a separate component with its own locking.
+    concurrent use, and the shipper's queue is thread-safe by design,
+    so a single MesediClient can be safely shared across threads.
     """
 
     def __init__(
@@ -48,13 +60,16 @@ class MesediClient:
         api_key: str,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
+        flush_interval_ms: int = 250,
+        batch_size: int = 100,
+        max_queue: int = 10_000,
     ):
         if not api_key:
             raise ValueError("api_key is required")
         if not api_key.startswith("mesedi_sk_"):
             # Match the backend's auth-middleware check — fail loudly on
             # the SDK side rather than letting the backend return 401 on
-            # the first call.
+            # every call.
             raise ValueError(
                 "api_key must start with 'mesedi_sk_' "
                 "(received an obviously-malformed key)"
@@ -71,6 +86,12 @@ class MesediClient:
             },
             timeout=timeout,
         )
+        self._shipper = EventShipper(
+            http=self._http,
+            flush_interval_ms=flush_interval_ms,
+            batch_size=batch_size,
+            max_queue=max_queue,
+        )
 
     # ── context-manager sugar ─────────────────────────────────────────
 
@@ -81,19 +102,52 @@ class MesediClient:
         self.close()
 
     def close(self) -> None:
-        """Close the underlying HTTP client; safe to call multiple times."""
+        """Shut down the shipper and close the underlying HTTP client.
+
+        Safe to call multiple times. The shipper drains its queue with
+        a timeout; any items not yet sent at the timeout are lost.
+        """
+        self._shipper.shutdown()
         self._http.close()
 
-    # ── execution endpoints ───────────────────────────────────────────
+    def flush(self, timeout: float = 5.0) -> bool:
+        """Block until everything submitted so far has been sent.
+
+        Returns True if drained within ``timeout``, False otherwise.
+        Primarily useful in tests and end-of-script synchronization;
+        production code should rely on the atexit-registered shutdown.
+        """
+        return self._shipper.flush(timeout=timeout)
+
+    # ── async submit (used by @wrap; default path) ────────────────────
+
+    def submit_execution_start(self, execution: Execution) -> None:
+        """Enqueue POST /executions for asynchronous dispatch."""
+        self._shipper.submit_execution_start(execution)
+
+    def submit_execution_end(self, execution: Execution) -> None:
+        """Enqueue PATCH /executions/{id} for asynchronous dispatch."""
+        self._shipper.submit_execution_end(execution)
+
+    def submit_event(self, event: Event) -> None:
+        """Enqueue a single Event for batched asynchronous dispatch."""
+        self._shipper.submit_event(event)
+
+    # ── sync (advanced) ───────────────────────────────────────────────
 
     def create_execution(self, execution: Execution) -> Dict[str, Any]:
-        """POST /executions. Returns the backend's response body as dict."""
+        """POST /executions synchronously. Returns parsed JSON response.
+
+        Bypasses the shipper. Useful for one-off scripts or when you
+        need the backend's response (e.g., to inspect ``ok``). Production
+        agent code should prefer ``submit_execution_start()``.
+        """
         r = self._http.post("/executions", json=execution.start_payload())
         r.raise_for_status()
         return r.json()  # type: ignore[no-any-return]
 
     def update_execution(self, execution: Execution) -> Dict[str, Any]:
-        """PATCH /executions/{id}. Returns the backend's response body as dict."""
+        """PATCH /executions/{id} synchronously. Returns parsed JSON."""
         r = self._http.patch(
             f"/executions/{execution.execution_id}",
             json=execution.end_payload(),
@@ -101,10 +155,8 @@ class MesediClient:
         r.raise_for_status()
         return r.json()  # type: ignore[no-any-return]
 
-    # ── event endpoints ───────────────────────────────────────────────
-
     def send_events(self, events: List[Event]) -> Dict[str, Any]:
-        """POST /events as a JSON array. Empty list is a no-op."""
+        """POST /events synchronously as a JSON array. Empty list is a no-op."""
         if not events:
             return {"ok": True, "accepted": 0, "rejected": 0}
         payload = [e.to_dict() for e in events]
@@ -117,6 +169,8 @@ def configure(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     timeout: float = DEFAULT_TIMEOUT,
+    flush_interval_ms: int = 250,
+    batch_size: int = 100,
 ) -> MesediClient:
     """Configure the module-level default client.
 
@@ -125,7 +179,8 @@ def configure(
       - base_url ← MESEDI_BASE_URL (defaults to ``http://localhost:8080``)
 
     Calling configure() again replaces the previous default client; the
-    previous client's underlying HTTP session is closed first.
+    previous client's shipper is shut down (with flush) before
+    replacement.
     """
     global _default_client
 
@@ -140,19 +195,19 @@ def configure(
     if base_url is None:
         base_url = os.environ.get("MESEDI_BASE_URL", DEFAULT_BASE_URL)
 
-    # Close any previous default client before replacing it.
+    # Cleanly close any previous default client before replacing it.
     if _default_client is not None:
         try:
             _default_client.close()
         except Exception:
-            # Closing should never fail in practice, but if it does we'd
-            # rather replace the client cleanly than crash configure().
             pass
 
     _default_client = MesediClient(
         api_key=api_key,
         base_url=base_url,
         timeout=timeout,
+        flush_interval_ms=flush_interval_ms,
+        batch_size=batch_size,
     )
     return _default_client
 
@@ -160,13 +215,10 @@ def configure(
 def get_client() -> MesediClient:
     """Return the module-level default client.
 
-    Raises RuntimeError if `mesedi.configure()` has not been called and
-    MESEDI_API_KEY is not in the environment.
+    If not yet configured, tries to auto-configure from MESEDI_API_KEY in
+    the environment. Raises RuntimeError if no api_key is available.
     """
     if _default_client is None:
-        # Auto-configure from env if MESEDI_API_KEY is set — convenience
-        # for serverless / container environments where configure() at
-        # cold-start can be inconvenient.
         env_key = os.environ.get("MESEDI_API_KEY")
         if env_key:
             return configure()
@@ -175,3 +227,13 @@ def get_client() -> MesediClient:
             "or set MESEDI_API_KEY in the environment before using @mesedi.wrap."
         )
     return _default_client
+
+
+def flush(timeout: float = 5.0) -> bool:
+    """Module-level helper: flush the default client.
+
+    Convenience wrapper for ``mesedi.get_client().flush(timeout)``. Useful
+    when you want a one-liner at the end of a script to ensure all
+    observations have landed before exit.
+    """
+    return get_client().flush(timeout=timeout)
