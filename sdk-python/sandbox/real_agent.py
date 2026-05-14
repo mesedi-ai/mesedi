@@ -1,10 +1,10 @@
 """
-Example using the real Mesedi SDK (v0.0.2 — async event shipper).
+Example using the real Mesedi SDK (v0.0.3 — @wrap + @tool + async).
 
-This is the same demo as before, but the SDK now ships executions and
-events asynchronously via a background daemon thread. The wrapped
-function should return in essentially "function-time only" — no HTTP
-round-trip latency from the @wrap decorator itself.
+Demonstrates both decorators together: a @wrap'd agent function that
+calls several @tool-decorated tool functions. Each invocation produces
+one Execution row (from @wrap) and one tool_call event row per tool
+call (from @tool), all linked by execution_id and ordered by sequence.
 
 Prereqs:
   - Backend running:
@@ -17,12 +17,20 @@ Run:
 
 Verify in SQLite:
   cd ../../backend
-  sqlite3 mesedi-dev.db \\
-    "SELECT execution_id, status, duration_ms, crash_signature
-     FROM executions
-     ORDER BY started_at DESC LIMIT 5;"
+  sqlite3 mesedi-dev.db "
+    SELECT execution_id, status, duration_ms, crash_signature
+    FROM executions ORDER BY started_at DESC LIMIT 5;
+    "
+  sqlite3 mesedi-dev.db "
+    SELECT event_type, sequence,
+           json_extract(payload, '$.tool_name') AS tool,
+           json_extract(payload, '$.status')    AS status,
+           duration_ms
+    FROM events ORDER BY id DESC LIMIT 10;
+    "
 """
 
+import random
 import time
 
 import mesedi
@@ -33,24 +41,59 @@ mesedi.configure(
 )
 
 
-@mesedi.wrap
-def successful_agent(query: str) -> str:
-    """Pretend to be a real agent. Sleeps 50ms then returns an answer."""
-    time.sleep(0.05)
-    return f"Answer to {query!r}: 42"
+# ── @tool examples ───────────────────────────────────────────────────
+
+
+@mesedi.tool
+def search_web(query: str) -> list:
+    """Pretend tool: simulate a web-search call."""
+    time.sleep(0.01)
+    return [f"result for {query!r} #{i}" for i in range(3)]
+
+
+@mesedi.tool
+def calculator(a: int, b: int, op: str = "+") -> int:
+    """Pretend tool: simulate a calculator call."""
+    if op == "+":
+        return a + b
+    if op == "*":
+        return a * b
+    raise ValueError(f"unsupported op: {op!r}")
+
+
+@mesedi.tool
+def flaky_database_lookup(key: str) -> str:
+    """Pretend tool: randomly fails to demonstrate failed tool_call events."""
+    time.sleep(0.005)
+    if random.random() < 0.5:
+        raise ConnectionError(f"db unreachable while looking up {key!r}")
+    return f"value-for-{key}"
+
+
+# ── @wrap examples ───────────────────────────────────────────────────
 
 
 @mesedi.wrap
-def crashing_agent(query: str) -> str:
-    """Pretend to be a buggy agent. Sleeps 20ms then crashes."""
-    time.sleep(0.02)
-    raise ValueError(f"Could not parse {query!r}")
+def agent_with_tools(query: str) -> str:
+    """Run an agent that uses three tools, two reliable, one flaky."""
+    results = search_web(query)
+    total = calculator(len(results), 10, op="*")
+
+    # Try the flaky lookup but recover if it fails — we want @wrap to
+    # see a "completed" execution even when an inner @tool raises.
+    try:
+        cached = flaky_database_lookup(query)
+    except ConnectionError:
+        cached = "(cache miss)"
+
+    return f"answer for {query!r}: {total} results, cached={cached}"
 
 
 @mesedi.wrap
-def instant_agent() -> str:
-    """Returns immediately. Shows the SDK overhead in isolation."""
-    return "done"
+def agent_that_crashes(query: str) -> str:
+    """Agent that fires a tool then crashes from its own code."""
+    _ = search_web(query)
+    raise RuntimeError(f"agent gave up on {query!r}")
 
 
 def _ms(seconds: float) -> str:
@@ -58,46 +101,42 @@ def _ms(seconds: float) -> str:
 
 
 if __name__ == "__main__":
-    # ── Latency demo ─────────────────────────────────────────────────
-    # With the async shipper, wall-clock time for the wrapped call
-    # should be very close to "function body only" — the @wrap overhead
-    # is just dataclass construction + queue enqueue, both
-    # microseconds-scale.
+    # Deterministic-ish: seed so the flaky tool's outcome is reproducible.
+    random.seed(7)
 
-    print("\n── Run 1: instant agent (showing @wrap overhead) ──")
+    print("\n── Run 1: agent_with_tools (3 tool calls inside) ──")
     t = time.perf_counter()
-    _ = instant_agent()
-    print(f"  wall-clock: {_ms(time.perf_counter() - t)} (target: < 5ms)")
-
-    print("\n── Run 2: successful agent (50ms sleep) ──")
-    t = time.perf_counter()
-    result = successful_agent("what is the meaning of life?")
-    print(f"  wall-clock: {_ms(time.perf_counter() - t)} (target: ~50ms)")
+    result = agent_with_tools("pickleball clubs in miami")
+    print(f"  wall-clock: {_ms(time.perf_counter() - t)}")
     print(f"  result: {result}")
 
-    print("\n── Run 3: crashing agent (20ms sleep, then ValueError) ──")
+    print("\n── Run 2: agent_that_crashes (1 tool call, then crash) ──")
     t = time.perf_counter()
     try:
-        crashing_agent("bad input")
-    except ValueError as e:
-        print(f"  wall-clock: {_ms(time.perf_counter() - t)} (target: ~20ms)")
-        print(f"  caught (re-raised by @wrap, as expected): {e}")
+        agent_that_crashes("invalid input")
+    except RuntimeError as e:
+        print(f"  wall-clock: {_ms(time.perf_counter() - t)}")
+        print(f"  caught (re-raised by @wrap): {e}")
 
-    # ── Sync barrier ─────────────────────────────────────────────────
-    # The shipper is async, so executions may not have landed at the
-    # backend yet when these lines run. flush() blocks until the
-    # background thread has drained the queue.
+    print("\n── Run 3: tool called OUTSIDE @wrap (should run unobserved) ──")
+    direct_result = calculator(2, 3)  # no surrounding @wrap
+    print(f"  direct calculator(2, 3) = {direct_result} (no event recorded)")
 
     print("\n── Flushing shipper queue... ──")
     t = time.perf_counter()
     ok = mesedi.flush(timeout=5.0)
     print(f"  flush ok={ok} in {_ms(time.perf_counter() - t)}")
 
-    print("\n── Done. Three executions recorded.")
-    print("Verify in SQLite:")
+    print("\n── Done. Verify in SQLite:")
     print("  cd ../../backend")
     print(
-        '  sqlite3 mesedi-dev.db "SELECT execution_id, status, '
-        'duration_ms, crash_signature FROM executions ORDER BY '
-        'started_at DESC LIMIT 5;"'
+        '  sqlite3 mesedi-dev.db "SELECT execution_id, status, duration_ms, '
+        'crash_signature FROM executions ORDER BY started_at DESC LIMIT 5;"'
+    )
+    print()
+    print(
+        '  sqlite3 mesedi-dev.db "SELECT event_type, sequence, '
+        "json_extract(payload, \\'\\$.tool_name\\') AS tool, "
+        "json_extract(payload, \\'\\$.status\\') AS status, "
+        'duration_ms FROM events ORDER BY id DESC LIMIT 10;"'
     )
