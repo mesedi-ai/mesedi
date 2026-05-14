@@ -142,6 +142,14 @@ type Store interface {
 	// failure_class=tool_failures and signature=toolName. Same
 	// idempotency contract as the other groupers.
 	GroupToolFailure(ctx context.Context, executionID, projectID, toolName string) error
+	// FindFirstFailedValidator returns the name of the first
+	// validator_result event with payload.passed=false in this
+	// execution, or empty string if no validators failed. The "agent
+	// recovered from a quality-check failure" pattern.
+	FindFirstFailedValidator(ctx context.Context, executionID string) (string, error)
+	// GroupValidatorFailure upserts a failure_group with
+	// failure_class=validator_failures and signature=validatorName.
+	GroupValidatorFailure(ctx context.Context, executionID, projectID, validatorName string) error
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). For pagination, pass limit +
 	// offset; default to limit=50 in callers.
