@@ -1006,6 +1006,21 @@ func (s *SQLiteStore) GroupCostVelocity(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassCostVelocity, signature)
 }
 
+// GroupIdenticalCallLoop upserts a failure_group with
+// failure_class=loops and signature="identical_call_<callHash>".
+// callHash is computed in the handler from (model + user_message) and
+// truncated to a short hex prefix. Same idempotency contract.
+func (s *SQLiteStore) GroupIdenticalCallLoop(
+	ctx context.Context,
+	executionID, projectID, callHash string,
+) error {
+	if callHash == "" {
+		return fmt.Errorf("callHash required")
+	}
+	signature := "identical_call_" + callHash
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
+}
+
 // ListFailureGroups returns failure_groups for a project, sorted by
 // most-recent first. Caller is responsible for sensible limit/offset
 // bounds (handler enforces a max-limit ceiling).

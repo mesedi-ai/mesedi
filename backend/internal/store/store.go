@@ -162,6 +162,13 @@ type Store interface {
 	// V0.0.1 absolute-threshold version; Phase-5+ will swap to a
 	// proper baseline-relative detector.
 	GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64) error
+	// GroupIdenticalCallLoop upserts a failure_group with
+	// failure_class=loops and signature=identical_call_<short_hash>
+	// when an execution made the same LLM call (same model + user
+	// message) at least N times. Fourth and final Phase-4 loop
+	// sub-detector after time_budget, step_count, and (deferred)
+	// similar_call.
+	GroupIdenticalCallLoop(ctx context.Context, executionID, projectID, callHash string) error
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). For pagination, pass limit +
 	// offset; default to limit=50 in callers.

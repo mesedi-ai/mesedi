@@ -11,6 +11,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -308,16 +310,19 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				}
 			}
 
-			// Sub-slice 16: cost-velocity detector. Any execution whose
-			// resolved cost exceeds the v0.0.1 absolute threshold gets
-			// grouped as cost_velocity with a cost-bucketed signature.
-			// Production version (Phase 5+) compares against a project
-			// rolling baseline rather than an absolute value.
-			if effectiveCost > 0 {
-				if err := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost); err != nil {
-					h.Logger.Warn("cost-velocity grouping failed (continuing)",
+			// Sub-slice 17: identical-call loop detector. Fourth and
+			// final Phase-4 loop sub-detector. Hashes (model +
+			// user_message) per llm_call; if the same hash appears
+			// 3+ times in one execution, group as loops/identical_call.
+			// Runs BEFORE injection check because a runaway loop
+			// generating the same prompt repeatedly is a more urgent
+			// resource-waste classification than a single injection
+			// attempt embedded in the same prompt.
+			if callHash, found := scanForIdenticalCalls(evts, 3); found {
+				if err := h.Store.GroupIdenticalCallLoop(r.Context(), executionID, authProjectID, callHash); err != nil {
+					h.Logger.Warn("identical-call grouping failed (continuing)",
 						"execution_id", executionID,
-						"cost_usd", effectiveCost,
+						"call_hash", callHash,
 						"error", err.Error(),
 					)
 				}
@@ -328,11 +333,37 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// injection patterns. First match wins; the pattern name
 			// becomes the failure_group signature so all executions
 			// hitting the same attack pattern cluster together.
+			//
+			// PRIORITY NOTE: injection runs BEFORE cost-velocity (just
+			// below) because a prompt-injection is a security event —
+			// "this execution was attacked" is a more important
+			// classification than "this execution was expensive."
+			// The failure_group_id idempotency short-circuit means an
+			// injection-classified execution skips cost-velocity even
+			// if it would otherwise have matched.
 			if pattern, found := scanForInjection(evts); found {
 				if err := h.Store.GroupPromptInjection(r.Context(), executionID, authProjectID, pattern); err != nil {
 					h.Logger.Warn("prompt-injection grouping failed (continuing)",
 						"execution_id", executionID,
 						"pattern", pattern,
+						"error", err.Error(),
+					)
+				}
+			}
+
+			// Sub-slice 16: cost-velocity detector. Any execution whose
+			// resolved cost exceeds the v0.0.1 absolute threshold gets
+			// grouped as cost_velocity with a cost-bucketed signature.
+			// Production version (Phase 5+) compares against a project
+			// rolling baseline rather than an absolute value. Runs LAST
+			// in the events-fetch block — every other detector that
+			// fires on the same execution wins via the failure_group_id
+			// idempotency short-circuit.
+			if effectiveCost > 0 {
+				if err := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost); err != nil {
+					h.Logger.Warn("cost-velocity grouping failed (continuing)",
+						"execution_id", executionID,
+						"cost_usd", effectiveCost,
 						"error", err.Error(),
 					)
 				}
@@ -729,6 +760,45 @@ func computeExecutionCost(evts []*events.Event) float64 {
 		total += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)
 	}
 	return total
+}
+
+// scanForIdenticalCalls returns the short-hex hash of an LLM call
+// (model + user_message) that appears at least `threshold` times in
+// the event slice, plus true. If no call repeats that many times,
+// returns ("", false). The hash is the SHA-256 of model+user_message
+// truncated to 8 hex chars — readable, collision-resistant at scale,
+// and acts as the failure_group signature so distinct repeated
+// prompts cluster into distinct groups.
+//
+// Detection fires on the FIRST event that pushes a hash to the
+// threshold — earlier events of the same hash are already counted but
+// haven't yet crossed the line. This makes the function cheap (O(n)
+// with early return) without needing to scan the entire event list
+// twice.
+func scanForIdenticalCalls(evts []*events.Event, threshold int) (string, bool) {
+	counts := make(map[string]int, 8)
+	for _, e := range evts {
+		if e.EventType != events.EventTypeLLMCall {
+			continue
+		}
+		if len(e.Payload) == 0 {
+			continue
+		}
+		var p struct {
+			Model       string `json:"model"`
+			UserMessage string `json:"user_message"`
+		}
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			continue
+		}
+		sum := sha256.Sum256([]byte(p.Model + "\x00" + p.UserMessage))
+		short := hex.EncodeToString(sum[:4])
+		counts[short]++
+		if counts[short] >= threshold {
+			return short, true
+		}
+	}
+	return "", false
 }
 
 // scanForInjection walks llm_call events looking for known prompt-
