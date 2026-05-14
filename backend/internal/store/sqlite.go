@@ -652,26 +652,27 @@ func deriveGroupID(projectID, failureClass, signature string) string {
 	return "grp-" + hex.EncodeToString(h[:8])
 }
 
-// GroupCrashedExecution upserts a failure_group for the given crashed
-// execution and links the execution into it via the failure_group_id
-// column on executions.
+// groupExecutionInternal is the shared upsert path for all detection
+// classes. Both GroupCrashedExecution and GroupTimeBudgetExceedance
+// are thin wrappers around this — they just supply the appropriate
+// failure_class + signature.
 //
 // Idempotency: if the execution already has a failure_group_id set
-// (e.g., the PATCH-to-crashed fired more than once for the same
-// execution_id, or this is a retry), the function returns nil without
-// double-counting. The unique (project_id, failure_class, signature)
-// index on failure_groups is the ultimate guard against duplicate
-// groups, but the explicit early-return is faster than relying on the
-// index-conflict path for the common no-op case.
-func (s *SQLiteStore) GroupCrashedExecution(
+// (because it was already linked to a different group, or a previous
+// call already linked it to this group), the function returns nil
+// without double-counting. This is also how "crash classification
+// wins over time-budget overlap" is enforced — the crash grouping
+// runs first in the handler, sets failure_group_id, then the
+// subsequent time-budget call short-circuits here.
+func (s *SQLiteStore) groupExecutionInternal(
 	ctx context.Context,
-	executionID, projectID, signature string,
+	executionID, projectID, failureClass, signature string,
 ) error {
-	if executionID == "" || projectID == "" || signature == "" {
-		return fmt.Errorf("executionID, projectID, signature all required")
+	if executionID == "" || projectID == "" || failureClass == "" || signature == "" {
+		return fmt.Errorf("executionID, projectID, failureClass, signature all required")
 	}
 
-	// Idempotency check: skip if already grouped.
+	// Idempotency check: skip if already grouped (any class).
 	var existing sql.NullString
 	err := s.db.QueryRowContext(
 		ctx,
@@ -688,14 +689,10 @@ func (s *SQLiteStore) GroupCrashedExecution(
 		return nil // already grouped; no-op
 	}
 
-	groupID := deriveGroupID(projectID, FailureClassCrashes, signature)
+	groupID := deriveGroupID(projectID, failureClass, signature)
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Upsert: insert on first-ever match, increment counters on subsequent.
-	// The deterministic group_id means we can conflict on PRIMARY KEY
-	// directly — no need to match by (project_id, failure_class, signature)
-	// triple. Counters are set to 1/1 on insert; the ON CONFLICT branch
-	// increments by 1 each subsequent call.
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO failure_groups (
 			group_id, project_id, failure_class, signature,
@@ -708,13 +705,11 @@ func (s *SQLiteStore) GroupCrashedExecution(
 			event_count = event_count + 1,
 			affected_executions = affected_executions + 1,
 			last_seen = excluded.last_seen
-	`, groupID, projectID, FailureClassCrashes, signature, now, now, executionID)
+	`, groupID, projectID, failureClass, signature, now, now, executionID)
 	if err != nil {
 		return fmt.Errorf("upsert failure_group: %w", err)
 	}
 
-	// Link the execution to its group. This is what the idempotency
-	// check above looks for on subsequent calls.
 	_, err = s.db.ExecContext(
 		ctx,
 		`UPDATE executions SET failure_group_id = ? WHERE execution_id = ?`,
@@ -728,10 +723,61 @@ func (s *SQLiteStore) GroupCrashedExecution(
 	s.logger.Info("execution grouped",
 		"execution_id", executionID,
 		"failure_group_id", groupID,
-		"failure_class", FailureClassCrashes,
+		"failure_class", failureClass,
 		"signature", signature,
 	)
 	return nil
+}
+
+// GroupCrashedExecution upserts a failure_group with failure_class=crashes
+// for the given execution. Thin wrapper around groupExecutionInternal.
+func (s *SQLiteStore) GroupCrashedExecution(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) error {
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassCrashes, signature)
+}
+
+// timeBudgetThresholdMs is the hardcoded cutoff for "this execution
+// took too long" detection in v0.0.1. Set artificially low (1s) for
+// local-dev visibility; production default will be 60s (or 10min per
+// the concept-doc step-budget detector spec) and configurable per
+// project once the projects table gets per-project policy columns.
+const timeBudgetThresholdMs int64 = 1000
+
+// timeBudgetSignature returns a coarse duration-bucket label so that
+// "long-running executions" cluster into a small number of groups
+// rather than one group per unique millisecond. Buckets: 1s+, 10s+,
+// 60s+, 10m+, 1h+. Anything below the threshold is filtered upstream
+// in the handler; this function assumes a positive duration that has
+// already exceeded the threshold.
+func timeBudgetSignature(durationMs int64) string {
+	switch {
+	case durationMs < 10_000:
+		return "time_budget_1s+"
+	case durationMs < 60_000:
+		return "time_budget_10s+"
+	case durationMs < 600_000:
+		return "time_budget_60s+"
+	case durationMs < 3_600_000:
+		return "time_budget_10m+"
+	default:
+		return "time_budget_1h+"
+	}
+}
+
+// GroupTimeBudgetExceedance upserts a failure_group with
+// failure_class=loops and a duration-bucketed signature. Called from
+// HandleUpdateExecution after the crash check, so crash-classified
+// executions are already linked to a crashes group and this call
+// becomes a no-op via the idempotency check.
+func (s *SQLiteStore) GroupTimeBudgetExceedance(
+	ctx context.Context,
+	executionID, projectID string,
+	durationMs int64,
+) error {
+	signature := timeBudgetSignature(durationMs)
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
 }
 
 // ListFailureGroups returns failure_groups for a project, sorted by

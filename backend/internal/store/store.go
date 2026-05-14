@@ -118,6 +118,16 @@ type Store interface {
 	// already linked to a group (e.g., already grouped as a crash) is
 	// a no-op; crash classification wins over time-budget overlap.
 	GroupTimeBudgetExceedance(ctx context.Context, executionID, projectID string, durationMs int64) error
+	// GroupStepCountExceedance upserts a failure_group with
+	// failure_class=loops and an event-count-bucketed signature. Runs
+	// after the time-budget check; the same idempotency short-circuit
+	// means each execution lands in at most one group.
+	GroupStepCountExceedance(ctx context.Context, executionID, projectID string, eventCount int) error
+	// CountEventsForExecution returns the number of event rows
+	// recorded against a single execution. Used by the step-count
+	// detector and the Phase-9 replay UI's "this run produced N
+	// events" header.
+	CountEventsForExecution(ctx context.Context, executionID string) (int, error)
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). For pagination, pass limit +
 	// offset; default to limit=50 in callers.
