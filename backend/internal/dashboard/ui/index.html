@@ -168,10 +168,13 @@
       border: 0.5px solid transparent;
       text-transform: capitalize;
     }
-    .badge-crash    { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
-    .badge-loop     { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
-    .badge-tool     { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
-    .badge-default  { background: var(--surface-2);  color: var(--text-muted); }
+    .badge-crash      { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+    .badge-loop       { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .badge-tool       { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .badge-validator  { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
+    .badge-injection  { background: var(--purple-bg);  color: var(--purple);  border-color: var(--purple-border); }
+    .badge-cost       { background: rgba(201, 166, 70, 0.15); color: var(--accent); border-color: rgba(201, 166, 70, 0.35); }
+    .badge-default    { background: var(--surface-2);  color: var(--text-muted); }
     .status-started   { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
     .status-completed { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
     .status-crashed   { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
@@ -319,10 +322,15 @@
       return (ms / 1000).toFixed(1) + "s";
     }
     function badgeForClass(cls) {
-      if (cls === "crashes") return "badge-crash";
-      if (cls === "loops") return "badge-loop";
-      if (cls && cls.includes("tool")) return "badge-tool";
-      return "badge-default";
+      switch (cls) {
+        case "crashes":            return "badge-crash";
+        case "loops":              return "badge-loop";
+        case "tool_failures":      return "badge-tool";
+        case "validator_failures": return "badge-validator";
+        case "prompt_injection":   return "badge-injection";
+        case "cost_velocity":      return "badge-cost";
+        default:                   return "badge-default";
+      }
     }
     function badgeForStatus(status) { return "status-" + (status || "default"); }
     function escapeHtml(s) {
