@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"mesedi/backend/internal/events"
@@ -36,13 +37,17 @@ func New(logger *slog.Logger, s store.Store) *Handlers {
 	return &Handlers{Logger: logger, Store: s}
 }
 
-// RegisterRoutes attaches every Phase 1 route to the provided ServeMux.
+// RegisterRoutes attaches every protected route to the provided ServeMux.
 // Keep this list short and explicit — it doubles as the API surface
 // inventory for documentation.
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
+	// Phase 1 ingest surface.
 	mux.HandleFunc("POST /executions", h.HandleCreateExecution)
 	mux.HandleFunc("PATCH /executions/{id}", h.HandleUpdateExecution)
 	mux.HandleFunc("POST /events", h.HandleIngestEvents)
+	// Phase 3a — read-side failure_group surface for the dashboard.
+	mux.HandleFunc("GET /failure-groups", h.HandleListFailureGroups)
+	mux.HandleFunc("GET /failure-groups/{id}", h.HandleGetFailureGroup)
 }
 
 // HandleCreateExecution accepts an Execution at the agent's entry point
@@ -108,10 +113,23 @@ func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request)
 // HandleUpdateExecution marks an existing execution as completed, crashed,
 // halted, etc. Idempotent — repeated PATCH calls with the same status are
 // silently accepted.
+//
+// Phase 3a addition: if the PATCH transitions an execution to status=crashed
+// AND a crash_signature is provided, the execution is grouped into the
+// appropriate failure_group via Store.GroupCrashedExecution. The grouping
+// step is best-effort: if it fails, the request still returns 200 because
+// the execution's primary update has already succeeded; only the
+// dashboard's grouping view is degraded.
 func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request) {
 	executionID := r.PathValue("id")
 	if executionID == "" {
 		writeError(w, http.StatusBadRequest, "execution_id path parameter required")
+		return
+	}
+
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context (auth middleware not engaged)")
 		return
 	}
 
@@ -140,6 +158,19 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Phase 3a: link crashed executions to their failure_group. Best-effort —
+	// a grouping failure doesn't fail the PATCH because the execution itself
+	// is already correctly recorded.
+	if patch.Status == events.StatusCrashed && patch.CrashSignature != "" {
+		if err := h.Store.GroupCrashedExecution(r.Context(), executionID, authProjectID, patch.CrashSignature); err != nil {
+			h.Logger.Warn("crash grouping failed (continuing)",
+				"execution_id", executionID,
+				"crash_signature", patch.CrashSignature,
+				"error", err.Error(),
+			)
+		}
+	}
+
 	h.Logger.Info("execution updated",
 		"execution_id", patch.ExecutionID,
 		"status", patch.Status,
@@ -156,6 +187,78 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		"execution_id": patch.ExecutionID,
 		"status":       patch.Status,
 	})
+}
+
+// HandleListFailureGroups returns the calling project's failure groups,
+// sorted by most-recent first. Supports `limit` (default 50, max 200) and
+// `offset` (default 0) via query string.
+func (h *Handlers) HandleListFailureGroups(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	limit := parseIntQuery(r, "limit", 50, 1, 200)
+	offset := parseIntQuery(r, "offset", 0, 0, 1_000_000)
+
+	groups, err := h.Store.ListFailureGroups(r.Context(), authProjectID, limit, offset)
+	if err != nil {
+		h.Logger.Error("list failure_groups failed",
+			"project_id", authProjectID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"failure_groups": groups,
+		"count":          len(groups),
+		"limit":          limit,
+		"offset":         offset,
+	})
+}
+
+// HandleGetFailureGroup returns a single failure_group by id. Returns 404
+// both when the group doesn't exist AND when the group belongs to a
+// different project than the caller (don't leak group_id existence
+// across tenants).
+func (h *Handlers) HandleGetFailureGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := r.PathValue("id")
+	if groupID == "" {
+		writeError(w, http.StatusBadRequest, "group_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	group, err := h.Store.GetFailureGroup(r.Context(), groupID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "failure group not found")
+			return
+		}
+		h.Logger.Error("get failure_group failed",
+			"group_id", groupID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if group.ProjectID != authProjectID {
+		// Don't reveal that the group exists in another project — return
+		// 404 same as a non-existent group.
+		writeError(w, http.StatusNotFound, "failure group not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, group)
 }
 
 // HandleIngestEvents accepts a batch of Events. Batching is required —
@@ -252,4 +355,25 @@ func writeError(w http.ResponseWriter, status int, message string) {
 		"ok":    false,
 		"error": message,
 	})
+}
+
+// parseIntQuery returns the integer value of a URL query parameter,
+// falling back to defaultVal if missing/invalid. Clamps the result to
+// [min, max]. Used by list endpoints for limit/offset.
+func parseIntQuery(r *http.Request, key string, defaultVal, min, max int) int {
+	raw := r.URL.Query().Get(key)
+	if raw == "" {
+		return defaultVal
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return defaultVal
+	}
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }

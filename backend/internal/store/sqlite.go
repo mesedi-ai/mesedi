@@ -10,7 +10,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -440,4 +442,203 @@ func nullFloat(v float64) any {
 		return nil
 	}
 	return v
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 3a — Failure groups (crash detection)
+// ─────────────────────────────────────────────────────────────────────────
+
+// deriveGroupID returns a deterministic group_id for a given
+// (project_id, failure_class, signature) tuple. Same inputs always
+// produce the same output, across runs and across restarts — so no
+// coordination is needed to look up "the" group for a signature.
+//
+// 16 hex chars from SHA-256 = 64 bits of entropy, which is comfortably
+// collision-resistant for any realistic per-project failure-group
+// volume (billions of distinct signatures before birthday-paradox
+// collisions become measurable).
+func deriveGroupID(projectID, failureClass, signature string) string {
+	h := sha256.Sum256([]byte(projectID + "|" + failureClass + "|" + signature))
+	return "grp-" + hex.EncodeToString(h[:8])
+}
+
+// GroupCrashedExecution upserts a failure_group for the given crashed
+// execution and links the execution into it via the failure_group_id
+// column on executions.
+//
+// Idempotency: if the execution already has a failure_group_id set
+// (e.g., the PATCH-to-crashed fired more than once for the same
+// execution_id, or this is a retry), the function returns nil without
+// double-counting. The unique (project_id, failure_class, signature)
+// index on failure_groups is the ultimate guard against duplicate
+// groups, but the explicit early-return is faster than relying on the
+// index-conflict path for the common no-op case.
+func (s *SQLiteStore) GroupCrashedExecution(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) error {
+	if executionID == "" || projectID == "" || signature == "" {
+		return fmt.Errorf("executionID, projectID, signature all required")
+	}
+
+	// Idempotency check: skip if already grouped.
+	var existing sql.NullString
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT failure_group_id FROM executions WHERE execution_id = ?`,
+		executionID,
+	).Scan(&existing)
+	if err == sql.ErrNoRows {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read execution failure_group_id: %w", err)
+	}
+	if existing.Valid && existing.String != "" {
+		return nil // already grouped; no-op
+	}
+
+	groupID := deriveGroupID(projectID, FailureClassCrashes, signature)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Upsert: insert on first-ever match, increment counters on subsequent.
+	// The deterministic group_id means we can conflict on PRIMARY KEY
+	// directly — no need to match by (project_id, failure_class, signature)
+	// triple. Counters are set to 1/1 on insert; the ON CONFLICT branch
+	// increments by 1 each subsequent call.
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO failure_groups (
+			group_id, project_id, failure_class, signature,
+			first_seen, last_seen,
+			event_count, affected_executions,
+			sample_execution_id
+		)
+		VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
+		ON CONFLICT(group_id) DO UPDATE SET
+			event_count = event_count + 1,
+			affected_executions = affected_executions + 1,
+			last_seen = excluded.last_seen
+	`, groupID, projectID, FailureClassCrashes, signature, now, now, executionID)
+	if err != nil {
+		return fmt.Errorf("upsert failure_group: %w", err)
+	}
+
+	// Link the execution to its group. This is what the idempotency
+	// check above looks for on subsequent calls.
+	_, err = s.db.ExecContext(
+		ctx,
+		`UPDATE executions SET failure_group_id = ? WHERE execution_id = ?`,
+		groupID,
+		executionID,
+	)
+	if err != nil {
+		return fmt.Errorf("link execution to failure_group: %w", err)
+	}
+
+	s.logger.Info("execution grouped",
+		"execution_id", executionID,
+		"failure_group_id", groupID,
+		"failure_class", FailureClassCrashes,
+		"signature", signature,
+	)
+	return nil
+}
+
+// ListFailureGroups returns failure_groups for a project, sorted by
+// most-recent first. Caller is responsible for sensible limit/offset
+// bounds (handler enforces a max-limit ceiling).
+func (s *SQLiteStore) ListFailureGroups(
+	ctx context.Context,
+	projectID string,
+	limit, offset int,
+) ([]*FailureGroup, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			group_id, project_id, failure_class, signature,
+			first_seen, last_seen,
+			event_count, affected_executions,
+			cost_wasted_usd, sample_execution_id
+		FROM failure_groups
+		WHERE project_id = ?
+		ORDER BY last_seen DESC
+		LIMIT ? OFFSET ?
+	`, projectID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("query failure_groups: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*FailureGroup
+	for rows.Next() {
+		g, err := scanFailureGroup(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// GetFailureGroup returns a single failure_group by its deterministic id.
+func (s *SQLiteStore) GetFailureGroup(
+	ctx context.Context,
+	groupID string,
+) (*FailureGroup, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT
+			group_id, project_id, failure_class, signature,
+			first_seen, last_seen,
+			event_count, affected_executions,
+			cost_wasted_usd, sample_execution_id
+		FROM failure_groups
+		WHERE group_id = ?
+	`, groupID)
+	g, err := scanFailureGroup(row)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query failure_group: %w", err)
+	}
+	return g, nil
+}
+
+// rowScanner is satisfied by both *sql.Row and *sql.Rows — letting
+// scanFailureGroup serve both single-row and iteration paths.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
+	var (
+		g          FailureGroup
+		firstSeen  string
+		lastSeen   string
+		costWasted sql.NullFloat64
+		sampleID   sql.NullString
+	)
+	if err := r.Scan(
+		&g.GroupID,
+		&g.ProjectID,
+		&g.FailureClass,
+		&g.Signature,
+		&firstSeen,
+		&lastSeen,
+		&g.EventCount,
+		&g.AffectedExecutions,
+		&costWasted,
+		&sampleID,
+	); err != nil {
+		return nil, err
+	}
+	g.FirstSeen, _ = time.Parse(time.RFC3339, firstSeen)
+	g.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
+	if costWasted.Valid {
+		v := costWasted.Float64
+		g.CostWastedUSD = &v
+	}
+	if sampleID.Valid {
+		g.SampleExecutionID = sampleID.String
+	}
+	return &g, nil
 }
