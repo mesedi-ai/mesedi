@@ -1,0 +1,32 @@
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+backend/mesedi-dev.db
+backend/mesedi-dev.db-*
+backend/*.test
+backend/coverage.out
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Env
+.env
+.env.local
+backend/.env
+
+# Future subdirs
+sdk-python/__pycache__/
+sdk-python/.venv/
+sdk-python/dist/
+sdk-python/*.egg-info/
+sdk-typescript/node_modules/
+sdk-typescript/dist/
+dashboard/node_modules/
+dashboard/.next/

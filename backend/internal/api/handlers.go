@@ -1,0 +1,255 @@
+// Package api wires HTTP handlers for the Mesedi backend service.
+//
+// Phase 1 scope: ingest endpoints accept JSON, validate shape, log to
+// stdout. Storage (Postgres) and detection (loops, drift, etc.) come
+// online in Phase 1.5 and Phases 3+.
+//
+// Handlers do not authenticate yet — Phase 1.5 adds bearer-token auth
+// via middleware. For local dev today, any caller can post to /events
+// and /executions; that is intentional and matches the "ship phase
+// acceptance, iterate after" principle of the development checklist.
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"mesedi/backend/internal/events"
+	"mesedi/backend/internal/store"
+)
+
+// Handlers carries dependencies needed by HTTP handlers. As more
+// subsystems come online (storage, detectors, etc.) they get attached
+// here rather than passed through each handler signature.
+type Handlers struct {
+	Logger *slog.Logger
+	Store  store.Store
+}
+
+// New constructs the Handlers value. Done as a constructor (rather than
+// a literal) so the dependencies become explicit as the surface grows.
+func New(logger *slog.Logger, s store.Store) *Handlers {
+	return &Handlers{Logger: logger, Store: s}
+}
+
+// RegisterRoutes attaches every Phase 1 route to the provided ServeMux.
+// Keep this list short and explicit — it doubles as the API surface
+// inventory for documentation.
+func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /executions", h.HandleCreateExecution)
+	mux.HandleFunc("PATCH /executions/{id}", h.HandleUpdateExecution)
+	mux.HandleFunc("POST /events", h.HandleIngestEvents)
+}
+
+// HandleCreateExecution accepts an Execution at the agent's entry point
+// and records the start of a run. Phase 1 implementation just validates
+// shape and logs; Phase 1.5 persists to Postgres.
+func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request) {
+	var exec events.Execution
+	if err := decodeJSON(r, &exec); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if exec.ExecutionID == "" {
+		writeError(w, http.StatusBadRequest, "execution_id is required")
+		return
+	}
+
+	// Auth-attached project_id is the source of truth. If the request
+	// body provided one and it doesn't match, reject — this catches
+	// SDK bugs where the wrong API key was used for the wrong project.
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context (auth middleware not engaged)")
+		return
+	}
+	if exec.ProjectID != "" && exec.ProjectID != authProjectID {
+		writeError(w, http.StatusForbidden,
+			"project_id in body does not match authenticated project")
+		return
+	}
+	exec.ProjectID = authProjectID
+
+	if exec.Status == "" {
+		exec.Status = events.StatusStarted
+	}
+	if exec.StartedAt.IsZero() {
+		exec.StartedAt = time.Now().UTC()
+	}
+
+	if err := h.Store.CreateExecution(r.Context(), &exec); err != nil {
+		h.Logger.Error("create execution failed",
+			"execution_id", exec.ExecutionID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, "persist failed: "+err.Error())
+		return
+	}
+
+	h.Logger.Info("execution created",
+		"execution_id", exec.ExecutionID,
+		"project_id", exec.ProjectID,
+		"status", exec.Status,
+		"started_at", exec.StartedAt.Format(time.RFC3339),
+		"sdk_language", exec.SDKLanguage,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"execution_id": exec.ExecutionID,
+		"status":       exec.Status,
+	})
+}
+
+// HandleUpdateExecution marks an existing execution as completed, crashed,
+// halted, etc. Idempotent — repeated PATCH calls with the same status are
+// silently accepted.
+func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request) {
+	executionID := r.PathValue("id")
+	if executionID == "" {
+		writeError(w, http.StatusBadRequest, "execution_id path parameter required")
+		return
+	}
+
+	var patch events.Execution
+	if err := decodeJSON(r, &patch); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	patch.ExecutionID = executionID
+
+	if patch.EndedAt == nil {
+		now := time.Now().UTC()
+		patch.EndedAt = &now
+	}
+
+	if err := h.Store.UpdateExecution(r.Context(), &patch); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "execution not found: "+patch.ExecutionID)
+			return
+		}
+		h.Logger.Error("update execution failed",
+			"execution_id", patch.ExecutionID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, "persist failed: "+err.Error())
+		return
+	}
+
+	h.Logger.Info("execution updated",
+		"execution_id", patch.ExecutionID,
+		"status", patch.Status,
+		"ended_at", patch.EndedAt.Format(time.RFC3339),
+		"duration_ms", patch.DurationMs,
+		"total_tokens_in", patch.TotalTokensIn,
+		"total_tokens_out", patch.TotalTokensOut,
+		"estimated_cost_usd", patch.EstimatedCostUSD,
+		"crash_signature", patch.CrashSignature,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"execution_id": patch.ExecutionID,
+		"status":       patch.Status,
+	})
+}
+
+// HandleIngestEvents accepts a batch of Events. Batching is required —
+// the SDK buffers events client-side and flushes in groups of ~100, so
+// the ingest path is array-shaped from day one. A single-event POST is
+// accepted as a 1-element array; rejecting non-array bodies catches
+// SDK bugs early.
+func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
+	var batch []events.Event
+	if err := decodeJSON(r, &batch); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if len(batch) == 0 {
+		writeError(w, http.StatusBadRequest, "empty event batch")
+		return
+	}
+
+	// First pass: validate and defaulting. Reject malformed events
+	// individually so a single bad event in a batch doesn't poison the
+	// whole transaction.
+	accepted := make([]events.Event, 0, len(batch))
+	rejected := 0
+	for i := range batch {
+		evt := &batch[i]
+		if evt.EventID == "" || evt.ExecutionID == "" || evt.EventType == "" {
+			rejected++
+			h.Logger.Warn("event rejected: required field missing",
+				"event_index", i,
+				"event_id", evt.EventID,
+				"execution_id", evt.ExecutionID,
+				"event_type", evt.EventType,
+			)
+			continue
+		}
+		if evt.Timestamp.IsZero() {
+			evt.Timestamp = time.Now().UTC()
+		}
+		accepted = append(accepted, *evt)
+	}
+
+	if err := h.Store.SaveEvents(r.Context(), accepted); err != nil {
+		h.Logger.Error("save events failed", "error", err.Error(), "batch_size", len(accepted))
+		writeError(w, http.StatusInternalServerError, "persist failed: "+err.Error())
+		return
+	}
+
+	for _, evt := range accepted {
+		h.Logger.Info("event ingested",
+			"event_id", evt.EventID,
+			"execution_id", evt.ExecutionID,
+			"event_type", evt.EventType,
+			"sequence", evt.Sequence,
+			"duration_ms", evt.DurationMs,
+			"payload_bytes", len(evt.Payload),
+		)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"accepted": len(accepted),
+		"rejected": rejected,
+	})
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+// decodeJSON enforces strict decoding — unknown JSON fields cause a 400.
+// Strict decoding catches schema drift early during SDK development;
+// once the schema is stable post-Phase 4 we may relax to forward-compat.
+func decodeJSON(r *http.Request, dst any) error {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
+}
+
+// writeJSON writes a JSON response with the given status code. Errors
+// during write are logged-and-ignored: there's nothing useful to do at
+// that point and the client has already received the status.
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		// Cannot send another response now (header is committed); just log.
+		fmt.Fprintf(w, `{"ok":false,"error":"response encode failed: %s"}`, err.Error())
+	}
+}
+
+// writeError is a convenience wrapper for the standard error response shape.
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]any{
+		"ok":    false,
+		"error": message,
+	})
+}
