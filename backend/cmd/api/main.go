@@ -169,6 +169,9 @@ func main() {
 	mux.Handle("GET /api-keys", privateHandler)
 	mux.Handle("POST /api-keys", privateHandler)
 	mux.Handle("DELETE /api-keys/{id}", privateHandler)
+	// Sub-slice 21b — SSE remote-halt channel (auth-required).
+	mux.Handle("GET /executions/{id}/halt-stream", privateHandler)
+	mux.Handle("POST /executions/{id}/halt", privateHandler)
 
 	// Top-level middleware: recover from panics, log every request.
 	root := api.NewTopChain(logger)(mux)

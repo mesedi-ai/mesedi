@@ -175,3 +175,16 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 	}
 	return s.ResponseWriter.Write(b)
 }
+
+// Flush forwards to the underlying writer's Flush implementation so
+// SSE handlers (which call w.(http.Flusher).Flush() after each frame
+// to push bytes to the client) can punch through this wrapper. Without
+// this, the type assertion in HandleHaltStream fails and the SSE
+// stream falls back to "streaming unsupported". Go's net/http stdlib
+// writers implement Flusher; intermediate wrappers like statusRecorder
+// must explicitly forward.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
