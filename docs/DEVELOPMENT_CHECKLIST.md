@@ -82,6 +82,10 @@ Time-ordered record of milestones actually shipped. Updated continuously as work
 
   **End-to-end SQLite-verified:** 159 executions, 30 completed, 9 crashed in 24h, 13 failure groups across 6 distinct failure classes spanning all 7 concept-doc classes except drift. Real $ cost numbers populating execution detail. API key minting + revoking working through the dashboard against the live `mesedi_sk_dev_local_only` bootstrap key.
 
+- **2026-05-14 LATE EVENING** — **Sub-slice 19: TypeScript SDK v0.0.1 (Phase 11 start).** Full feature-parity with Python SDK v0.0.5. `sdk-typescript/` package: ESM, zero runtime deps, Node 18+ native fetch, `strict: true` TS, `AsyncLocalStorage` for execution context (the Node equivalent of Python's `contextvars`). Files: `src/{events.ts, client.ts, context.ts, wrap.ts, tool.ts, observe.ts, anthropic_integration.ts, index.ts}`. Public API mirrors Python exactly: `configure()`, `wrap()` (HOF), `tool()` (HOF), `checkpoint()`, `validatorResult()`, `instrumentAnthropic()`, `flush()`. Crash-signature formula byte-identical to Python (SHA-256 of exception class + first 5 stack lines, 16 hex chars) so cross-language crashes cluster into the same failure group. Async event shipper: `setInterval`-driven drainer, 250ms / 100-event flush, fail-open posture (backend errors logged, never block agent). Two tsconfigs: `tsconfig.json` (src → dist/, npm-shippable) and `tsconfig.sandbox.json` (extends, includes sandbox/, outputs to dist-sandbox/ for local end-to-end testing). `MessagesClassLike` interface uses `(...args: any[]) => Promise<any>` for variance tolerance with arbitrary Anthropic-SDK-shaped fakes. End-to-end smoke-tested with three sandbox scripts hitting localhost:8080 with `mesedi_sk_dev_local_only`. **Not published to npm** — local-only posture maintained.
+- **2026-05-14 LATE EVENING** — **Sub-slice 20: TypeScript SDK parity polish.** Validator-result helper, checkpoint helper, Anthropic-patch test-injection seam, error-path coverage to match Python. Anthropic patching uses class-prototype injection (the standard Node instrumentation-library pattern) — opt-in via `instrumentAnthropic()`, idempotent (keyed by class object), preserves original `.create` method name + docstring. TypeScript SDK now feature-complete for v1; remaining work is OpenAI patch + ESM/CJS dual-export build + npm publication, all deferred until post-Verdifax-LOI.
+- **2026-05-14 LATE EVENING** — **Sub-slice 21a: Hard-halt local-budget enforcement (Phase 10 start).** Python SDK only — TS port deferred. New `mesedi/halt.py`: `MesediHalt(BaseException)` (inherits BaseException, not Exception, so broad `except Exception:` handlers don't accidentally swallow halts), `Budget` dataclass (`max_wall_clock_seconds`, `max_steps`, `max_tokens_in`, `max_tokens_out` — all optional), `BudgetTracker` (thread-safe counters with `RLock`, monotonic-clock start). `ExecutionContext` gains a `budget_tracker` field + `check_budget()` method. Halt-safe boundary checks installed at: `@tool` entry, `instrument_anthropic`'s patched `messages.create` entry, `checkpoint()` call. Each boundary calls `ctx.check_budget()` first (raises if any budget exceeded), then increments the relevant counter (`increment_steps()` or `add_tokens()`). `@wrap` accepts both bare (`@wrap`) and factory (`@wrap(budget=Budget(...))`) shapes via duck-typing the first argument; catches `MesediHalt`, marks `status=halted`, packs the trigger into `crash_signature` as `halt:<trigger>` (e.g. `halt:wall_clock`, `halt:step_count`), returns `None` to caller (controlled stop, no re-raise). End-to-end verified via `sandbox/halt_test.py`: `clean_agent` (no budget): 411ms, returns "no budget, no halt"; `runaway_wall_clock_agent` (1s budget): 5 iterations + halt at 1020ms, `finally` block confirmed-ran; `runaway_step_count_agent` (3-step budget): halt at 612ms. SQLite confirmed: `exec-22e52a7e545e halted halt:step_count`, `exec-3dc22922e41a halted halt:wall_clock`. Version bumped to v0.0.6. **Deferred to 21b/21c:** SSE remote-halt channel (backend → SDK), per-failure-class halt config in dashboard, TS port of the entire hard-halt stack.
+
 ---
 
 ## Phase 0 — Pre-development setup (Days 1–2)
@@ -526,62 +530,82 @@ Goal: The killer feature — a Chrome-DevTools-style timeline of every event in 
 
 ---
 
-## Phase 10 — Hard-halt mechanism (Days 48–52, ~5 days)
+## Phase 10 — Hard-halt mechanism (Days 48–52, ~5 days) — **LOCAL-BUDGET TIER SHIPPED 2026-05-14 EVENING (Python only)**
 
 Goal: Opt-in halt mode per the §8.2 spec, including dual-layer containment and halt-safe checkpoints.
 
-- [ ] **Local in-memory budget enforcement** (SDK):
-  - [ ] Per-execution token-budget counter incremented on each LLM call
-  - [ ] Per-execution step counter incremented on each event
-  - [ ] Per-execution wall-clock timer
-  - [ ] All checked at LLM-call boundaries (zero network dependency)
-  - [ ] Trigger raises `MesediHalt` exception synchronously
-- [ ] **Remote control channel** (backend ↔ SDK):
-  - [ ] WebSocket connection per active execution (or SSE if simpler)
-  - [ ] Backend sends `{"action": "halt", "reason": "..."}` when detector fires
-  - [ ] SDK receives, sets a halt-pending flag
-- [ ] **Halt-safe checkpoints in SDK**:
-  - [ ] Between LLM-call boundaries, between tool-call boundaries, on `checkpoint()`, the SDK checks the halt-pending flag
-  - [ ] If set, raises `MesediHalt` at that boundary (not mid-tool-execution)
-  - [ ] After 30 seconds of "halt-pending but no halt-safe checkpoint reached", escalate to stronger termination
-- [ ] **Per-failure-class halt config**:
+**Status:** Sub-slice 21a (local-budget enforcement, Python SDK) shipped end-to-end and SQLite-verified. Remaining work breaks into 21b (SSE remote-halt channel), 21c (per-class halt config in dashboard), and a TS port of the entire stack.
+
+- [x] **Local in-memory budget enforcement** (Python SDK) — **DONE 2026-05-14 EVENING (sub-slice 21a)**:
+  - [x] Per-execution token-budget counter incremented on each LLM call (`BudgetTracker.add_tokens` from `anthropic_integration`)
+  - [x] Per-execution step counter incremented on each event (`BudgetTracker.increment_steps` from `@tool`, anthropic-patch, `checkpoint()`)
+  - [x] Per-execution wall-clock timer (`BudgetTracker.start = time.monotonic()`, checked on every `check_budget` call)
+  - [x] All checked at halt-safe boundaries (zero network dependency) — `@tool` entry, anthropic-patch entry, `checkpoint()` call
+  - [x] Trigger raises `MesediHalt(BaseException)` synchronously; inherits BaseException so broad `except Exception:` handlers don't swallow
+  - [ ] TypeScript SDK port — deferred to sub-slice 21d
+- [ ] **Remote control channel** (backend ↔ SDK) — **DEFERRED to sub-slice 21b**:
+  - [ ] SSE chosen over WebSocket (simpler, one-way fits use case). Endpoint: `GET /executions/{id}/halt-stream`
+  - [ ] Backend sends `event: halt\ndata: {"reason": "..."}\n\n` when detector fires
+  - [ ] SDK background thread receives, sets `ctx.remote_halt_pending = (reason,)` flag
+- [x] **Halt-safe checkpoints in SDK** (Python) — **DONE 2026-05-14 EVENING (sub-slice 21a)**:
+  - [x] Between LLM-call boundaries, between tool-call boundaries, on `checkpoint()`, the SDK calls `ctx.check_budget()` which raises `MesediHalt` if any budget exceeded
+  - [x] Raised at the boundary, not mid-tool-execution — verified: `slow_tool()` (200ms sleep) completes cleanly, halt fires on the *next* `slow_tool()` entry rather than interrupting the sleep
+  - [x] `try/finally` cleanup runs normally — verified in sandbox test: `finally` block ran after wall-clock halt and printed cleanup confirmation
+  - [ ] After 30s of "halt-pending but no halt-safe checkpoint reached", escalate to stronger termination — **DEFERRED**, lives with 21b once remote channel exists
+- [ ] **Per-failure-class halt config** — **DEFERRED to sub-slice 21c**:
   - [ ] Dashboard `/settings/alerts` page: for each failure class, toggle observe vs hard-halt
-- [ ] **Halt receipts**:
-  - [ ] On halt, persist a `halt_receipt` row with: trigger detector, timestamp, last event before halt, cleanup hooks fired
-  - [ ] Surfaced in execution detail page
-- [ ] **`try/finally` cleanup propagation**:
-  - [ ] `MesediHalt` is a regular Python exception → standard `finally` blocks run → standard `with` context exits trigger → resources released
-- [ ] **Framework-aware halt**:
+  - [ ] `projects.halt_config_json` column or `halt_configs` table — schema TBD with 21c
+- [~] **Halt receipts** — **partial via crash_signature today**:
+  - [x] On halt, the execution lands in SQLite with `status=halted` and `crash_signature=halt:<trigger>` (e.g. `halt:wall_clock`, `halt:step_count`, `halt:token_total`) — verified: 2 halted rows in dev DB
+  - [ ] Dedicated `halt_receipts` table with: trigger detector, timestamp, last event before halt, cleanup hooks fired — **DEFERRED** (current approach: trigger packed into crash_signature, last event derivable from `events` table)
+  - [ ] Surfaced explicitly in execution-detail page (today: shown as crash_signature) — **DEFERRED**
+- [x] **`try/finally` cleanup propagation** — **DONE 2026-05-14 EVENING (sub-slice 21a)**:
+  - [x] `MesediHalt` raises like a regular Python exception → standard `finally` blocks run → standard `with` context exits trigger → resources released. Verified end-to-end in `sandbox/halt_test.py` (`runaway_wall_clock_agent.finally` block confirmed-ran).
+- [ ] **Framework-aware halt** — **DEFERRED to Phase 12 (framework adapters)**:
   - [ ] LangChain / LangGraph adapter: halt triggers framework's standard cleanup (state-graph rollback if available)
   - [ ] Custom-loop agents: developer responsible (documented clearly)
 
-**Acceptance:** Run agent with hard-halt enabled for `loop_detected`. Trigger an intentional loop. Observe: alert fires → halt signal sent → SDK halts at next LLM-call boundary → execution terminates with status=halted → halt receipt visible in dashboard → no resources leaked (verify with logs).
+**Acceptance (sub-slice 21a, local-budget tier):** Wall-clock + step-count + token-total budgets enforce at halt-safe boundaries; halted executions land in SQLite with `status=halted` and `crash_signature=halt:<trigger>`; `try/finally` cleanup runs; `@wrap` returns None (no re-raise). **DONE 2026-05-14 EVENING.**
+
+**Acceptance (full Phase 10, awaiting 21b/21c/21d):** Run agent with hard-halt enabled for `loop_detected`. Trigger an intentional loop. Observe: alert fires → halt signal sent over SSE → SDK halts at next halt-safe checkpoint → execution terminates with status=halted → halt receipt visible in dashboard → no resources leaked (verify with logs).
 
 ---
 
-## Phase 11 — TypeScript SDK v1 (Days 53–57, ~5 days)
+## Phase 11 — TypeScript SDK v1 (Days 53–57, ~5 days) — **CORE SHIPPED 2026-05-14 LATE EVENING**
 
 Goal: Feature parity with Python SDK for TS-based agents.
 
-- [ ] **Package skeleton**:
-  - [ ] `package.json` (ESM + CJS dual export)
-  - [ ] TypeScript with `strict: true`
-  - [ ] Vitest for tests
-- [ ] **`wrap` as higher-order function** (TS doesn't have decorators in the same way):
+**Status:** v0.0.2 local-only TypeScript SDK feature-complete vs Python v0.0.5 (excluding hard-halt 21a, which lands on TS in 21d). Anthropic patching shipped. OpenAI patching + dual ESM/CJS build + npm publication deferred until post-LOI.
+
+- [x] **Package skeleton** — **DONE 2026-05-14 LATE EVENING (sub-slice 19)**:
+  - [x] `package.json` — ESM-only for now (`"type": "module"`); CJS dual-export deferred until npm-publish slice
+  - [x] TypeScript `strict: true` across both src/ and sandbox/
+  - [ ] Vitest for tests — **DEFERRED** to npm-publish slice (today: end-to-end sandbox scripts cover the same behaviors)
+  - [x] Split tsconfigs: `tsconfig.json` (src/ → dist/, what gets shipped to npm) + `tsconfig.sandbox.json` (extends, includes sandbox/, outputs to dist-sandbox/) — keeps test files out of the published artifact
+- [x] **`wrap` as higher-order function** — **DONE 2026-05-14 LATE EVENING (sub-slice 19)**:
   ```typescript
   export const handleTicket = wrap(
-    { project: 'cs-agent' },
     async (ticket: Ticket) => { /* agent code */ }
   );
   ```
-- [ ] **Monkey-patch Anthropic SDK + OpenAI SDK** (Node ESM is harder than Python; use `import-in-the-middle` or proxy-based patching)
-- [ ] **Async event buffer** (same pattern as Python)
-- [ ] **`tool` HOF for tool instrumentation**
-- [ ] **Publish to npm**:
+  Single-arg shape (no options object — `configure()` covers global config) keeps the API symmetric with Python's `@mesedi.wrap`.
+- [~] **Monkey-patch Anthropic SDK + OpenAI SDK** — **Anthropic DONE, OpenAI DEFERRED**:
+  - [x] Anthropic patching via class-prototype injection (Node's standard instrumentation-library pattern). `instrumentAnthropic(messagesClass?)` — opt-in, idempotent (keyed by class reference), preserves original method name. `MessagesClassLike.prototype.create` typed as `(...args: any[]) => Promise<any>` for variance with arbitrary fakes/real-SDK shapes.
+  - [ ] OpenAI patching — **DEFERRED** to next sub-slice; same prototype-injection pattern will work
+- [x] **Async event buffer** — **DONE 2026-05-14 LATE EVENING (sub-slice 19)**: `setInterval`-driven background drainer in `client.ts`, 250ms flush cadence / 100-event capacity threshold, retry-with-backoff on transient failures, fail-open (backend errors logged via `console.warn`, never block the agent), graceful shutdown via `process.on("exit", ...)` flush hook.
+- [x] **`tool` HOF for tool instrumentation** — **DONE 2026-05-14 LATE EVENING (sub-slice 19)**: same shape as Python's `@tool`. Emits `tool_call` event with `name`, `args` (JSON-stringified, truncated), `result` / `exception_*` on completion. Fail-open when called outside a `wrap()`'d execution.
+- [x] **`checkpoint()` + `validatorResult()`** — **DONE 2026-05-14 LATE EVENING (sub-slice 20)**: identical surface to Python; emits matching event types; severity coercion + message truncation match Python byte-for-byte.
+- [x] **`AsyncLocalStorage` for execution context** — **DONE 2026-05-14 LATE EVENING (sub-slice 19)**: Node's `node:async_hooks` `AsyncLocalStorage` is the TS equivalent of Python's `contextvars.ContextVar`. Context survives `await` boundaries, parallel `Promise.all`, and any non-explicit forking — same semantics customers expect from Python.
+- [x] **Crash-signature wire-format parity** — **DONE 2026-05-14 LATE EVENING (sub-slice 19)**: SHA-256(`exception_class + first 5 stack lines`)[:16] — formula identical to Python so cross-language crashes cluster into the same failure group on the backend.
+- [ ] **Publish to npm** — **DEFERRED** to post-Verdifax-LOI (local-only posture):
   - [ ] First release: `mesedi@0.1.0` on npm
-- [ ] **Quickstart doc for TS users**
+  - [ ] Dual ESM + CJS build via `tsup` or rollup
+  - [ ] Trusted Publishing / npm-provenance attestation
+- [ ] **Quickstart doc for TS users** — **DEFERRED** to docs-site slice
 
-**Acceptance:** Vercel-AI-SDK-based agent integrates with one `wrap()` call; events arrive at backend within 1 second of execution completion.
+**Acceptance (sub-slices 19 + 20, local TS SDK v0.0.2):** Three sandbox scripts (`real_agent.ts`, `tool_agent.ts`, `anthropic_agent.ts`) hit localhost:8080 with `mesedi_sk_dev_local_only`; executions land in the same SQLite DB the Python SDK writes to; events have correct types + sequences; cross-language crash-signature parity verified by hand. **DONE 2026-05-14 LATE EVENING.**
+
+**Acceptance (full Phase 11, awaiting publish slice):** Vercel-AI-SDK-based agent integrates with one `wrap()` call; events arrive at backend within 1 second of execution completion.
 
 ---
 
