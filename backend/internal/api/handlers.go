@@ -31,14 +31,19 @@ import (
 // subsystems come online (storage, detectors, etc.) they get attached
 // here rather than passed through each handler signature.
 type Handlers struct {
-	Logger *slog.Logger
-	Store  store.Store
+	Logger   *slog.Logger
+	Store    store.Store
+	HaltSubs *HaltSubscribers // sub-slice 21b — SSE halt-channel registry
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
 // a literal) so the dependencies become explicit as the surface grows.
 func New(logger *slog.Logger, s store.Store) *Handlers {
-	return &Handlers{Logger: logger, Store: s}
+	return &Handlers{
+		Logger:   logger,
+		Store:    s,
+		HaltSubs: NewHaltSubscribers(),
+	}
 }
 
 // RegisterRoutes attaches every protected route to the provided ServeMux.
@@ -62,6 +67,9 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api-keys", h.HandleListAPIKeys)
 	mux.HandleFunc("POST /api-keys", h.HandleCreateAPIKey)
 	mux.HandleFunc("DELETE /api-keys/{id}", h.HandleRevokeAPIKey)
+	// Sub-slice 21b — SSE remote-halt channel.
+	mux.HandleFunc("GET /executions/{id}/halt-stream", h.HandleHaltStream)
+	mux.HandleFunc("POST /executions/{id}/halt", h.HandleTriggerHalt)
 }
 
 // HandleCreateExecution accepts an Execution at the agent's entry point
