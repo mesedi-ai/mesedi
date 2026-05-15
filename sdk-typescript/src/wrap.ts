@@ -49,6 +49,7 @@ import {
   Status,
   utcNowRfc3339,
 } from "./events.js";
+import { Budget, BudgetTracker, isMesediHalt } from "./halt.js";
 
 /** Options accepted by `wrap()`. All optional. */
 export interface WrapOptions {
@@ -59,6 +60,19 @@ export interface WrapOptions {
    * was the summarizer."
    */
   name?: string;
+  /**
+   * Optional per-execution budget. When set, the wrapped function
+   * runs with halt-safe boundary checks at every `tool()` /
+   * `checkpoint()` / Anthropic LLM-call entry point. If any limit is
+   * exceeded between calls, a MesediHalt is thrown internally —
+   * wrap() catches it, marks the execution status=halted (with
+   * crash_signature=`halt:<trigger>`), and returns undefined.
+   *
+   * The wrapped function's normal try/finally cleanup runs as
+   * expected — halt is raised AT a safe boundary, never mid-tool /
+   * mid-LLM-call, so user resources release cleanly.
+   */
+  budget?: Budget;
 }
 
 /**
@@ -68,7 +82,7 @@ export interface WrapOptions {
 export function wrap<TArgs extends unknown[], TResult>(
   fnOrOpts: WrapOptions | ((...args: TArgs) => Promise<TResult>),
   maybeFn?: (...args: TArgs) => Promise<TResult>,
-): (...args: TArgs) => Promise<TResult> {
+): (...args: TArgs) => Promise<TResult | undefined> {
   // Support both call shapes:
   //   wrap(fn) — no options
   //   wrap({...opts}, fn) — with options
@@ -94,7 +108,7 @@ export function wrap<TArgs extends unknown[], TResult>(
   // compiler check doesn't complain in this slice.
   void opts.name;
 
-  return async function inner(...args: TArgs): Promise<TResult> {
+  return async function inner(...args: TArgs): Promise<TResult | undefined> {
     const client = getClient();
     const executionId = newExecutionId();
     const execution: Execution = {
@@ -102,26 +116,52 @@ export function wrap<TArgs extends unknown[], TResult>(
       status: Status.STARTED,
       started_at: utcNowRfc3339(),
       sdk_language: "typescript",
-      sdk_version: "0.0.1",
+      sdk_version: "0.0.3",
     };
+
+    // Construct a budget tracker iff a budget was supplied. Stays
+    // undefined for un-budgeted wraps — checkBudget() then no-ops.
+    const tracker = opts.budget ? new BudgetTracker(opts.budget) : undefined;
 
     client.submitExecutionStart(execution);
     const startWall = performance.now();
 
     try {
-      const result = await runInExecutionContext(executionId, () => fn(...args));
+      const result = await runInExecutionContext(
+        executionId,
+        () => fn(...args),
+        tracker,
+      );
       execution.status = Status.COMPLETED;
       execution.duration_ms = Math.round(performance.now() - startWall);
       execution.ended_at = utcNowRfc3339();
       client.submitExecutionEnd(execution);
       return result;
     } catch (err) {
-      execution.status = Status.CRASHED;
       execution.duration_ms = Math.round(performance.now() - startWall);
       execution.ended_at = utcNowRfc3339();
+
+      if (isMesediHalt(err)) {
+        // Controlled halt — record as halted, NOT crashed. The
+        // crash_signature carries the trigger so the dashboard can
+        // group halts by cause (`halt:wall_clock` etc.) — same wire
+        // format the Python SDK emits.
+        execution.status = Status.HALTED;
+        // err is narrowed to MesediHalt here by isMesediHalt's type
+        // guard, so the trigger access is type-safe.
+        execution.crash_signature = `halt:${err.trigger}`;
+        client.submitExecutionEnd(execution);
+        // Return undefined — DON'T re-throw. The halt is a
+        // controlled stop; the caller's downstream code should NOT
+        // see an exception. This matches Python's `return None`
+        // behavior in wrap.py.
+        return undefined;
+      }
+
+      execution.status = Status.CRASHED;
       execution.crash_signature = crashSignature(err);
       client.submitExecutionEnd(execution);
-      throw err; // re-throw with original stack
+      throw err; // re-throw real crashes with original stack
     }
   };
 }

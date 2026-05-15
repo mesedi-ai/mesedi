@@ -41,6 +41,7 @@ import { createHash } from "node:crypto";
 import { getClient } from "./client.js";
 import { newExecutionId, runInExecutionContext, } from "./context.js";
 import { Status, utcNowRfc3339, } from "./events.js";
+import { BudgetTracker, isMesediHalt } from "./halt.js";
 /**
  * Wrap an async function so each call is recorded as an agent
  * execution by Mesedi.
@@ -77,12 +78,15 @@ export function wrap(fnOrOpts, maybeFn) {
             status: Status.STARTED,
             started_at: utcNowRfc3339(),
             sdk_language: "typescript",
-            sdk_version: "0.0.1",
+            sdk_version: "0.0.3",
         };
+        // Construct a budget tracker iff a budget was supplied. Stays
+        // undefined for un-budgeted wraps — checkBudget() then no-ops.
+        const tracker = opts.budget ? new BudgetTracker(opts.budget) : undefined;
         client.submitExecutionStart(execution);
         const startWall = performance.now();
         try {
-            const result = await runInExecutionContext(executionId, () => fn(...args));
+            const result = await runInExecutionContext(executionId, () => fn(...args), tracker);
             execution.status = Status.COMPLETED;
             execution.duration_ms = Math.round(performance.now() - startWall);
             execution.ended_at = utcNowRfc3339();
@@ -90,12 +94,28 @@ export function wrap(fnOrOpts, maybeFn) {
             return result;
         }
         catch (err) {
-            execution.status = Status.CRASHED;
             execution.duration_ms = Math.round(performance.now() - startWall);
             execution.ended_at = utcNowRfc3339();
+            if (isMesediHalt(err)) {
+                // Controlled halt — record as halted, NOT crashed. The
+                // crash_signature carries the trigger so the dashboard can
+                // group halts by cause (`halt:wall_clock` etc.) — same wire
+                // format the Python SDK emits.
+                execution.status = Status.HALTED;
+                // err is narrowed to MesediHalt here by isMesediHalt's type
+                // guard, so the trigger access is type-safe.
+                execution.crash_signature = `halt:${err.trigger}`;
+                client.submitExecutionEnd(execution);
+                // Return undefined — DON'T re-throw. The halt is a
+                // controlled stop; the caller's downstream code should NOT
+                // see an exception. This matches Python's `return None`
+                // behavior in wrap.py.
+                return undefined;
+            }
+            execution.status = Status.CRASHED;
             execution.crash_signature = crashSignature(err);
             client.submitExecutionEnd(execution);
-            throw err; // re-throw with original stack
+            throw err; // re-throw real crashes with original stack
         }
     };
 }
