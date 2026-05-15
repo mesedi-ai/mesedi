@@ -1,0 +1,40 @@
+{
+  "name": "mesedi",
+  "version": "0.0.1",
+  "description": "Mesedi SDK — guardians for autonomous AI.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build:sandbox": "tsc -p tsconfig.sandbox.json",
+    "clean": "rm -rf dist dist-sandbox",
+    "test:sandbox": "npm run build:sandbox && node dist-sandbox/sandbox/real_agent.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "observability",
+    "attestation",
+    "mesedi"
+  ],
+  "author": "Verdifax, LLC",
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.11.0"
+  }
+}
