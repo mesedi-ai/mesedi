@@ -108,9 +108,15 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
             # pattern as @tool and @wrap.
             return original_create(self, *args, **kwargs)
 
+        # Halt-safe boundary: budget check runs BEFORE the LLM call,
+        # so a halt fires at this checkpoint rather than mid-API-call.
+        ctx.check_budget()
+
         client = get_client()
         sequence = ctx.next_sequence()
         event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
 
         model = kwargs.get("model", "unknown")
         system_raw = kwargs.get("system", "")
@@ -146,6 +152,11 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
 
         duration_ms = int((time.perf_counter() - start) * 1000)
         response_text, input_tokens, output_tokens = _extract_response_fields(response)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens,
+                tokens_out=output_tokens,
+            )
 
         client.submit_event(Event(
             event_id=event_id,

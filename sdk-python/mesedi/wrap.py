@@ -80,6 +80,18 @@ def wrap(
       - Always: pop the execution context, even on exception.
     """
 
+    # Support both call shapes — bare `@mesedi.wrap` and
+    # `@mesedi.wrap(budget=Budget(...))`. Detect which we got:
+    # if `func` is None, we're in the "called with kwargs" form and
+    # need to return a decorator factory. Otherwise this IS the
+    # decorator.
+    if func is None:
+        # `@mesedi.wrap(budget=...)` — return a factory that takes
+        # the actual function on the next call.
+        def factory(actual: F) -> F:
+            return wrap(actual, budget=budget)  # type: ignore[return-value]
+        return factory
+
     @functools.wraps(func)
     def inner(*args: Any, **kwargs: Any) -> Any:
         client = get_client()
@@ -90,11 +102,28 @@ def wrap(
         # captures only the user's function — not the SDK's own overhead.
         client.submit_execution_start(execution)
         start_wall = time.perf_counter()
-        ctx_token = push_execution_context(execution_id)
+        ctx_token = push_execution_context(execution_id, budget=budget)
 
         try:
             try:
                 result = func(*args, **kwargs)
+            except MesediHalt as halt_exc:
+                # Halt is NOT a crash — it's a controlled stop the SDK
+                # itself raised because a budget was exceeded. Mark
+                # the execution `halted` with the trigger metadata
+                # and return cleanly. We do NOT re-raise — the caller
+                # of the @wrap'd function sees a None return (or
+                # whatever the agent's normal "I gave up" value is)
+                # rather than an exception.
+                execution.status = Status.HALTED
+                execution.duration_ms = _elapsed_ms(start_wall)
+                execution.ended_at = utcnow_rfc3339()
+                # Pack the halt reason into crash_signature so it shows
+                # up in the dashboard's failure-group surface (reuses
+                # the existing column rather than adding a new one).
+                execution.crash_signature = f"halt:{halt_exc.trigger}"
+                client.submit_execution_end(execution)
+                return None
             except BaseException as exc:
                 execution.status = Status.CRASHED
                 execution.duration_ms = _elapsed_ms(start_wall)

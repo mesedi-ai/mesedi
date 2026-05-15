@@ -76,11 +76,18 @@ def tool(func: F) -> F:
             # directly without going through @wrap.
             return func(*args, **kwargs)
 
+        # Halt-safe boundary: budget check runs BEFORE the tool's
+        # work, so a halt fires at this checkpoint rather than mid-
+        # tool. Lets standard try/finally cleanup unwind cleanly.
+        ctx.check_budget()
+
         client = get_client()
         tool_name = getattr(func, "__name__", "<unknown>")
         sequence = ctx.next_sequence()
         event_id = f"evt-{uuid.uuid4().hex[:12]}"
         args_summary = _summarize_args(args, kwargs)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
 
         start_wall = time.perf_counter()
         try:

@@ -69,6 +69,13 @@ def checkpoint(name: str, **metadata: Any) -> None:
     if ctx is None:
         return
 
+    # Halt-safe boundary: checkpoint is the canonical place for users
+    # to insert their own "ok to halt here" markers. Budget check
+    # runs first so a halt fires before the event is emitted.
+    ctx.check_budget()
+    if ctx.budget_tracker is not None:
+        ctx.budget_tracker.increment_steps()
+
     client = get_client()
     client.submit_event(Event(
         event_id=f"evt-{uuid.uuid4().hex[:12]}",
