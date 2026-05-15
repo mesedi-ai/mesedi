@@ -1,6 +1,6 @@
 {
   "name": "mesedi",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Mesedi SDK — guardians for autonomous AI.",
   "license": "MIT",
   "type": "module",
@@ -20,7 +20,8 @@
     "build": "tsc",
     "build:sandbox": "tsc -p tsconfig.sandbox.json",
     "clean": "rm -rf dist dist-sandbox",
-    "test:sandbox": "npm run build:sandbox && node dist-sandbox/sandbox/real_agent.js"
+    "test:sandbox": "npm run build:sandbox && node dist-sandbox/sandbox/real_agent.js",
+    "test:parity": "npm run build:sandbox && node dist-sandbox/sandbox/parity_test.js"
   },
   "engines": {
     "node": ">=18.0.0"

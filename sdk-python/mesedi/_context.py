@@ -31,23 +31,29 @@ without coordinating.
 from __future__ import annotations
 
 import threading
+import time
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import Optional
 
+from mesedi.halt import Budget, BudgetTracker
+
 
 @dataclass
 class ExecutionContext:
-    """Per-execution scratch state shared between @wrap and @tool.
+    """Per-execution scratch state shared between @wrap, @tool,
+    @anthropic, @checkpoint, and validator_result.
 
-    Holds the execution_id (so tools know which Execution to attach to)
-    and a sequence counter (so each emitted event gets a monotonically
-    increasing sequence number within the execution).
+    Holds the execution_id (so events know which Execution to attach
+    to), a sequence counter (so each emitted event gets a monotonically
+    increasing sequence number within the execution), and an optional
+    BudgetTracker for hard-halt enforcement.
     """
 
     execution_id: str
     _seq_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _seq: int = 0
+    budget_tracker: Optional[BudgetTracker] = None
 
     def next_sequence(self) -> int:
         """Return the next sequence number for this execution.
@@ -59,6 +65,17 @@ class ExecutionContext:
         with self._seq_lock:
             self._seq += 1
             return self._seq
+
+    def check_budget(self) -> None:
+        """Inspect the budget; raise MesediHalt if any limit is exceeded.
+
+        Cheap no-op if no budget was configured (or all limits are
+        unbounded). Called from @tool/@checkpoint/anthropic-patch at
+        the function-call boundary BEFORE the inner work runs, so a
+        halt fires at a safe checkpoint rather than mid-tool.
+        """
+        if self.budget_tracker is not None:
+            self.budget_tracker.check_or_halt()
 
 
 _current: ContextVar[Optional[ExecutionContext]] = ContextVar(
@@ -72,15 +89,24 @@ def current_execution_context() -> Optional[ExecutionContext]:
     return _current.get()
 
 
-def push_execution_context(execution_id: str) -> Token[Optional[ExecutionContext]]:
+def push_execution_context(
+    execution_id: str,
+    budget: Optional[Budget] = None,
+) -> Token[Optional[ExecutionContext]]:
     """Set the current execution context.
 
     Returns a token that must be passed to ``pop_execution_context()``
     to restore the previous value. Nested wraps (a @wrap function
     calling another @wrap function) work naturally: each call pushes,
     each return pops, the outer context is restored automatically.
+
+    If `budget` is provided, a fresh BudgetTracker is attached for
+    halt enforcement within this execution.
     """
-    ctx = ExecutionContext(execution_id=execution_id)
+    tracker: Optional[BudgetTracker] = None
+    if budget is not None and not budget.is_unbounded():
+        tracker = BudgetTracker(budget=budget, started_at_monotonic=time.perf_counter())
+    ctx = ExecutionContext(execution_id=execution_id, budget_tracker=tracker)
     return _current.set(ctx)
 
 
