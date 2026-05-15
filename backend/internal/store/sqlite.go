@@ -1115,6 +1115,201 @@ func (s *SQLiteStore) GroupIdenticalCallLoop(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
 }
 
+// GroupSimilarCallLoop upserts a failure_group with
+// failure_class=loops and signature="similar_call_<callHash>".
+// callHash is computed in the handler as a hash of the dominant
+// trigrams in the cluster — different stuck-pattern clusters get
+// different signatures so they aggregate as distinct rows in the
+// dashboard.
+func (s *SQLiteStore) GroupSimilarCallLoop(
+	ctx context.Context,
+	executionID, projectID, callHash string,
+) error {
+	if callHash == "" {
+		return fmt.Errorf("callHash required")
+	}
+	signature := "similar_call_" + callHash
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
+}
+
+// ListModelsForExecution returns the distinct set of model names from
+// this execution's llm_call events, sorted alphabetically. Uses SQLite
+// JSON1's json_extract to read payload.model. Returns empty slice (not
+// nil) if no llm_call events have a model field.
+func (s *SQLiteStore) ListModelsForExecution(
+	ctx context.Context,
+	executionID string,
+) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT json_extract(payload, '$.model') AS model
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'llm_call'
+		  AND json_extract(payload, '$.model') IS NOT NULL
+		  AND json_extract(payload, '$.model') != ''
+		ORDER BY model ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list models for execution: %w", err)
+	}
+	defer rows.Close()
+
+	models := make([]string, 0, 4)
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, fmt.Errorf("scan model: %w", err)
+		}
+		if m != "" {
+			models = append(models, m)
+		}
+	}
+	return models, rows.Err()
+}
+
+// ListModelsForProjectSince returns distinct models seen in this
+// project's llm_call events since the cutoff, EXCLUDING the given
+// execution. Used by the drift detector to compute the historical
+// model-mix baseline. Joins events ↔ executions on execution_id to
+// scope by project; an indexed query on a hot path, but llm_call
+// volume is modest enough at MVP scale that the join cost is fine.
+func (s *SQLiteStore) ListModelsForProjectSince(
+	ctx context.Context,
+	projectID string,
+	cutoff time.Time,
+	excludeExecutionID string,
+) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT json_extract(e.payload, '$.model') AS model
+		FROM events e
+		JOIN executions x ON x.execution_id = e.execution_id
+		WHERE x.project_id = ?
+		  AND e.event_type = 'llm_call'
+		  AND e.timestamp >= ?
+		  AND e.execution_id != ?
+		  AND json_extract(e.payload, '$.model') IS NOT NULL
+		  AND json_extract(e.payload, '$.model') != ''
+		ORDER BY model ASC
+	`, projectID, cutoff.UTC().Format(time.RFC3339), excludeExecutionID)
+	if err != nil {
+		return nil, fmt.Errorf("list models for project since: %w", err)
+	}
+	defer rows.Close()
+
+	models := make([]string, 0, 8)
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, fmt.Errorf("scan model: %w", err)
+		}
+		if m != "" {
+			models = append(models, m)
+		}
+	}
+	return models, rows.Err()
+}
+
+// GroupDriftSignal upserts a failure_group with failure_class=drift
+// and the caller-supplied signature. Same idempotency contract as the
+// other groupers — if the execution is already in a higher-priority
+// group (crash, injection), this is a no-op.
+func (s *SQLiteStore) GroupDriftSignal(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) error {
+	if signature == "" {
+		return fmt.Errorf("drift signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassDrift, signature)
+}
+
+// ListLLMUserMessagesForExecution returns user_messages from this
+// execution's llm_call events, in sequence order. Empty / NULL
+// user_messages are filtered out — they don't contribute lexical
+// signal.
+func (s *SQLiteStore) ListLLMUserMessagesForExecution(
+	ctx context.Context,
+	executionID string,
+) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT json_extract(payload, '$.user_message') AS user_message
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'llm_call'
+		  AND json_extract(payload, '$.user_message') IS NOT NULL
+		  AND json_extract(payload, '$.user_message') != ''
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list user messages for execution: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]string, 0, 4)
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, fmt.Errorf("scan user message: %w", err)
+		}
+		if m != "" {
+			out = append(out, m)
+		}
+	}
+	return out, rows.Err()
+}
+
+// ListLLMUserMessagesForProjectSince returns user_messages from every
+// llm_call event in this project's history since cutoff, excluding
+// the current execution. Sorted by timestamp DESC (most recent first)
+// so when callers apply a limit, they get the freshest signal.
+//
+// Bounded by limit. Pass 0 for "no limit" — typically callers should
+// pass 500 or 1000 for v0.0.1; once we have a project-volume signal,
+// the limit becomes adaptive.
+func (s *SQLiteStore) ListLLMUserMessagesForProjectSince(
+	ctx context.Context,
+	projectID string,
+	cutoff time.Time,
+	excludeExecutionID string,
+	limit int,
+) ([]string, error) {
+	query := `
+		SELECT json_extract(e.payload, '$.user_message') AS user_message
+		FROM events e
+		JOIN executions x ON x.execution_id = e.execution_id
+		WHERE x.project_id = ?
+		  AND e.event_type = 'llm_call'
+		  AND e.timestamp >= ?
+		  AND e.execution_id != ?
+		  AND json_extract(e.payload, '$.user_message') IS NOT NULL
+		  AND json_extract(e.payload, '$.user_message') != ''
+		ORDER BY e.timestamp DESC
+	`
+	args := []interface{}{projectID, cutoff.UTC().Format(time.RFC3339), excludeExecutionID}
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list user messages for project since: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]string, 0, 64)
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, fmt.Errorf("scan user message: %w", err)
+		}
+		if m != "" {
+			out = append(out, m)
+		}
+	}
+	return out, rows.Err()
+}
+
 // ListFailureGroups returns failure_groups for a project, sorted by
 // most-recent first. Caller is responsible for sensible limit/offset
 // bounds (handler enforces a max-limit ceiling).
