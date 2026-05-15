@@ -42,6 +42,13 @@ from mesedi.events import Event, EventType, utcnow_rfc3339
 # events table.
 _MAX_VALIDATOR_MSG = 500
 
+# Truncation budgets for manually-emitted llm_call events. Match the
+# values in anthropic_integration.py so wire-format payloads from the
+# patched Anthropic SDK and from emit_llm_call() are byte-identical.
+_MAX_LLM_SYSTEM = 1000
+_MAX_LLM_USER_MSG = 1000
+_MAX_LLM_RESPONSE = 1000
+
 
 def checkpoint(name: str, **metadata: Any) -> None:
     """Emit a ``checkpoint`` event marking a notable point in execution.
@@ -142,5 +149,99 @@ def validator_result(
         event_type=EventType.VALIDATOR_RESULT,
         sequence=ctx.next_sequence(),
         timestamp=utcnow_rfc3339(),
+        payload=payload,
+    ))
+
+
+def emit_llm_call(
+    model: str,
+    user_message: str,
+    system_prompt: str = "",
+    response_text: str = "",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    duration_ms: int = 0,
+    status: str = "ok",
+) -> None:
+    """Emit an ``llm_call`` event with the same wire format the
+    Anthropic patch produces.
+
+    This is the manual escape hatch for LLM providers Mesedi doesn't
+    auto-instrument (OpenAI, Google, Mistral, Together, local models,
+    mocked calls in dogfood scripts, etc.). Call it after each model
+    invocation with the same fields the patched Anthropic create
+    method would have captured automatically:
+
+        mesedi.emit_llm_call(
+            model="gpt-4o",
+            user_message=user_prompt,
+            system_prompt=system_prompt,
+            response_text=completion_text,
+            input_tokens=usage.prompt_tokens,
+            output_tokens=usage.completion_tokens,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+        )
+
+    Drift / similar-call / identical-call / cost-velocity / prompt-
+    injection detectors all read from the resulting event payload, so
+    a manually-emitted llm_call event is detector-complete the same
+    way an auto-instrumented one is.
+
+    Halt-safe: this function is a safe halt boundary. Budget check
+    runs first (just like ``@tool``, ``checkpoint()``, and the patched
+    Anthropic create), so a halt fires here before the event is
+    persisted.
+
+    Outside @wrap: no-op. Mirrors the fail-open pattern of every
+    other observe-layer primitive.
+
+    Args:
+        model: The model identifier (e.g. "gpt-4o",
+            "claude-haiku-4-5-20251001"). Captured verbatim into the
+            event's ``payload.model`` for drift detection and cost
+            attribution.
+        user_message: The user-role prompt. Truncated to 1000 chars
+            to match the Anthropic patch's truncation budget.
+        system_prompt: The system-role prompt. Truncated to 1000 chars.
+        response_text: The model's response. Truncated to 1000 chars.
+        input_tokens: Token count for the prompt; used by cost-velocity.
+        output_tokens: Token count for the response; used by
+            cost-velocity.
+        duration_ms: Wall-clock duration of the LLM call in ms. Pass 0
+            if not measured.
+        status: "ok" if the call returned cleanly, "failed" otherwise.
+            Failed calls still record their model name (which still
+            feeds drift) but don't contribute response_text/token data.
+    """
+    ctx = current_execution_context()
+    if ctx is None:
+        return
+
+    # Halt-safe boundary: same pattern as the Anthropic patch.
+    ctx.check_budget()
+    if ctx.budget_tracker is not None:
+        ctx.budget_tracker.increment_steps()
+        if input_tokens > 0 or output_tokens > 0:
+            ctx.budget_tracker.add_tokens(tokens_in=input_tokens, tokens_out=output_tokens)
+
+    client = get_client()
+    payload: Dict[str, Any] = {
+        "model": model,
+        "system_prompt": (system_prompt or "")[:_MAX_LLM_SYSTEM],
+        "user_message": (user_message or "")[:_MAX_LLM_USER_MSG],
+        "status": status,
+    }
+    if status == "ok":
+        payload["response_text"] = (response_text or "")[:_MAX_LLM_RESPONSE]
+        payload["input_tokens"] = int(input_tokens)
+        payload["output_tokens"] = int(output_tokens)
+
+    client.submit_event(Event(
+        event_id=f"evt-{uuid.uuid4().hex[:12]}",
+        execution_id=ctx.execution_id,
+        event_type=EventType.LLM_CALL,
+        sequence=ctx.next_sequence(),
+        timestamp=utcnow_rfc3339(),
+        duration_ms=duration_ms,
         payload=payload,
     ))

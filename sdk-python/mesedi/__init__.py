@@ -53,11 +53,11 @@ from mesedi.events import (
     utcnow_rfc3339,
 )
 from mesedi.halt import Budget, MesediHalt
-from mesedi.observe import checkpoint, validator_result
+from mesedi.observe import checkpoint, emit_llm_call, validator_result
 from mesedi.tool import tool
 from mesedi.wrap import wrap
 
-__version__ = "0.0.6"
+__version__ = "0.0.7"
 
 __all__ = [
     "Budget",
@@ -69,6 +69,7 @@ __all__ = [
     "Status",
     "checkpoint",
     "configure",
+    "emit_llm_call",
     "flush",
     "get_client",
     "instrument_anthropic",
