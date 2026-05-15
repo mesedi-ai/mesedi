@@ -17,13 +17,32 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 export class ExecutionContext {
     executionId;
+    /**
+     * Optional budget tracker. Set when `wrap()` was invoked with a
+     * `budget` option; absent otherwise. The halt-safe boundary
+     * primitives (`tool()`, the Anthropic patch, `checkpoint()`) call
+     * `checkBudget()` at entry, which is a no-op when this is undefined.
+     */
+    budgetTracker;
     sequence = 0;
-    constructor(executionId) {
+    constructor(executionId, budgetTracker) {
         this.executionId = executionId;
+        this.budgetTracker = budgetTracker;
     }
     nextSequence() {
         this.sequence += 1;
         return this.sequence;
+    }
+    /**
+     * Halt-safe boundary check. Throws MesediHalt if a budget is
+     * exceeded; no-op if no budget is configured. Call this at the
+     * entry of any code path that's a natural halt boundary (start of
+     * a tool call, start of an LLM call, on a checkpoint).
+     */
+    checkBudget() {
+        if (this.budgetTracker) {
+            this.budgetTracker.check();
+        }
     }
 }
 const storage = new AsyncLocalStorage();
@@ -42,8 +61,8 @@ export function currentExecutionContext() {
  *
  * This is the workhorse `wrap()` calls internally.
  */
-export function runInExecutionContext(executionId, fn) {
-    const ctx = new ExecutionContext(executionId);
+export function runInExecutionContext(executionId, fn, budgetTracker) {
+    const ctx = new ExecutionContext(executionId, budgetTracker);
     return storage.run(ctx, fn);
 }
 /**

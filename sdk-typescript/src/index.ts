@@ -43,5 +43,7 @@ export type {
 } from "./observe.js";
 export { instrumentAnthropic } from "./anthropic_integration.js";
 export type { MessagesClassLike } from "./anthropic_integration.js";
+export { MesediHalt, isMesediHalt } from "./halt.js";
+export type { Budget, HaltTrigger } from "./halt.js";
 
-export const VERSION = "0.0.2";
+export const VERSION = "0.0.3";

@@ -16,18 +16,39 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { BudgetTracker } from "./halt.js";
 
 export class ExecutionContext {
   readonly executionId: string;
+  /**
+   * Optional budget tracker. Set when `wrap()` was invoked with a
+   * `budget` option; absent otherwise. The halt-safe boundary
+   * primitives (`tool()`, the Anthropic patch, `checkpoint()`) call
+   * `checkBudget()` at entry, which is a no-op when this is undefined.
+   */
+  readonly budgetTracker?: BudgetTracker;
   private sequence = 0;
 
-  constructor(executionId: string) {
+  constructor(executionId: string, budgetTracker?: BudgetTracker) {
     this.executionId = executionId;
+    this.budgetTracker = budgetTracker;
   }
 
   nextSequence(): number {
     this.sequence += 1;
     return this.sequence;
+  }
+
+  /**
+   * Halt-safe boundary check. Throws MesediHalt if a budget is
+   * exceeded; no-op if no budget is configured. Call this at the
+   * entry of any code path that's a natural halt boundary (start of
+   * a tool call, start of an LLM call, on a checkpoint).
+   */
+  checkBudget(): void {
+    if (this.budgetTracker) {
+      this.budgetTracker.check();
+    }
   }
 }
 
@@ -52,8 +73,9 @@ export function currentExecutionContext(): ExecutionContext | null {
 export function runInExecutionContext<T>(
   executionId: string,
   fn: () => Promise<T>,
+  budgetTracker?: BudgetTracker,
 ): Promise<T> {
-  const ctx = new ExecutionContext(executionId);
+  const ctx = new ExecutionContext(executionId, budgetTracker);
   return storage.run(ctx, fn);
 }
 

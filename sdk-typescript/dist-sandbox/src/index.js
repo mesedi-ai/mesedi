@@ -29,5 +29,6 @@ export { wrap } from "./wrap.js";
 export { tool } from "./tool.js";
 export { checkpoint, validatorResult } from "./observe.js";
 export { instrumentAnthropic } from "./anthropic_integration.js";
-export const VERSION = "0.0.2";
+export { MesediHalt, isMesediHalt } from "./halt.js";
+export const VERSION = "0.0.3";
 //# sourceMappingURL=index.js.map

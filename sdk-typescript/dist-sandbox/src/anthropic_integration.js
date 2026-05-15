@@ -73,6 +73,16 @@ export async function instrumentAnthropic(messagesClass) {
             // Outside wrap() — pass through unobserved.
             return originalCreate.apply(this, args);
         }
+        // Halt-safe boundary: check the budget BEFORE the actual LLM
+        // call. If a budget exists and is exceeded, this throws
+        // MesediHalt which propagates up to wrap()'s catch block. We
+        // count this as a step now (after the check passes) so the
+        // counter advances even though the LLM call hasn't run yet —
+        // matches the Python SDK's pattern (check, then count, then act).
+        ctx.checkBudget();
+        if (ctx.budgetTracker) {
+            ctx.budgetTracker.incrementSteps();
+        }
         const client = getClient();
         const sequence = ctx.nextSequence();
         const eventId = newEventId();
@@ -87,6 +97,14 @@ export async function instrumentAnthropic(messagesClass) {
             const response = await originalCreate.apply(this, args);
             const durationMs = Math.round(performance.now() - start);
             const { responseText, inputTokens, outputTokens } = extractResponseFields(response);
+            // Token-budget accounting: feeds into BudgetTracker so future
+            // halt-safe boundary checks know how many tokens this execution
+            // has consumed. Tokens from FAILED LLM calls don't get
+            // accounted (we don't reach this code path on the error
+            // branch) — that matches the Python SDK behavior.
+            if (ctx.budgetTracker) {
+                ctx.budgetTracker.addTokens(inputTokens, outputTokens);
+            }
             const event = {
                 event_id: eventId,
                 execution_id: ctx.executionId,

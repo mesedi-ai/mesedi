@@ -43,6 +43,15 @@ export function checkpoint(
   const ctx = currentExecutionContext();
   if (!ctx) return;
 
+  // Halt-safe boundary: checkpoint is the canonical place for users
+  // to insert their own "ok to halt here" markers. Budget check runs
+  // first so a halt fires before the event is emitted; the user's
+  // checkpoint call effectively becomes a yield point for halt.
+  ctx.checkBudget();
+  if (ctx.budgetTracker) {
+    ctx.budgetTracker.incrementSteps();
+  }
+
   const client = getClient();
   const event: Event = {
     event_id: newEventId(),
