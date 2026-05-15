@@ -1,0 +1,13 @@
+# synthetic-org runtime deps.
+#
+# Mesedi SDK is installed in editable mode from the sibling sdk-python/ dir
+# so any edits to the SDK are picked up immediately without re-installing.
+#
+# Install with:
+#   python3 -m pip install -r requirements.txt --break-system-packages
+#
+# Or, if you prefer a venv:
+#   python3 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+anthropic>=0.40,<1.0
+-e ../sdk-python
