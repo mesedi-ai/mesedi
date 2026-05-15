@@ -172,9 +172,73 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Phase 7 v0.0.1: model-drift detector — runs FIRST in the detection
+	// chain so it wins the idempotency claim over crashes when the crash
+	// IS caused by a new model. The classic case: agent calls a model
+	// that doesn't exist (deprecated, typo, misrouted), Anthropic
+	// returns 404, the agent crashes. Without this ordering, the
+	// execution lands in `crashes` with a generic stack-trace signature
+	// and the customer never sees the actionable "you used a new model"
+	// classification. With drift first, the same execution lands in
+	// `drift / new_model:<name>`, which is the right surface for "why
+	// did my agent suddenly start failing today."
+	//
+	// For executions that crashed WITHOUT a model change, drift's
+	// condition is false (current models all in historical) → it
+	// no-ops, and crashes claims normally below. So this change is
+	// safe: it only diverts the model-driven crashes, leaving
+	// non-model-related crashes unaffected.
+	//
+	// Best-effort throughout — drift query failures log and continue
+	// rather than blocking the rest of the detection pipeline.
+	if isTerminalStatus(patch.Status) {
+		// 7-day historical window — same for both drift signals.
+		cutoff := time.Now().Add(-7 * 24 * time.Hour)
+
+		// ── Drift v1 — model-mix signal ─────────────────────────────
+		// Catches: this execution used a model the project hasn't seen.
+		currentModels, mErr := h.Store.ListModelsForExecution(r.Context(), executionID)
+		if mErr != nil {
+			h.Logger.Warn("drift: list models for execution failed (skipping model-drift)",
+				"execution_id", executionID,
+				"error", mErr.Error(),
+			)
+		} else if len(currentModels) > 0 {
+			historicalModels, hErr := h.Store.ListModelsForProjectSince(r.Context(), authProjectID, cutoff, executionID)
+			if hErr != nil {
+				h.Logger.Warn("drift: list project models failed (skipping model-drift)",
+					"project_id", authProjectID,
+					"error", hErr.Error(),
+				)
+			} else if len(historicalModels) > 0 {
+				if signature, drift := detectors.DetectModelDrift(currentModels, historicalModels); drift {
+					if dErr := h.Store.GroupDriftSignal(r.Context(), executionID, authProjectID, signature); dErr != nil {
+						h.Logger.Warn("drift grouping failed (continuing)",
+							"execution_id", executionID,
+							"signature", signature,
+							"error", dErr.Error(),
+						)
+					} else {
+						h.Logger.Info("model drift detected",
+							"execution_id", executionID,
+							"signature", signature,
+							"current_models", currentModels,
+							"historical_models_count", len(historicalModels),
+						)
+					}
+				}
+			}
+		}
+
+		// Drift v2 (lexical) moved to the tail of the detector chain —
+		// see the cost_velocity block below.
+	}
+
 	// Phase 3a: link crashed executions to their failure_group. Best-effort —
 	// a grouping failure doesn't fail the PATCH because the execution itself
-	// is already correctly recorded.
+	// is already correctly recorded. Runs AFTER drift — if drift already
+	// claimed this execution, GroupCrashedExecution's idempotency check
+	// short-circuits as a no-op.
 	if patch.Status == events.StatusCrashed && patch.CrashSignature != "" {
 		if err := h.Store.GroupCrashedExecution(r.Context(), executionID, authProjectID, patch.CrashSignature); err != nil {
 			h.Logger.Warn("crash grouping failed (continuing)",
@@ -314,14 +378,13 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				}
 			}
 
-			// Sub-slice 17: identical-call loop detector. Fourth and
-			// final Phase-4 loop sub-detector. Hashes (model +
-			// user_message) per llm_call; if the same hash appears
-			// 3+ times in one execution, group as loops/identical_call.
-			// Runs BEFORE injection check because a runaway loop
-			// generating the same prompt repeatedly is a more urgent
-			// resource-waste classification than a single injection
-			// attempt embedded in the same prompt.
+			// Sub-slice 17: identical-call loop detector. Hashes
+			// (model + user_message) per llm_call; if the same hash
+			// appears 3+ times in one execution, group as
+			// loops/identical_call. Runs BEFORE the injection check
+			// because a runaway loop generating the same prompt
+			// repeatedly is a more urgent resource-waste signal than
+			// a single injection attempt embedded in the same prompt.
 			if callHash, found := scanForIdenticalCalls(evts, 3); found {
 				if err := h.Store.GroupIdenticalCallLoop(r.Context(), executionID, authProjectID, callHash); err != nil {
 					h.Logger.Warn("identical-call grouping failed (continuing)",
@@ -329,6 +392,27 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 						"call_hash", callHash,
 						"error", err.Error(),
 					)
+				}
+			}
+
+			// Sub-slice 81: similar-call loop detector. Catches the
+			// "stuck-loop with paraphrased prompts" pattern that
+			// identical_call misses — different exact text, same
+			// semantic intent, ≥3 near-duplicates within one
+			// execution. Runs AFTER identical_call so exact-text
+			// loops win the more-specific signature; only loops with
+			// varied wording reach this code path. Uses the same
+			// trigram substrate as drift v2.
+			similarMsgs := extractLLMUserMessages(evts)
+			if len(similarMsgs) >= detectors.SimilarCallMinClusterSize {
+				if callHash, found := detectors.DetectSimilarCallLoop(similarMsgs); found {
+					if err := h.Store.GroupSimilarCallLoop(r.Context(), executionID, authProjectID, callHash); err != nil {
+						h.Logger.Warn("similar-call grouping failed (continuing)",
+							"execution_id", executionID,
+							"call_hash", callHash,
+							"error", err.Error(),
+						)
+					}
 				}
 			}
 
@@ -359,10 +443,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// resolved cost exceeds the v0.0.1 absolute threshold gets
 			// grouped as cost_velocity with a cost-bucketed signature.
 			// Production version (Phase 5+) compares against a project
-			// rolling baseline rather than an absolute value. Runs LAST
-			// in the events-fetch block — every other detector that
-			// fires on the same execution wins via the failure_group_id
-			// idempotency short-circuit.
+			// rolling baseline rather than an absolute value.
 			if effectiveCost > 0 {
 				if err := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost); err != nil {
 					h.Logger.Warn("cost-velocity grouping failed (continuing)",
@@ -370,6 +451,57 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 						"cost_usd", effectiveCost,
 						"error", err.Error(),
 					)
+				}
+			}
+
+			// Drift v2 — lexical signal. Char-3-gram cosine distance
+			// between current execution's user_messages and the
+			// project's recent history. Runs LAST in the chain on
+			// purpose: lexical drift is a SOFT behavioral signal that
+			// should only surface for executions nothing else
+			// classified. The idempotency short-circuit in
+			// GroupDriftSignal means any execution already grouped
+			// (crashes, loops, tool_failures, validator_failures,
+			// prompt_injection, cost_velocity, or model-drift) skips
+			// drift v2 — which is the right priority: specific causal
+			// classifications beat the "prompts have shifted" pattern.
+			//
+			// The signal still gets logged when computed but
+			// not-grouped, so dashboards / detectors can be tuned
+			// against real data later without changing the order.
+			driftCutoff := time.Now().Add(-7 * 24 * time.Hour)
+			currentMsgs, cErr := h.Store.ListLLMUserMessagesForExecution(r.Context(), executionID)
+			if cErr != nil {
+				h.Logger.Warn("drift: list user_messages for execution failed (skipping lexical-drift)",
+					"execution_id", executionID,
+					"error", cErr.Error(),
+				)
+			} else if len(currentMsgs) > 0 {
+				historicalMsgs, hErr := h.Store.ListLLMUserMessagesForProjectSince(r.Context(), authProjectID, driftCutoff, executionID, 500)
+				if hErr != nil {
+					h.Logger.Warn("drift: list project user_messages failed (skipping lexical-drift)",
+						"project_id", authProjectID,
+						"error", hErr.Error(),
+					)
+				} else if len(historicalMsgs) > 0 {
+					if signature, distance, drift := detectors.DetectLexicalDrift(currentMsgs, historicalMsgs); drift {
+						if dErr := h.Store.GroupDriftSignal(r.Context(), executionID, authProjectID, signature); dErr != nil {
+							h.Logger.Warn("lexical drift grouping failed (continuing)",
+								"execution_id", executionID,
+								"signature", signature,
+								"distance", distance,
+								"error", dErr.Error(),
+							)
+						} else {
+							h.Logger.Info("lexical drift detected",
+								"execution_id", executionID,
+								"signature", signature,
+								"distance", distance,
+								"current_msgs_count", len(currentMsgs),
+								"historical_msgs_count", len(historicalMsgs),
+							)
+						}
+					}
 				}
 			}
 		}
@@ -764,6 +896,37 @@ func computeExecutionCost(evts []*events.Event) float64 {
 		total += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)
 	}
 	return total
+}
+
+// extractLLMUserMessages walks the event list and returns the
+// user_message field from every llm_call event, in sequence order.
+// Used by the similar-call loop detector to assemble the corpus for
+// pairwise cosine-distance clustering. Skips events whose payload is
+// missing or malformed — the detector handles empty slices.
+//
+// Mirrors computeExecutionCost's payload-shape-tolerant approach:
+// unmarshal into a tiny struct that extracts only the field we need,
+// ignore the rest. Survives any future payload schema additions.
+func extractLLMUserMessages(evts []*events.Event) []string {
+	out := make([]string, 0, len(evts))
+	for _, e := range evts {
+		if e == nil || e.EventType != events.EventTypeLLMCall {
+			continue
+		}
+		if len(e.Payload) == 0 {
+			continue
+		}
+		var p struct {
+			UserMessage string `json:"user_message"`
+		}
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			continue
+		}
+		if p.UserMessage != "" {
+			out = append(out, p.UserMessage)
+		}
+	}
+	return out
 }
 
 // ─────────────────────────────────────────────────────────────────────────

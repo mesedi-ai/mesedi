@@ -174,10 +174,52 @@ type Store interface {
 	// GroupIdenticalCallLoop upserts a failure_group with
 	// failure_class=loops and signature=identical_call_<short_hash>
 	// when an execution made the same LLM call (same model + user
-	// message) at least N times. Fourth and final Phase-4 loop
-	// sub-detector after time_budget, step_count, and (deferred)
-	// similar_call.
+	// message) at least N times. Catches exact-text loops where the
+	// agent is regenerating the same prompt verbatim.
 	GroupIdenticalCallLoop(ctx context.Context, executionID, projectID, callHash string) error
+	// GroupSimilarCallLoop upserts a failure_group with
+	// failure_class=loops and signature=similar_call_<short_hash>
+	// when an execution made N+ LLM calls whose user_messages cluster
+	// semantically (pairwise cosine distance below threshold) even
+	// though no two are exactly identical. Catches the "stuck-loop
+	// with paraphrased prompts" pattern that identical_call misses.
+	// 4th and final Phase-4 loop sub-detector — runs after
+	// identical_call so exact-text loops win that signature.
+	GroupSimilarCallLoop(ctx context.Context, executionID, projectID, callHash string) error
+	// ListModelsForExecution returns the distinct set of model names
+	// extracted from this execution's llm_call events' payload.model
+	// field, sorted alphabetically. Empty slice if no llm_call events
+	// recorded a model.
+	ListModelsForExecution(ctx context.Context, executionID string) ([]string, error)
+	// ListModelsForProjectSince returns the distinct set of model names
+	// seen across this project's llm_call events since cutoff,
+	// EXCLUDING events linked to excludeExecutionID. Used by the drift
+	// detector to compute the "historical model mix" baseline for the
+	// project. Caller passes the current execution's ID in
+	// excludeExecutionID so the baseline doesn't include the very
+	// execution being evaluated.
+	ListModelsForProjectSince(ctx context.Context, projectID string, cutoff time.Time, excludeExecutionID string) ([]string, error)
+	// GroupDriftSignal upserts a failure_group with
+	// failure_class=drift and the caller-supplied signature
+	// (e.g. "new_model:claude-opus-4-6"). v0.0.1 signal is model-mix
+	// drift; later versions may introduce lexical or embedding-based
+	// signatures within the same failure class.
+	GroupDriftSignal(ctx context.Context, executionID, projectID, signature string) error
+	// ListLLMUserMessagesForExecution returns the user_message field
+	// from each llm_call event in this execution, in payload-sequence
+	// order. Used by the lexical drift detector to build the
+	// per-execution prompt corpus. Returns empty slice if no llm_call
+	// events have a non-empty user_message.
+	ListLLMUserMessagesForExecution(ctx context.Context, executionID string) ([]string, error)
+	// ListLLMUserMessagesForProjectSince returns user_messages from
+	// every llm_call event in this project since cutoff, EXCLUDING
+	// events linked to excludeExecutionID. Used to build the historical
+	// baseline corpus the lexical drift detector compares against.
+	// limit caps the number of messages returned (most recent first);
+	// pass 0 for "no limit" but the caller is responsible for sensible
+	// bounds — a 7-day window on a busy project can be thousands of
+	// rows.
+	ListLLMUserMessagesForProjectSince(ctx context.Context, projectID string, cutoff time.Time, excludeExecutionID string, limit int) ([]string, error)
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). For pagination, pass limit +
 	// offset; default to limit=50 in callers.
