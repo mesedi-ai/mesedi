@@ -31,6 +31,9 @@
       --purple:       #a78bfa;
       --purple-bg:    rgba(167, 139, 250, 0.15);
       --purple-border:rgba(167, 139, 250, 0.35);
+      --teal:         #14b8a6;
+      --teal-bg:      rgba(20, 184, 166, 0.15);
+      --teal-border:  rgba(20, 184, 166, 0.35);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -256,6 +259,7 @@
     .badge-tool       { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
     .badge-validator  { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
     .badge-injection  { background: var(--purple-bg);  color: var(--purple);  border-color: var(--purple-border); }
+    .badge-drift      { background: var(--teal-bg);    color: var(--teal);    border-color: var(--teal-border); }
     .badge-cost       { background: rgba(201, 166, 70, 0.15); color: var(--accent); border-color: rgba(201, 166, 70, 0.35); }
     .badge-default    { background: var(--surface-2);  color: var(--text-muted); }
     .status-started   { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
@@ -355,6 +359,89 @@
       text-align: center;
       font-size: 11px; color: var(--text-dim);
     }
+
+    /* ── Filter bar (failure-groups list controls) ───────────────────── */
+    .filter-bar {
+      display: flex; gap: 16px; align-items: center;
+      margin-bottom: 14px; flex-wrap: wrap;
+    }
+    .filter-group {
+      display: flex; gap: 4px; align-items: center;
+    }
+    .filter-label {
+      font-size: 10px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin-right: 6px;
+    }
+    .filter-chip {
+      padding: 5px 11px;
+      font-size: 12px;
+      background: transparent;
+      border: 0.5px solid var(--border-2);
+      color: var(--text-muted);
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .filter-chip:hover { background: var(--surface-2); color: var(--text); }
+    .filter-chip.active {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--surface-3);
+    }
+    .filter-bar-spacer { flex: 1; }
+
+    /* ── Collapsible class-group cards ───────────────────────────────── */
+    .class-group {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .class-group-head {
+      display: flex; align-items: center; gap: 14px;
+      padding: 14px 18px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .class-group-head:hover { background: var(--surface-2); }
+    .class-group-caret {
+      font-size: 11px; color: var(--text-dim);
+      transition: transform 0.1s;
+      display: inline-block; width: 12px;
+    }
+    .class-group.open .class-group-caret { transform: rotate(90deg); }
+    .class-group-title {
+      flex: 1;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .class-group-title .badge { font-size: 11px; }
+    .class-group-stats {
+      display: flex; gap: 22px; align-items: center;
+      font-size: 12px; color: var(--text-muted);
+    }
+    .class-group-stat {
+      display: flex; gap: 5px; align-items: baseline;
+    }
+    .class-group-stat-value {
+      font-weight: 500; color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .class-group-stat-value.cost { color: var(--accent); }
+    .class-group-body {
+      display: none;
+      border-top: 0.5px solid var(--border);
+    }
+    .class-group.open .class-group-body { display: block; }
+    .class-group-body table {
+      border: none;
+      border-radius: 0;
+      background: transparent;
+    }
+    .class-group-body thead tr { background: transparent; }
+    .class-group-body td:first-child,
+    .class-group-body th:first-child { padding-left: 18px; }
   </style>
 </head>
 <body>
@@ -415,6 +502,7 @@
         case "tool_failures":      return "badge-tool";
         case "validator_failures": return "badge-validator";
         case "prompt_injection":   return "badge-injection";
+        case "drift":              return "badge-drift";
         case "cost_velocity":      return "badge-cost";
         default:                   return "badge-default";
       }
@@ -455,7 +543,7 @@
         </div>
         <div class="section">
           <div class="section-head"><div class="section-title">Failure groups<span class="count" id="groups-count"></span></div></div>
-          <div class="section-desc">Crash signatures observed across all executions. Each row is a unique signature; bumping <em>Events</em> means another execution hit the same code path.</div>
+          <div class="section-desc">Failure signatures clustered by class. Click a class to expand the signatures inside. Within each class, ranking sorts by <em>cost wasted × affected executions</em> by default.</div>
           <div id="groups-content"></div>
         </div>
         <div class="section">
@@ -491,28 +579,214 @@
       document.getElementById("stat-groups").textContent = fmtNum(s.open_failure_groups || 0);
     }
 
+    // ── Failure-groups view: filter + sort + collapse-by-class ──────────
+    //
+    // Severity rank: lower number = surface higher in the list.
+    // Crashes first (always actionable), then security (injection), then
+    // money (cost_velocity), then operational classes.
+    const FAILURE_CLASS_RANK = {
+      "crashes":            1,
+      "prompt_injection":   2,
+      "drift":              3,
+      "cost_velocity":      4,
+      "loops":              5,
+      "tool_failures":      6,
+      "validator_failures": 7,
+    };
+
+    const TIME_WINDOWS = {
+      "all": { label: "All time",     ms: Infinity },
+      "7d":  { label: "Last 7 days",  ms: 7 * 24 * 3600 * 1000 },
+      "24h": { label: "Last 24h",     ms: 24 * 3600 * 1000 },
+    };
+
+    const SORT_MODES = {
+      "severity": { label: "Severity" },
+      "recent":   { label: "Most recent" },
+      "frequent": { label: "Most frequent" },
+    };
+
+    const DEFAULT_PREFS = {
+      window:   "all",
+      sort:     "severity",
+      expanded: {},
+    };
+
+    function loadPrefs() {
+      try {
+        const raw = localStorage.getItem("mesedi.dashboard.prefs");
+        if (!raw) return JSON.parse(JSON.stringify(DEFAULT_PREFS));
+        const parsed = JSON.parse(raw);
+        return Object.assign({}, DEFAULT_PREFS, parsed,
+          { expanded: Object.assign({}, parsed.expanded || {}) });
+      } catch (e) {
+        return JSON.parse(JSON.stringify(DEFAULT_PREFS));
+      }
+    }
+
+    function savePrefs(prefs) {
+      try { localStorage.setItem("mesedi.dashboard.prefs", JSON.stringify(prefs)); }
+      catch (e) { /* private browsing or quota — silently degrade */ }
+    }
+
+    let _prefs = loadPrefs();
+    let _lastGroups = null;  // cached so filter toggles can re-render without re-fetch
+
+    function setPref(key, value) {
+      _prefs[key] = value;
+      savePrefs(_prefs);
+      if (_lastGroups) renderGroups(_lastGroups);
+    }
+
+    function toggleClassExpand(cls) {
+      _prefs.expanded = _prefs.expanded || {};
+      _prefs.expanded[cls] = !_prefs.expanded[cls];
+      savePrefs(_prefs);
+      if (_lastGroups) renderGroups(_lastGroups);
+    }
+
+    function toggleAllExpand() {
+      const groups = _lastGroups || [];
+      const classes = Array.from(new Set(groups.map(g => g.failure_class)));
+      const anyOpen = classes.some(c => _prefs.expanded && _prefs.expanded[c]);
+      _prefs.expanded = {};
+      if (!anyOpen) classes.forEach(c => { _prefs.expanded[c] = true; });
+      savePrefs(_prefs);
+      renderGroups(groups);
+    }
+
+    function filterGroupsByWindow(groups) {
+      const w = TIME_WINDOWS[_prefs.window] || TIME_WINDOWS.all;
+      if (!isFinite(w.ms)) return groups;
+      const cutoff = Date.now() - w.ms;
+      return groups.filter(g => {
+        if (!g.last_seen) return false;
+        const ts = new Date(g.last_seen).getTime();
+        return ts >= cutoff;
+      });
+    }
+
+    function severityScore(g) {
+      // cost × affected. groups with $0 cost still rank by affected count.
+      return (g.cost_wasted_usd || 0) * (g.affected_executions || 0)
+        + (g.affected_executions || 0) * 0.0000001;
+    }
+
+    function sortGroupsWithin(groups) {
+      const mode = _prefs.sort || "severity";
+      const sortFns = {
+        severity: (a, b) => severityScore(b) - severityScore(a),
+        recent:   (a, b) => new Date(b.last_seen || 0).getTime()
+                          - new Date(a.last_seen || 0).getTime(),
+        frequent: (a, b) => (b.affected_executions || 0) - (a.affected_executions || 0),
+      };
+      return groups.slice().sort(sortFns[mode] || sortFns.severity);
+    }
+
+    function renderFilterBar(visibleCount, totalCount) {
+      const windowChips = Object.keys(TIME_WINDOWS).map(k => {
+        const active = _prefs.window === k ? ' active' : '';
+        return '<button class="filter-chip' + active + '" onclick="setPref(\'window\', \''
+          + k + '\')">' + escapeHtml(TIME_WINDOWS[k].label) + '</button>';
+      }).join('');
+
+      const sortChips = Object.keys(SORT_MODES).map(k => {
+        const active = _prefs.sort === k ? ' active' : '';
+        return '<button class="filter-chip' + active + '" onclick="setPref(\'sort\', \''
+          + k + '\')">' + escapeHtml(SORT_MODES[k].label) + '</button>';
+      }).join('');
+
+      return '<div class="filter-bar">' +
+        '<div class="filter-group"><span class="filter-label">Window</span>' + windowChips + '</div>' +
+        '<div class="filter-group"><span class="filter-label">Sort</span>' + sortChips + '</div>' +
+        '<div class="filter-bar-spacer"></div>' +
+        '<button class="filter-chip" onclick="toggleAllExpand()">Expand / collapse all</button>' +
+      '</div>';
+    }
+
     function renderGroups(groups) {
+      _lastGroups = groups;
       const c = document.getElementById("groups-content");
-      document.getElementById("groups-count").textContent = " (" + groups.length + ")";
-      if (groups.length === 0) {
-        c.innerHTML = '<div class="empty"><strong>No failure groups yet.</strong></div>';
+      const countEl = document.getElementById("groups-count");
+      const totalCount = groups.length;
+      const filtered = filterGroupsByWindow(groups);
+
+      if (countEl) {
+        countEl.textContent = totalCount === filtered.length
+          ? " (" + totalCount + ")"
+          : " (" + filtered.length + " of " + totalCount + " · " + (TIME_WINDOWS[_prefs.window] || TIME_WINDOWS.all).label + ")";
+      }
+
+      if (totalCount === 0) {
+        c.innerHTML = renderFilterBar(0, 0) +
+          '<div class="empty"><strong>No failure groups yet.</strong><br>Run some agents against the backend to populate this view.</div>';
         return;
       }
-      const rows = groups.map(g =>
-        '<tr class="clickable" onclick="showFailureGroupDetail(\'' + escapeHtml(g.group_id) + '\')">' +
-          '<td><span class="badge ' + badgeForClass(g.failure_class) + '">' + escapeHtml(g.failure_class) + '</span></td>' +
-          '<td class="mono">' + escapeHtml(g.signature) + '</td>' +
-          '<td class="num">' + fmtNum(g.event_count) + '</td>' +
-          '<td class="num">' + fmtNum(g.affected_executions) + '</td>' +
-          '<td>' + fmtDate(g.first_seen) + '</td>' +
-          '<td>' + fmtDate(g.last_seen) + '</td>' +
-          '<td class="mono">' + escapeHtml(g.sample_execution_id || "—") + '</td>' +
-        '</tr>').join("");
-      c.innerHTML = '<table><thead><tr>' +
-        '<th>Class</th><th>Signature</th>' +
-        '<th class="num">Events</th><th class="num">Affected</th>' +
-        '<th>First seen</th><th>Last seen</th><th>Sample execution</th>' +
-        '</tr></thead><tbody>' + rows + '</tbody></table>';
+      if (filtered.length === 0) {
+        c.innerHTML = renderFilterBar(0, totalCount) +
+          '<div class="empty"><strong>No failure groups in this window.</strong><br>Try the "All time" filter to see older groups.</div>';
+        return;
+      }
+
+      // Bucket by class.
+      const byClass = {};
+      filtered.forEach(g => {
+        const cls = g.failure_class || "unknown";
+        (byClass[cls] = byClass[cls] || []).push(g);
+      });
+
+      // Order classes by rank (unknown classes go last).
+      const classNames = Object.keys(byClass).sort((a, b) => {
+        const ra = FAILURE_CLASS_RANK[a] || 99;
+        const rb = FAILURE_CLASS_RANK[b] || 99;
+        if (ra !== rb) return ra - rb;
+        return a.localeCompare(b);
+      });
+
+      const cards = classNames.map(cls => {
+        const groupsInCls = sortGroupsWithin(byClass[cls]);
+        const totalAffected = groupsInCls.reduce((s, g) => s + (g.affected_executions || 0), 0);
+        const totalCost     = groupsInCls.reduce((s, g) => s + (g.cost_wasted_usd || 0), 0);
+        const groupCount    = groupsInCls.length;
+        const expanded      = !!(_prefs.expanded && _prefs.expanded[cls]);
+
+        const rows = groupsInCls.map(g =>
+          '<tr class="clickable" onclick="showFailureGroupDetail(\'' + escapeHtml(g.group_id) + '\')">' +
+            '<td class="mono">' + escapeHtml(g.signature) + '</td>' +
+            '<td class="num">' + fmtNum(g.event_count) + '</td>' +
+            '<td class="num">' + fmtNum(g.affected_executions) + '</td>' +
+            '<td class="num">' + (g.cost_wasted_usd ? '$' + g.cost_wasted_usd.toFixed(4) : '—') + '</td>' +
+            '<td>' + fmtDate(g.first_seen) + '</td>' +
+            '<td>' + fmtDate(g.last_seen) + '</td>' +
+          '</tr>').join('');
+
+        return '<div class="class-group' + (expanded ? ' open' : '') + '">' +
+          '<div class="class-group-head" onclick="toggleClassExpand(\'' + escapeHtml(cls) + '\')">' +
+            '<span class="class-group-caret">▸</span>' +
+            '<div class="class-group-title">' +
+              '<span class="badge ' + badgeForClass(cls) + '">' + escapeHtml(cls) + '</span>' +
+            '</div>' +
+            '<div class="class-group-stats">' +
+              '<span class="class-group-stat"><span class="class-group-stat-value">' + fmtNum(groupCount) + '</span> ' +
+                (groupCount === 1 ? 'group' : 'groups') + '</span>' +
+              '<span class="class-group-stat"><span class="class-group-stat-value">' + fmtNum(totalAffected) + '</span> affected</span>' +
+              '<span class="class-group-stat"><span class="class-group-stat-value cost">$' + totalCost.toFixed(4) + '</span> wasted</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="class-group-body">' +
+            '<table><thead><tr>' +
+              '<th>Signature</th>' +
+              '<th class="num">Events</th>' +
+              '<th class="num">Affected</th>' +
+              '<th class="num">Cost wasted</th>' +
+              '<th>First seen</th>' +
+              '<th>Last seen</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      c.innerHTML = renderFilterBar(filtered.length, totalCount) + cards;
     }
 
     function renderExecsTable(execs) {
