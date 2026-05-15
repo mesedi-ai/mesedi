@@ -12,6 +12,11 @@
  *   tool(opts?, fn)          — higher-order function that records each
  *                              call as a tool_call event linked to the
  *                              surrounding wrap()'d execution.
+ *   checkpoint(name, meta?)  — mark a notable point in execution.
+ *   validatorResult(name, passed, opts?) — report a validator outcome.
+ *   instrumentAnthropic(cls?)— patch @anthropic-ai/sdk's
+ *                              Messages.create to emit llm_call events.
+ *                              Optional `cls` for testing.
  *   flush(timeoutMs?)        — wait for the background shipper to
  *                              drain all events submitted so far.
  *   MesediClient             — explicit client for advanced use cases.
@@ -22,5 +27,7 @@ export { MesediClient, configure, flush, getClient } from "./client.js";
 export { EventType, Status, utcNowRfc3339, } from "./events.js";
 export { wrap } from "./wrap.js";
 export { tool } from "./tool.js";
-export const VERSION = "0.0.1";
+export { checkpoint, validatorResult } from "./observe.js";
+export { instrumentAnthropic } from "./anthropic_integration.js";
+export const VERSION = "0.0.2";
 //# sourceMappingURL=index.js.map

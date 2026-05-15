@@ -36,16 +36,21 @@ import hashlib
 import time
 import traceback
 import uuid
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 from mesedi._context import pop_execution_context, push_execution_context
 from mesedi.client import get_client
 from mesedi.events import Execution, Status, utcnow_rfc3339
+from mesedi.halt import Budget, MesediHalt
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def wrap(func: F) -> F:
+def wrap(
+    func: Optional[F] = None,
+    *,
+    budget: Optional[Budget] = None,
+) -> Any:
     """Decorate a function so each call is recorded as an agent execution.
 
     Example::
