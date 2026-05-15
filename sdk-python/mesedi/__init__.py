@@ -57,7 +57,7 @@ from mesedi.observe import checkpoint, emit_llm_call, validator_result
 from mesedi.tool import tool
 from mesedi.wrap import wrap
 
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 
 __all__ = [
     "Budget",

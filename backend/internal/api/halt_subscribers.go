@@ -146,19 +146,28 @@ func (h *Handlers) HandleHaltStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cross-tenant guard: execution must belong to the caller's
-	// project. 404 (not 403) to avoid leaking which execution_ids
-	// exist on other projects.
+	// Cross-tenant guard — lenient on missing-execution to handle the
+	// SDK's async-shipper ordering: wrap() submits create-execution
+	// to the shipper queue (fire-and-forget) and then starts the
+	// halt-stream reader immediately. The reader can race ahead of
+	// the shipper, hitting this endpoint before the execution row
+	// exists. Subscribe has no side effects beyond registry insert,
+	// so accepting "execution doesn't exist yet" subscriptions is
+	// safe — they just sit in the registry until something
+	// (eventually) publishes against the same id, which can only
+	// come from a caller in the SAME project (publish-side enforces
+	// the strict project-id match). If the execution NEVER appears,
+	// the subscription burns its keepalive timer and exits cleanly.
+	//
+	// If the execution DOES exist, we still verify project ownership
+	// strictly. 404 (not 403) on mismatch so we don't leak which
+	// execution_ids exist on other projects.
 	exec, err := h.Store.GetExecution(r.Context(), executionID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "execution not found")
-			return
-		}
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if exec.ProjectID != authProjectID {
+	if exec != nil && exec.ProjectID != authProjectID {
 		writeError(w, http.StatusNotFound, "execution not found")
 		return
 	}

@@ -20,9 +20,15 @@ explicitly calls `mesedi.checkpoint()`.
     sees the wrapped function "return" cleanly; the halt is logged
     on Mesedi's side as the terminal status of the run.
 
-**This slice is pure SDK — no backend changes, no network
-dependency.** A future slice (21b) adds a remote control channel so
-detectors firing on the backend can signal a halt back to the SDK.
+**Sub-slice 21a was pure-SDK** (no backend changes). **Sub-slice 21b**
+adds the remote control channel: the backend exposes
+`GET /executions/{id}/halt-stream` (SSE) and
+`POST /executions/{id}/halt`. The SDK opens the SSE stream in a
+background thread when an execution is wrapped with a budget; when
+the dashboard / detector publishes a halt, the reader sets
+`remote_halt_pending` on this BudgetTracker, and the next
+`check_or_halt()` call raises `MesediHalt(trigger="remote_signal")`.
+The reader lives in `mesedi/halt_stream.py`.
 """
 
 from __future__ import annotations
@@ -100,6 +106,13 @@ class BudgetTracker:
         self._step_count = 0
         self._tokens_in = 0
         self._tokens_out = 0
+        # Sub-slice 21b: when the SSE halt-stream reader receives a
+        # halt event for this execution, it sets this field via
+        # signal_remote_halt(). The next check_or_halt() call reads it
+        # FIRST (before any budget-axis check) and raises with
+        # trigger="remote_signal". Stored as the reason string —
+        # None means "no remote halt pending."
+        self._remote_halt_reason: Optional[str] = None
 
     def increment_steps(self, n: int = 1) -> None:
         with self._lock:
@@ -120,13 +133,47 @@ class BudgetTracker:
                 "wall_clock_seconds": time.perf_counter() - self._started_at_monotonic,
             }
 
+    def signal_remote_halt(self, reason: str) -> None:
+        """Mark this execution as having a pending remote halt.
+
+        Called by the SSE halt-stream reader (see halt_stream.py) when
+        the backend publishes a halt event for this execution. The
+        next `check_or_halt()` call will raise
+        `MesediHalt(trigger="remote_signal")` with the supplied reason.
+
+        Idempotent — multiple signals just overwrite the reason (the
+        last one wins). Thread-safe — the reader runs in its own
+        thread so this is concurrent with `check_or_halt()` running
+        from the agent's thread.
+        """
+        with self._lock:
+            self._remote_halt_reason = reason or "remote halt"
+
     def check_or_halt(self) -> None:
         """Inspect the budget; raise MesediHalt if any limit is exceeded.
 
         Called at every halt-safe checkpoint — LLM-call entry, tool-
         call entry, explicit `checkpoint()`. Cheap when the budget is
         unbounded (early-return) so it's safe to call frequently.
+
+        Priority: remote halt FIRST. If the dashboard / a detector
+        explicitly told us to halt, operator intent beats any budget
+        axis. Local budgets only trip when no remote halt is pending.
         """
+        # Remote halt check — runs even when the budget is unbounded,
+        # so a wrap()'d agent without a local Budget can still be
+        # remote-halted (e.g. for dashboard panic-stop semantics).
+        with self._lock:
+            if self._remote_halt_reason is not None:
+                reason = self._remote_halt_reason
+                # Clear the flag so successive check_or_halt() calls
+                # don't repeat-raise after the first MesediHalt has
+                # already escaped to @wrap. Belt-and-suspenders —
+                # @wrap catches the halt and returns immediately, so
+                # this should never matter, but it costs nothing.
+                self._remote_halt_reason = None
+                raise MesediHalt(reason=reason, trigger="remote_signal")
+
         b = self._budget
         if b.is_unbounded():
             return

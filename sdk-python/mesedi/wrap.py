@@ -38,10 +38,15 @@ import traceback
 import uuid
 from typing import Any, Callable, Optional, TypeVar
 
-from mesedi._context import pop_execution_context, push_execution_context
+from mesedi._context import (
+    current_execution_context,
+    pop_execution_context,
+    push_execution_context,
+)
 from mesedi.client import get_client
 from mesedi.events import Execution, Status, utcnow_rfc3339
 from mesedi.halt import Budget, MesediHalt
+from mesedi.halt_stream import HaltStreamReader
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -104,6 +109,25 @@ def wrap(
         start_wall = time.perf_counter()
         ctx_token = push_execution_context(execution_id, budget=budget)
 
+        # Sub-slice 21b.2: if a budget is configured for this
+        # execution, spawn a background SSE reader subscribed to
+        # /executions/{id}/halt-stream. When the backend publishes a
+        # halt, the reader calls tracker.signal_remote_halt(reason);
+        # the next halt-safe boundary check then raises MesediHalt
+        # with trigger="remote_signal". Fail-open: if the reader can't
+        # subscribe (backend unreachable, etc.) the wrapped agent
+        # still runs with whatever local budget it was given.
+        halt_reader: Optional[HaltStreamReader] = None
+        ctx = current_execution_context()
+        if ctx is not None and ctx.budget_tracker is not None:
+            halt_reader = HaltStreamReader(
+                execution_id=execution_id,
+                base_url=client.base_url,
+                api_key=client.api_key,
+                on_halt=ctx.budget_tracker.signal_remote_halt,
+            )
+            halt_reader.start()
+
         try:
             try:
                 result = func(*args, **kwargs)
@@ -140,6 +164,12 @@ def wrap(
             client.submit_execution_end(execution)
             return result
         finally:
+            # Stop the halt-stream reader BEFORE popping the context,
+            # so any in-flight signal_remote_halt() call against the
+            # tracker still finds a valid context. Daemon thread —
+            # safe to leave running; stop() just unblocks it.
+            if halt_reader is not None:
+                halt_reader.stop()
             # Pop the execution context on EVERY exit path — return,
             # exception, even keyboard-interrupt — so nested wraps
             # correctly restore the outer context.

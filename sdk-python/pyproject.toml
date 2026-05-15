@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mesedi"
-version = "0.0.7"
+version = "0.0.8"
 description = "Mesedi SDK — guardians for autonomous AI."
 readme = "README.md"
 requires-python = ">=3.9"
