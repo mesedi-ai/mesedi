@@ -95,18 +95,20 @@ Owner: solo founder.
 **Status:** Most items DEFERRED to post-Verdifax-LOI to maintain local-only invisibility during acquirer outreach. The local-only path covers the technical foundation work without creating any acquirer-discoverable artifacts.
 
 - [x] **Domain registration confirmed**: `mesedi.ai` purchased and pointing at Cloudflare DNS — **DONE 2026-05-13** (parked, no public DNS records yet)
-- [ ] **Create GitHub organization** `Mesedi` (or `mesedi`) — DEFERRED to post-LOI to avoid acquirer-visibility risk
-- [ ] **Create initial repos** — DEFERRED; local-only directories used instead:
-  - [x] `~/mesedi/backend/` — local directory, local git repo initialized 2026-05-14
-  - [ ] `~/mesedi/sdk-python/` — not started
-  - [ ] `~/mesedi/sdk-typescript/` — not started
-  - [ ] `~/mesedi/dashboard/` — not started
-- [ ] **Provision SaaS accounts** — DEFERRED to post-LOI:
+- [x] **Create GitHub organization** — **DONE 2026-05-15**. Org exists under the `mesediai@gmail.com` owner identity. Exact org handle recorded in `docs/PROJECT_REGISTRY.md`. **No repos pushed yet** — local-only posture maintained during the Verdifax outreach window. Post-LOI launch action: push the local monorepo to a private repo on the new org, then flip to public on launch day. Org hygiene checklist (2FA, branch protection, domain verification, etc.) tracked in PROJECT_REGISTRY.md.
+- [x] **Dedicated project email**: `mesediai@gmail.com` registered 2026-05-15. Separate identity from any Verdifax-side email account, used for GitHub org ownership and future SaaS/package-registry accounts. Pre-launch hygiene checklist (2FA, recovery, signature) tracked in `PROJECT_REGISTRY.md`.
+- [~] **Create initial repos** — partially in place; local-only directories cover v1 build, GitHub org awaits post-LOI push:
+  - [x] `~/mesedi/backend/` — local directory, local git repo initialized 2026-05-14, multiple commits on `main`
+  - [x] `~/mesedi/sdk-python/` — created and committed; v0.0.8 as of 2026-05-15 (Phase 2 + sub-slices 5/6/19/20/21a/21b.2 all landed)
+  - [x] `~/mesedi/sdk-typescript/` — created and committed; v0.0.3 as of 2026-05-15 (Phase 11 + sub-slices 20/21d landed)
+  - [x] `~/mesedi/synthetic-org/` — committed 2026-05-15; 5-industry dogfood substrate
+  - [ ] `~/mesedi/dashboard/` — Next.js production surface DEFERRED to post-LOI. The local-dev dashboard lives embedded in the Go binary at `backend/internal/dashboard/`.
+- [ ] **Provision SaaS accounts** — DEFERRED to post-LOI per `PROJECT_REGISTRY.md`:
   - [ ] Fly.io / Neon / Upstash / Vercel / Clerk / Stripe / Resend / Anthropic / OpenAI / Cloudflare — all deferred
 - [ ] **Cloudflare DNS setup for `mesedi.ai`** — DEFERRED to post-LOI (domain currently parked)
-- [ ] **Email aliases at `mesedi.ai`** — DEFERRED to post-LOI
+- [ ] **Email aliases at `mesedi.ai`** — DEFERRED to post-LOI (operational mail at `mesediai@gmail.com` in the interim)
 - [x] **Initial commit** to backend repo — **DONE 2026-05-14** (local git, no remote)
-- [ ] **Set up GitHub Actions** scaffolds — DEFERRED to post-LOI
+- [ ] **Set up GitHub Actions** scaffolds — DEFERRED to post-LOI (org has no repos yet; CI lands once the public push happens)
 
 **Acceptance (local-only variant):** Local development environment functional. `cd ~/mesedi/backend && go run cmd/api/main.go` serves `/health` on localhost:8080 with structured JSON logs. **DONE 2026-05-14.**
 
