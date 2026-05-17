@@ -279,7 +279,8 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				)
 			} else if len(historicalModels) > 0 {
 				if signature, drift := detectors.DetectModelDrift(currentModels, historicalModels); drift {
-					if dErr := h.Store.GroupDriftSignal(r.Context(), executionID, authProjectID, signature); dErr != nil {
+					isNew, dErr := h.Store.GroupDriftSignal(r.Context(), executionID, authProjectID, signature)
+					if dErr != nil {
 						h.Logger.Warn("drift grouping failed (continuing)",
 							"execution_id", executionID,
 							"signature", signature,
@@ -293,6 +294,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 							"historical_models_count", len(historicalModels),
 						)
 					}
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassDrift, signature, isNew, dErr)
 				}
 			}
 		}
@@ -307,13 +309,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// claimed this execution, GroupCrashedExecution's idempotency check
 	// short-circuits as a no-op.
 	if patch.Status == events.StatusCrashed && patch.CrashSignature != "" {
-		if err := h.Store.GroupCrashedExecution(r.Context(), executionID, authProjectID, patch.CrashSignature); err != nil {
+		isNew, err := h.Store.GroupCrashedExecution(r.Context(), executionID, authProjectID, patch.CrashSignature)
+		if err != nil {
 			h.Logger.Warn("crash grouping failed (continuing)",
 				"execution_id", executionID,
 				"crash_signature", patch.CrashSignature,
 				"error", err.Error(),
 			)
 		}
+		h.maybeFireWebhook(r, authProjectID, store.FailureClassCrashes, patch.CrashSignature, isNew, err)
 	}
 
 	// Phase 3b sub-slice 10: time-budget detector. Any terminal execution
@@ -323,13 +327,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// circuits this call). The threshold is hardcoded at 1s for v0.0.1;
 	// production default will be 60s, configurable per-project later.
 	if isTerminalStatus(patch.Status) && patch.DurationMs > 1000 {
-		if err := h.Store.GroupTimeBudgetExceedance(r.Context(), executionID, authProjectID, patch.DurationMs); err != nil {
+		isNew, err := h.Store.GroupTimeBudgetExceedance(r.Context(), executionID, authProjectID, patch.DurationMs)
+		if err != nil {
 			h.Logger.Warn("time-budget grouping failed (continuing)",
 				"execution_id", executionID,
 				"duration_ms", patch.DurationMs,
 				"error", err.Error(),
 			)
 		}
+		h.maybeFireWebhook(r, authProjectID, store.FailureClassLoops, store.TimeBudgetSignature(patch.DurationMs), isNew, err)
 	}
 
 	// Phase 3b sub-slice 11: step-count detector. Any terminal execution
@@ -348,13 +354,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else if count > 10 {
-			if err := h.Store.GroupStepCountExceedance(r.Context(), executionID, authProjectID, count); err != nil {
+			isNew, gErr := h.Store.GroupStepCountExceedance(r.Context(), executionID, authProjectID, count)
+			if gErr != nil {
 				h.Logger.Warn("step-count grouping failed (continuing)",
 					"execution_id", executionID,
 					"event_count", count,
-					"error", err.Error(),
+					"error", gErr.Error(),
 				)
 			}
+			h.maybeFireWebhook(r, authProjectID, store.FailureClassLoops, store.StepCountSignature(count), isNew, gErr)
 		}
 	}
 
@@ -375,13 +383,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else if toolName != "" {
-			if err := h.Store.GroupToolFailure(r.Context(), executionID, authProjectID, toolName); err != nil {
+			isNew, gErr := h.Store.GroupToolFailure(r.Context(), executionID, authProjectID, toolName)
+			if gErr != nil {
 				h.Logger.Warn("tool-failure grouping failed (continuing)",
 					"execution_id", executionID,
 					"tool_name", toolName,
-					"error", err.Error(),
+					"error", gErr.Error(),
 				)
 			}
+			h.maybeFireWebhook(r, authProjectID, store.FailureClassToolFailures, toolName, isNew, gErr)
 		}
 	}
 
@@ -399,13 +409,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else if validatorName != "" {
-			if err := h.Store.GroupValidatorFailure(r.Context(), executionID, authProjectID, validatorName); err != nil {
+			isNew, gErr := h.Store.GroupValidatorFailure(r.Context(), executionID, authProjectID, validatorName)
+			if gErr != nil {
 				h.Logger.Warn("validator-failure grouping failed (continuing)",
 					"execution_id", executionID,
 					"validator_name", validatorName,
-					"error", err.Error(),
+					"error", gErr.Error(),
 				)
 			}
+			h.maybeFireWebhook(r, authProjectID, store.FailureClassValidator, validatorName, isNew, gErr)
 		}
 	}
 
@@ -453,13 +465,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// repeatedly is a more urgent resource-waste signal than
 			// a single injection attempt embedded in the same prompt.
 			if callHash, found := scanForIdenticalCalls(evts, 3); found {
-				if err := h.Store.GroupIdenticalCallLoop(r.Context(), executionID, authProjectID, callHash); err != nil {
+				isNew, gErr := h.Store.GroupIdenticalCallLoop(r.Context(), executionID, authProjectID, callHash)
+				if gErr != nil {
 					h.Logger.Warn("identical-call grouping failed (continuing)",
 						"execution_id", executionID,
 						"call_hash", callHash,
-						"error", err.Error(),
+						"error", gErr.Error(),
 					)
 				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassLoops, "identical_call_"+callHash, isNew, gErr)
 			}
 
 			// Sub-slice 81: similar-call loop detector. Catches the
@@ -473,13 +487,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			similarMsgs := extractLLMUserMessages(evts)
 			if len(similarMsgs) >= detectors.SimilarCallMinClusterSize {
 				if callHash, found := detectors.DetectSimilarCallLoop(similarMsgs); found {
-					if err := h.Store.GroupSimilarCallLoop(r.Context(), executionID, authProjectID, callHash); err != nil {
+					isNew, gErr := h.Store.GroupSimilarCallLoop(r.Context(), executionID, authProjectID, callHash)
+					if gErr != nil {
 						h.Logger.Warn("similar-call grouping failed (continuing)",
 							"execution_id", executionID,
 							"call_hash", callHash,
-							"error", err.Error(),
+							"error", gErr.Error(),
 						)
 					}
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassLoops, "similar_call_"+callHash, isNew, gErr)
 				}
 			}
 
@@ -497,13 +513,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// injection-classified execution skips cost-velocity even
 			// if it would otherwise have matched.
 			if pattern, found := scanForInjection(evts); found {
-				if err := h.Store.GroupPromptInjection(r.Context(), executionID, authProjectID, pattern); err != nil {
+				isNew, gErr := h.Store.GroupPromptInjection(r.Context(), executionID, authProjectID, pattern)
+				if gErr != nil {
 					h.Logger.Warn("prompt-injection grouping failed (continuing)",
 						"execution_id", executionID,
 						"pattern", pattern,
-						"error", err.Error(),
+						"error", gErr.Error(),
 					)
 				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassInjection, pattern, isNew, gErr)
 			}
 
 			// Sub-slice 16: cost-velocity detector. Any execution whose
@@ -512,13 +530,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// Production version (Phase 5+) compares against a project
 			// rolling baseline rather than an absolute value.
 			if effectiveCost > 0 {
-				if err := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost); err != nil {
+				isNew, gErr := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost)
+				if gErr != nil {
 					h.Logger.Warn("cost-velocity grouping failed (continuing)",
 						"execution_id", executionID,
 						"cost_usd", effectiveCost,
-						"error", err.Error(),
+						"error", gErr.Error(),
 					)
 				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocitySignature(effectiveCost), isNew, gErr)
 			}
 
 			// Drift v2 — lexical signal. Char-3-gram cosine distance
@@ -552,7 +572,8 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					)
 				} else if len(historicalMsgs) > 0 {
 					if signature, distance, drift := detectors.DetectLexicalDrift(currentMsgs, historicalMsgs); drift {
-						if dErr := h.Store.GroupDriftSignal(r.Context(), executionID, authProjectID, signature); dErr != nil {
+						isNew, dErr := h.Store.GroupDriftSignal(r.Context(), executionID, authProjectID, signature)
+						if dErr != nil {
 							h.Logger.Warn("lexical drift grouping failed (continuing)",
 								"execution_id", executionID,
 								"signature", signature,
@@ -568,6 +589,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 								"historical_msgs_count", len(historicalMsgs),
 							)
 						}
+						h.maybeFireWebhook(r, authProjectID, store.FailureClassDrift, signature, isNew, dErr)
 					}
 				}
 			}
@@ -824,6 +846,41 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 			"error", err.Error(),
 		)
 		evts = nil
+	}
+
+	// Server-side token aggregation: if the SDK didn't explicitly PATCH
+	// total_tokens_in / total_tokens_out on the terminal-status update,
+	// derive them from the llm_call event payloads. Lets adapters
+	// (LangChain, CrewAI, etc.) and bare emit_llm_call() callers show
+	// accurate execution-level totals without requiring every SDK to
+	// thread a running counter into the @wrap exit path.
+	//
+	// SDK-supplied values win when present (non-zero) — a future SDK
+	// slice can authoritatively report totals (e.g. accumulating
+	// across streaming chunks the event payloads can't see) and the
+	// dashboard will trust that report.
+	if exec.TotalTokensIn == 0 && exec.TotalTokensOut == 0 {
+		var sumIn, sumOut int
+		for _, e := range evts {
+			if e == nil || e.EventType != events.EventTypeLLMCall {
+				continue
+			}
+			if e.Payload == nil {
+				continue
+			}
+			// Payload is a json.RawMessage; cheaply parse just the
+			// two numeric fields we need.
+			var p struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			}
+			if err := json.Unmarshal(e.Payload, &p); err == nil {
+				sumIn += p.InputTokens
+				sumOut += p.OutputTokens
+			}
+		}
+		exec.TotalTokensIn = sumIn
+		exec.TotalTokensOut = sumOut
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
