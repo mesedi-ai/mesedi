@@ -40,7 +40,7 @@ The seven Mesedi failure classes split cleanly into auto-fixable and recommendat
 
 ## Release sequencing
 
-**Mesedi v1** (currently in-flight, local-only posture, post-LOI launch) — no repair tier yet. The story is "detect, cluster, optionally stop." All seven failure-class detectors, failure-group dedup, hard-halt with local budgets plus SSE remote channel, dashboard with collapse-by-class view, dogfood substrate, operator Halt button, continuous synthetic-org traffic via launchd. Remaining v1 work: webhook escalation (task #83), framework adapters (LangChain / CrewAI / Vercel AI SDK), docs and quickstart polish.
+**Mesedi v1** (currently in-flight, local-only posture, post-LOI launch) — no repair tier yet. The story is "detect, cluster, optionally stop, escalate." All seven failure-class detectors, failure-group dedup, hard-halt with local budgets plus SSE remote channel, dashboard with collapse-by-class view, dogfood substrate, operator Halt button, continuous synthetic-org traffic via launchd, **webhook escalation on first-occurrence of a failure_group with HMAC-signed payloads + retry/backoff + per-project class filter + dashboard UI**. Remaining v1 work: framework adapters (LangChain / CrewAI / Vercel AI SDK), docs and quickstart polish.
 
 **Mesedi v1.5** — Tier 1 (Recommendation). A "Playbooks" feature surfaces canonical fix descriptions per failure-class signature on the dashboard's failure-group detail page. Text only, no actions taken, no Mesedi liability. Ships as a point release between v1 launch and v2.
 
