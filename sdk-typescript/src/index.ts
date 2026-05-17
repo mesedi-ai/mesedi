@@ -46,4 +46,4 @@ export type { MessagesClassLike } from "./anthropic_integration.js";
 export { MesediHalt, isMesediHalt } from "./halt.js";
 export type { Budget, HaltTrigger } from "./halt.js";
 
-export const VERSION = "0.0.3";
+export const VERSION = "0.0.4";
