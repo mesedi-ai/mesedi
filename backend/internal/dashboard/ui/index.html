@@ -148,6 +148,143 @@
       font-family: inherit;
     }
     .revoke-btn:hover { background: var(--danger-bg); }
+
+    /* Secret-reveal action row — copy + dismiss buttons. Used by both
+     * the webhook register-reveal and (eventually) the API-key mint
+     * reveal. */
+    .reveal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .reveal-actions button {
+      padding: 5px 11px;
+      background: var(--bg);
+      border: 0.5px solid var(--border-2);
+      color: var(--text);
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .reveal-actions button:hover { background: var(--surface-2); }
+    .reveal-actions button.dismiss {
+      color: var(--text-muted);
+    }
+    .reveal-actions button.copied {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success);
+    }
+
+    /* Webhook settings page (task #83 slice 4). */
+    .webhook-form {
+      display: grid;
+      grid-template-columns: 1fr 2fr auto;
+      gap: 10px;
+      align-items: start;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 18px;
+    }
+    .webhook-form input[type="text"], .webhook-form input[type="url"] {
+      padding: 8px 12px;
+      background: var(--bg);
+      border: 0.5px solid var(--border-2);
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    .webhook-form input:focus {
+      outline: none; border-color: var(--accent);
+    }
+    .webhook-form-classes {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 4px 0 0 0;
+    }
+    .webhook-form-classes label {
+      display: flex; align-items: center; gap: 5px; cursor: pointer;
+    }
+    .webhook-form-classes input { cursor: pointer; }
+    .webhook-form-hint {
+      grid-column: 1 / -1;
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 2px 0 0 0;
+    }
+    .webhook-form button {
+      padding: 8px 14px;
+      background: var(--accent);
+      border: 0.5px solid var(--accent);
+      color: var(--bg);
+      border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .webhook-form button:hover { opacity: 0.9; }
+    .webhook-row-actions {
+      display: flex; gap: 6px;
+    }
+    .small-btn {
+      padding: 3px 9px;
+      background: transparent;
+      border: 0.5px solid var(--border-2);
+      color: var(--text-muted);
+      border-radius: 5px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .small-btn:hover { background: var(--surface-2); color: var(--text); }
+    .deliveries-panel {
+      margin: 6px 0 18px 0;
+      padding: 12px 14px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 8px;
+    }
+    .deliveries-panel h3 {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .deliveries-panel table { font-size: 12px; }
+    .status-badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .status-delivered {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 0.5px solid var(--success-border);
+    }
+    .status-failed {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 0.5px solid var(--danger-border);
+    }
+    .status-pending {
+      background: var(--surface-2);
+      color: var(--text-muted);
+      border: 0.5px solid var(--border-2);
+    }
+
     main { padding: 28px; max-width: 1280px; margin: 0 auto; }
 
     .page-head {
@@ -537,6 +674,7 @@
     </div>
     <div style="display: flex; align-items: center; gap: 16px;">
       <a class="nav-link" onclick="showOverview()">Overview</a>
+      <a class="nav-link" onclick="showWebhooks()">Webhooks</a>
       <a class="nav-link" onclick="showSettings()">Settings</a>
       <span class="dev-badge">DEV ONLY · LOCALHOST</span>
     </div>
@@ -1413,6 +1551,258 @@
         await refreshKeys();
       } catch (e) {
         alert("Revoke failed: " + e.message);
+      }
+    }
+
+    // ── Webhooks page (task #83 slice 4) ───────────────────────────────
+    // Lists registered webhooks, lets the operator create new ones with a
+    // class filter, run an on-demand test delivery, view recent deliveries
+    // inline, and delete. Reveals each newly-created webhook's secret ONCE
+    // — same pattern as the API-key mint page.
+
+    const FAILURE_CLASSES_FOR_FILTER = [
+      "crashes", "loops", "tool_failures", "validator_failures",
+      "drift", "cost_velocity", "prompt_injection",
+    ];
+
+    async function showWebhooks() {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <div class="page-head">
+          <div>
+            <h1>Webhooks · failure-class escalation</h1>
+            <div class="subtitle">When Mesedi detects a brand-new failure pattern in this project, it POSTs a signed JSON payload to each registered URL. Secret is shown ONCE at creation.</div>
+          </div>
+          <button class="reload-btn" onclick="showWebhooks()">↻ Reload</button>
+        </div>
+        <div id="webhook-revealed"></div>
+        <div class="webhook-form">
+          <input type="text" id="wh-name" placeholder="Label (optional) — e.g. 'slack-oncall'" />
+          <input type="url" id="wh-url" placeholder="https://hooks.slack.com/services/..." />
+          <button onclick="createWebhook()">+ Register</button>
+          <div class="webhook-form-classes" id="wh-classes">
+            ${FAILURE_CLASSES_FOR_FILTER.map(c =>
+              `<label><input type="checkbox" value="${escapeHtml(c)}" /> ${escapeHtml(c)}</label>`
+            ).join("")}
+          </div>
+          <div class="webhook-form-hint">Leave all classes unchecked to receive every failure class.</div>
+        </div>
+        <div id="webhooks-content"><div class="empty">Loading…</div></div>
+      `;
+      await refreshWebhooks();
+    }
+
+    async function refreshWebhooks() {
+      const c = document.getElementById("webhooks-content");
+      try {
+        const data = await fetchJSON("/webhooks");
+        const hooks = data.webhooks || [];
+        if (hooks.length === 0) {
+          c.innerHTML = '<div class="empty"><strong>No webhooks yet.</strong><br>Register one above and Mesedi will POST to it on every new failure class.</div>';
+          return;
+        }
+        const rows = hooks.map(h => {
+          const classes = (h.enabled_classes && h.enabled_classes.length)
+            ? h.enabled_classes.join(", ")
+            : "<em>all classes</em>";
+          const enabledChip = h.enabled
+            ? '<span class="status-badge status-delivered">enabled</span>'
+            : '<span class="status-badge status-pending">disabled</span>';
+          return `<tr>
+            <td>${escapeHtml(h.name || "—")}</td>
+            <td class="mono" style="word-break: break-all;">${escapeHtml(h.url)}</td>
+            <td>${classes}</td>
+            <td>${enabledChip}</td>
+            <td>${fmtDate(h.created_at)}</td>
+            <td>
+              <div class="webhook-row-actions">
+                <button class="small-btn" onclick="testWebhook('${escapeHtml(h.webhook_id)}')">Test</button>
+                <button class="small-btn" onclick="toggleDeliveries('${escapeHtml(h.webhook_id)}')">Deliveries</button>
+                <button class="revoke-btn" onclick="deleteWebhook('${escapeHtml(h.webhook_id)}', '${escapeHtml(h.name || h.webhook_id)}')">Delete</button>
+              </div>
+            </td>
+          </tr>
+          <tr id="del-row-${escapeHtml(h.webhook_id)}" style="display: none;">
+            <td colspan="6"><div id="del-panel-${escapeHtml(h.webhook_id)}" class="deliveries-panel"></div></td>
+          </tr>`;
+        }).join("");
+        c.innerHTML = `<table>
+          <thead><tr>
+            <th>Label</th><th>URL</th><th>Classes</th><th>Status</th><th>Created</th><th></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+      } catch (e) {
+        c.innerHTML = '<div class="error">Fetch failed: ' + e.message + '</div>';
+      }
+    }
+
+    async function createWebhook() {
+      const name = document.getElementById("wh-name").value.trim();
+      const url = document.getElementById("wh-url").value.trim();
+      const classes = Array.from(
+        document.querySelectorAll('#wh-classes input[type="checkbox"]:checked')
+      ).map(el => el.value);
+
+      if (!url) {
+        document.getElementById("webhook-revealed").innerHTML =
+          '<div class="error">URL is required.</div>';
+        return;
+      }
+
+      try {
+        const r = await fetch("/webhooks", {
+          method: "POST",
+          headers: { ...HEADERS, "Content-Type": "application/json" },
+          body: JSON.stringify({ name, url, enabled_classes: classes }),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        const data = await r.json();
+        document.getElementById("webhook-revealed").innerHTML = `
+          <div class="key-revealed">
+            <div class="label">Webhook registered · secret shown ONCE</div>
+            <div class="value" id="webhook-secret-value">${escapeHtml(data.secret)}</div>
+            <div class="warn">⚠ ${escapeHtml(data.warning || "Store this secret now. Use it to verify the X-Mesedi-Signature header on inbound deliveries (HMAC-SHA256 of the raw body).")}</div>
+            <div class="reveal-actions">
+              <button id="webhook-secret-copy" onclick="copyWebhookSecret('${escapeHtml(data.secret)}')">Copy secret</button>
+              <button class="dismiss" onclick="dismissWebhookSecret()">Dismiss</button>
+            </div>
+          </div>
+        `;
+        document.getElementById("wh-name").value = "";
+        document.getElementById("wh-url").value = "";
+        document.querySelectorAll('#wh-classes input[type="checkbox"]').forEach(el => el.checked = false);
+        await refreshWebhooks();
+      } catch (e) {
+        document.getElementById("webhook-revealed").innerHTML =
+          '<div class="error">Register failed: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function copyWebhookSecret(secret) {
+      const btn = document.getElementById("webhook-secret-copy");
+      try {
+        await navigator.clipboard.writeText(secret);
+        if (btn) {
+          const original = btn.textContent;
+          btn.textContent = "✓ Copied";
+          btn.classList.add("copied");
+          setTimeout(() => {
+            btn.textContent = original;
+            btn.classList.remove("copied");
+          }, 1500);
+        }
+      } catch (e) {
+        // Fallback for browsers without clipboard API: select the
+        // secret element so the user can ⌘C themselves.
+        const valueEl = document.getElementById("webhook-secret-value");
+        if (valueEl) {
+          const range = document.createRange();
+          range.selectNodeContents(valueEl);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        if (btn) btn.textContent = "Select-copy (clipboard unavailable)";
+      }
+    }
+
+    function dismissWebhookSecret() {
+      const el = document.getElementById("webhook-revealed");
+      if (el) el.innerHTML = "";
+    }
+
+    async function deleteWebhook(webhookID, label) {
+      if (!confirm(`Delete webhook "${label}"? Future failure groups will no longer notify it.`)) {
+        return;
+      }
+      try {
+        const r = await fetch("/webhooks/" + encodeURIComponent(webhookID), {
+          method: "DELETE",
+          headers: HEADERS,
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        await refreshWebhooks();
+      } catch (e) {
+        alert("Delete failed: " + e.message);
+      }
+    }
+
+    async function testWebhook(webhookID) {
+      try {
+        const r = await fetch("/webhooks/" + encodeURIComponent(webhookID) + "/test", {
+          method: "POST",
+          headers: HEADERS,
+        });
+        const data = await r.json();
+        if (data.ok) {
+          alert(`Test delivered ✓\nattempts: ${data.attempts}\nhttp: ${data.http_status}\ntook ${data.duration_ms}ms`);
+        } else {
+          alert(`Test FAILED\nattempts: ${data.attempts}\nerror: ${data.error || "—"}\nhttp: ${data.http_status || "—"}`);
+        }
+        // Refresh deliveries panel if currently open for this webhook.
+        const row = document.getElementById("del-row-" + webhookID);
+        if (row && row.style.display !== "none") {
+          await loadDeliveries(webhookID);
+        }
+      } catch (e) {
+        alert("Test request failed: " + e.message);
+      }
+    }
+
+    async function toggleDeliveries(webhookID) {
+      const row = document.getElementById("del-row-" + webhookID);
+      if (!row) return;
+      if (row.style.display === "none") {
+        row.style.display = "";
+        await loadDeliveries(webhookID);
+      } else {
+        row.style.display = "none";
+      }
+    }
+
+    async function loadDeliveries(webhookID) {
+      const panel = document.getElementById("del-panel-" + webhookID);
+      if (!panel) return;
+      panel.innerHTML = '<div class="empty">Loading deliveries…</div>';
+      try {
+        const data = await fetchJSON("/webhooks/" + encodeURIComponent(webhookID) + "/deliveries");
+        const deliveries = data.deliveries || [];
+        if (deliveries.length === 0) {
+          panel.innerHTML = '<h3>Recent deliveries</h3><div class="empty">No deliveries yet.</div>';
+          return;
+        }
+        const rows = deliveries.map(d => {
+          let statusCls = "status-pending";
+          if (d.status === "delivered") statusCls = "status-delivered";
+          else if (d.status === "failed") statusCls = "status-failed";
+          return `<tr>
+            <td>${fmtDate(d.created_at)}</td>
+            <td>${escapeHtml(d.failure_class || "—")}</td>
+            <td class="mono">${escapeHtml(d.signature || "—")}</td>
+            <td class="num">${d.attempt}</td>
+            <td><span class="status-badge ${statusCls}">${escapeHtml(d.status)}</span></td>
+            <td class="num">${d.http_status ?? "—"}</td>
+            <td class="num">${d.duration_ms}ms</td>
+            <td>${escapeHtml(d.error || "")}</td>
+          </tr>`;
+        }).join("");
+        panel.innerHTML = `<h3>Recent deliveries · ${deliveries.length}</h3>
+          <table>
+            <thead><tr>
+              <th>When</th><th>Class</th><th>Signature</th><th>Try</th>
+              <th>Status</th><th>HTTP</th><th>Took</th><th>Error</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      } catch (e) {
+        panel.innerHTML = '<div class="error">Fetch failed: ' + e.message + '</div>';
       }
     }
 
