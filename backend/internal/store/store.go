@@ -35,6 +35,53 @@ type APIKey struct {
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
+// ProjectWebhook is a per-project webhook configuration for failure-class
+// escalation. When a failure_group fires (slice 2 dispatcher), Mesedi
+// looks up every enabled webhook for the project, filters by
+// EnabledClasses, and POSTs a signed payload to each matching URL.
+//
+// Secret is a shared symmetric HMAC key returned to the caller ONCE at
+// creation time; the dispatcher uses it to sign outbound payloads with
+// an X-Mesedi-Signature header the receiver verifies. Stored
+// plaintext for local-dev; production deployments would encrypt the
+// column at rest with KMS.
+//
+// EnabledClasses is a JSON-encoded array of failure-class names. Empty
+// or nil means "all classes" — the common case. Validation that
+// supplied class names match the FailureClass* constants happens at
+// the handler layer.
+type ProjectWebhook struct {
+	WebhookID       string    `json:"webhook_id"`
+	ProjectID       string    `json:"project_id"`
+	Name            string    `json:"name,omitempty"`
+	URL             string    `json:"url"`
+	Secret          string    `json:"-"` // never returned in list responses
+	EnabledClasses  []string  `json:"enabled_classes"`
+	Enabled         bool      `json:"enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// WebhookDelivery is one attempted POST to a registered webhook URL.
+// One row per attempt (including retries); a single failure-group
+// escalation may produce up to 3 rows under the default retry policy.
+//
+// Status values: "pending" | "delivered" | "failed".
+type WebhookDelivery struct {
+	DeliveryID    string    `json:"delivery_id"`
+	WebhookID     string    `json:"webhook_id"`
+	ProjectID     string    `json:"project_id"`
+	FailureClass  string    `json:"failure_class,omitempty"`
+	Signature     string    `json:"signature,omitempty"`
+	GroupID       string    `json:"group_id,omitempty"`
+	Attempt       int       `json:"attempt"`
+	Status        string    `json:"status"`
+	HTTPStatus    *int      `json:"http_status,omitempty"`
+	Error         string    `json:"error,omitempty"`
+	ResponseBody  string    `json:"response_body,omitempty"`
+	DurationMs    int64     `json:"duration_ms"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 // Failure-class constants. One value per detector that produces a
 // failure_group. Crashes is the only class wired into the backend
 // detector today; loops / tool_failures / etc. come online as their
@@ -90,6 +137,41 @@ type Store interface {
 	// key doesn't exist or belongs to a different project — protects
 	// against cross-tenant deletion via id-guessing.
 	DeleteAPIKey(ctx context.Context, keyID, projectID string) error
+
+	// Project webhooks (failure-class escalation, task #83).
+	// CreateProjectWebhook persists a new webhook configuration. The
+	// caller is responsible for generating WebhookID + Secret. CreatedAt
+	// is set if zero.
+	CreateProjectWebhook(ctx context.Context, wh *ProjectWebhook) error
+	// ListProjectWebhooksForProject returns every webhook (enabled and
+	// disabled) for a project, sorted by CreatedAt DESC. The Secret
+	// field is intentionally cleared on the returned values — the
+	// secret is shown ONLY at creation time.
+	ListProjectWebhooksForProject(ctx context.Context, projectID string) ([]*ProjectWebhook, error)
+	// ListEnabledProjectWebhooks returns only the enabled webhooks for
+	// a project, WITH the Secret populated. Used by the slice-2
+	// dispatcher to sign outbound payloads. Never call this from a
+	// handler that returns the result to a client.
+	ListEnabledProjectWebhooks(ctx context.Context, projectID string) ([]*ProjectWebhook, error)
+	// DeleteProjectWebhook hard-deletes a webhook by id, but ONLY if
+	// it belongs to the given project. Returns ErrNotFound if the
+	// webhook doesn't exist or belongs to a different project.
+	DeleteProjectWebhook(ctx context.Context, webhookID, projectID string) error
+	// GetProjectWebhook returns one webhook by id WITH the Secret
+	// populated. Used by the test-trigger handler to look up the
+	// secret before dispatching. Returns ErrNotFound if absent or if
+	// the webhook belongs to a different project.
+	GetProjectWebhook(ctx context.Context, webhookID, projectID string) (*ProjectWebhook, error)
+
+	// Webhook delivery log (slice 2 dispatcher).
+	// RecordWebhookDelivery persists one delivery attempt row. The
+	// caller is responsible for filling in WebhookID, ProjectID,
+	// Status, Attempt, and any of the optional fields; DeliveryID
+	// and CreatedAt are set here if zero.
+	RecordWebhookDelivery(ctx context.Context, d *WebhookDelivery) error
+	// ListDeliveriesForWebhook returns the most recent N deliveries
+	// for a webhook, sorted by created_at DESC.
+	ListDeliveriesForWebhook(ctx context.Context, webhookID string, limit int) ([]*WebhookDelivery, error)
 
 	// Executions.
 	CreateExecution(ctx context.Context, exec *events.Execution) error

@@ -174,6 +174,12 @@ func main() {
 	mux.Handle("POST /executions/{id}/halt", privateHandler)
 	// Tier 1 Playbooks (auth-required).
 	mux.Handle("GET /playbooks", privateHandler)
+	// Task #83 — webhook escalation config + dispatcher (auth-required).
+	mux.Handle("GET /webhooks", privateHandler)
+	mux.Handle("POST /webhooks", privateHandler)
+	mux.Handle("DELETE /webhooks/{id}", privateHandler)
+	mux.Handle("POST /webhooks/{id}/test", privateHandler)
+	mux.Handle("GET /webhooks/{id}/deliveries", privateHandler)
 
 	// Top-level middleware: recover from panics, log every request.
 	root := api.NewTopChain(logger)(mux)
