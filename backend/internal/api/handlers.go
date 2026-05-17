@@ -11,6 +11,7 @@
 package api
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,7 +19,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"mesedi/backend/internal/detectors"
@@ -26,24 +29,27 @@ import (
 	"mesedi/backend/internal/playbooks"
 	"mesedi/backend/internal/pricing"
 	"mesedi/backend/internal/store"
+	"mesedi/backend/internal/webhooks"
 )
 
 // Handlers carries dependencies needed by HTTP handlers. As more
 // subsystems come online (storage, detectors, etc.) they get attached
 // here rather than passed through each handler signature.
 type Handlers struct {
-	Logger   *slog.Logger
-	Store    store.Store
-	HaltSubs *HaltSubscribers // sub-slice 21b — SSE halt-channel registry
+	Logger        *slog.Logger
+	Store         store.Store
+	HaltSubs      *HaltSubscribers // sub-slice 21b — SSE halt-channel registry
+	WebhookClient *http.Client     // task #83 — outbound dispatcher HTTP client
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
 // a literal) so the dependencies become explicit as the surface grows.
 func New(logger *slog.Logger, s store.Store) *Handlers {
 	return &Handlers{
-		Logger:   logger,
-		Store:    s,
-		HaltSubs: NewHaltSubscribers(),
+		Logger:        logger,
+		Store:         s,
+		HaltSubs:      NewHaltSubscribers(),
+		WebhookClient: webhooks.DefaultHTTPClient(),
 	}
 }
 
@@ -75,6 +81,13 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// signature. Plain GET with query params; content is the embedded
 	// markdown shipped in internal/playbooks/content/.
 	mux.HandleFunc("GET /playbooks", h.HandleGetPlaybook)
+	// Task #83 — webhook escalation config + dispatcher.
+	mux.HandleFunc("GET /webhooks", h.HandleListWebhooks)
+	mux.HandleFunc("POST /webhooks", h.HandleCreateWebhook)
+	mux.HandleFunc("DELETE /webhooks/{id}", h.HandleDeleteWebhook)
+	// Slice 2: manual test-delivery trigger + deliveries log read.
+	mux.HandleFunc("POST /webhooks/{id}/test", h.HandleTestWebhook)
+	mux.HandleFunc("GET /webhooks/{id}/deliveries", h.HandleListWebhookDeliveries)
 }
 
 // HandleGetPlaybook returns the markdown content for the playbook
@@ -1096,6 +1109,347 @@ func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		"ok":     true,
 		"key_id": keyID,
 	})
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Webhook escalation config (task #83 slice 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+// validFailureClasses is the allowlist of class names accepted in the
+// `enabled_classes` field on POST /webhooks. Bigger than the
+// FailureClass* constants in store.go feels like duplication, but it
+// lets us treat the webhook layer's accepted classes as an
+// independently-evolving surface from the detector's emitted classes.
+var validFailureClasses = map[string]struct{}{
+	store.FailureClassCrashes:      {},
+	store.FailureClassLoops:        {},
+	store.FailureClassToolFailures: {},
+	store.FailureClassValidator:    {},
+	store.FailureClassDrift:        {},
+	store.FailureClassCostVelocity: {},
+	store.FailureClassInjection:    {},
+}
+
+// HandleListWebhooks returns the calling project's webhooks. The
+// `secret` field is never serialized — it's only ever shown once at
+// creation time.
+func (h *Handlers) HandleListWebhooks(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	hooks, err := h.Store.ListProjectWebhooksForProject(r.Context(), authProjectID)
+	if err != nil {
+		h.Logger.Error("list webhooks failed", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"webhooks": hooks,
+		"count":    len(hooks),
+	})
+}
+
+// HandleCreateWebhook registers a new webhook for the calling project
+// and returns the generated secret ONCE. Subsequent list responses
+// omit the secret.
+//
+// Request body:
+//
+//	{
+//	  "name":            "string (optional, human label)",
+//	  "url":             "https://... (required, must be http(s))",
+//	  "enabled_classes": ["crashes","tool_failures"] (optional; empty/missing = all),
+//	  "enabled":         true (optional, default true)
+//	}
+//
+// The dispatcher (slice 2) will only deliver to webhooks where
+// enabled=true and the failure_group's class is either in
+// enabled_classes OR enabled_classes is empty.
+func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	var body struct {
+		Name           string   `json:"name,omitempty"`
+		URL            string   `json:"url"`
+		EnabledClasses []string `json:"enabled_classes,omitempty"`
+		Enabled        *bool    `json:"enabled,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+
+	// URL validation: must be parseable, must have http/https scheme,
+	// must have a host. Anything else is a misconfiguration that would
+	// just generate dispatcher-side errors later.
+	body.URL = strings.TrimSpace(body.URL)
+	if body.URL == "" {
+		writeError(w, http.StatusBadRequest, "url required")
+		return
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil || parsed.Host == "" {
+		writeError(w, http.StatusBadRequest, "url is not a valid URL")
+		return
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		writeError(w, http.StatusBadRequest, "url must use http or https scheme")
+		return
+	}
+
+	// Validate enabled_classes — every entry must match a known class.
+	// Unknown class names would just silently never fire, which is the
+	// worst failure mode for an alerting feature; reject loudly.
+	for _, c := range body.EnabledClasses {
+		if _, known := validFailureClasses[c]; !known {
+			writeError(w, http.StatusBadRequest,
+				"unknown failure_class: "+c+" (valid: crashes, loops, tool_failures, validator_failures, drift, cost_velocity, prompt_injection)")
+			return
+		}
+	}
+
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+
+	// Generate webhook_id + secret. webhook_id is a short stable
+	// identifier for client-side reference; secret is 32 bytes of
+	// random entropy hex-encoded (256-bit HMAC key, industry-standard
+	// strength for symmetric webhook signing).
+	webhookID, err := newWebhookID()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "generate webhook_id: "+err.Error())
+		return
+	}
+	secret, err := newWebhookSecret()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "generate secret: "+err.Error())
+		return
+	}
+
+	rec := &store.ProjectWebhook{
+		WebhookID:      webhookID,
+		ProjectID:      authProjectID,
+		Name:           body.Name,
+		URL:            body.URL,
+		Secret:         secret,
+		EnabledClasses: body.EnabledClasses,
+		Enabled:        enabled,
+	}
+	if err := h.Store.CreateProjectWebhook(r.Context(), rec); err != nil {
+		writeError(w, http.StatusInternalServerError, "persist webhook: "+err.Error())
+		return
+	}
+
+	h.Logger.Info("webhook created",
+		"webhook_id", webhookID,
+		"project_id", authProjectID,
+		"url", body.URL,
+		"enabled", enabled,
+		"class_filter_count", len(body.EnabledClasses),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"webhook_id":      webhookID,
+		"url":             body.URL,
+		"name":            body.Name,
+		"enabled_classes": body.EnabledClasses,
+		"enabled":         enabled,
+		"secret":          secret,
+		"warning":         "Store this secret now — it will never be shown again. Use it to verify the X-Mesedi-Signature header on inbound webhook deliveries.",
+	})
+}
+
+// HandleDeleteWebhook hard-deletes a webhook. Project-scoped via the
+// store method's project_id guard; cross-tenant id-guessing returns
+// 404, not 403, to avoid leaking which ids exist.
+func (h *Handlers) HandleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
+	webhookID := r.PathValue("id")
+	if webhookID == "" {
+		writeError(w, http.StatusBadRequest, "webhook_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	if err := h.Store.DeleteProjectWebhook(r.Context(), webhookID, authProjectID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "webhook not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.Logger.Info("webhook deleted",
+		"webhook_id", webhookID,
+		"project_id", authProjectID,
+	)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"webhook_id": webhookID,
+	})
+}
+
+// HandleTestWebhook fires a synthetic delivery against a webhook so an
+// operator can verify the receiver is reachable and HMAC-verifying
+// correctly. Blocks until the delivery resolves (delivered or failed
+// after retries) so the response carries the outcome.
+//
+// Project-scoped: the webhook must belong to the calling project. The
+// dashboard URL embedded in the payload is derived from the request's
+// Host header — adequate for local-dev; a future slice will make this
+// configurable via a flag/env var for production deployments.
+func (h *Handlers) HandleTestWebhook(w http.ResponseWriter, r *http.Request) {
+	webhookID := r.PathValue("id")
+	if webhookID == "" {
+		writeError(w, http.StatusBadRequest, "webhook_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	wh, err := h.Store.GetProjectWebhook(r.Context(), webhookID, authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "webhook not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "lookup webhook: "+err.Error())
+		return
+	}
+
+	// Derive a dashboard base URL from the inbound request — best-effort
+	// for slice 2. Production deployments would set this from config.
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	dashboardBase := scheme + "://" + r.Host
+
+	// Build a delivery_id up front so the payload echoes it back to the
+	// receiver in the X-Mesedi-Event-Id header (the receiver can use it
+	// for idempotency).
+	rndBuf := make([]byte, 8)
+	if _, err := rand.Read(rndBuf); err != nil {
+		writeError(w, http.StatusInternalServerError, "generate delivery_id: "+err.Error())
+		return
+	}
+	deliveryID := "del-" + hex.EncodeToString(rndBuf)
+
+	payload := webhooks.BuildTestPayload(wh, dashboardBase, deliveryID)
+
+	// Run delivery — synchronous for slice 2; slice 3's auto-fire path
+	// will run this in a goroutine.
+	result, attempts := webhooks.Deliver(r.Context(), h.Logger, h.WebhookClient, wh, payload)
+
+	// Persist every attempt to the deliveries log (best-effort: a
+	// persistence error here doesn't change the operator-visible
+	// outcome, but does get logged).
+	for i := range attempts {
+		if err := h.Store.RecordWebhookDelivery(r.Context(), &attempts[i]); err != nil {
+			h.Logger.Warn("record webhook delivery failed (continuing)",
+				"webhook_id", webhookID,
+				"attempt", attempts[i].Attempt,
+				"error", err.Error(),
+			)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":          result.Status == "delivered",
+		"webhook_id":  webhookID,
+		"delivery_id": deliveryID,
+		"status":      result.Status,
+		"attempts":    result.Attempts,
+		"http_status": result.HTTPStatus,
+		"error":       result.Error,
+		"duration_ms": result.DurationMs,
+		"payload":     payload,
+	})
+}
+
+// HandleListWebhookDeliveries returns the most recent delivery attempts
+// for a webhook. Project-scoped via the webhook lookup. Default limit
+// 50; capped at 200.
+func (h *Handlers) HandleListWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
+	webhookID := r.PathValue("id")
+	if webhookID == "" {
+		writeError(w, http.StatusBadRequest, "webhook_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	// Confirm webhook belongs to project before returning its log.
+	if _, err := h.Store.GetProjectWebhook(r.Context(), webhookID, authProjectID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "webhook not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "lookup webhook: "+err.Error())
+		return
+	}
+
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	deliveries, err := h.Store.ListDeliveriesForWebhook(r.Context(), webhookID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list deliveries: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"webhook_id": webhookID,
+		"deliveries": deliveries,
+		"count":      len(deliveries),
+	})
+}
+
+// newWebhookID returns a short stable identifier for a webhook row.
+// Format: "wh-<16-hex-chars>" — readable in logs, sortable, no
+// information leak about creation time. 64 bits of entropy is plenty
+// for a per-project identifier space.
+func newWebhookID() (string, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return "wh-" + hex.EncodeToString(buf[:]), nil
+}
+
+// newWebhookSecret returns a 256-bit random secret as a 64-char hex
+// string. Used as the HMAC key the dispatcher signs payloads with;
+// the receiver verifies signatures using the same value.
+func newWebhookSecret() (string, error) {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf[:]), nil
 }
 
 // scanForIdenticalCalls returns the short-hex hash of an LLM call
