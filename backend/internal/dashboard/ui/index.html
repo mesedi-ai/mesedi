@@ -177,6 +177,29 @@
     .reload-btn:hover { background: var(--surface-2); border-color: var(--surface-3); }
     .reload-btn:active { transform: translateY(1px); }
 
+    /* Operator-action row above an execution's metadata. Only rendered
+     * when the execution is still running (status === "started"); the
+     * Halt button POSTs /executions/{id}/halt to push a halt event via
+     * the SSE channel the SDK is subscribed to. */
+    .exec-actions {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .halt-btn {
+      padding: 8px 18px;
+      background: var(--danger-bg);
+      border: 0.5px solid var(--danger-border);
+      color: var(--danger);
+      border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .halt-btn:hover { background: var(--danger); color: var(--bg); }
+    .halt-btn:active { transform: translateY(1px); }
+    .halt-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
     .stats-row {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -839,7 +862,23 @@
     function renderExecutionDetail(exec, events) {
       const c = document.getElementById("detail-content");
 
+      // Operator Halt action — only visible while the execution is
+      // still running. POSTs to /executions/{id}/halt which pushes a
+      // halt event over the SSE channel the SDK is subscribed to.
+      // The agent halts at the next safe boundary (tool entry, LLM
+      // call entry, checkpoint), runs its try/finally cleanup, and
+      // PATCHes the execution to status=halted.
+      const haltAction = exec.status === "started"
+        ? '<div class="exec-actions">' +
+            '<button class="halt-btn" ' +
+              'onclick="haltExecution(\'' + escapeHtml(exec.execution_id) + '\', this)">' +
+              '⛔ Halt this execution' +
+            '</button>' +
+          '</div>'
+        : "";
+
       const meta = `
+        ${haltAction}
         <div class="meta-grid">
           <div class="meta-cell">
             <div class="meta-label">Status</div>
@@ -915,6 +954,78 @@
         <th class="num">#</th><th>Event</th><th>Summary</th>
         <th class="num">Duration</th><th>Time</th>
       </tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    // Operator-triggered halt — POST /executions/{id}/halt to the
+    // backend, which fans the halt event out over SSE to whatever
+    // SDK process is subscribed for this execution. The agent stops
+    // at the next safe boundary; the dashboard reloads the execution
+    // detail shortly after so the operator sees the new status=halted
+    // state.
+    //
+    // Three response paths to handle:
+    //   200 + {notified: N}   — N>=1 SDK subscriber received the halt.
+    //                           Tell the operator, reload the detail.
+    //   404 + {error: "no active halt-stream subscribers..."}
+    //                         — execution has no live SDK listener
+    //                           (probably already terminal, or the
+    //                           agent wasn't budgeted so it never
+    //                           subscribed). Tell the operator —
+    //                           still a useful failure mode to know
+    //                           about, not a bug.
+    //   other                 — surface raw HTTP status + body for
+    //                           debugging.
+    async function haltExecution(executionID, btn) {
+      if (!confirm(
+        "Halt this execution?\n\n" +
+        "The SDK will be signaled to stop at the next safe boundary " +
+        "(next tool call, LLM call, or checkpoint). The agent's normal " +
+        "try/finally cleanup will run; the execution will be recorded " +
+        "as status=halted with crash_signature=halt:remote_signal."
+      )) return;
+
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Halting…";
+      }
+
+      try {
+        const r = await fetch("/executions/" + encodeURIComponent(executionID) + "/halt", {
+          method: "POST",
+          headers: Object.assign({}, HEADERS, { "Content-Type": "application/json" }),
+          body: JSON.stringify({ reason: "halted by operator from dashboard" }),
+        });
+        const text = await r.text();
+        let body = null;
+        try { body = JSON.parse(text); } catch { /* not JSON */ }
+
+        if (r.ok && body && body.notified) {
+          alert(
+            "Halt delivered to " + body.notified + " SDK subscriber(s).\n\n" +
+            "The execution will stop at its next safe boundary. " +
+            "Reloading the detail page shortly to show the new status."
+          );
+          setTimeout(() => showExecutionDetail(executionID), 1500);
+          return;
+        }
+        if (r.status === 404 && body && body.error) {
+          alert(
+            "Halt could not be delivered:\n\n" + body.error + "\n\n" +
+            "This usually means the execution has no live SDK listener " +
+            "(either it's already terminal, or the wrapped agent didn't " +
+            "set a Budget so no halt-stream subscription was opened)."
+          );
+        } else {
+          alert("Halt failed: HTTP " + r.status + "\n" + text);
+        }
+      } catch (err) {
+        alert("Halt request failed: " + (err.message || String(err)));
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "⛔ Halt this execution";
+        }
+      }
     }
 
     // Extract a short human-readable summary from event payload.
