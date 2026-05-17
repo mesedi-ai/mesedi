@@ -30,5 +30,5 @@ export { tool } from "./tool.js";
 export { checkpoint, validatorResult } from "./observe.js";
 export { instrumentAnthropic } from "./anthropic_integration.js";
 export { MesediHalt, isMesediHalt } from "./halt.js";
-export const VERSION = "0.0.3";
+export const VERSION = "0.0.4";
 //# sourceMappingURL=index.js.map

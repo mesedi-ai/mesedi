@@ -50,6 +50,7 @@ import {
   utcNowRfc3339,
 } from "./events.js";
 import { Budget, BudgetTracker, isMesediHalt } from "./halt.js";
+import { HaltStreamReader } from "./halt_stream.js";
 
 /** Options accepted by `wrap()`. All optional. */
 export interface WrapOptions {
@@ -116,12 +117,31 @@ export function wrap<TArgs extends unknown[], TResult>(
       status: Status.STARTED,
       started_at: utcNowRfc3339(),
       sdk_language: "typescript",
-      sdk_version: "0.0.3",
+      sdk_version: "0.0.4",
     };
 
     // Construct a budget tracker iff a budget was supplied. Stays
     // undefined for un-budgeted wraps — checkBudget() then no-ops.
     const tracker = opts.budget ? new BudgetTracker(opts.budget) : undefined;
+
+    // Sub-slice 21e: if a budget is configured, spawn an SSE reader
+    // subscribed to /executions/{id}/halt-stream. When the backend
+    // publishes a halt (e.g. via the dashboard's operator Halt
+    // button), the reader calls tracker.signalRemoteHalt(reason);
+    // the next halt-safe boundary check in tool()/checkpoint()/the
+    // Anthropic patch then throws MesediHalt(trigger='remote_signal').
+    // Fail-open: subscription failures log at debug and the agent
+    // continues with local-budget-only operation.
+    let haltReader: HaltStreamReader | undefined;
+    if (tracker !== undefined) {
+      haltReader = new HaltStreamReader({
+        executionId,
+        baseUrl: client.baseUrl,
+        apiKey: client.apiKey,
+        onHalt: (reason: string) => tracker.signalRemoteHalt(reason),
+      });
+      haltReader.start();
+    }
 
     client.submitExecutionStart(execution);
     const startWall = performance.now();
@@ -162,6 +182,11 @@ export function wrap<TArgs extends unknown[], TResult>(
       execution.crash_signature = crashSignature(err);
       client.submitExecutionEnd(execution);
       throw err; // re-throw real crashes with original stack
+    } finally {
+      // Stop the halt-stream reader on every exit path so the
+      // in-flight fetch aborts and the background task exits. Safe
+      // to call multiple times.
+      haltReader?.stop();
     }
   };
 }

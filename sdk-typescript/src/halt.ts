@@ -166,6 +166,12 @@ export class BudgetTracker {
   private steps = 0;
   private tokensIn = 0;
   private tokensOut = 0;
+  // Sub-slice 21e: when the SSE halt-stream reader receives a halt
+  // event for this execution, it sets this field via
+  // signalRemoteHalt(). The next check() call reads it FIRST (before
+  // any budget-axis check) and throws MesediHalt with
+  // trigger='remote_signal'. undefined means no remote halt pending.
+  private remoteHaltReason?: string;
 
   constructor(budget: Budget) {
     this.budget = budget;
@@ -176,14 +182,47 @@ export class BudgetTracker {
   }
 
   /**
+   * Mark this execution as having a pending remote halt.
+   *
+   * Called by the SSE halt-stream reader (see halt_stream.ts) when
+   * the backend publishes a halt event for this execution. The next
+   * `check()` call will throw `MesediHalt(trigger='remote_signal')`
+   * with the supplied reason.
+   *
+   * Idempotent — multiple signals overwrite the reason (last one
+   * wins). Concurrency is fine: Node's single-threaded event loop
+   * means the reader thread's write and the agent thread's read
+   * can't interleave at the JS level.
+   */
+  signalRemoteHalt(reason: string): void {
+    this.remoteHaltReason = reason || "remote halt";
+  }
+
+  /**
    * Halt-safe boundary check. Call before doing work; if any budget
    * is already exceeded, this throws MesediHalt and the caller's
    * work never runs.
+   *
+   * Priority: remote halt FIRST. If the dashboard or a detector
+   * explicitly told us to halt, operator intent beats any budget
+   * axis. Local budgets only trip when no remote halt is pending.
    */
   check(): void {
-    // Wall-clock — checked first because it's the most common trigger
-    // in practice. A runaway agent burns time before it burns steps
-    // or tokens.
+    // Remote halt check — runs even when the budget is unbounded,
+    // so a wrap()'d agent without explicit local limits can still
+    // be remote-halted (dashboard panic-stop semantics).
+    if (this.remoteHaltReason !== undefined) {
+      const reason = this.remoteHaltReason;
+      // Clear so successive check() calls don't repeat-raise after
+      // the first MesediHalt escapes to wrap(). wrap() catches and
+      // returns immediately, so this shouldn't matter in practice,
+      // but it costs nothing.
+      this.remoteHaltReason = undefined;
+      throw new MesediHalt(reason, "remote_signal");
+    }
+    // Wall-clock — checked first among the local axes because it's
+    // the most common trigger in practice. A runaway agent burns
+    // time before it burns steps or tokens.
     if (this.budget.maxWallClockSeconds !== undefined) {
       const elapsedSec = (performance.now() - this.startMs) / 1000;
       if (elapsedSec >= this.budget.maxWallClockSeconds) {
