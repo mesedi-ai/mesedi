@@ -31,8 +31,10 @@
 //     validators have well-known remediation patterns.
 //
 //   - prompt_injection/<pattern_name> — PER-INSTANCE. One
-//     playbook per detection pattern (ignore_instructions,
-//     role_override, instruction_tag, literal_sentinels).
+//     playbook per detection pattern emitted by
+//     detectors/injection.go: instruction_tag,
+//     system_prompt_inject, jailbreak_dan, developer_mode,
+//     role_override, ignore_instructions.
 //
 //   - crashes/<hash> — NO PLAYBOOK. Crash signatures are SHA-256
 //     hashes of exception class + stack; we can't enumerate them
@@ -96,10 +98,17 @@ var patterns = []pattern{
 	{"validator_failures", "", "validator_failures/_default.md"},
 
 	// ── prompt_injection — one playbook per detection pattern ───
-	{"prompt_injection", "ignore_instructions", "prompt_injection/ignore_instructions.md"},
-	{"prompt_injection", "role_override", "prompt_injection/role_override.md"},
+	// Signatures emitted by detectors/injection.go. Order doesn't
+	// matter here (signatures are exact-match within a class) but
+	// reflects the tier ordering from the detector for readability:
+	// literal sentinels first, then named jailbreaks, then semantic
+	// overrides, then broad catch-alls.
 	{"prompt_injection", "instruction_tag", "prompt_injection/instruction_tag.md"},
-	{"prompt_injection", "literal_sentinels", "prompt_injection/literal_sentinels.md"},
+	{"prompt_injection", "system_prompt_inject", "prompt_injection/system_prompt_inject.md"},
+	{"prompt_injection", "jailbreak_dan", "prompt_injection/jailbreak_dan.md"},
+	{"prompt_injection", "developer_mode", "prompt_injection/developer_mode.md"},
+	{"prompt_injection", "role_override", "prompt_injection/role_override.md"},
+	{"prompt_injection", "ignore_instructions", "prompt_injection/ignore_instructions.md"},
 
 	// ── cost_velocity — single class-wide playbook ──────────────
 	{"cost_velocity", "cost_", "cost_velocity/_default.md"},
