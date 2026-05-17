@@ -28,6 +28,7 @@ sdk-python/dist/
 sdk-python/*.egg-info/
 sdk-typescript/node_modules/
 sdk-typescript/dist/
+sdk-typescript/dist-sandbox/
 dashboard/node_modules/
 dashboard/.next/
 
@@ -40,3 +41,5 @@ dashboard/.next/
 # Synthetic-org local runtime state
 synthetic-org/.venv/
 synthetic-org/session-*.json
+synthetic-org/continuous_traffic.log
+synthetic-org/continuous_traffic.log.*
