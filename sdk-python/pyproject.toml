@@ -34,6 +34,23 @@ dev = [
     "pytest>=7.0",
     "mypy>=1.0",
 ]
+# Framework adapter extras. The adapter modules under
+# mesedi.integrations.* import the third-party framework only when
+# instantiated, so importing `mesedi` never requires any of these.
+# Install the extra you need — e.g. `pip install mesedi[langchain]`.
+#
+# LangChain's `langchain-core` is the minimum needed; many users will
+# also have `langchain` itself (full chain library) installed, and our
+# adapter detects either. We pin to >=0.1 because the BaseCallbackHandler
+# interface stabilized at that version.
+langchain = [
+    "langchain-core>=0.1",
+]
+# CrewAI builds on LangChain, so `langchain-core` comes in transitively.
+# CrewAI's step_callback / task_callback API stabilized at ~0.30.
+crewai = [
+    "crewai>=0.30",
+]
 
 [project.urls]
 Homepage = "https://mesedi.ai"

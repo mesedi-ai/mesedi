@@ -75,6 +75,61 @@ drainer. Network failures during observation NEVER throw back into the
 wrapped agent — the SDK is fail-open: a Mesedi outage degrades to
 invisibility, not to broken production code.
 
+## Framework integrations
+
+### Vercel AI SDK
+
+If your agent uses Vercel's `ai` package (`generateText`, multi-step
+ReAct with `tools` + `maxSteps`), you don't have to wrap every tool by
+hand. `wrapGenerateText` is a one-line higher-order function that
+returns a drop-in replacement for `generateText` with Mesedi telemetry
+side effects.
+
+```typescript
+import { configure, wrap, flush } from "mesedi";
+import { wrapGenerateText } from "mesedi/integrations/vercel_ai";
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+
+configure({ apiKey: process.env.MESEDI_API_KEY! });
+
+const generateTextM = wrapGenerateText(generateText);
+
+export const runAgent = wrap(
+  { name: "support-triage" },
+  async (question: string) => {
+    const result = await generateTextM({
+      model: openai("gpt-4o"),
+      prompt: question,
+      tools: { lookup, search },
+      maxSteps: 5,
+    });
+    return result.text;
+  },
+);
+```
+
+Per invocation, the wrapper emits:
+
+- One `llm_call` event per step (Vercel's multi-step ReAct surfaces
+  intermediate reasoning + final answer on `result.steps`). Model id,
+  user message, system prompt, token usage, response text — all
+  captured in the standard Mesedi wire format.
+- One `tool_call` event per tool invocation in each step. Pairs
+  `result.toolCalls[i]` to `result.toolResults` by `toolCallId`,
+  detects failure mode (missing result OR `result.error` field) and
+  records `status=failed` with `exception_type` / `exception_message`.
+
+Detectors — drift, identical / similar-call loops, tool-failures,
+cost-velocity, prompt-injection — see the same wire format as a
+hand-written `mesedi` instrumentation produces.
+
+`ai` is declared as an **optional peer dependency** — installing
+`mesedi` doesn't require it. If your project already has `ai`
+installed for `generateText`, the integration just works.
+
+`streamText` and `generateObject` ship in a later slice.
+
 ## Posture
 
 Same local-only posture as `sdk-python/`. npm publication via the

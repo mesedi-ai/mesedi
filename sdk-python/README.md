@@ -60,6 +60,75 @@ Network failures during observation NEVER block the wrapped function. The
 SDK is fail-open: a Mesedi outage degrades to invisibility, not to broken
 production code.
 
+## Framework integrations
+
+If your agent is built on LangChain or CrewAI, you don't have to wrap every
+function with `@mesedi.tool` by hand. Adapter modules under
+`mesedi.integrations.*` translate each framework's native callback or hook
+surface into Mesedi telemetry. They're **optional**: importing `mesedi`
+itself never requires any framework to be installed.
+
+The pattern is the same across frameworks: your function gets `@mesedi.wrap`
+for the execution boundary, and a one-line adapter does the in-execution
+event emission.
+
+### LangChain
+
+```bash
+pip install mesedi[langchain]
+```
+
+```python
+import mesedi
+from mesedi.integrations.langchain import MesediCallbackHandler
+
+@mesedi.wrap
+def run_agent(question: str) -> str:
+    chain = build_chain()
+    result = chain.invoke(
+        {"input": question},
+        config={"callbacks": [MesediCallbackHandler()]},
+    )
+    return result["output"]
+```
+
+The callback handler subscribes to LangChain's standard `on_llm_start` /
+`on_llm_end` / `on_tool_start` / `on_tool_end` (etc.) hooks and emits
+`llm_call` and `tool_call` events with the same wire format as a
+hand-written `mesedi.emit_llm_call()` + `@mesedi.tool` pair. Detectors —
+drift, identical / similar-call loops, tool-failures, cost-velocity,
+prompt-injection — see no difference.
+
+### CrewAI
+
+```bash
+pip install mesedi[crewai]
+```
+
+```python
+import mesedi
+from mesedi.integrations.crewai import instrument_crew
+
+@mesedi.wrap
+def run_my_crew(question: str) -> str:
+    crew = build_crew()
+    instrument_crew(crew)
+    return str(crew.kickoff(inputs={"question": question}))
+```
+
+`instrument_crew` is one line that does three things, all idempotent:
+
+1. Attaches a Mesedi `MesediCallbackHandler` to each agent's LLM — same
+   LLM/tool telemetry as the LangChain integration above, because CrewAI
+   uses LangChain under the hood.
+2. Sets `crew.step_callback` to emit `crewai.agent_action` /
+   `crewai.agent_finish` checkpoint events per agent step.
+3. Sets `crew.task_callback` to emit `crewai.task_completed` checkpoint
+   events per finished task.
+
+Result: the dashboard timeline shows LLM/tool detail interleaved with
+CrewAI's higher-level reasoning rhythm.
+
 ## Posture
 
 This SDK ships from the same monorepo as the backend during the local-only
