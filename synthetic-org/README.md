@@ -111,6 +111,10 @@ synthetic-org/
 └── .gitignore
 ```
 
+## Continuous traffic (capstone)
+
+Once synthetic-org is exercising every detector reliably, the next operational step is making it run continuously without manual invocation so the dashboard stays always-populated and any Mesedi regression surfaces within an hour. See `CONTINUOUS_TRAFFIC.md` for the macOS launchd-based setup — one-time install of a plist that fires the runner hourly in dry-run mode, with rotating logs and zero API spend.
+
 ## Roadmap
 
 - **v1 (today, this scaffold):** all 5 agents on raw Anthropic, runner.py orchestrator, dry-run mode, basic budgets.

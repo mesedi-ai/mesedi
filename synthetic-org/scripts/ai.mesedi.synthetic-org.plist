@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd plist for continuous synthetic-org traffic.
+
+  Schedules the wrapper script `continuous_traffic.sh` to run hourly,
+  generating ~10 dry-run agent executions per batch so the Mesedi
+  dashboard stays continuously populated.
+
+  Install (replaces if already loaded):
+    cp synthetic-org/scripts/ai.mesedi.synthetic-org.plist ~/Library/LaunchAgents/
+    launchctl unload ~/Library/LaunchAgents/ai.mesedi.synthetic-org.plist 2>/dev/null
+    launchctl load   ~/Library/LaunchAgents/ai.mesedi.synthetic-org.plist
+
+  Trigger one immediate batch (testing):
+    launchctl start ai.mesedi.synthetic-org
+
+  Inspect status:
+    launchctl list | grep mesedi
+    tail -f /Users/robertcanario/mesedi/synthetic-org/continuous_traffic.log
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/ai.mesedi.synthetic-org.plist
+    rm ~/Library/LaunchAgents/ai.mesedi.synthetic-org.plist
+
+  Notes on the choices below:
+
+    - Label is reverse-DNS (ai.mesedi.synthetic-org) per Apple's
+      convention; uniquely identifies this agent.
+    - StartInterval=3600 fires every hour. The first run happens 3600s
+      after `launchctl load`; use `launchctl start <label>` to kick
+      off an immediate batch for testing.
+    - RunAtLoad=false because we don't want the first batch to fire
+      until the system has been up for a while (avoids generating
+      traffic during early-boot when the backend may not be running).
+    - ProgramArguments points at the wrapper script with an absolute
+      path. The path is hardcoded for this machine — edit if the
+      repo lives somewhere else.
+    - StandardOutPath / StandardErrorPath redirect to the same log
+      file the wrapper script appends to. Belt-and-suspenders in case
+      a future change starts emitting output before the wrapper's
+      explicit redirect kicks in.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.mesedi.synthetic-org</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/robertcanario/mesedi/synthetic-org/scripts/continuous_traffic.sh</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/robertcanario/mesedi/synthetic-org/continuous_traffic.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/robertcanario/mesedi/synthetic-org/continuous_traffic.log</string>
+
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/robertcanario/mesedi/synthetic-org</string>
+</dict>
+</plist>
