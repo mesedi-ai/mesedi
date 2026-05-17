@@ -10,6 +10,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./integrations/vercel_ai": {
+      "types": "./dist/integrations/vercel_ai.d.ts",
+      "import": "./dist/integrations/vercel_ai.js"
+    }
+  },
+  "peerDependencies": {
+    "ai": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
     }
   },
   "files": [
