@@ -23,6 +23,7 @@ import (
 
 	"mesedi/backend/internal/detectors"
 	"mesedi/backend/internal/events"
+	"mesedi/backend/internal/playbooks"
 	"mesedi/backend/internal/pricing"
 	"mesedi/backend/internal/store"
 )
@@ -70,6 +71,51 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Sub-slice 21b — SSE remote-halt channel.
 	mux.HandleFunc("GET /executions/{id}/halt-stream", h.HandleHaltStream)
 	mux.HandleFunc("POST /executions/{id}/halt", h.HandleTriggerHalt)
+	// Tier 1 Playbooks — canonical fix descriptions per failure-class
+	// signature. Plain GET with query params; content is the embedded
+	// markdown shipped in internal/playbooks/content/.
+	mux.HandleFunc("GET /playbooks", h.HandleGetPlaybook)
+}
+
+// HandleGetPlaybook returns the markdown content for the playbook
+// matching (failure_class, signature) query parameters. Returns:
+//
+//	200 + text/markdown  — content
+//	400                  — missing or empty query params
+//	404                  — no playbook matches this (class, signature)
+//
+// No auth-context project check needed — playbook content is
+// universal (doesn't reference any particular project's data), so
+// authenticated callers in any project can read any playbook.
+func (h *Handlers) HandleGetPlaybook(w http.ResponseWriter, r *http.Request) {
+	failureClass := r.URL.Query().Get("failure_class")
+	signature := r.URL.Query().Get("signature")
+	if failureClass == "" || signature == "" {
+		writeError(w, http.StatusBadRequest,
+			"failure_class and signature query parameters are both required")
+		return
+	}
+
+	body, err := playbooks.Load(failureClass, signature)
+	if err != nil {
+		if errors.Is(err, playbooks.ErrNotFound) {
+			writeError(w, http.StatusNotFound,
+				"no playbook for failure_class="+failureClass+" signature="+signature)
+			return
+		}
+		h.Logger.Error("playbook load failed",
+			"failure_class", failureClass,
+			"signature", signature,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, "playbook load failed: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(body))
 }
 
 // HandleCreateExecution accepts an Execution at the agent's entry point

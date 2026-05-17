@@ -414,6 +414,64 @@
     }
     .filter-bar-spacer { flex: 1; }
 
+    /* ── Tier 1 Playbook card on failure-group detail ────────────────── */
+    .playbook-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin-bottom: 28px;
+      line-height: 1.55;
+    }
+    .playbook-card .playbook-eyebrow {
+      font-size: 10px;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .playbook-card h1 {
+      font-size: 18px;
+      font-weight: 500;
+      margin: 0 0 12px 0;
+    }
+    .playbook-card h2 {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      margin: 18px 0 8px 0;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .playbook-card p {
+      color: var(--text-muted);
+      margin: 0 0 10px 0;
+    }
+    .playbook-card p strong { color: var(--text); font-weight: 500; }
+    .playbook-card ul, .playbook-card ol {
+      margin: 6px 0 12px 0;
+      padding-left: 22px;
+      color: var(--text-muted);
+    }
+    .playbook-card li { margin-bottom: 6px; }
+    .playbook-card li strong { color: var(--text); font-weight: 500; }
+    .playbook-card code {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      padding: 1px 5px;
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+    }
+    .playbook-card a {
+      color: var(--info);
+      text-decoration: none;
+      border-bottom: 0.5px dotted var(--info);
+    }
+    .playbook-card a:hover { color: var(--text); border-bottom-color: var(--text); }
+
     /* ── Collapsible class-group cards ───────────────────────────────── */
     .class-group {
       background: var(--surface);
@@ -1082,6 +1140,12 @@
     function renderFailureGroupDetail(g, execs) {
       const c = document.getElementById("group-detail-content");
 
+      // Playbook is fetched lazily AFTER the page renders, so a slow
+      // playbook lookup doesn't block the rest of the detail view.
+      // The placeholder div gets populated by loadPlaybook() below
+      // once we know the failure_class + signature.
+      const playbookPlaceholder = '<div id="playbook-slot"></div>';
+
       const meta = `
         <div class="meta-grid">
           <div class="meta-cell">
@@ -1130,7 +1194,110 @@
         </div>
       `;
 
-      c.innerHTML = meta + execsSection;
+      c.innerHTML = meta + playbookPlaceholder + execsSection;
+
+      // Tier 1 Playbook — fire-and-forget fetch. If a playbook exists
+      // for this (failure_class, signature) pair, it renders into the
+      // #playbook-slot placeholder. If not, the placeholder stays
+      // empty (no error UI — a missing playbook is normal for many
+      // signatures, especially crash hashes).
+      loadPlaybook(g.failure_class, g.signature);
+    }
+
+    // Fetches the playbook for the given (failure_class, signature)
+    // and renders the markdown into the #playbook-slot div. Silent
+    // failure for 404 (no playbook for this signature is the
+    // expected case for the majority of failure-group views right
+    // now — only a handful of signatures have content authored).
+    async function loadPlaybook(failureClass, signature) {
+      const slot = document.getElementById("playbook-slot");
+      if (!slot) return;
+      try {
+        const url = "/playbooks?failure_class=" +
+          encodeURIComponent(failureClass) +
+          "&signature=" + encodeURIComponent(signature);
+        const r = await fetch(url, { headers: HEADERS });
+        if (r.status === 404) return;       // expected — no content authored yet
+        if (!r.ok) {
+          console.warn("playbook fetch failed", r.status);
+          return;
+        }
+        const markdown = await r.text();
+        slot.innerHTML =
+          '<div class="playbook-card">' +
+            '<div class="playbook-eyebrow">Playbook · canonical fix description</div>' +
+            renderMarkdown(markdown) +
+          '</div>';
+      } catch (err) {
+        console.warn("playbook load failed", err);
+      }
+    }
+
+    // Tiny markdown-to-HTML renderer. Supports only the subset
+    // playbook content actually uses: H1/H2 headers, paragraphs,
+    // bulleted + numbered lists, inline code, bold via **, simple
+    // links. Intentionally minimal so the dashboard doesn't pull a
+    // 50 KB markdown library to render a few hundred lines of text.
+    //
+    // Escapes HTML first so playbook content can't inject scripts
+    // even if a future author writes raw HTML by mistake.
+    function renderMarkdown(md) {
+      // 1. Escape all HTML special chars.
+      let s = md
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      // 2. Headers (H1, H2). Match start-of-line.
+      s = s.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+      s = s.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+
+      // 3. Inline: bold (**x**), code (`x`), links ([text](url)).
+      // Order matters — process code BEFORE bold so backtick
+      // contents don't get re-interpreted.
+      s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+      s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+      // 4. Lists — handled by splitting into blocks and detecting
+      // groups of lines that start with `- ` or `1. `. Bulleted
+      // and numbered are both rendered as <ul> for visual
+      // consistency in this dashboard; numbered semantics aren't
+      // critical for playbook readability.
+      const lines = s.split("\n");
+      const out = [];
+      let inList = false;
+      let inParagraph = false;
+      const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+      const closeParagraph = () => { if (inParagraph) { out.push("</p>"); inParagraph = false; } };
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed === "") {
+          closeList();
+          closeParagraph();
+          continue;
+        }
+        if (/^[-*] /.test(trimmed) || /^\d+\. /.test(trimmed)) {
+          closeParagraph();
+          if (!inList) { out.push("<ul>"); inList = true; }
+          const item = trimmed.replace(/^[-*] /, "").replace(/^\d+\. /, "");
+          out.push("<li>" + item + "</li>");
+          continue;
+        }
+        if (/^<h[12]>/.test(trimmed)) {
+          closeList();
+          closeParagraph();
+          out.push(trimmed);
+          continue;
+        }
+        closeList();
+        if (!inParagraph) { out.push("<p>"); inParagraph = true; }
+        out.push(trimmed);
+      }
+      closeList();
+      closeParagraph();
+      return out.join("\n");
     }
 
     function renderAffectedExecsTable(execs) {
