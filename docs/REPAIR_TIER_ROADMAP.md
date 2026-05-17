@@ -40,9 +40,13 @@ The seven Mesedi failure classes split cleanly into auto-fixable and recommendat
 
 ## Release sequencing
 
-**Mesedi v1** (currently in-flight, local-only posture, post-LOI launch) — no repair tier yet. The story is "detect, cluster, optionally stop." All seven failure-class detectors, failure-group dedup, hard-halt with local budgets plus SSE remote channel, dashboard with collapse-by-class view, dogfood substrate. Remaining v1 work: 21c operator Halt button, webhook escalation (task #83), framework adapters, continuous synthetic-org traffic, docs and quickstart polish.
+**Mesedi v1** (currently in-flight, local-only posture, post-LOI launch) — no repair tier yet. The story is "detect, cluster, optionally stop." All seven failure-class detectors, failure-group dedup, hard-halt with local budgets plus SSE remote channel, dashboard with collapse-by-class view, dogfood substrate, operator Halt button, continuous synthetic-org traffic via launchd. Remaining v1 work: webhook escalation (task #83), framework adapters (LangChain / CrewAI / Vercel AI SDK), docs and quickstart polish.
 
-**Mesedi v1.5** — Tier 1 (Recommendation) only. A "Playbooks" feature surfaces canonical fix descriptions per failure-class signature on the dashboard's failure-group detail page. Text only, no actions taken, no Mesedi liability. Roughly one focused week to scaffold the infrastructure and populate the first twenty-five to thirty playbook entries against the patterns already observed in synthetic-org traffic. Ships as a point release between v1 launch and v2.
+**Mesedi v1.5** — Tier 1 (Recommendation). A "Playbooks" feature surfaces canonical fix descriptions per failure-class signature on the dashboard's failure-group detail page. Text only, no actions taken, no Mesedi liability. Ships as a point release between v1 launch and v2.
+
+Status (as of 2026-05-16): **Tier 1 Playbooks v1 shipped (local).** Infrastructure (`backend/internal/playbooks` with `embed.FS` pattern-match resolver, `GET /playbooks` endpoint, dashboard playbook-card with client-side markdown rendering) plus 14 content entries covering every detector-signature shape Mesedi v0.0.1 emits: loops (4 sub-detectors), tool_failures (catch-all), validator_failures (catch-all), prompt_injection (6 per-instance patterns), cost_velocity (catch-all), drift (new_model, lexical_drift). Crashes intentionally has no playbook — stack-trace hashes can't be enumerated and crashes need actual debugging rather than generic guidance.
+
+Future v1.5 work: per-tool playbook overrides where customer base reveals which tools fail most (e.g. `slack_post_message`-specific instead of `_default.md`), per-validator overrides on the same pattern, per-project pattern tuning so legitimate uses can opt out of specific injection signatures.
 
 **Mesedi v2** — Tier 3 (Runtime auto-fix) for the safe classes. Five auto-fix paths (cost-velocity downgrade, identical-call dedup, prompt-injection sanitization, drift-model-mix pin, tool-failure retry) plus three pieces of cross-cutting infrastructure:
 
