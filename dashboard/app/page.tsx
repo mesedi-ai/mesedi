@@ -1,5 +1,3 @@
-import Image from "next/image";
-
 const FAILURE_CLASSES = [
   "crashes",
   "time_budget",
@@ -19,8 +17,10 @@ export default function Home() {
         style={{ borderBottom: "1px solid var(--border)" }}
       >
         <div className="flex items-center gap-3">
-          <Image src="/mesedi-logo.png" alt="Mesedi logo" width={36} height={36} priority />
-          <span className="text-lg font-medium tracking-tight" style={{ color: "var(--text)" }}>
+          <span
+            className="text-4xl font-medium tracking-tight"
+            style={{ color: "var(--accent)" }}
+          >
             mesedi
           </span>
         </div>
@@ -46,15 +46,6 @@ export default function Home() {
 
       <main className="flex-1 flex flex-col items-center justify-center px-6 sm:px-10 py-16 sm:py-20">
         <div className="max-w-3xl mx-auto text-center flex flex-col items-center">
-          <Image
-            src="/mesedi-logo.png"
-            alt="Mesedi logo"
-            width={128}
-            height={128}
-            priority
-            className="mb-8"
-          />
-
           <div
             className="inline-flex items-center gap-2 px-3 py-1 rounded-full mb-8"
             style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
