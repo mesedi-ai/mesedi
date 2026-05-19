@@ -39,7 +39,7 @@ export default function Sidebar() {
       }}
     >
       <div className="px-5 py-5">
-        <Link href="/app" className="block">
+        <Link href="/" className="block" title="Back to mesedi home">
           <div
             className="text-2xl font-medium tracking-tight"
             style={{ color: "var(--accent)" }}

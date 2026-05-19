@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 const FAILURE_CLASSES = [
   "crashes",
   "time_budget",
@@ -17,9 +19,16 @@ export default function Home() {
         style={{ borderBottom: "1px solid var(--border)" }}
       >
         <div className="flex items-center gap-3">
+          <Image
+            src="/mesedi-logo-mark-only.png"
+            alt="Mesedi logo"
+            width={44}
+            height={44}
+            priority
+          />
           <span
-            className="text-4xl font-medium tracking-tight"
-            style={{ color: "var(--accent)" }}
+            className="text-4xl font-bold tracking-tight"
+            style={{ color: "var(--text)" }}
           >
             mesedi
           </span>
@@ -44,21 +53,16 @@ export default function Home() {
         </nav>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-6 sm:px-10 py-16 sm:py-20">
+      <main className="flex-1 flex flex-col items-center px-6 sm:px-10 pt-10 sm:pt-16 pb-16 sm:pb-20">
         <div className="max-w-3xl mx-auto text-center flex flex-col items-center">
-          <div
-            className="inline-flex items-center gap-2 px-3 py-1 rounded-full mb-8"
-            style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-          >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--success)" }}></span>
-            <span
-              className="text-[11px] tracking-wide"
-              style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}
-            >
-              v1 · public release
-            </span>
-          </div>
-
+          <Image
+            src="/mesedi-logo-mark-only.png"
+            alt="Mesedi logo"
+            width={160}
+            height={160}
+            priority
+            className="mb-10"
+          />
           <h1
             className="text-5xl sm:text-6xl font-medium tracking-tight mb-6"
             style={{ color: "var(--text)", lineHeight: 1.1 }}

@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   description:
     "Observability and runtime safety for AI agents in production. Detects failures, halts runaways, and escalates the first occurrence to your team — the moment it happens.",
   icons: {
-    icon: "/mesedi-logo.png",
+    icon: "/mesedi-logo-mark-only.png",
   },
 };
 
