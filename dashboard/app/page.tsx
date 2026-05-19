@@ -50,10 +50,12 @@ const FAILURE_CLASSES: FailureClassEntry[] = [
 const STEPS = [
   {
     n: "01",
-    title: "Install",
-    blurb: "Add the SDK to your existing project. No infra to stand up — Mesedi runs as a hosted service.",
-    python: "pip install mesedi",
-    typescript: "npm install mesedi",
+    title: "Install (PyPI + npm shipping soon)",
+    blurb: "Add the SDK to your existing project. For early access today, install directly from the GitHub repo. PyPI and npm packages publish shortly.",
+    python: 'pip install "git+https://github.com/mesedi-ai/mesedi.git#subdirectory=sdk-python"',
+    typescript: `git clone https://github.com/mesedi-ai/mesedi
+cd mesedi/sdk-typescript
+npm install && npm link`,
   },
   {
     n: "02",
@@ -323,9 +325,12 @@ export default function Home() {
               your inbox), with a canonical playbook fix attached.
             </p>
             <p>
-              Eight failure classes are detected today. The product is open-source
-              MIT, the SDKs ship to PyPI and npm, and the backend runs on Fly.io.
-              Self-host if you want to; use the hosted service if you don&apos;t.
+              Eight failure classes are detected today. The backend, SDKs, and
+              dashboard are all open-source under MIT — the full repo lives on
+              GitHub at <code style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>mesedi-ai/mesedi</code>.
+              Python and Node packages publish to PyPI and npm soon; install
+              from the repo today. The hosted service runs on Fly.io. Self-host
+              if you want to; use the hosted service if you don&apos;t.
             </p>
           </div>
         </section>
@@ -348,20 +353,12 @@ export default function Home() {
             GitHub
           </a>
           <a
-            href="https://pypi.org/project/mesedi/"
+            href="https://github.com/mesedi-ai/mesedi/blob/main/LICENSE"
             target="_blank"
             rel="noopener noreferrer"
             className="transition-colors hover:opacity-80"
           >
-            PyPI
-          </a>
-          <a
-            href="https://www.npmjs.com/package/mesedi"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="transition-colors hover:opacity-80"
-          >
-            npm
+            MIT License
           </a>
         </div>
       </footer>

@@ -66,7 +66,7 @@ export default function OverviewPage() {
               className="text-[11px] tracking-wider uppercase mb-2"
               style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}
             >
-              Python
+              Python (early access — PyPI shipping soon)
             </div>
             <pre
               className="rounded-md p-3 overflow-x-auto text-[13px]"
@@ -77,7 +77,7 @@ export default function OverviewPage() {
                 fontFamily: "var(--font-mono)",
               }}
             >
-              <code>{`pip install mesedi
+              <code>{`pip install "git+https://github.com/mesedi-ai/mesedi.git#subdirectory=sdk-python"
 export MESEDI_API_KEY=mesedi_sk_...
 
 from mesedi import wrap
@@ -93,7 +93,7 @@ def my_agent(query):
               className="text-[11px] tracking-wider uppercase mb-2"
               style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}
             >
-              Node / TypeScript
+              Node / TypeScript (early access — npm shipping soon)
             </div>
             <pre
               className="rounded-md p-3 overflow-x-auto text-[13px]"
@@ -104,7 +104,8 @@ def my_agent(query):
                 fontFamily: "var(--font-mono)",
               }}
             >
-              <code>{`npm install mesedi
+              <code>{`git clone https://github.com/mesedi-ai/mesedi
+cd mesedi/sdk-typescript && npm install && npm link
 export MESEDI_API_KEY=mesedi_sk_...
 
 import { wrap } from "mesedi";
