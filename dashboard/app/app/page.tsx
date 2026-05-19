@@ -1,4 +1,38 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { api, ApiError, type Stats } from "@/lib/api";
+
+type LoadState =
+  | { status: "loading" }
+  | { status: "ok"; stats: Stats }
+  | { status: "error"; message: string };
+
 export default function OverviewPage() {
+  const [state, setState] = useState<LoadState>({ status: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getStats()
+      .then((stats) => {
+        if (!cancelled) setState({ status: "ok", stats });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message =
+          err instanceof ApiError
+            ? `${err.status} ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : "Unknown error";
+        setState({ status: "error", message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
       <div className="mb-10">
@@ -6,17 +40,14 @@ export default function OverviewPage() {
           Welcome to Mesedi
         </h2>
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          No data yet. Connect the SDK to start sending agent telemetry — the
-          dashboard will populate automatically.
+          Connect the SDK to start sending agent telemetry — the dashboard
+          populates automatically.
         </p>
       </div>
 
       <div
-        className="rounded-lg p-6"
-        style={{
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-        }}
+        className="rounded-lg p-6 mb-8"
+        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
       >
         <div className="flex items-center gap-2 mb-4">
           <i
@@ -47,7 +78,7 @@ export default function OverviewPage() {
               }}
             >
               <code>{`pip install mesedi
-export MESEDI_API_KEY=mk_...
+export MESEDI_API_KEY=mesedi_sk_...
 
 from mesedi import wrap
 
@@ -74,7 +105,7 @@ def my_agent(query):
               }}
             >
               <code>{`npm install mesedi
-export MESEDI_API_KEY=mk_...
+export MESEDI_API_KEY=mesedi_sk_...
 
 import { wrap } from "mesedi";
 
@@ -84,11 +115,45 @@ const myAgent = wrap(async (query) => { ... });`}</code>
         </div>
       </div>
 
-      <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <h3 className="text-sm font-medium mb-3" style={{ color: "var(--text)" }}>
+        Live stats
+      </h3>
+
+      {state.status === "error" && (
+        <div
+          className="rounded-md px-4 py-3 mb-4 text-xs"
+          style={{
+            background: "rgba(239, 68, 68, 0.08)",
+            border: "1px solid var(--danger)",
+            color: "var(--danger)",
+          }}
+        >
+          Could not load stats from the backend — {state.message}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {[
-          { icon: "ti-alert-triangle", label: "Failure groups", count: "0" },
-          { icon: "ti-list-tree", label: "Executions", count: "0" },
-          { icon: "ti-webhook", label: "Webhooks fired", count: "0" },
+          {
+            icon: "ti-alert-triangle",
+            label: "Failure groups",
+            sub: "currently open",
+            value:
+              state.status === "ok" ? state.stats.open_failure_groups : null,
+          },
+          {
+            icon: "ti-list-tree",
+            label: "Executions",
+            sub: "all time",
+            value:
+              state.status === "ok" ? state.stats.total_executions : null,
+          },
+          {
+            icon: "ti-skull",
+            label: "Crashes",
+            sub: "last 24h",
+            value: state.status === "ok" ? state.stats.crashed_24h : null,
+          },
         ].map((stat) => (
           <div
             key={stat.label}
@@ -113,12 +178,15 @@ const myAgent = wrap(async (query) => { ... });`}</code>
             </div>
             <div
               className="text-2xl font-medium"
-              style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}
+              style={{
+                color: stat.value === null ? "var(--text-dim)" : "var(--text)",
+                fontFamily: "var(--font-mono)",
+              }}
             >
-              {stat.count}
+              {stat.value === null ? "—" : stat.value.toLocaleString()}
             </div>
             <div className="text-[11px] mt-1" style={{ color: "var(--text-dim)" }}>
-              last 24h
+              {stat.sub}
             </div>
           </div>
         ))}

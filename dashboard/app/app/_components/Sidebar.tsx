@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { clearApiKey } from "@/lib/auth";
 
 type NavItem = {
   href: string;
@@ -21,6 +22,12 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  function handleSignOut() {
+    clearApiKey();
+    router.push("/login");
+  }
 
   return (
     <aside
@@ -93,11 +100,25 @@ export default function Sidebar() {
             local · v1
           </div>
         </div>
-        <i
-          className="ti ti-logout"
-          style={{ fontSize: "16px", color: "var(--text-dim)", cursor: "pointer" }}
-          aria-hidden="true"
-        />
+        <button
+          onClick={handleSignOut}
+          className="transition-colors"
+          style={{
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            color: "var(--text-dim)",
+            cursor: "pointer",
+          }}
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <i
+            className="ti ti-logout"
+            style={{ fontSize: "16px" }}
+            aria-hidden="true"
+          />
+        </button>
       </div>
     </aside>
   );
