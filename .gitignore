@@ -43,3 +43,10 @@ synthetic-org/.venv/
 synthetic-org/session-*.json
 synthetic-org/continuous_traffic.log
 synthetic-org/continuous_traffic.log.*
+
+# Internal-only docs — pricing strategy, roadmap timelines,
+# competitive notes. Never commit these to a public repo.
+ROADMAP.md
+NOTES.md
+PRICING.md
+INTERNAL_*.md
