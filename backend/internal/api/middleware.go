@@ -33,6 +33,7 @@ func NewTopChain(logger *slog.Logger) Middleware {
 	return chain(
 		recoverMiddleware(logger),
 		requestLogMiddleware(logger),
+		CORSMiddleware(),
 	)
 }
 
