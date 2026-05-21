@@ -93,6 +93,15 @@ export default function Home() {
         style={{ borderBottom: "1px solid var(--border)" }}
       >
         <div className="flex items-center gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/mesedi-mark.svg"
+            alt=""
+            aria-hidden
+            width={44}
+            height={44}
+            className="shrink-0"
+          />
           <span
             className="text-4xl font-bold tracking-tight"
             style={{ color: "var(--text)" }}

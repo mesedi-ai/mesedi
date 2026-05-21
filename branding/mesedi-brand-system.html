@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesedi — Logo System (Orange)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --obsidian:#0E1116;
+    --obsidian-2:#161B22;
+    --line:#26303B;
+    /* Orange ramp — matched to the marketing landing accent (#FF8C42)
+       with a lighter highlight stop and a darker shadow stop tuned by
+       hand for the metallic-shield gradient direction. */
+    --orange-1:#FFB37A;     /* highlight */
+    --orange-2:#FF8C42;     /* primary accent — matches dashboard --accent */
+    --orange-3:#C45E1A;     /* shadow */
+    --steel:#7FA6B8;
+    --ink:#0E1116;
+    --paper:#EDE4D6;
+    --txt:#D8C7B0;
+    --muted:#7E8A97;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 70% -10%, rgba(255,140,66,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 110%, rgba(127,166,184,.06), transparent 55%),
+      var(--obsidian);
+    color:var(--txt);
+    font-family:"IBM Plex Mono",monospace;
+    min-height:100vh;
+    padding:64px 28px 96px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  .eyebrow{
+    font-size:11px;letter-spacing:.42em;text-transform:uppercase;color:var(--orange-2);
+    display:flex;align-items:center;gap:14px;margin-bottom:22px;
+  }
+  .eyebrow::after{content:"";height:1px;flex:1;background:linear-gradient(90deg,var(--orange-3),transparent)}
+  h1{font-family:"Marcellus",serif;font-size:clamp(40px,7vw,76px);letter-spacing:.16em;color:var(--paper);font-weight:400;line-height:1}
+  .sub{margin-top:18px;color:var(--muted);max-width:54ch;line-height:1.7;font-size:13px}
+  .sub b{color:var(--orange-1);font-weight:500}
+
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px;margin-top:56px}
+  .card{
+    grid-column:span 12;
+    background:linear-gradient(180deg,var(--obsidian-2),#11161D);
+    border:1px solid var(--line);border-radius:14px;padding:30px;position:relative;overflow:hidden;
+  }
+  .card .tag{
+    position:absolute;top:16px;right:18px;font-size:10px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--muted);
+  }
+  .card h3{font-family:"Marcellus",serif;letter-spacing:.1em;color:var(--paper);font-weight:400;font-size:18px;margin-bottom:6px}
+  .card p{font-size:12px;color:var(--muted);line-height:1.6;max-width:42ch}
+  @media(min-width:760px){
+    .c-6{grid-column:span 6}.c-4{grid-column:span 4}.c-8{grid-column:span 8}
+  }
+
+  .stage{display:flex;align-items:center;justify-content:center;padding:34px 0 30px;min-height:220px}
+  .stage.light{background:var(--paper);border-radius:10px;margin-bottom:20px}
+
+  .lockup{display:flex;align-items:center;gap:22px}
+  .lockup .name{font-family:"Marcellus",serif;font-size:44px;letter-spacing:.2em;color:var(--paper)}
+  .lockup .name .dot{color:var(--orange-2)}
+  .tagline{font-size:10px;letter-spacing:.34em;text-transform:uppercase;color:var(--muted);margin-top:6px}
+
+  .sizes{display:flex;align-items:flex-end;gap:30px;flex-wrap:wrap;justify-content:center}
+  .sizes figure{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .sizes figcaption{font-size:10px;color:var(--muted);letter-spacing:.15em}
+  .chip{background:var(--obsidian);border:1px solid var(--line);border-radius:8px;padding:8px;display:flex}
+
+  .swatches{display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+  .sw{flex:1;height:64px;display:flex;align-items:flex-end;padding:7px;font-size:9px;letter-spacing:.05em}
+  .footer{margin-top:48px;font-size:11px;color:var(--muted);letter-spacing:.06em;line-height:1.8;border-top:1px solid var(--line);padding-top:22px}
+  .footer b{color:var(--orange-1);font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Brand Mark · Mešedi Bodyguard</div>
+  <h1>MESEDI</h1>
+  <p class="sub">A guardian layer for autonomous agents. The mark fuses a <b>heater shield</b> (the guard) with an upward <b>spearhead</b> cut from its core — the weapon of the Hittite royal bodyguard — bisected by an <b>aperture line</b> that reads as an AI scan. Orange on obsidian — color-matched to the marketing landing accent (<b>#FF8C42</b>).</p>
+
+  <div class="grid">
+
+    <!-- PRIMARY -->
+    <div class="card c-8">
+      <span class="tag">Primary</span>
+      <div class="stage">
+        <svg width="150" height="150" viewBox="0 0 100 100" fill="none" aria-label="Mesedi primary mark">
+          <defs>
+            <linearGradient id="or" x1="20" y1="6" x2="80" y2="96" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#FFB37A"/><stop offset=".5" stop-color="#FF8C42"/><stop offset="1" stop-color="#C45E1A"/>
+            </linearGradient>
+          </defs>
+          <path fill-rule="evenodd" clip-rule="evenodd" fill="url(#or)" d="M50 4 L90 14 L90 50 C90 74 73 90 50 96 C27 90 10 74 10 50 L10 14 Z M50 22 L62 44 L54 44 L54 70 L46 70 L46 44 L38 44 Z"/>
+          <rect x="34" y="40" width="32" height="3.2" rx="1.6" fill="#0E1116"/>
+        </svg>
+      </div>
+      <h3>The Sentinel Shield</h3>
+      <p>One closed silhouette. Spearhead and scan line are negative space, so it holds together at any scale and survives single-color printing.</p>
+    </div>
+
+    <!-- MONO -->
+    <div class="card c-4">
+      <span class="tag">Monochrome</span>
+      <div class="stage light">
+        <svg width="96" height="96" viewBox="0 0 100 100" fill="none" aria-label="Mesedi mono dark">
+          <path fill-rule="evenodd" clip-rule="evenodd" fill="#161B22" d="M50 4 L90 14 L90 50 C90 74 73 90 50 96 C27 90 10 74 10 50 L10 14 Z M50 22 L62 44 L54 44 L54 70 L46 70 L46 44 L38 44 Z"/>
+          <rect x="34" y="40" width="32" height="3.2" rx="1.6" fill="#EDE4D6"/>
+        </svg>
+      </div>
+      <div class="stage" style="min-height:auto;padding:6px 0 0">
+        <svg width="72" height="72" viewBox="0 0 100 100" fill="none" aria-label="Mesedi mono light">
+          <path fill-rule="evenodd" clip-rule="evenodd" fill="#EDE4D6" d="M50 4 L90 14 L90 50 C90 74 73 90 50 96 C27 90 10 74 10 50 L10 14 Z M50 22 L62 44 L54 44 L54 70 L46 70 L46 44 L38 44 Z"/>
+          <rect x="34" y="40" width="32" height="3.2" rx="1.6" fill="#0E1116"/>
+        </svg>
+      </div>
+      <h3 style="margin-top:14px">One ink, either way</h3>
+      <p>Solid fill on light or dark backgrounds. No gradient dependency.</p>
+    </div>
+
+    <!-- SOLID FLAT (favicon-safe, matches marketing accent exactly) -->
+    <div class="card c-4">
+      <span class="tag">Solid · Flat Accent</span>
+      <div class="stage">
+        <svg width="118" height="118" viewBox="0 0 100 100" fill="none" aria-label="Mesedi flat accent">
+          <path fill-rule="evenodd" clip-rule="evenodd" fill="#FF8C42" d="M50 4 L90 14 L90 50 C90 74 73 90 50 96 C27 90 10 74 10 50 L10 14 Z M50 22 L62 44 L54 44 L54 70 L46 70 L46 44 L38 44 Z"/>
+          <rect x="34" y="40" width="32" height="3.2" rx="1.6" fill="#0E1116"/>
+        </svg>
+      </div>
+      <h3>Flat #FF8C42</h3>
+      <p>Exact accent match to the dashboard / marketing landing. Use this for favicons, Slack avatars, and anywhere a compressor will crush the gradient.</p>
+    </div>
+
+    <!-- WORDMARK -->
+    <div class="card c-8">
+      <span class="tag">Lockup</span>
+      <div class="stage">
+        <div class="lockup">
+          <svg width="74" height="74" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" fill="url(#or)" d="M50 4 L90 14 L90 50 C90 74 73 90 50 96 C27 90 10 74 10 50 L10 14 Z M50 22 L62 44 L54 44 L54 70 L46 70 L46 44 L38 44 Z"/>
+            <rect x="34" y="40" width="32" height="3.2" rx="1.6" fill="#0E1116"/>
+          </svg>
+          <div>
+            <div class="name">MESEDI<span class="dot">.</span></div>
+            <div class="tagline">Guardians for Autonomous AI</div>
+          </div>
+        </div>
+      </div>
+      <h3>Wordmark</h3>
+      <p>Marcellus inscriptional caps (the stone-cut feel) with a mono tagline (the machine). The full stop in <b style="color:#FF8C42">#FF8C42</b> matches the orange in your "autonomous AI agents." landing heading.</p>
+    </div>
+
+    <!-- SIZE TEST -->
+    <div class="card c-8">
+      <span class="tag">Legibility</span>
+      <h3 style="margin-bottom:18px">Scale test — where logos die</h3>
+      <div class="sizes">
+        <figure><div class="chip"><svg width="64" height="64" viewBox="0 0 100 100"><path fill-rule="evenodd" clip-rule="evenodd" fill="url(#or)" d="M50 4 L90 14 L90 50 C90 74 73 90 50 96 C27 90 10 74 10 50 L10 14 Z M50 22 L62 44 L54 44 L54 70 L46 70 L46 44 L38 44 Z"/><rect x="34" y="40" width="32" height="3.2" rx="1.6" fill="#0E1116"/></svg></div><figcaption>64px</figcaption></figure>
+        <figure><div class="chip"><svg width="32" height="32" viewBox="0 0 100 100"><path fill-rule="evenodd" clip-rule="evenodd" fill="url(#or)" d="M50 4 L90 14 L90 50 C90 74 73 90 50 96 C27 90 10 74 10 50 L10 14 Z M50 22 L62 44 L54 44 L54 70 L46 70 L46 44 L38 44 Z"/><rect x="34" y="40" width="32" height="3.2" rx="1.6" fill="#0E1116"/></svg></div><figcaption>32px</figcaption></figure>
+        <figure><div class="chip"><svg width="16" height="16" viewBox="0 0 100 100"><path fill-rule="evenodd" clip-rule="evenodd" fill="#FF8C42" d="M50 4 L90 14 L90 50 C90 74 73 90 50 96 C27 90 10 74 10 50 L10 14 Z M50 22 L62 44 L54 44 L54 70 L46 70 L46 44 L38 44 Z"/><rect x="34" y="40" width="32" height="3.2" rx="1.6" fill="#0E1116"/></svg></div><figcaption>16px favicon (flat)</figcaption></figure>
+      </div>
+    </div>
+
+    <!-- PALETTE -->
+    <div class="card c-4">
+      <span class="tag">Palette</span>
+      <h3 style="margin-bottom:16px">Orange / Obsidian</h3>
+      <div class="swatches">
+        <div class="sw" style="background:#FFB37A;color:#5a2f10">FFB37A</div>
+        <div class="sw" style="background:#FF8C42;color:#2b1306">FF8C42</div>
+        <div class="sw" style="background:#C45E1A;color:#EDE4D6">C45E1A</div>
+        <div class="sw" style="background:#161B22;color:#D8C7B0">161B22</div>
+        <div class="sw" style="background:#0E1116;color:#7E8A97">0E1116</div>
+      </div>
+      <p style="margin-top:14px"><b style="color:#FF8C42">#FF8C42</b> is the load-bearing accent — same value as the dashboard <code>--accent</code> variable. Steel <span style="color:#7FA6B8">#7FA6B8</span> stays reserved for active/alert states in product UI.</p>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    <b>Color rationale:</b> the bronze-gradient version read warm but slightly muted next to the marketing landing's saturated orange. This palette retunes the gradient stops around the existing <b>#FF8C42</b> accent so the mark and the landing accent are the same color family without a perceptual jump between hero text and logo.<br>
+    <b>Watch-out:</b> use the gradient version only where you control the render pipeline. Slack, Notion, Twitter, and email-client favicon compressors will crush subtle gradient stops — ship the flat <b>#FF8C42</b> variant to those surfaces.
+  </div>
+
+</div>
+</body>
+</html>
