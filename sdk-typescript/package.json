@@ -1,8 +1,18 @@
 {
   "name": "mesedi",
-  "version": "0.0.4",
-  "description": "Mesedi SDK — guardians for autonomous AI.",
+  "version": "0.1.0",
+  "description": "Mesedi SDK — guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence.",
   "license": "MIT",
+  "homepage": "https://mesedi.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mesedi-ai/mesedi.git",
+    "directory": "sdk-typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/mesedi-ai/mesedi/issues"
+  },
+  "author": "Robert J. Canario <mesediai@gmail.com>",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -42,10 +52,17 @@
     "ai",
     "agents",
     "observability",
-    "attestation",
+    "agent-monitoring",
+    "llm",
+    "vercel-ai-sdk",
+    "anthropic",
+    "openai",
     "mesedi"
   ],
-  "author": "Verdifax, LLC",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^20.11.0"

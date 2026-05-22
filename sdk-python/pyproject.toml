@@ -4,15 +4,26 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mesedi"
-version = "0.0.8"
-description = "Mesedi SDK — guardians for autonomous AI."
+version = "0.1.0"
+description = "Mesedi SDK — guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
-    { name = "Verdifax, LLC" },
+    { name = "Robert J. Canario", email = "mesediai@gmail.com" },
 ]
-keywords = ["ai", "agents", "observability", "attestation", "mesedi"]
+keywords = [
+    "ai",
+    "agents",
+    "observability",
+    "agent-monitoring",
+    "llm",
+    "langchain",
+    "crewai",
+    "anthropic",
+    "openai",
+    "mesedi",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -54,6 +65,9 @@ crewai = [
 
 [project.urls]
 Homepage = "https://mesedi.ai"
+Repository = "https://github.com/mesedi-ai/mesedi"
+Issues = "https://github.com/mesedi-ai/mesedi/issues"
+Documentation = "https://github.com/mesedi-ai/mesedi/tree/main/sdk-python#readme"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mesedi"]
