@@ -1,0 +1,91 @@
+# Release workflow for the Mesedi Python SDK.
+#
+# Triggers on a `sdk-python-v*` git tag push (monorepo convention so the
+# Python SDK and the TypeScript SDK can release independently). Verifies
+# the build, validates the distributions with twine, then publishes to
+# PyPI via Trusted Publishing (OIDC) — no PYPI_TOKEN secret required.
+#
+# To cut a new release:
+#
+#   $EDITOR sdk-python/pyproject.toml           # bump version
+#   git add sdk-python/pyproject.toml
+#   git commit -m "Release sdk-python v0.1.1"
+#   git tag -a sdk-python-v0.1.1 -m "Release sdk-python v0.1.1"
+#   git push origin main sdk-python-v0.1.1
+#
+# Consumers update via:
+#
+#   pip install --upgrade mesedi
+#
+# Trusted Publishing prerequisite (one-time setup on pypi.org):
+#   1. Log in at https://pypi.org/manage/account/publishing/
+#   2. Add a new Trusted Publisher for the `mesedi` package with:
+#         Owner:            mesedi-ai
+#         Repository:       mesedi
+#         Workflow name:    release-sdk-python.yml
+#         Environment:      pypi
+#   3. For the *initial* publish, PyPI requires the project to exist —
+#      use the "pending publisher" flow: register the publisher on the
+#      packaging page BEFORE the first release, and PyPI will create
+#      the project on first successful upload from this workflow.
+
+name: Release Python SDK
+
+on:
+  push:
+    tags:
+      - "sdk-python-v*"
+
+permissions:
+  contents: write    # GitHub Release creation
+  id-token: write    # PyPI Trusted Publishing OIDC token
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mesedi
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Verify tag matches pyproject.toml version
+        working-directory: sdk-python
+        run: |
+          tag="${GITHUB_REF##*/}"                          # sdk-python-v0.1.0
+          tag_version="${tag#sdk-python-v}"                # 0.1.0
+          pkg_version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag $tag (=> $tag_version) does not match pyproject.toml version $pkg_version"
+            exit 1
+          fi
+
+      - name: Build sdist + wheel
+        working-directory: sdk-python
+        run: python -m build
+
+      - name: Validate distributions
+        working-directory: sdk-python
+        run: twine check dist/*
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk-python/dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
