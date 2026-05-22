@@ -1,28 +1,16 @@
 # Mesedi TypeScript SDK
 
-**Status:** Phase 11 alpha (v0.0.1). Local-only development; not yet on npm.
+**Status:** v0.1.0 alpha. Live on npm.
 
 The TypeScript companion to `sdk-python/`. Feature parity for the v1
 surface — `configure()`, `wrap()`, `tool()`, async event shipper,
 fail-open posture — built on Node 18+ native `fetch` and
 `AsyncLocalStorage`. **Zero runtime dependencies.**
 
-## Quickstart (local development)
-
-Prerequisites: Mesedi backend running on `localhost:8080`. See
-`../backend/README.md` if not yet running.
+## Install
 
 ```bash
-cd ~/mesedi/sdk-typescript
-npm install              # installs only devDeps (TypeScript)
-npm run build            # compile src/ → dist/
-node sandbox/real_agent.js
-```
-
-Or run the sandbox in one shot:
-
-```bash
-npm run test:sandbox
+npm install mesedi
 ```
 
 ## API
@@ -130,8 +118,18 @@ installed for `generateText`, the integration just works.
 
 `streamText` and `generateObject` ship in a later slice.
 
-## Posture
+## Releases
 
-Same local-only posture as `sdk-python/`. npm publication via the
-trusted-publishing flow ships post-LOI alongside the SDK ecosystem
-work in Phase 16.
+This SDK is published to npm via OIDC Trusted Publishing from the
+`release-sdk-typescript.yml` GitHub Actions workflow — no long-lived
+NPM_TOKEN secret. Every release carries an npm provenance attestation
+linking it to a specific commit in `mesedi-ai/mesedi`.
+
+To cut a new release, bump `version` in `package.json`, commit, then:
+
+```bash
+git tag -a sdk-typescript-v0.X.Y -m "Release sdk-typescript v0.X.Y"
+git push origin sdk-typescript-v0.X.Y
+```
+
+The workflow installs, builds, and publishes with `--provenance`.

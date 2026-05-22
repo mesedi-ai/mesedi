@@ -1,40 +1,30 @@
 # Mesedi Python SDK
 
-**Status:** Phase 2 alpha (v0.0.1). Local-only development; not yet on PyPI.
+**Status:** v0.1.0 alpha. Live on PyPI.
 
 The Mesedi SDK observes autonomous AI agent runs and ships them to the Mesedi
-backend for detection and analysis. Today's surface is intentionally tiny:
+backend for failure-class detection and analysis. The v1 surface:
 
 - `mesedi.configure(api_key=...)` — set up the module-level client
 - `@mesedi.wrap` — decorate any function as an "agent execution"; the SDK
   records start, completion (or crash), wall-clock duration, and a stable
   crash signature suitable for grouping identical exceptions.
+- `@mesedi.tool` — decorate any function as an observed tool call; emits
+  `tool_call` events into the surrounding execution context.
+- Framework adapters for LangChain and CrewAI (see below).
 
-The `@tool` decorator, Anthropic SDK monkey-patch, async event buffer, and
-PyPI release land in later sub-slices.
-
-## Quickstart (local development)
-
-Prerequisites: Mesedi backend running on `localhost:8080` with the bootstrap
-dev project. See `../backend/README.md` if not yet running.
+## Install
 
 ```bash
-cd ~/mesedi/sdk-python
-python3 -m pip install -e .
-
-cd sandbox
-python3 real_agent.py
+pip install mesedi
 ```
 
-Or use it programmatically:
+## Quickstart
 
 ```python
 import mesedi
 
-mesedi.configure(
-    api_key="mesedi_sk_dev_local_only",
-    base_url="http://localhost:8080",
-)
+mesedi.configure(api_key="mesedi_sk_...")
 
 @mesedi.wrap
 def run_my_agent(query: str) -> str:
@@ -43,6 +33,9 @@ def run_my_agent(query: str) -> str:
 
 run_my_agent("hello")
 ```
+
+For local backend development against `localhost:8080`, pass an explicit
+`base_url=`. Otherwise the SDK posts to the Mesedi production backend.
 
 ## What lands in the backend
 
@@ -129,8 +122,18 @@ def run_my_crew(question: str) -> str:
 Result: the dashboard timeline shows LLM/tool detail interleaved with
 CrewAI's higher-level reasoning rhythm.
 
-## Posture
+## Releases
 
-This SDK ships from the same monorepo as the backend during the local-only
-development window. PyPI publication via Trusted Publishing (PEP 740) is
-deferred to the post-LOI sequence in `../docs/DEVELOPMENT_CHECKLIST.md`.
+This SDK is published to PyPI via OIDC Trusted Publishing from the
+`release-sdk-python.yml` GitHub Actions workflow — no long-lived
+PYPI_TOKEN secret. Every release carries the PyPI "verified" provenance
+badge linking it to a specific commit in `mesedi-ai/mesedi`.
+
+To cut a new release, bump `version` in `pyproject.toml`, commit, then:
+
+```bash
+git tag -a sdk-python-v0.X.Y -m "Release sdk-python v0.X.Y"
+git push origin sdk-python-v0.X.Y
+```
+
+The workflow type-checks, builds, validates with `twine`, and publishes.
