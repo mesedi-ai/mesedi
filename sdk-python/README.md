@@ -5,11 +5,11 @@
 The Mesedi SDK observes autonomous AI agent runs and ships them to the Mesedi
 backend for failure-class detection and analysis. The v1 surface:
 
-- `mesedi.configure(api_key=...)` — set up the module-level client
-- `@mesedi.wrap` — decorate any function as an "agent execution"; the SDK
+- `mesedi.configure(api_key=...)`: set up the module-level client
+- `@mesedi.wrap`: decorate any function as an "agent execution". The SDK
   records start, completion (or crash), wall-clock duration, and a stable
   crash signature suitable for grouping identical exceptions.
-- `@mesedi.tool` — decorate any function as an observed tool call; emits
+- `@mesedi.tool`: decorate any function as an observed tool call. Emits
   `tool_call` events into the surrounding execution context.
 - Framework adapters for LangChain and CrewAI (see below).
 
@@ -88,9 +88,9 @@ def run_agent(question: str) -> str:
 The callback handler subscribes to LangChain's standard `on_llm_start` /
 `on_llm_end` / `on_tool_start` / `on_tool_end` (etc.) hooks and emits
 `llm_call` and `tool_call` events with the same wire format as a
-hand-written `mesedi.emit_llm_call()` + `@mesedi.tool` pair. Detectors —
-drift, identical / similar-call loops, tool-failures, cost-velocity,
-prompt-injection — see no difference.
+hand-written `mesedi.emit_llm_call()` + `@mesedi.tool` pair. Detectors
+(drift, identical/similar-call loops, tool-failures, cost-velocity,
+prompt-injection) see no difference.
 
 ### CrewAI
 
@@ -111,7 +111,7 @@ def run_my_crew(question: str) -> str:
 
 `instrument_crew` is one line that does three things, all idempotent:
 
-1. Attaches a Mesedi `MesediCallbackHandler` to each agent's LLM — same
+1. Attaches a Mesedi `MesediCallbackHandler` to each agent's LLM. Same
    LLM/tool telemetry as the LangChain integration above, because CrewAI
    uses LangChain under the hood.
 2. Sets `crew.step_callback` to emit `crewai.agent_action` /
@@ -125,7 +125,7 @@ CrewAI's higher-level reasoning rhythm.
 ## Releases
 
 This SDK is published to PyPI via OIDC Trusted Publishing from the
-`release-sdk-python.yml` GitHub Actions workflow — no long-lived
+`release-sdk-python.yml` GitHub Actions workflow, with no long-lived
 PYPI_TOKEN secret. Every release carries the PyPI "verified" provenance
 badge linking it to a specific commit in `mesedi-ai/mesedi`.
 

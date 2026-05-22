@@ -3,8 +3,8 @@
 **Status:** v0.1.0 alpha. Live on npm.
 
 The TypeScript companion to `sdk-python/`. Feature parity for the v1
-surface — `configure()`, `wrap()`, `tool()`, async event shipper,
-fail-open posture — built on Node 18+ native `fetch` and
+surface (`configure()`, `wrap()`, `tool()`, async event shipper,
+fail-open posture), built on Node 18+ native `fetch` and
 `AsyncLocalStorage`. **Zero runtime dependencies.**
 
 ## Install
@@ -23,12 +23,12 @@ configure({
   baseUrl: "http://localhost:8080",
 });
 
-// Define a tool — observed when called from inside a wrap()'d function
+// Define a tool. Observed when called from inside a wrap()'d function.
 const searchWeb = tool({ name: "search_web" }, async (q: string) => {
   return ["result1", "result2"];
 });
 
-// Wrap an agent function — records start/complete/crash automatically
+// Wrap an agent function. Records start/complete/crash automatically.
 const runAgent = wrap(async (query: string) => {
   const results = await searchWeb(query);
   return `found ${results.length} results`;
@@ -60,7 +60,7 @@ For each `tool()`-decorated call (from inside a `wrap()`):
 
 All HTTP is async via a single in-process queue + a `setInterval`
 drainer. Network failures during observation NEVER throw back into the
-wrapped agent — the SDK is fail-open: a Mesedi outage degrades to
+wrapped agent. The SDK is fail-open: a Mesedi outage degrades to
 invisibility, not to broken production code.
 
 ## Framework integrations
@@ -101,18 +101,18 @@ Per invocation, the wrapper emits:
 
 - One `llm_call` event per step (Vercel's multi-step ReAct surfaces
   intermediate reasoning + final answer on `result.steps`). Model id,
-  user message, system prompt, token usage, response text — all
+  user message, system prompt, token usage, response text, all
   captured in the standard Mesedi wire format.
 - One `tool_call` event per tool invocation in each step. Pairs
   `result.toolCalls[i]` to `result.toolResults` by `toolCallId`,
   detects failure mode (missing result OR `result.error` field) and
   records `status=failed` with `exception_type` / `exception_message`.
 
-Detectors — drift, identical / similar-call loops, tool-failures,
-cost-velocity, prompt-injection — see the same wire format as a
+Detectors (drift, identical/similar-call loops, tool-failures,
+cost-velocity, prompt-injection) see the same wire format as a
 hand-written `mesedi` instrumentation produces.
 
-`ai` is declared as an **optional peer dependency** — installing
+`ai` is declared as an **optional peer dependency**. Installing
 `mesedi` doesn't require it. If your project already has `ai`
 installed for `generateText`, the integration just works.
 
@@ -121,7 +121,7 @@ installed for `generateText`, the integration just works.
 ## Releases
 
 This SDK is published to npm via OIDC Trusted Publishing from the
-`release-sdk-typescript.yml` GitHub Actions workflow — no long-lived
+`release-sdk-typescript.yml` GitHub Actions workflow, with no long-lived
 NPM_TOKEN secret. Every release carries an npm provenance attestation
 linking it to a specific commit in `mesedi-ai/mesedi`.
 
