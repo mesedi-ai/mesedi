@@ -11,6 +11,6 @@
 -- may not have an owner_email if they were created via direct API
 -- key issuance for testing).
 ALTER TABLE projects ADD COLUMN owner_email TEXT;
-CREATE INDEX idx_projects_owner_email
+CREATE INDEX IF NOT EXISTS idx_projects_owner_email
     ON projects(owner_email)
     WHERE owner_email IS NOT NULL;

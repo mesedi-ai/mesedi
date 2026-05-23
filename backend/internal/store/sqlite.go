@@ -121,17 +121,81 @@ func (s *SQLiteStore) applyMigrations(ctx context.Context) error {
 			return fmt.Errorf("check migration %d: %w", version, err)
 		}
 
-		// Read + apply.
+		// Read + apply. Split on semicolons so each statement runs
+		// independently. Bare-Exec on multi-statement SQL stops at the
+		// first failed statement, which means an idempotency error on
+		// statement N skips statements N+1..M. Per-statement application
+		// with idempotency-error tolerance lets us be fully forgiving.
 		body, err := fs.ReadFile(migrationsFS, path.Join("migrations", name))
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
-		if _, err := s.db.ExecContext(ctx, string(body)); err != nil {
-			return fmt.Errorf("apply migration %s: %w", name, err)
+		statements := splitSQLStatements(string(body))
+		for stmtIdx, stmt := range statements {
+			if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+				// Tolerate idempotency errors. SQLite raises these when
+				// a migration tries to add a column/table/index/etc.
+				// that already exists. Most common cause is the partial
+				// state created by older versions of this runner that
+				// failed to record migrations after successful apply,
+				// so every restart re-ran everything and migrations
+				// that weren't purely CREATE-IF-NOT-EXISTS would crash.
+				errMsg := strings.ToLower(err.Error())
+				isIdempotencyErr := strings.Contains(errMsg, "duplicate column name") ||
+					strings.Contains(errMsg, "already exists")
+				if !isIdempotencyErr {
+					return fmt.Errorf("apply migration %s statement %d: %w", name, stmtIdx+1, err)
+				}
+				s.logger.Warn("migration statement produced idempotency error, treating as already-applied",
+					"migration_version", version, "file", name, "statement_index", stmtIdx+1, "error", err.Error())
+			}
 		}
 		s.logger.Info("migration applied", "migration_version", version, "file", name)
+
+		// Record the version as applied. This was missing from the
+		// original runner. The check above would always go through
+		// the apply path, which silently relied on every migration
+		// being purely idempotent DDL (CREATE TABLE IF NOT EXISTS,
+		// etc.). Adding the explicit record here closes the gap.
+		if _, err := s.db.ExecContext(ctx,
+			"INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)",
+			version); err != nil {
+			return fmt.Errorf("record migration %d: %w", version, err)
+		}
 	}
 	return nil
+}
+
+// splitSQLStatements splits a SQL string into individual statements on
+// semicolons. Naive split that does NOT handle semicolons inside string
+// literals or comments. Our migration files are simple DDL with no
+// embedded semicolons, so this is sufficient. Switch to a proper SQL
+// tokenizer if migrations ever need string literals with semicolons.
+func splitSQLStatements(body string) []string {
+	out := make([]string, 0, 4)
+	for _, raw := range strings.Split(body, ";") {
+		stmt := strings.TrimSpace(raw)
+		if stmt == "" {
+			continue
+		}
+		// Drop lines that are entirely SQL line comments. Multi-line
+		// comments inside a statement are preserved (sqlite ignores
+		// them at parse time).
+		lines := strings.Split(stmt, "\n")
+		kept := make([]string, 0, len(lines))
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "--") {
+				continue
+			}
+			kept = append(kept, line)
+		}
+		joined := strings.TrimSpace(strings.Join(kept, "\n"))
+		if joined != "" {
+			out = append(out, joined)
+		}
+	}
+	return out
 }
 
 // parseMigrationVersion extracts the integer prefix from `NNN_name.sql`.
