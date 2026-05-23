@@ -54,6 +54,11 @@ type runtimeConfig struct {
 	LogLevel     string
 	DBURL        string
 	DashboardURL string
+	// Stripe billing config (#120). Any of these may be empty in
+	// local dev — the billing endpoints respond 503 when missing.
+	StripeSecretKey     string
+	StripeWebhookSecret string
+	StripeProPriceID    string
 }
 
 // bootstrapDevProject creates a default "dev" project and a fixed test
@@ -157,7 +162,13 @@ func main() {
 	publicMux.Handle("GET /ui/", dashboard.Handler())
 
 	privateMux := http.NewServeMux()
-	handlers := api.New(logger, st, cfg.DashboardURL)
+	stripeCfg := api.StripeConfig{
+		SecretKey:     cfg.StripeSecretKey,
+		WebhookSecret: cfg.StripeWebhookSecret,
+		ProPriceID:    cfg.StripeProPriceID,
+	}
+	logger.Info("stripe billing configured", "configured", stripeCfg.Configured())
+	handlers := api.New(logger, st, cfg.DashboardURL, stripeCfg)
 	handlers.RegisterRoutes(privateMux)
 	privateHandler := api.NewAuthChain(logger, st)(privateMux)
 
@@ -202,6 +213,14 @@ func main() {
 	mux.Handle("DELETE /webhooks/{id}", privateHandler)
 	mux.Handle("POST /webhooks/{id}/test", privateHandler)
 	mux.Handle("GET /webhooks/{id}/deliveries", privateHandler)
+	// #120 — Stripe billing (auth-required for everything except
+	// the Stripe-server-to-server webhook receiver, which is wired
+	// below alongside the signup endpoint).
+	mux.Handle("GET /billing", privateHandler)
+	mux.Handle("GET /billing/usage", privateHandler)
+	mux.Handle("POST /billing/checkout", privateHandler)
+	mux.Handle("POST /billing/portal", privateHandler)
+	mux.Handle("POST /billing/webhook", signupHandler)
 
 	// Top-level middleware: recover from panics, log every request.
 	root := api.NewTopChain(logger)(mux)
@@ -250,10 +269,13 @@ func handleHealth(logger *slog.Logger) http.HandlerFunc {
 
 func loadConfig() runtimeConfig {
 	cfg := runtimeConfig{
-		Port:         envInt("MESEDI_PORT", 8080),
-		LogLevel:     envString("MESEDI_LOG_LEVEL", "info"),
-		DBURL:        envString("MESEDI_DB_URL", defaultDBURL),
-		DashboardURL: envString("MESEDI_DASHBOARD_URL", ""),
+		Port:                envInt("MESEDI_PORT", 8080),
+		LogLevel:            envString("MESEDI_LOG_LEVEL", "info"),
+		DBURL:               envString("MESEDI_DB_URL", defaultDBURL),
+		DashboardURL:        envString("MESEDI_DASHBOARD_URL", ""),
+		StripeSecretKey:     envString("MESEDI_STRIPE_SECRET_KEY", ""),
+		StripeWebhookSecret: envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),
+		StripeProPriceID:    envString("MESEDI_STRIPE_PRO_PRICE_ID", ""),
 	}
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "TCP port for the HTTP API")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log verbosity: debug | info | warn | error")

@@ -15,12 +15,48 @@ import (
 )
 
 // Project is one customer's top-level container for agent telemetry.
+//
+// Billing fields (Tier, StripeCustomerID, StripeSubscriptionID,
+// CurrentPeriodStart, CurrentPeriodEnd, ExecutionsThisPeriod) were
+// added in migration 006 as part of the Stripe integration slice
+// (#120). For existing projects created before that migration ran,
+// Tier defaults to "hobby" and the Stripe identifiers are empty
+// until a Checkout completes.
 type Project struct {
 	ProjectID   string    `json:"project_id"`
 	Name        string    `json:"name"`
 	OwnerUserID string    `json:"owner_user_id,omitempty"`
 	OwnerEmail  string    `json:"owner_email,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
+
+	// Tier: "hobby" | "pro" | "enterprise". Always populated;
+	// migration 006 backfills existing rows to "hobby".
+	Tier string `json:"tier"`
+	// Stripe identifiers — populated after a successful Checkout.
+	// Empty for hobby-tier projects that never upgraded.
+	StripeCustomerID     string `json:"stripe_customer_id,omitempty"`
+	StripeSubscriptionID string `json:"stripe_subscription_id,omitempty"`
+	// CurrentPeriodStart / CurrentPeriodEnd mirror the Stripe
+	// subscription's billing period so the dashboard can render the
+	// "X executions used of N this month" line without a Stripe API
+	// round-trip on every page load. Updated on
+	// customer.subscription.updated and invoice.paid webhook events.
+	CurrentPeriodStart *time.Time `json:"current_period_start,omitempty"`
+	CurrentPeriodEnd   *time.Time `json:"current_period_end,omitempty"`
+	// ExecutionsThisPeriod is the rolling counter incremented on each
+	// successful POST /executions. Reset to zero on each new billing
+	// period (lazy reset: handlers compare CurrentPeriodEnd to now and
+	// roll over before incrementing).
+	ExecutionsThisPeriod int64 `json:"executions_this_period"`
+}
+
+// DailyExecutionCount is one bucket of an execution-usage time series.
+// Used by the billing page's usage chart. The Date is in UTC, midnight,
+// inclusive (so a row with Date=2026-05-23 covers all executions where
+// started_at falls between 2026-05-23T00:00:00Z and 2026-05-24T00:00:00Z).
+type DailyExecutionCount struct {
+	Date  time.Time `json:"date"`
+	Count int64     `json:"count"`
 }
 
 // APIKey is an authentication credential bound to a project. The raw
@@ -126,6 +162,34 @@ type Store interface {
 	// Projects + API keys (admin / bootstrap operations).
 	CreateProject(ctx context.Context, p *Project) error
 	GetProject(ctx context.Context, projectID string) (*Project, error)
+	// Billing (#120 — Stripe integration).
+	// UpdateProjectBilling sets the tier, Stripe identifiers, and
+	// current period bounds in one call. Called from the Stripe
+	// webhook handler after checkout.session.completed and from
+	// customer.subscription.updated. Period start/end may be nil to
+	// clear (e.g., on subscription cancellation).
+	UpdateProjectBilling(ctx context.Context, projectID, tier, stripeCustomerID, stripeSubscriptionID string, periodStart, periodEnd *time.Time) error
+	// GetProjectByStripeCustomerID resolves a Stripe customer id back
+	// to the owning project for webhook event handling. Returns
+	// ErrNotFound if no project is associated with that customer.
+	GetProjectByStripeCustomerID(ctx context.Context, stripeCustomerID string) (*Project, error)
+	// IncrementExecutionsThisPeriod atomically increments the per-
+	// period execution counter on a project. Called from
+	// HandleCreateExecution on each successful POST /executions. Best-
+	// effort: a failure here logs a warning but does not fail the
+	// ingest path.
+	IncrementExecutionsThisPeriod(ctx context.Context, projectID string) error
+	// ResetExecutionsThisPeriod zeroes the counter and updates the
+	// period bounds. Called when a new billing period starts (lazy
+	// reset, triggered by webhook or by a counter-read handler
+	// noticing the current period has ended).
+	ResetExecutionsThisPeriod(ctx context.Context, projectID string, periodStart, periodEnd time.Time) error
+	// GetDailyExecutionCounts returns one row per UTC day of executions
+	// in the given project over the given window, in ascending date
+	// order. Days with zero executions are NOT included in the result
+	// (the dashboard fills gaps client-side). Used by the billing
+	// page's usage chart.
+	GetDailyExecutionCounts(ctx context.Context, projectID string, since, until time.Time) ([]DailyExecutionCount, error)
 	CreateAPIKey(ctx context.Context, k *APIKey) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error)
 	TouchAPIKey(ctx context.Context, keyID string) error

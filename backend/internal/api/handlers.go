@@ -47,6 +47,11 @@ type Handlers struct {
 	// local dev where the dashboard is same-origin with the API, wrong
 	// in prod where the dashboard lives on a different host.
 	DashboardURL string
+	// Stripe carries the secret key, webhook signing secret, and Pro
+	// price id used by the billing endpoints (#120). All three may
+	// be empty in local dev; the billing endpoints respond 503 when
+	// any of them is missing.
+	Stripe StripeConfig
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
@@ -54,13 +59,17 @@ type Handlers struct {
 //
 // dashboardURL is the public origin of the React dashboard (no trailing
 // slash, no path). Pass "" in local dev to derive from the request host.
-func New(logger *slog.Logger, s store.Store, dashboardURL string) *Handlers {
+//
+// stripeCfg carries Stripe-specific identifiers; pass a zero-value
+// StripeConfig in local dev to leave billing endpoints disabled.
+func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg StripeConfig) *Handlers {
 	return &Handlers{
 		Logger:        logger,
 		Store:         s,
 		HaltSubs:      NewHaltSubscribers(),
 		WebhookClient: webhooks.DefaultHTTPClient(),
 		DashboardURL:  strings.TrimRight(dashboardURL, "/"),
+		Stripe:        stripeCfg,
 	}
 }
 
@@ -73,6 +82,11 @@ func New(logger *slog.Logger, s store.Store, dashboardURL string) *Handlers {
 // rate limiter.
 func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /signup", h.HandleSignup)
+	// Stripe webhook receiver. Public because Stripe POSTs server-
+	// to-server with no bearer; authenticity is verified inside the
+	// handler via the Stripe-Signature header against the configured
+	// webhook secret.
+	mux.HandleFunc("POST /billing/webhook", h.HandleStripeWebhook)
 }
 
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
@@ -109,6 +123,11 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Slice 2: manual test-delivery trigger + deliveries log read.
 	mux.HandleFunc("POST /webhooks/{id}/test", h.HandleTestWebhook)
 	mux.HandleFunc("GET /webhooks/{id}/deliveries", h.HandleListWebhookDeliveries)
+	// Task #120 — Stripe billing endpoints (auth-required).
+	mux.HandleFunc("GET /billing", h.HandleGetBilling)
+	mux.HandleFunc("GET /billing/usage", h.HandleGetBillingUsage)
+	mux.HandleFunc("POST /billing/checkout", h.HandleCreateCheckout)
+	mux.HandleFunc("POST /billing/portal", h.HandleCreatePortal)
 }
 
 // HandleGetPlaybook returns the markdown content for the playbook
@@ -195,6 +214,18 @@ func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request)
 		)
 		writeError(w, http.StatusInternalServerError, "persist failed: "+err.Error())
 		return
+	}
+
+	// #120 — increment the per-period execution counter. Best-effort:
+	// a failure here logs a warning but does not propagate to the
+	// caller. Counting must never block ingest. Enforcement (Hobby
+	// silent-drop, Pro overage metering) lands in a follow-up slice
+	// that gates on this counter before the CreateExecution call.
+	if err := h.Store.IncrementExecutionsThisPeriod(r.Context(), exec.ProjectID); err != nil {
+		h.Logger.Warn("increment executions counter failed (continuing)",
+			"project_id", exec.ProjectID,
+			"error", err.Error(),
+		)
 	}
 
 	h.Logger.Info("execution created",

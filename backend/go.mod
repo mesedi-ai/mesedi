@@ -2,7 +2,10 @@ module mesedi/backend
 
 go 1.25.0
 
-require modernc.org/sqlite v1.50.1
+require (
+	github.com/stripe/stripe-go/v82 v82.5.1
+	modernc.org/sqlite v1.50.1
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

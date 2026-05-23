@@ -227,10 +227,19 @@ func (s *SQLiteStore) CreateProject(ctx context.Context, p *Project) error {
 	if p.CreatedAt.IsZero() {
 		p.CreatedAt = time.Now().UTC()
 	}
+	// Default Tier to "hobby" when the caller did not specify one.
+	// Migration 006 sets the column default at the schema level, but
+	// being explicit here keeps reads consistent with the in-memory
+	// struct the caller passed in.
+	if p.Tier == "" {
+		p.Tier = "hobby"
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO projects (project_id, name, owner_user_id, owner_email, created_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, p.ProjectID, p.Name, nullString(p.OwnerUserID), nullString(p.OwnerEmail), p.CreatedAt)
+		INSERT INTO projects (
+			project_id, name, owner_user_id, owner_email, created_at, tier
+		)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, p.ProjectID, p.Name, nullString(p.OwnerUserID), nullString(p.OwnerEmail), p.CreatedAt, p.Tier)
 	if err != nil {
 		return fmt.Errorf("insert project: %w", err)
 	}
@@ -239,11 +248,18 @@ func (s *SQLiteStore) CreateProject(ctx context.Context, p *Project) error {
 
 func (s *SQLiteStore) GetProject(ctx context.Context, projectID string) (*Project, error) {
 	p := &Project{}
-	var owner sql.NullString
-	var email sql.NullString
+	var owner, email, stripeCust, stripeSub sql.NullString
+	var periodStart, periodEnd sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT project_id, name, owner_user_id, owner_email, created_at FROM projects WHERE project_id = ?
-	`, projectID).Scan(&p.ProjectID, &p.Name, &owner, &email, &p.CreatedAt)
+		SELECT project_id, name, owner_user_id, owner_email, created_at,
+		       tier, stripe_customer_id, stripe_subscription_id,
+		       current_period_start, current_period_end, executions_this_period
+		FROM projects WHERE project_id = ?
+	`, projectID).Scan(
+		&p.ProjectID, &p.Name, &owner, &email, &p.CreatedAt,
+		&p.Tier, &stripeCust, &stripeSub,
+		&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -256,7 +272,157 @@ func (s *SQLiteStore) GetProject(ctx context.Context, projectID string) (*Projec
 	if email.Valid {
 		p.OwnerEmail = email.String
 	}
+	if stripeCust.Valid {
+		p.StripeCustomerID = stripeCust.String
+	}
+	if stripeSub.Valid {
+		p.StripeSubscriptionID = stripeSub.String
+	}
+	if periodStart.Valid {
+		t := time.Unix(periodStart.Int64, 0).UTC()
+		p.CurrentPeriodStart = &t
+	}
+	if periodEnd.Valid {
+		t := time.Unix(periodEnd.Int64, 0).UTC()
+		p.CurrentPeriodEnd = &t
+	}
 	return p, nil
+}
+
+// UpdateProjectBilling sets the tier, Stripe identifiers, and period
+// bounds in one UPDATE. nullPtrTime treats nil pointers as NULL in the
+// database (used to clear period bounds on subscription cancellation).
+func (s *SQLiteStore) UpdateProjectBilling(
+	ctx context.Context,
+	projectID, tier, stripeCustomerID, stripeSubscriptionID string,
+	periodStart, periodEnd *time.Time,
+) error {
+	if tier == "" {
+		return fmt.Errorf("tier required")
+	}
+	var startUnix, endUnix sql.NullInt64
+	if periodStart != nil {
+		startUnix.Int64 = periodStart.UTC().Unix()
+		startUnix.Valid = true
+	}
+	if periodEnd != nil {
+		endUnix.Int64 = periodEnd.UTC().Unix()
+		endUnix.Valid = true
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE projects
+		SET tier = ?,
+		    stripe_customer_id = ?,
+		    stripe_subscription_id = ?,
+		    current_period_start = ?,
+		    current_period_end = ?
+		WHERE project_id = ?
+	`, tier, nullString(stripeCustomerID), nullString(stripeSubscriptionID), startUnix, endUnix, projectID)
+	if err != nil {
+		return fmt.Errorf("update project billing: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetProjectByStripeCustomerID resolves a Stripe customer id to the
+// owning project. Used by the webhook handler when Stripe sends an
+// event keyed by customer rather than by Mesedi project_id.
+func (s *SQLiteStore) GetProjectByStripeCustomerID(
+	ctx context.Context, stripeCustomerID string,
+) (*Project, error) {
+	if stripeCustomerID == "" {
+		return nil, ErrNotFound
+	}
+	var projectID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT project_id FROM projects WHERE stripe_customer_id = ? LIMIT 1
+	`, stripeCustomerID).Scan(&projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetProject(ctx, projectID)
+}
+
+// IncrementExecutionsThisPeriod atomically adds 1 to the counter.
+// Best-effort: a failure does not propagate to the ingest path; the
+// caller logs and continues.
+func (s *SQLiteStore) IncrementExecutionsThisPeriod(
+	ctx context.Context, projectID string,
+) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE projects
+		SET executions_this_period = executions_this_period + 1
+		WHERE project_id = ?
+	`, projectID)
+	if err != nil {
+		return fmt.Errorf("increment executions counter: %w", err)
+	}
+	return nil
+}
+
+// ResetExecutionsThisPeriod zeros the counter and updates the period
+// bounds. Called on billing-period rollover (invoice.paid webhook or
+// lazy reset when handlers notice current_period_end has passed).
+func (s *SQLiteStore) ResetExecutionsThisPeriod(
+	ctx context.Context, projectID string, periodStart, periodEnd time.Time,
+) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE projects
+		SET executions_this_period = 0,
+		    current_period_start = ?,
+		    current_period_end = ?
+		WHERE project_id = ?
+	`, periodStart.UTC().Unix(), periodEnd.UTC().Unix(), projectID)
+	if err != nil {
+		return fmt.Errorf("reset executions counter: %w", err)
+	}
+	return nil
+}
+
+// GetDailyExecutionCounts groups executions by UTC date for the
+// billing-page usage chart. Date is the calendar day at UTC midnight;
+// Count is the number of executions started on that day. Days with
+// zero executions are omitted (the dashboard fills gaps client-side).
+func (s *SQLiteStore) GetDailyExecutionCounts(
+	ctx context.Context, projectID string, since, until time.Time,
+) ([]DailyExecutionCount, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+		    date(started_at) AS day,
+		    COUNT(*) AS n
+		FROM executions
+		WHERE project_id = ?
+		  AND started_at >= ?
+		  AND started_at <  ?
+		GROUP BY day
+		ORDER BY day ASC
+	`, projectID, since.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, fmt.Errorf("query daily execution counts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []DailyExecutionCount
+	for rows.Next() {
+		var dayStr string
+		var n int64
+		if err := rows.Scan(&dayStr, &n); err != nil {
+			return nil, fmt.Errorf("scan daily count: %w", err)
+		}
+		t, err := time.Parse("2006-01-02", dayStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse day %q: %w", dayStr, err)
+		}
+		out = append(out, DailyExecutionCount{Date: t.UTC(), Count: n})
+	}
+	return out, rows.Err()
 }
 
 func (s *SQLiteStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
