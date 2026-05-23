@@ -56,6 +56,14 @@ func New(logger *slog.Logger, s store.Store) *Handlers {
 // RegisterRoutes attaches every protected route to the provided ServeMux.
 // Keep this list short and explicit — it doubles as the API surface
 // inventory for documentation.
+// RegisterPublicRoutes attaches handlers that intentionally bypass
+// bearer-token auth. /signup is public because a browser visiting it
+// has no API key yet; abuse is bounded by signup.go's in-process IP
+// rate limiter.
+func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /signup", h.HandleSignup)
+}
+
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Phase 1 ingest surface.
 	mux.HandleFunc("POST /executions", h.HandleCreateExecution)

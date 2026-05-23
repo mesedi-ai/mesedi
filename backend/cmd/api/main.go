@@ -2,7 +2,8 @@
 // agent execution telemetry, runs detection engines against the event
 // stream, and surfaces alerts via webhook + dashboard.
 //
-// Architecture: see /Users/robertcanario/mesedi/concept idea/DETAILED_CONCEPT.md
+// See the per-component READMEs in this repo for runtime configuration,
+// failure-class detectors, and SDK integration patterns.
 //
 // Configuration (12-factor — flags or env vars; flags win):
 //
@@ -142,7 +143,7 @@ func main() {
 	publicMux.HandleFunc("GET /health", handleHealth(logger))
 	// Local-dev dashboard: served from embedded files in the backend
 	// binary itself, so same-origin (no CORS gymnastics) and no
-	// separate web server needed. NOT the production dashboard — see
+	// separate web server needed. NOT the production dashboard. See
 	// internal/dashboard/dashboard.go for the posture statement.
 	publicMux.Handle("GET /ui/", dashboard.Handler())
 
@@ -151,9 +152,19 @@ func main() {
 	handlers.RegisterRoutes(privateMux)
 	privateHandler := api.NewAuthChain(logger, st)(privateMux)
 
+	// Public POST /signup bypasses the bearer-token auth chain (visitors
+	// have no key yet) but still needs CORS so the marketing site at
+	// mesedi.vercel.app can POST cross-origin. The signup handler's
+	// in-process IP rate limiter bounds abuse.
+	signupMux := http.NewServeMux()
+	handlers.RegisterPublicRoutes(signupMux)
+	signupHandler := api.CORSMiddleware()(signupMux)
+
 	mux := http.NewServeMux()
 	mux.Handle("GET /health", publicMux)
 	mux.Handle("GET /ui/", publicMux)
+	mux.Handle("POST /signup", signupHandler)
+	mux.Handle("OPTIONS /signup", signupHandler)
 	mux.Handle("POST /executions", privateHandler)
 	mux.Handle("PATCH /executions/{id}", privateHandler)
 	mux.Handle("POST /events", privateHandler)
@@ -211,10 +222,9 @@ func main() {
 	logger.Info("http server stopped cleanly")
 }
 
-// handleHealth returns the standard health-check endpoint. Mirrors the shape
-// of Verdifax's /health (ok, service, version, time) so anyone familiar with
-// the Verdifax pattern recognizes it immediately. Adds git_sha once we have
-// a build pipeline injecting it via -ldflags.
+// handleHealth returns the standard health-check endpoint with the
+// conventional shape (ok, service, version, time). Adds git_sha once we
+// have a build pipeline injecting it via -ldflags.
 func handleHealth(logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

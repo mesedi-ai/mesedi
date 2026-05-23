@@ -158,9 +158,9 @@ func (s *SQLiteStore) CreateProject(ctx context.Context, p *Project) error {
 		p.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO projects (project_id, name, owner_user_id, created_at)
-		VALUES (?, ?, ?, ?)
-	`, p.ProjectID, p.Name, nullString(p.OwnerUserID), p.CreatedAt)
+		INSERT INTO projects (project_id, name, owner_user_id, owner_email, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, p.ProjectID, p.Name, nullString(p.OwnerUserID), nullString(p.OwnerEmail), p.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("insert project: %w", err)
 	}
@@ -170,9 +170,10 @@ func (s *SQLiteStore) CreateProject(ctx context.Context, p *Project) error {
 func (s *SQLiteStore) GetProject(ctx context.Context, projectID string) (*Project, error) {
 	p := &Project{}
 	var owner sql.NullString
+	var email sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT project_id, name, owner_user_id, created_at FROM projects WHERE project_id = ?
-	`, projectID).Scan(&p.ProjectID, &p.Name, &owner, &p.CreatedAt)
+		SELECT project_id, name, owner_user_id, owner_email, created_at FROM projects WHERE project_id = ?
+	`, projectID).Scan(&p.ProjectID, &p.Name, &owner, &email, &p.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -181,6 +182,9 @@ func (s *SQLiteStore) GetProject(ctx context.Context, projectID string) (*Projec
 	}
 	if owner.Valid {
 		p.OwnerUserID = owner.String
+	}
+	if email.Valid {
+		p.OwnerEmail = email.String
 	}
 	return p, nil
 }
@@ -1112,29 +1116,49 @@ func deriveGroupID(projectID, failureClass, signature string) string {
 func (s *SQLiteStore) groupExecutionInternal(
 	ctx context.Context,
 	executionID, projectID, failureClass, signature string,
-) error {
+) (isNew bool, err error) {
 	if executionID == "" || projectID == "" || failureClass == "" || signature == "" {
-		return fmt.Errorf("executionID, projectID, failureClass, signature all required")
+		return false, fmt.Errorf("executionID, projectID, failureClass, signature all required")
 	}
 
 	// Idempotency check: skip if already grouped (any class).
 	var existing sql.NullString
-	err := s.db.QueryRowContext(
+	err = s.db.QueryRowContext(
 		ctx,
 		`SELECT failure_group_id FROM executions WHERE execution_id = ?`,
 		executionID,
 	).Scan(&existing)
 	if err == sql.ErrNoRows {
-		return ErrNotFound
+		return false, ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("read execution failure_group_id: %w", err)
+		return false, fmt.Errorf("read execution failure_group_id: %w", err)
 	}
 	if existing.Valid && existing.String != "" {
-		return nil // already grouped; no-op
+		return false, nil // already grouped; no-op (and not new from this caller's perspective)
 	}
 
 	groupID := deriveGroupID(projectID, failureClass, signature)
+
+	// Newness probe: does the failure_group already exist? If not, this
+	// call is about to create it and we'll report isNew=true to the
+	// caller so it can fire webhook escalation. Racy under concurrent
+	// writers for the same signature — both observers could see "not
+	// found" and both report isNew=true. For v1 with low concurrency the
+	// worst case is duplicate webhook deliveries, not data corruption.
+	// Production hardening (RETURNING-clause or transactional upsert)
+	// is deferred.
+	var existedBefore int
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT 1 FROM failure_groups WHERE group_id = ? LIMIT 1`,
+		groupID,
+	).Scan(&existedBefore)
+	if err != nil && err != sql.ErrNoRows {
+		return false, fmt.Errorf("probe failure_group existence: %w", err)
+	}
+	isNew = err == sql.ErrNoRows
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Upsert: insert on first-ever match, increment counters on subsequent.
@@ -1152,7 +1176,7 @@ func (s *SQLiteStore) groupExecutionInternal(
 			last_seen = excluded.last_seen
 	`, groupID, projectID, failureClass, signature, now, now, executionID)
 	if err != nil {
-		return fmt.Errorf("upsert failure_group: %w", err)
+		return false, fmt.Errorf("upsert failure_group: %w", err)
 	}
 
 	_, err = s.db.ExecContext(
@@ -1162,7 +1186,7 @@ func (s *SQLiteStore) groupExecutionInternal(
 		executionID,
 	)
 	if err != nil {
-		return fmt.Errorf("link execution to failure_group: %w", err)
+		return false, fmt.Errorf("link execution to failure_group: %w", err)
 	}
 
 	s.logger.Info("execution grouped",
@@ -1170,8 +1194,9 @@ func (s *SQLiteStore) groupExecutionInternal(
 		"failure_group_id", groupID,
 		"failure_class", failureClass,
 		"signature", signature,
+		"is_new_group", isNew,
 	)
-	return nil
+	return isNew, nil
 }
 
 // GroupCrashedExecution upserts a failure_group with failure_class=crashes
@@ -1179,7 +1204,7 @@ func (s *SQLiteStore) groupExecutionInternal(
 func (s *SQLiteStore) GroupCrashedExecution(
 	ctx context.Context,
 	executionID, projectID, signature string,
-) error {
+) (isNew bool, err error) {
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassCrashes, signature)
 }
 
@@ -1190,13 +1215,13 @@ func (s *SQLiteStore) GroupCrashedExecution(
 // project once the projects table gets per-project policy columns.
 const timeBudgetThresholdMs int64 = 1000
 
-// timeBudgetSignature returns a coarse duration-bucket label so that
+// TimeBudgetSignature returns a coarse duration-bucket label so that
 // "long-running executions" cluster into a small number of groups
 // rather than one group per unique millisecond. Buckets: 1s+, 10s+,
 // 60s+, 10m+, 1h+. Anything below the threshold is filtered upstream
 // in the handler; this function assumes a positive duration that has
 // already exceeded the threshold.
-func timeBudgetSignature(durationMs int64) string {
+func TimeBudgetSignature(durationMs int64) string {
 	switch {
 	case durationMs < 10_000:
 		return "time_budget_1s+"
@@ -1220,16 +1245,16 @@ func (s *SQLiteStore) GroupTimeBudgetExceedance(
 	ctx context.Context,
 	executionID, projectID string,
 	durationMs int64,
-) error {
-	signature := timeBudgetSignature(durationMs)
+) (isNew bool, err error) {
+	signature := TimeBudgetSignature(durationMs)
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
 }
 
-// stepCountSignature buckets event counts so high-step-count executions
+// StepCountSignature buckets event counts so high-step-count executions
 // cluster into a small number of groups rather than one group per
 // distinct count. Buckets: 10+, 50+, 100+, 500+, 5000+. Anything below
 // the threshold is filtered upstream in the handler.
-func stepCountSignature(count int) string {
+func StepCountSignature(count int) string {
 	switch {
 	case count < 50:
 		return "step_count_10+"
@@ -1253,8 +1278,8 @@ func (s *SQLiteStore) GroupStepCountExceedance(
 	ctx context.Context,
 	executionID, projectID string,
 	eventCount int,
-) error {
-	signature := stepCountSignature(eventCount)
+) (isNew bool, err error) {
+	signature := StepCountSignature(eventCount)
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
 }
 
@@ -1344,9 +1369,9 @@ func (s *SQLiteStore) FindFirstFailedToolName(
 func (s *SQLiteStore) GroupToolFailure(
 	ctx context.Context,
 	executionID, projectID, toolName string,
-) error {
+) (isNew bool, err error) {
 	if toolName == "" {
-		return fmt.Errorf("toolName required")
+		return false, fmt.Errorf("toolName required")
 	}
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassToolFailures, toolName)
 }
@@ -1388,9 +1413,9 @@ func (s *SQLiteStore) FindFirstFailedValidator(
 func (s *SQLiteStore) GroupValidatorFailure(
 	ctx context.Context,
 	executionID, projectID, validatorName string,
-) error {
+) (isNew bool, err error) {
 	if validatorName == "" {
-		return fmt.Errorf("validatorName required")
+		return false, fmt.Errorf("validatorName required")
 	}
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassValidator, validatorName)
 }
@@ -1402,9 +1427,9 @@ func (s *SQLiteStore) GroupValidatorFailure(
 func (s *SQLiteStore) GroupPromptInjection(
 	ctx context.Context,
 	executionID, projectID, patternName string,
-) error {
+) (isNew bool, err error) {
 	if patternName == "" {
-		return fmt.Errorf("patternName required")
+		return false, fmt.Errorf("patternName required")
 	}
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassInjection, patternName)
 }
@@ -1415,11 +1440,11 @@ func (s *SQLiteStore) GroupPromptInjection(
 // baseline-relative detector (Phase 5+).
 const costVelocityThresholdUSD = 0.001
 
-// costVelocitySignature buckets execution cost into order-of-magnitude
+// CostVelocitySignature buckets execution cost into order-of-magnitude
 // signatures so high-cost runs cluster sensibly. The lowest bucket
 // (cost_$0.001+) matches the threshold; anything cheaper is filtered
 // upstream in the handler.
-func costVelocitySignature(costUSD float64) string {
+func CostVelocitySignature(costUSD float64) string {
 	switch {
 	case costUSD < 0.01:
 		return "cost_$0.001+"
@@ -1443,11 +1468,11 @@ func (s *SQLiteStore) GroupCostVelocity(
 	ctx context.Context,
 	executionID, projectID string,
 	costUSD float64,
-) error {
+) (isNew bool, err error) {
 	if costUSD < costVelocityThresholdUSD {
-		return nil
+		return false, nil
 	}
-	signature := costVelocitySignature(costUSD)
+	signature := CostVelocitySignature(costUSD)
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassCostVelocity, signature)
 }
 
@@ -1458,9 +1483,9 @@ func (s *SQLiteStore) GroupCostVelocity(
 func (s *SQLiteStore) GroupIdenticalCallLoop(
 	ctx context.Context,
 	executionID, projectID, callHash string,
-) error {
+) (isNew bool, err error) {
 	if callHash == "" {
-		return fmt.Errorf("callHash required")
+		return false, fmt.Errorf("callHash required")
 	}
 	signature := "identical_call_" + callHash
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
@@ -1475,9 +1500,9 @@ func (s *SQLiteStore) GroupIdenticalCallLoop(
 func (s *SQLiteStore) GroupSimilarCallLoop(
 	ctx context.Context,
 	executionID, projectID, callHash string,
-) error {
+) (isNew bool, err error) {
 	if callHash == "" {
-		return fmt.Errorf("callHash required")
+		return false, fmt.Errorf("callHash required")
 	}
 	signature := "similar_call_" + callHash
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassLoops, signature)
@@ -1567,9 +1592,9 @@ func (s *SQLiteStore) ListModelsForProjectSince(
 func (s *SQLiteStore) GroupDriftSignal(
 	ctx context.Context,
 	executionID, projectID, signature string,
-) error {
+) (isNew bool, err error) {
 	if signature == "" {
-		return fmt.Errorf("drift signature required")
+		return false, fmt.Errorf("drift signature required")
 	}
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassDrift, signature)
 }
@@ -1731,6 +1756,18 @@ func (s *SQLiteStore) GetFailureGroup(
 		return nil, fmt.Errorf("query failure_group: %w", err)
 	}
 	return g, nil
+}
+
+// GetFailureGroupByClassSignature returns a failure_group by its
+// natural key (project_id, failure_class, signature). Used by the
+// webhook dispatcher to fetch the canonical sample_execution_id for
+// the payload at first-occurrence time.
+func (s *SQLiteStore) GetFailureGroupByClassSignature(
+	ctx context.Context,
+	projectID, failureClass, signature string,
+) (*FailureGroup, error) {
+	groupID := deriveGroupID(projectID, failureClass, signature)
+	return s.GetFailureGroup(ctx, groupID)
 }
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows — letting

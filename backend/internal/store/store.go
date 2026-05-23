@@ -19,6 +19,7 @@ type Project struct {
 	ProjectID   string    `json:"project_id"`
 	Name        string    `json:"name"`
 	OwnerUserID string    `json:"owner_user_id,omitempty"`
+	OwnerEmail  string    `json:"owner_email,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -199,21 +200,23 @@ type Store interface {
 	SaveEvents(ctx context.Context, batch []events.Event) error
 
 	// Failure groups (Phase 3a — crash detection, Phase 3b/4 — loops).
-	// GroupCrashedExecution upserts a failure_group for the (project,
-	// failure_class=crashes, signature) tuple and links the execution.
-	// Idempotent: re-calling with an already-grouped execution is a no-op.
-	GroupCrashedExecution(ctx context.Context, executionID, projectID, signature string) error
+	//
+	// Every Group* method returns (isNew bool, error). isNew is true
+	// iff this call CREATED a new failure_group row (this is the first
+	// occurrence of this (project, class, signature) tuple).
+	// Subsequent occurrences return isNew=false. Used by the webhook
+	// escalation dispatcher (task #83) to fire on first occurrence only,
+	// not on every re-occurrence. Idempotency is unchanged — an
+	// already-grouped execution is still a no-op and returns
+	// (false, nil).
+	GroupCrashedExecution(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// GroupTimeBudgetExceedance upserts a failure_group with
 	// failure_class=loops and a duration-bucketed signature. Same
-	// idempotency contract as GroupCrashedExecution — an execution
-	// already linked to a group (e.g., already grouped as a crash) is
-	// a no-op; crash classification wins over time-budget overlap.
-	GroupTimeBudgetExceedance(ctx context.Context, executionID, projectID string, durationMs int64) error
+	// idempotency contract as GroupCrashedExecution.
+	GroupTimeBudgetExceedance(ctx context.Context, executionID, projectID string, durationMs int64) (bool, error)
 	// GroupStepCountExceedance upserts a failure_group with
-	// failure_class=loops and an event-count-bucketed signature. Runs
-	// after the time-budget check; the same idempotency short-circuit
-	// means each execution lands in at most one group.
-	GroupStepCountExceedance(ctx context.Context, executionID, projectID string, eventCount int) error
+	// failure_class=loops and an event-count-bucketed signature.
+	GroupStepCountExceedance(ctx context.Context, executionID, projectID string, eventCount int) (bool, error)
 	// CountEventsForExecution returns the number of event rows
 	// recorded against a single execution. Used by the step-count
 	// detector and the Phase-9 replay UI's "this run produced N
@@ -230,9 +233,9 @@ type Store interface {
 	// failed silently (agent caught the exception, ran to completion).
 	FindFirstFailedToolName(ctx context.Context, executionID string) (string, error)
 	// GroupToolFailure upserts a failure_group with
-	// failure_class=tool_failures and signature=toolName. Same
-	// idempotency contract as the other groupers.
-	GroupToolFailure(ctx context.Context, executionID, projectID, toolName string) error
+	// failure_class=tool_failures and signature=toolName. Returns
+	// isNew=true on first occurrence.
+	GroupToolFailure(ctx context.Context, executionID, projectID, toolName string) (bool, error)
 	// FindFirstFailedValidator returns the name of the first
 	// validator_result event with payload.passed=false in this
 	// execution, or empty string if no validators failed. The "agent
@@ -240,34 +243,19 @@ type Store interface {
 	FindFirstFailedValidator(ctx context.Context, executionID string) (string, error)
 	// GroupValidatorFailure upserts a failure_group with
 	// failure_class=validator_failures and signature=validatorName.
-	GroupValidatorFailure(ctx context.Context, executionID, projectID, validatorName string) error
+	GroupValidatorFailure(ctx context.Context, executionID, projectID, validatorName string) (bool, error)
 	// GroupPromptInjection upserts a failure_group with
-	// failure_class=prompt_injection and signature=patternName
-	// (e.g. "ignore_instructions", "role_override"). Detection logic
-	// lives in internal/detectors/injection.go — this method just
-	// records the result.
-	GroupPromptInjection(ctx context.Context, executionID, projectID, patternName string) error
+	// failure_class=prompt_injection and signature=patternName.
+	GroupPromptInjection(ctx context.Context, executionID, projectID, patternName string) (bool, error)
 	// GroupCostVelocity upserts a failure_group with
-	// failure_class=cost_velocity and a cost-bucketed signature
-	// (cost_$0.001+, cost_$0.01+, cost_$0.10+, cost_$1+, cost_$10+).
-	// V0.0.1 absolute-threshold version; Phase-5+ will swap to a
-	// proper baseline-relative detector.
-	GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64) error
+	// failure_class=cost_velocity and a cost-bucketed signature.
+	GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64) (bool, error)
 	// GroupIdenticalCallLoop upserts a failure_group with
-	// failure_class=loops and signature=identical_call_<short_hash>
-	// when an execution made the same LLM call (same model + user
-	// message) at least N times. Catches exact-text loops where the
-	// agent is regenerating the same prompt verbatim.
-	GroupIdenticalCallLoop(ctx context.Context, executionID, projectID, callHash string) error
+	// failure_class=loops and signature=identical_call_<short_hash>.
+	GroupIdenticalCallLoop(ctx context.Context, executionID, projectID, callHash string) (bool, error)
 	// GroupSimilarCallLoop upserts a failure_group with
-	// failure_class=loops and signature=similar_call_<short_hash>
-	// when an execution made N+ LLM calls whose user_messages cluster
-	// semantically (pairwise cosine distance below threshold) even
-	// though no two are exactly identical. Catches the "stuck-loop
-	// with paraphrased prompts" pattern that identical_call misses.
-	// 4th and final Phase-4 loop sub-detector — runs after
-	// identical_call so exact-text loops win that signature.
-	GroupSimilarCallLoop(ctx context.Context, executionID, projectID, callHash string) error
+	// failure_class=loops and signature=similar_call_<short_hash>.
+	GroupSimilarCallLoop(ctx context.Context, executionID, projectID, callHash string) (bool, error)
 	// ListModelsForExecution returns the distinct set of model names
 	// extracted from this execution's llm_call events' payload.model
 	// field, sorted alphabetically. Empty slice if no llm_call events
@@ -282,11 +270,8 @@ type Store interface {
 	// execution being evaluated.
 	ListModelsForProjectSince(ctx context.Context, projectID string, cutoff time.Time, excludeExecutionID string) ([]string, error)
 	// GroupDriftSignal upserts a failure_group with
-	// failure_class=drift and the caller-supplied signature
-	// (e.g. "new_model:claude-opus-4-6"). v0.0.1 signal is model-mix
-	// drift; later versions may introduce lexical or embedding-based
-	// signatures within the same failure class.
-	GroupDriftSignal(ctx context.Context, executionID, projectID, signature string) error
+	// failure_class=drift and the caller-supplied signature.
+	GroupDriftSignal(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// ListLLMUserMessagesForExecution returns the user_message field
 	// from each llm_call event in this execution, in payload-sequence
 	// order. Used by the lexical drift detector to build the
@@ -309,6 +294,11 @@ type Store interface {
 	// GetFailureGroup returns a single failure_group by id. Returns
 	// ErrNotFound if absent.
 	GetFailureGroup(ctx context.Context, groupID string) (*FailureGroup, error)
+	// GetFailureGroupByClassSignature returns a failure_group by its
+	// natural key. Used by the webhook dispatcher to fetch the
+	// canonical sample_execution_id for the payload at
+	// first-occurrence time.
+	GetFailureGroupByClassSignature(ctx context.Context, projectID, failureClass, signature string) (*FailureGroup, error)
 
 	// Lifecycle.
 	Close() error
