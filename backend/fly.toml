@@ -1,0 +1,72 @@
+# Mesedi backend — Fly.io app configuration.
+#
+# v0.1 production posture (matches current local-only architecture):
+#   - SQLite on a 1GB persistent volume at /data.
+#     Single-writer; sufficient for early-stage traffic. Postgres
+#     migration is a v0.2 concern — the store interface already
+#     abstracts the underlying engine.
+#   - Plaintext webhook secrets in DB. The volume is only readable
+#     by the app's own container, so this is acceptable for v0.1.
+#     KMS encryption deferred to a later slice (see slice 2 deferral
+#     note in backend/internal/store/migrations/003_project_webhooks.sql).
+#   - Dashboard UI ships from the same binary via go:embed (one
+#     service, one deploy, no separate static-asset hosting).
+#
+# When mesedi.ai domain is acquired + Cloudflare-zoned, [http_service]
+# stays unchanged and a CNAME at api.mesedi.ai points at this Fly
+# app. Fly handles TLS termination either way.
+
+app = "mesedi-api"
+primary_region = "iad"
+
+[build]
+
+[env]
+  MESEDI_PORT = "8080"
+  MESEDI_LOG_LEVEL = "info"
+  # SQLite WAL journal mode for concurrent readers while a writer
+  # holds the lock; foreign_keys=on enforces ON DELETE CASCADE.
+  MESEDI_DB_URL = "file:/data/mesedi.db?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)"
+  # Public origin of the React dashboard. Used to build deep-link
+  # URLs in webhook payloads and Discord/Slack embeds. When mesedi.ai
+  # domain ships, swap this to https://app.mesedi.ai.
+  MESEDI_DASHBOARD_URL = "https://mesedi.vercel.app"
+
+# Persistent volume for SQLite database + WAL/SHM files. 1GB is
+# generous for v0.1 telemetry volume — at ~1KB per event, that's
+# room for ~1M events before we need to grow the volume.
+[[mounts]]
+  source = "mesedi_data"
+  destination = "/data"
+
+# HTTP service config. Force HTTPS, auto-start machines on inbound
+# traffic, keep at least one machine running so health checks always
+# have somewhere to land.
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+# VM size. shared-cpu-1x + 256MB is the smallest tier; should be
+# fine for v0.1 backend traffic (telemetry ingest is cheap; the
+# detector chain runs per-PATCH on a small event list).
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+# /health is unauthenticated (see cmd/api/main.go); Fly's health-
+# check hits it directly without bearer-token gymnastics.
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  protocol = "http"
+  timeout = "5s"

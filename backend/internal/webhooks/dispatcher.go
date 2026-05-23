@@ -77,22 +77,28 @@ type Payload struct {
 // BuildTestPayload returns a synthetic Payload an operator can use to
 // verify their receiver is reachable and signature-verifying
 // correctly. The signature is a fixed string ("test_signature") and
-// the dashboard / playbook URLs point at sensible defaults derived
-// from the configured dashboard base URL.
+// the dashboard URL points at the React dashboard root; the test
+// payload omits the SampleExecutionID so adapters don't render dead
+// links into the receiving channel (exec-test isn't a real row).
+//
+// dashboardBaseURL should be the dashboard origin without a path
+// (e.g. https://mesedi.vercel.app), no trailing slash. Adapters
+// append their own routes.
 func BuildTestPayload(webhook *store.ProjectWebhook, dashboardBaseURL, deliveryID string) Payload {
 	return Payload{
-		Version:           "1",
-		Event:             "failure_group.test",
-		Test:              true,
-		ProjectID:         webhook.ProjectID,
-		WebhookID:         webhook.WebhookID,
-		FailureClass:      "crashes",
-		Signature:         "test_signature",
-		SampleExecutionID: "exec-test",
-		DashboardURL:      dashboardBaseURL + "/ui/",
-		PlaybookURL:       "",
-		DeliveryID:        deliveryID,
-		Timestamp:         time.Now().UTC(),
+		Version:      "1",
+		Event:        "failure_group.test",
+		Test:         true,
+		ProjectID:    webhook.ProjectID,
+		WebhookID:    webhook.WebhookID,
+		FailureClass: "crashes",
+		Signature:    "test_signature",
+		// SampleExecutionID intentionally empty for test deliveries —
+		// avoids putting "exec-test" (a 404 link) into Discord/Slack.
+		DashboardURL: dashboardBaseURL,
+		PlaybookURL:  "",
+		DeliveryID:   deliveryID,
+		Timestamp:    time.Now().UTC(),
 	}
 }
 

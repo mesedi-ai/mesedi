@@ -7,10 +7,18 @@
 //
 // Configuration (12-factor — flags or env vars; flags win):
 //
-//	Flag           Env var               Default
-//	--port         MESEDI_PORT           8080
-//	--log-level    MESEDI_LOG_LEVEL      info
-//	--db-url       MESEDI_DB_URL         file:./mesedi-dev.db?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)
+//	Flag             Env var                 Default
+//	--port           MESEDI_PORT             8080
+//	--log-level      MESEDI_LOG_LEVEL        info
+//	--db-url         MESEDI_DB_URL           file:./mesedi-dev.db?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)
+//	--dashboard-url  MESEDI_DASHBOARD_URL    (empty — falls back to request Host)
+//
+// MESEDI_DASHBOARD_URL is the public origin of the React dashboard
+// (Vercel-hosted in prod, e.g. https://mesedi.vercel.app). When set,
+// webhook payloads and embed deep-links use this base; otherwise the
+// scheme+host of the inbound request is used (correct for same-origin
+// dev setups, wrong when the backend and dashboard live on different
+// hosts).
 package main
 
 import (
@@ -42,9 +50,10 @@ const (
 )
 
 type runtimeConfig struct {
-	Port     int
-	LogLevel string
-	DBURL    string
+	Port         int
+	LogLevel     string
+	DBURL        string
+	DashboardURL string
 }
 
 // bootstrapDevProject creates a default "dev" project and a fixed test
@@ -148,7 +157,7 @@ func main() {
 	publicMux.Handle("GET /ui/", dashboard.Handler())
 
 	privateMux := http.NewServeMux()
-	handlers := api.New(logger, st)
+	handlers := api.New(logger, st, cfg.DashboardURL)
 	handlers.RegisterRoutes(privateMux)
 	privateHandler := api.NewAuthChain(logger, st)(privateMux)
 
@@ -241,13 +250,15 @@ func handleHealth(logger *slog.Logger) http.HandlerFunc {
 
 func loadConfig() runtimeConfig {
 	cfg := runtimeConfig{
-		Port:     envInt("MESEDI_PORT", 8080),
-		LogLevel: envString("MESEDI_LOG_LEVEL", "info"),
-		DBURL:    envString("MESEDI_DB_URL", defaultDBURL),
+		Port:         envInt("MESEDI_PORT", 8080),
+		LogLevel:     envString("MESEDI_LOG_LEVEL", "info"),
+		DBURL:        envString("MESEDI_DB_URL", defaultDBURL),
+		DashboardURL: envString("MESEDI_DASHBOARD_URL", ""),
 	}
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "TCP port for the HTTP API")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log verbosity: debug | info | warn | error")
 	flag.StringVar(&cfg.DBURL, "db-url", cfg.DBURL, "Postgres connection string (required for Phase 1.5+)")
+	flag.StringVar(&cfg.DashboardURL, "dashboard-url", cfg.DashboardURL, "public origin of the React dashboard (e.g. https://mesedi.vercel.app)")
 	flag.Parse()
 	return cfg
 }

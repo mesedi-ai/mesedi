@@ -40,16 +40,27 @@ type Handlers struct {
 	Store         store.Store
 	HaltSubs      *HaltSubscribers // sub-slice 21b — SSE halt-channel registry
 	WebhookClient *http.Client     // task #83 — outbound dispatcher HTTP client
+	// DashboardURL is the public origin of the React dashboard
+	// (e.g. https://mesedi.vercel.app). Used to build deep-links in
+	// webhook payloads and Discord embeds. When empty, the dispatcher
+	// falls back to the inbound request's scheme + host — correct for
+	// local dev where the dashboard is same-origin with the API, wrong
+	// in prod where the dashboard lives on a different host.
+	DashboardURL string
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
 // a literal) so the dependencies become explicit as the surface grows.
-func New(logger *slog.Logger, s store.Store) *Handlers {
+//
+// dashboardURL is the public origin of the React dashboard (no trailing
+// slash, no path). Pass "" in local dev to derive from the request host.
+func New(logger *slog.Logger, s store.Store, dashboardURL string) *Handlers {
 	return &Handlers{
 		Logger:        logger,
 		Store:         s,
 		HaltSubs:      NewHaltSubscribers(),
 		WebhookClient: webhooks.DefaultHTTPClient(),
+		DashboardURL:  strings.TrimRight(dashboardURL, "/"),
 	}
 }
 
@@ -1399,13 +1410,10 @@ func (h *Handlers) HandleTestWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Derive a dashboard base URL from the inbound request — best-effort
-	// for slice 2. Production deployments would set this from config.
-	scheme := "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-	dashboardBase := scheme + "://" + r.Host
+	// Dashboard base URL — configured via MESEDI_DASHBOARD_URL in prod
+	// (e.g. https://mesedi.vercel.app); falls back to request-derived
+	// scheme + host for local-dev.
+	dashboardBase := h.resolveDashboardBase(r)
 
 	// Build a delivery_id up front so the payload echoes it back to the
 	// receiver in the X-Mesedi-Event-Id header (the receiver can use it

@@ -79,10 +79,8 @@ func BuildDiscordBody(p Payload) ([]byte, error) {
 	}
 	var fields []embedField
 
-	// Execution deep link. Dashboard route is /app/executions/{id};
-	// DashboardURL today is "<base>/ui/" because the backend doesn't
-	// know about the Next.js dashboard host. Strip the trailing /ui/
-	// and replace with /app so the link lands on the React dashboard.
+	// Execution deep link. DashboardURL is the React dashboard root
+	// (no path); the executions route is /app/executions/{id}.
 	if p.SampleExecutionID != "" && p.DashboardURL != "" {
 		execURL := dashboardExecutionURL(p.DashboardURL, p.SampleExecutionID)
 		fields = append(fields, embedField{
@@ -133,20 +131,13 @@ func BuildDiscordBody(p Payload) ([]byte, error) {
 	})
 }
 
-// dashboardExecutionURL converts the backend-known DashboardURL
-// ("<base>/ui/") into the React-dashboard execution detail URL
-// ("<base-without-/ui>/app/executions/{id}"). When DashboardURL
-// doesn't end in /ui/, we fall back to appending /app/executions/{id}
-// to the given base.
-//
-// This conversion is here (in the Discord adapter) rather than in the
-// dispatcher because the dispatcher's DashboardURL is meant for
-// receiver-side parsing — they can do whatever they want with it.
-// The Discord adapter, being the rendering layer, knows the route.
+// dashboardExecutionURL builds the React-dashboard execution detail
+// URL from the DashboardURL (root, no path) and an execution ID. The
+// /app/executions/{id} route lives in the dispatcher's knowledge,
+// not the receiver's — receivers consuming the raw payload get just
+// the base and can build their own deep links.
 func dashboardExecutionURL(dashboardURL, executionID string) string {
-	base := strings.TrimSuffix(dashboardURL, "/ui/")
-	base = strings.TrimSuffix(base, "/ui")
-	base = strings.TrimRight(base, "/")
+	base := strings.TrimRight(dashboardURL, "/")
 	return base + "/app/executions/" + executionID
 }
 
@@ -158,5 +149,111 @@ func adaptedBody(rawURL string, p Payload) ([]byte, bool, error) {
 		b, err := BuildDiscordBody(p)
 		return b, true, err
 	}
+	if isSlackURL(rawURL) {
+		b, err := BuildSlackBody(p)
+		return b, true, err
+	}
 	return nil, false, nil
+}
+
+// isSlackURL returns true if the URL is a Slack incoming-webhook
+// endpoint. Slack has shipped three URL shapes over time; we match
+// the documented modern path and the legacy variant.
+func isSlackURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "https://hooks.slack.com/services/") ||
+		strings.HasPrefix(rawURL, "https://hooks.slack.com/triggers/") ||
+		strings.HasPrefix(rawURL, "https://hooks.slack.com/workflows/")
+}
+
+// slackAttachmentColor returns the Slack attachment "color" value
+// (hex with leading #, NOT decimal — Slack and Discord disagree on
+// this) for a failure class. Mirrors the dashboard / Discord palette
+// so on-screen, in-Discord, and in-Slack rendering match.
+func slackAttachmentColor(failureClass string) string {
+	switch failureClass {
+	case "crashes", "validator_failures", "tool_failures":
+		return "#EF4444" // red
+	case "time_budget", "step_count", "cost_velocity":
+		return "#F59E0B" // amber
+	case "drift":
+		return "#60A5FA" // blue
+	case "prompt_injection":
+		return "#FF8C42" // mesedi orange
+	default:
+		return "#6B7280" // muted gray
+	}
+}
+
+// BuildSlackBody returns a JSON body shaped for Slack's incoming-
+// webhook API. One attachment per delivery; failure_class drives the
+// pretext (above the attachment) and the color bar; signature
+// appears in the title. The sample-execution and playbook deep-links
+// become attachment fields with Slack-flavored <URL|label> markup.
+//
+// Test deliveries get a "Mesedi test" pretext so the receiving
+// channel can tell setup pings apart from real alerts.
+func BuildSlackBody(p Payload) ([]byte, error) {
+	pretext := "*Mesedi alert*"
+	if p.Test {
+		pretext = "*Mesedi test*"
+	}
+
+	type slackField struct {
+		Title string `json:"title"`
+		Value string `json:"value"`
+		Short bool   `json:"short,omitempty"`
+	}
+	var fields []slackField
+
+	if p.SampleExecutionID != "" && p.DashboardURL != "" {
+		execURL := dashboardExecutionURL(p.DashboardURL, p.SampleExecutionID)
+		fields = append(fields, slackField{
+			Title: "Sample execution",
+			Value: fmt.Sprintf("<%s|%s>", execURL, p.SampleExecutionID),
+			Short: true,
+		})
+	}
+	if p.PlaybookURL != "" {
+		fields = append(fields, slackField{
+			Title: "Playbook",
+			Value: fmt.Sprintf("<%s|Open recommended remediation>", p.PlaybookURL),
+			Short: true,
+		})
+	}
+
+	type slackAttachment struct {
+		Color      string       `json:"color"`
+		Pretext    string       `json:"pretext"`
+		Title      string       `json:"title"`
+		Text       string       `json:"text"`
+		Fields     []slackField `json:"fields,omitempty"`
+		Footer     string       `json:"footer,omitempty"`
+		Timestamp  int64        `json:"ts,omitempty"`
+		MarkdownIn []string     `json:"mrkdwn_in,omitempty"`
+	}
+	type slackBody struct {
+		Username    string            `json:"username"`
+		Attachments []slackAttachment `json:"attachments"`
+	}
+
+	att := slackAttachment{
+		Color:   slackAttachmentColor(p.FailureClass),
+		Pretext: pretext,
+		Title:   fmt.Sprintf("%s · %s", p.FailureClass, p.Signature),
+		Text:    fmt.Sprintf("First occurrence of `%s` in project.", p.FailureClass),
+		Fields:  fields,
+		Footer:  fmt.Sprintf("Mesedi · delivery %s", p.DeliveryID),
+		// mrkdwn_in tells Slack which fields to parse for *bold* /
+		// `code` markup. Without this, the pretext stars render
+		// literally instead of as bold.
+		MarkdownIn: []string{"pretext", "text"},
+	}
+	if !p.Timestamp.IsZero() {
+		att.Timestamp = p.Timestamp.UTC().Unix()
+	}
+
+	return json.Marshal(slackBody{
+		Username:    "Mesedi",
+		Attachments: []slackAttachment{att},
+	})
 }
