@@ -166,33 +166,39 @@ func (s *SQLiteStore) applyMigrations(ctx context.Context) error {
 	return nil
 }
 
-// splitSQLStatements splits a SQL string into individual statements on
-// semicolons. Naive split that does NOT handle semicolons inside string
-// literals or comments. Our migration files are simple DDL with no
-// embedded semicolons, so this is sufficient. Switch to a proper SQL
-// tokenizer if migrations ever need string literals with semicolons.
+// splitSQLStatements splits a SQL string into individual statements
+// on semicolons. Comments are stripped FIRST so semicolons inside `--`
+// line comments don't cause spurious splits (migration 005 has a `;`
+// inside its header comment text, which broke an earlier version of
+// this splitter).
+//
+// Limitation: does NOT handle semicolons inside string literals. Our
+// migration files are simple DDL with no embedded semicolons in
+// strings, so this is sufficient. Switch to a proper SQL tokenizer
+// if that ever changes.
 func splitSQLStatements(body string) []string {
-	out := make([]string, 0, 4)
-	for _, raw := range strings.Split(body, ";") {
-		stmt := strings.TrimSpace(raw)
-		if stmt == "" {
+	// Pass 1: strip line comments. A `--` makes the rest of the line
+	// a comment in SQL. Drop entirely-comment lines and trim in-line
+	// comment suffixes from non-comment lines.
+	cleaned := make([]string, 0)
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
 			continue
 		}
-		// Drop lines that are entirely SQL line comments. Multi-line
-		// comments inside a statement are preserved (sqlite ignores
-		// them at parse time).
-		lines := strings.Split(stmt, "\n")
-		kept := make([]string, 0, len(lines))
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "--") {
-				continue
-			}
-			kept = append(kept, line)
+		if idx := strings.Index(line, "--"); idx >= 0 {
+			line = line[:idx]
 		}
-		joined := strings.TrimSpace(strings.Join(kept, "\n"))
-		if joined != "" {
-			out = append(out, joined)
+		cleaned = append(cleaned, line)
+	}
+	cleanedBody := strings.Join(cleaned, "\n")
+
+	// Pass 2: split on semicolons now that comments are gone.
+	out := make([]string, 0, 4)
+	for _, raw := range strings.Split(cleanedBody, ";") {
+		stmt := strings.TrimSpace(raw)
+		if stmt != "" {
+			out = append(out, stmt)
 		}
 	}
 	return out
