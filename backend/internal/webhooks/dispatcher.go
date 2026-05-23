@@ -150,6 +150,28 @@ func Deliver(
 			}}
 	}
 
+	// Receiver-specific payload reshape. Discord (and future chat
+	// targets) need a body shape Mesedi's generic Payload doesn't
+	// match. When an adapter applies, the HMAC signature is recomputed
+	// over the adapted body so the on-wire signature header is correct
+	// for whatever leaves the dispatcher.
+	if adapted, ok, adaptErr := adaptedBody(webhook.URL, payload); ok {
+		if adaptErr != nil {
+			return DeliveryResult{
+					Status:   "failed",
+					Attempts: 1,
+					Error:    "marshal adapted payload: " + adaptErr.Error(),
+				}, []store.WebhookDelivery{{
+					WebhookID: webhook.WebhookID,
+					ProjectID: webhook.ProjectID,
+					Attempt:   1,
+					Status:    "failed",
+					Error:     "marshal adapted payload: " + adaptErr.Error(),
+				}}
+		}
+		body = adapted
+	}
+
 	signature := Sign(body, []byte(webhook.Secret))
 
 	attempts := make([]store.WebhookDelivery, 0, MaxAttempts)
