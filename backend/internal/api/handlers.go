@@ -67,6 +67,8 @@ func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Phase 1 ingest surface.
 	mux.HandleFunc("POST /executions", h.HandleCreateExecution)
+	// #118 Slice 1 — read-side project surface for the dashboard.
+	mux.HandleFunc("GET /project", h.HandleGetProject)
 	mux.HandleFunc("PATCH /executions/{id}", h.HandleUpdateExecution)
 	mux.HandleFunc("POST /events", h.HandleIngestEvents)
 	// Phase 3b — read-side execution surface for the dashboard.
@@ -1626,4 +1628,37 @@ func parseIntQuery(r *http.Request, key string, defaultVal, min, max int) int {
 		return max
 	}
 	return v
+}
+
+// HandleGetProject returns the authenticated project's identity. Used
+// by the dashboard to show "Project: <name>" in the topbar and welcome
+// screens, and by /app/settings to display + (eventually) rename the
+// project.
+//
+// Returns project_id, name, owner_email, created_at. Does not return
+// the API key prefix or any sensitive material — the calling client
+// already has the key in localStorage and any rename/revoke flows
+// happen through other endpoints that already audit-log by key_id.
+func (h *Handlers) HandleGetProject(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	project, err := h.Store.GetProject(r.Context(), authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "get project: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":          true,
+		"project_id":  project.ProjectID,
+		"name":        project.Name,
+		"owner_email": project.OwnerEmail,
+		"created_at":  project.CreatedAt,
+	})
 }

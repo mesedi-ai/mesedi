@@ -168,6 +168,8 @@ func main() {
 	mux.Handle("POST /executions", privateHandler)
 	mux.Handle("PATCH /executions/{id}", privateHandler)
 	mux.Handle("POST /events", privateHandler)
+	// #118 Slice 1 — dashboard reads the calling project's identity.
+	mux.Handle("GET /project", privateHandler)
 	// Phase 3b — read-side execution + stats surface for the dashboard.
 	mux.Handle("GET /executions", privateHandler)
 	mux.Handle("GET /executions/{id}", privateHandler)

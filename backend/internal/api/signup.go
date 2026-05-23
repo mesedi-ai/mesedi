@@ -40,13 +40,16 @@ type SignupRequest struct {
 
 // SignupResponse is the wire shape returned on a successful signup.
 // The api_key field is the ONLY moment the raw key is ever surfaced;
-// the caller must store it immediately.
+// the caller must store it immediately. ProjectName is echoed back so
+// the welcome screen can confirm what was created without a follow-up
+// GET /project round-trip.
 type SignupResponse struct {
-	OK         bool   `json:"ok"`
-	ProjectID  string `json:"project_id"`
-	APIKey     string `json:"api_key"`
-	KeyPrefix  string `json:"key_prefix"`
-	Warning    string `json:"warning"`
+	OK          bool   `json:"ok"`
+	ProjectID   string `json:"project_id"`
+	ProjectName string `json:"project_name"`
+	APIKey      string `json:"api_key"`
+	KeyPrefix   string `json:"key_prefix"`
+	Warning     string `json:"warning"`
 }
 
 // emailRegex is the conservative RFC-5322-subset used for v0.1 validation.
@@ -209,10 +212,11 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	)
 
 	writeJSON(w, http.StatusCreated, SignupResponse{
-		OK:        true,
-		ProjectID: projectID,
-		APIKey:    rawKey,
-		KeyPrefix: prefix,
-		Warning:   "Store this api_key now. It will never be shown again.",
+		OK:          true,
+		ProjectID:   projectID,
+		ProjectName: projectName,
+		APIKey:      rawKey,
+		KeyPrefix:   prefix,
+		Warning:     "Store this api_key now. It will never be shown again.",
 	})
 }
