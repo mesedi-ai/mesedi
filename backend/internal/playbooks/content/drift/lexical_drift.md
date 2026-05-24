@@ -8,7 +8,7 @@ An execution in this project produced `llm_call` user_messages whose **lexical d
 
 The detector catches **distributional** drift, the prompts changed continuously over time, whereas the sibling `new_model` detector catches **categorical** drift (the model identifier flipped). Both fire under the same `drift` failure class because they share the same root pattern: something upstream of the LLM changed without coordination, and now agent behavior is shifting.
 
-The floor was raised from 0.30 to 0.45 after empirical observation against synthetic-org traffic, 0.30 fires on routine same-domain variation, which is noise; 0.45 keeps the meaningful signal and cuts false positives ~80%.
+The floor was raised from 0.30 to 0.45 after empirical observation against dogfood traffic, 0.30 fires on routine same-domain variation, which is noise; 0.45 keeps the meaningful signal and cuts false positives ~80%.
 
 ## What this catches
 

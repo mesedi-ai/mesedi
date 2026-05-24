@@ -26,10 +26,6 @@ sdk-typescript/  TypeScript / Node SDK shipped to npm as `mesedi`.
                  AsyncShipper, Anthropic patch, hard-halt + SSE.
                  `mesedi/integrations/vercel_ai` adapter for Vercel
                  AI SDK's generateText.
-synthetic-org/   Five-industry dogfood substrate (financial-research,
-                 support-triage, clinical-summary, contract-review,
-                 incident-response). Runs hourly via launchd to keep
-                 the dashboard continuously populated during dev.
 branding/        Logo and favicon assets.
 ```
 
@@ -76,16 +72,9 @@ http://localhost:8080/ui/
 
 You should see executions, events, failure groups, the playbook surface per failure class, the webhook escalation page, and the API-key management page. Default bootstrap API key for local dev: `mesedi_sk_dev_local_only`.
 
-For continuous synthetic-org traffic via launchd (populates the dashboard hourly):
-
-```bash
-bash synthetic-org/scripts/install_continuous_traffic.sh
-# Stop: bash synthetic-org/scripts/stop_continuous_traffic.sh
-```
-
 ## Status
 
-All seven failure-class detectors are live, plus failure-group deduplication, hard-halt with local budgets plus SSE remote channel, dashboard with collapse-by-class view, continuous synthetic-org traffic, operator Halt button, webhook escalation on first-occurrence, framework adapters for LangChain / CrewAI / Vercel AI SDK, and Tier 1 Playbooks v1 covering every detector-signature shape.
+All seven failure-class detectors are live, plus failure-group deduplication, hard-halt with local budgets plus SSE remote channel, dashboard with collapse-by-class view, operator Halt button, webhook escalation on first-occurrence, framework adapters for LangChain / CrewAI / Vercel AI SDK, and Tier 1 Playbooks v1 covering every detector-signature shape.
 
 The hosted Cloud version runs on Fly.io. Self-host instructions are in `backend/README.md`.
 

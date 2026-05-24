@@ -140,7 +140,7 @@ func normalize(s string) string {
 // about them; modifying these values changes the signature space.
 //
 // Threshold floor raised from 0.30 → 0.45 after empirical observation
-// (synthetic-org full-mix runs): 0.30 fires on routine same-domain
+// (full-mix dogfood runs): 0.30 fires on routine same-domain
 // variation, which is noise. 0.45 keeps the meaningful signal and
 // cuts the false positives ~80%.
 var LexicalDriftThresholds = []struct {
