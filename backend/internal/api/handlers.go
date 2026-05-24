@@ -26,6 +26,7 @@ import (
 
 	"mesedi/backend/internal/detectors"
 	"mesedi/backend/internal/events"
+	"mesedi/backend/internal/mail"
 	"mesedi/backend/internal/playbooks"
 	"mesedi/backend/internal/pricing"
 	"mesedi/backend/internal/store"
@@ -52,6 +53,14 @@ type Handlers struct {
 	// be empty in local dev; the billing endpoints respond 503 when
 	// any of them is missing.
 	Stripe StripeConfig
+	// Mailer ships transactional email (welcome on signup today;
+	// day-1 / day-3 nudges later). Local-dev runs without
+	// RESEND_API_KEY use a NoopMailer that silently swallows sends.
+	Mailer mail.Mailer
+	// DocsURL is the public origin of the docs site, used inside
+	// transactional email templates. Falls back to DashboardURL +
+	// "/docs" if empty.
+	DocsURL string
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
@@ -62,7 +71,13 @@ type Handlers struct {
 //
 // stripeCfg carries Stripe-specific identifiers; pass a zero-value
 // StripeConfig in local dev to leave billing endpoints disabled.
-func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg StripeConfig) *Handlers {
+//
+// mailer is the transactional email sender. Pass mail.NoopMailer in
+// local dev or test runs to silently swallow sends.
+func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg StripeConfig, mailer mail.Mailer) *Handlers {
+	if mailer == nil {
+		mailer = mail.NoopMailer{Logger: logger}
+	}
 	return &Handlers{
 		Logger:        logger,
 		Store:         s,
@@ -70,6 +85,7 @@ func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg Stri
 		WebhookClient: webhooks.DefaultHTTPClient(),
 		DashboardURL:  strings.TrimRight(dashboardURL, "/"),
 		Stripe:        stripeCfg,
+		Mailer:        mailer,
 	}
 }
 

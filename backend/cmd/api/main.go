@@ -36,6 +36,7 @@ import (
 
 	"mesedi/backend/internal/api"
 	"mesedi/backend/internal/dashboard"
+	"mesedi/backend/internal/mail"
 	"mesedi/backend/internal/store"
 )
 
@@ -62,6 +63,11 @@ type runtimeConfig struct {
 	// Admin dashboard bearer token (#150). When empty the /admin/*
 	// routes refuse every request with 503 (fail-closed posture).
 	AdminToken string
+	// Transactional email via Resend (#127). When ResendAPIKey is
+	// empty the backend uses a NoopMailer that swallows every send,
+	// suitable for local dev and CI.
+	ResendAPIKey string
+	ResendFrom   string
 }
 
 // bootstrapDevProject creates a default "dev" project and a fixed test
@@ -171,7 +177,20 @@ func main() {
 		ProPriceID:    cfg.StripeProPriceID,
 	}
 	logger.Info("stripe billing configured", "configured", stripeCfg.Configured())
-	handlers := api.New(logger, st, cfg.DashboardURL, stripeCfg)
+
+	// Transactional email (#127). Falls back to NoopMailer when no
+	// RESEND_API_KEY is configured so signups still complete in
+	// local dev and CI.
+	var mailer mail.Mailer
+	if cfg.ResendAPIKey != "" {
+		mailer = mail.NewResendMailer(cfg.ResendAPIKey, cfg.ResendFrom, logger)
+		logger.Info("transactional email configured", "provider", "resend", "from", cfg.ResendFrom)
+	} else {
+		mailer = mail.NoopMailer{Logger: logger}
+		logger.Info("transactional email disabled", "reason", "RESEND_API_KEY not set")
+	}
+
+	handlers := api.New(logger, st, cfg.DashboardURL, stripeCfg, mailer)
 	handlers.RegisterRoutes(privateMux)
 	privateHandler := api.NewAuthChain(logger, st)(privateMux)
 
@@ -306,6 +325,8 @@ func loadConfig() runtimeConfig {
 		StripeWebhookSecret: envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),
 		StripeProPriceID:    envString("MESEDI_STRIPE_PRO_PRICE_ID", ""),
 		AdminToken:          envString("MESEDI_ADMIN_TOKEN", ""),
+		ResendAPIKey:        envString("RESEND_API_KEY", ""),
+		ResendFrom:          envString("MESEDI_MAIL_FROM", "Mesedi <onboarding@resend.dev>"),
 	}
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "TCP port for the HTTP API")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log verbosity: debug | info | warn | error")

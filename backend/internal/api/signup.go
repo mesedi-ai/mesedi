@@ -20,6 +20,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -29,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"mesedi/backend/internal/mail"
 	"mesedi/backend/internal/store"
 )
 
@@ -211,6 +213,11 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		"ip", ip,
 	)
 
+	// 6. Fire the welcome email out-of-band. Non-blocking: if Resend
+	//    is slow or down, the user still gets their key. NoopMailer
+	//    in local dev makes this a no-op.
+	h.sendWelcomeEmail(email, projectName, prefix)
+
 	writeJSON(w, http.StatusCreated, SignupResponse{
 		OK:          true,
 		ProjectID:   projectID,
@@ -219,4 +226,38 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		KeyPrefix:   prefix,
 		Warning:     "Store this api_key now. It will never be shown again.",
 	})
+}
+
+// sendWelcomeEmail dispatches the welcome template on a background
+// goroutine with a bounded context. Errors are logged, never surfaced
+// to the signing-up user; a Resend outage must not block a successful
+// signup.
+func (h *Handlers) sendWelcomeEmail(toEmail, projectName, keyPrefix string) {
+	dashboardURL := h.DashboardURL
+	if dashboardURL == "" {
+		dashboardURL = "https://mesedi.vercel.app"
+	}
+	docsURL := h.DocsURL
+	if docsURL == "" {
+		docsURL = dashboardURL + "/docs/quickstart"
+	}
+
+	in := mail.WelcomeInput{
+		ToEmail:      toEmail,
+		ProjectName:  projectName,
+		APIKeyPrefix: keyPrefix,
+		DashboardURL: dashboardURL + "/app",
+		DocsURL:      docsURL,
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := h.Mailer.SendWelcome(ctx, in); err != nil {
+			h.Logger.Warn("signup: welcome email failed",
+				"error", err.Error(),
+				"to", toEmail,
+			)
+		}
+	}()
 }
