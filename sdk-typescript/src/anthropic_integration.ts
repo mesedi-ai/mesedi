@@ -1,5 +1,5 @@
 /**
- * Anthropic SDK monkey-patch — auto-emit llm_call events for every
+ * Anthropic SDK monkey-patch, auto-emit llm_call events for every
  * messages.create() call inside a wrap()'d execution.
  *
  * Activation is opt-in (call instrumentAnthropic() once at startup),
@@ -8,12 +8,12 @@
  *
  * What gets captured per call:
  *   - model (e.g. "claude-opus-4-6")
- *   - system_prompt — truncated to 1000 chars
- *   - user_message — the LAST user-role message, truncated to 1000
- *   - response_text — concatenated text-block content, truncated
- *   - input_tokens / output_tokens — from response.usage
- *   - duration_ms — wall-clock of the API call
- *   - status — "ok" / "failed"
+ *   - system_prompt, truncated to 1000 chars
+ *   - user_message, the LAST user-role message, truncated to 1000
+ *   - response_text, concatenated text-block content, truncated
+ *   - input_tokens / output_tokens, from response.usage
+ *   - duration_ms, wall-clock of the API call
+ *   - status, "ok" / "failed"
  *   - exception_type + exception_message on failure
  *
  * Dependency injection: instrumentAnthropic accepts an optional
@@ -32,7 +32,7 @@ const MAX_USER_MSG = 1000;
 const MAX_RESPONSE = 1000;
 const MAX_EXC_MSG = 500;
 
-/** Already-patched classes — keyed by class identity to make
+/** Already-patched classes, keyed by class identity to make
  * instrumentAnthropic() idempotent and to allow distinct fake classes
  * to be patched in tests without falsely tripping the check. */
 const _patched = new WeakSet<object>();
@@ -40,7 +40,7 @@ const _patched = new WeakSet<object>();
 /**
  * Minimal duck-typed interfaces for the parts of the Anthropic SDK
  * shape we depend on. Defined here so the SDK has zero direct
- * dependency on @anthropic-ai/sdk — at runtime we just call .create()
+ * dependency on @anthropic-ai/sdk, at runtime we just call .create()
  * on whatever class was passed.
  *
  * `create` typed as `(...args: any[]) => Promise<any>` rather than a
@@ -76,7 +76,7 @@ interface AnthropicCreateArgs {
  * llm_call events. Returns true on success or no-op (already
  * patched). Returns false if no class was supplied and the
  * @anthropic-ai/sdk package isn't installed (best-effort dynamic
- * import — kept optional so the SDK stays dependency-free at install
+ * import, kept optional so the SDK stays dependency-free at install
  * time).
  */
 export async function instrumentAnthropic(
@@ -90,7 +90,7 @@ export async function instrumentAnthropic(
       // installed, we auto-locate Messages; otherwise instrumentation
       // is a no-op.
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore — the package may not be installed; this is by design
+      // @ts-ignore, the package may not be installed; this is by design
       const mod = (await import("@anthropic-ai/sdk")) as unknown as {
         Anthropic?: { Messages?: MessagesClassLike };
       };
@@ -104,7 +104,7 @@ export async function instrumentAnthropic(
     }
     if (!cls) {
       console.warn(
-        "mesedi: located @anthropic-ai/sdk but couldn't find Anthropic.Messages — SDK version mismatch?",
+        "mesedi: located @anthropic-ai/sdk but couldn't find Anthropic.Messages, SDK version mismatch?",
       );
       return false;
     }
@@ -120,7 +120,7 @@ export async function instrumentAnthropic(
   ): Promise<AnthropicResponseLike> {
     const ctx = currentExecutionContext();
     if (!ctx) {
-      // Outside wrap() — pass through unobserved.
+      // Outside wrap(), pass through unobserved.
       return originalCreate.apply(this, args);
     }
 
@@ -128,7 +128,7 @@ export async function instrumentAnthropic(
     // call. If a budget exists and is exceeded, this throws
     // MesediHalt which propagates up to wrap()'s catch block. We
     // count this as a step now (after the check passes) so the
-    // counter advances even though the LLM call hasn't run yet —
+    // counter advances even though the LLM call hasn't run yet , 
     // matches the Python SDK's pattern (check, then count, then act).
     ctx.checkBudget();
     if (ctx.budgetTracker) {
@@ -157,7 +157,7 @@ export async function instrumentAnthropic(
       // halt-safe boundary checks know how many tokens this execution
       // has consumed. Tokens from FAILED LLM calls don't get
       // accounted (we don't reach this code path on the error
-      // branch) — that matches the Python SDK behavior.
+      // branch), that matches the Python SDK behavior.
       if (ctx.budgetTracker) {
         ctx.budgetTracker.addTokens(inputTokens, outputTokens);
       }
@@ -255,7 +255,7 @@ function extractResponseFields(response: AnthropicResponseLike): {
       responseText = parts.join("\n");
     }
   } catch {
-    // best effort — leave responseText empty
+    // best effort, leave responseText empty
   }
   try {
     if (response.usage) {
@@ -263,7 +263,7 @@ function extractResponseFields(response: AnthropicResponseLike): {
       outputTokens = Number(response.usage.output_tokens ?? 0) || 0;
     }
   } catch {
-    // best effort — leave token counts at 0
+    // best effort, leave token counts at 0
   }
   return { responseText, inputTokens, outputTokens };
 }

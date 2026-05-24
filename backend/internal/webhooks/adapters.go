@@ -3,7 +3,7 @@
 // Mesedi's canonical Payload is a generic, versioned JSON envelope
 // designed for customer-side parsers (their own services consuming
 // the webhook). For first-party chat receivers (Discord today; Slack
-// is the obvious next adapter), that generic shape doesn't render —
+// is the obvious next adapter), that generic shape doesn't render , 
 // Discord requires a {content, embeds, file} body or it returns 400.
 //
 // Rather than ask customers to stand up a transformer, the dispatcher
@@ -36,7 +36,7 @@ func isDiscordURL(rawURL string) bool {
 }
 
 // discordEmbedColor returns the Discord embed accent color (decimal
-// int — Discord rejects strings here) for a failure class. Mirrors
+// int, Discord rejects strings here) for a failure class. Mirrors
 // the dashboard's failure-class color map so on-screen and in-Discord
 // rendering match.
 func discordEmbedColor(failureClass string) int {
@@ -134,7 +134,7 @@ func BuildDiscordBody(p Payload) ([]byte, error) {
 // dashboardExecutionURL builds the React-dashboard execution detail
 // URL from the DashboardURL (root, no path) and an execution ID. The
 // /app/executions/{id} route lives in the dispatcher's knowledge,
-// not the receiver's — receivers consuming the raw payload get just
+// not the receiver's, receivers consuming the raw payload get just
 // the base and can build their own deep links.
 func dashboardExecutionURL(dashboardURL, executionID string) string {
 	base := strings.TrimRight(dashboardURL, "/")
@@ -142,7 +142,7 @@ func dashboardExecutionURL(dashboardURL, executionID string) string {
 }
 
 // adaptedBody applies any receiver-specific payload reshape. Returns
-// (body, true) when an adapter matched; (nil, false) otherwise — the
+// (body, true) when an adapter matched; (nil, false) otherwise, the
 // caller should fall back to the canonical JSON marshal of Payload.
 func adaptedBody(rawURL string, p Payload) ([]byte, bool, error) {
 	if isDiscordURL(rawURL) {
@@ -166,7 +166,7 @@ func isSlackURL(rawURL string) bool {
 }
 
 // slackAttachmentColor returns the Slack attachment "color" value
-// (hex with leading #, NOT decimal — Slack and Discord disagree on
+// (hex with leading #, NOT decimal, Slack and Discord disagree on
 // this) for a failure class. Mirrors the dashboard / Discord palette
 // so on-screen, in-Discord, and in-Slack rendering match.
 func slackAttachmentColor(failureClass string) string {

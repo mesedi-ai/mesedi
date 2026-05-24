@@ -1,7 +1,7 @@
 /**
  * End-to-end smoke test for the Vercel AI SDK adapter.
  *
- * Doesn't require the `ai` package or any provider package — uses a
+ * Doesn't require the `ai` package or any provider package, uses a
  * mock `generateText` function that returns Vercel-shaped results.
  * Verifies the adapter end-to-end: a wrap()'d entry point that uses
  * wrapGenerateText() should produce one llm_call event per step
@@ -20,7 +20,7 @@
  *   - Timeline (4 events) in order:
  *       llm_call   gpt-4o · 100 in / 8 out  (step 1)
  *       tool_call  search_web · status=ok
- *       llm_call   gpt-4o · 80 in / 12 out  (step 2 — final answer)
+ *       llm_call   gpt-4o · 80 in / 12 out  (step 2, final answer)
  *       tool_call  lookup · status=failed
  */
 
@@ -48,7 +48,7 @@ interface MockOptions {
 }
 
 async function mockGenerateText(opts: MockOptions) {
-  void opts; // silence unused-param under strict tsconfig — real impl reads opts
+  void opts; // silence unused-param under strict tsconfig, real impl reads opts
   // Simulate a 25ms LLM round-trip.
   await new Promise((r) => setTimeout(r, 25));
   return {
@@ -96,7 +96,7 @@ const runSmoke = wrap(
   { name: "vercel_ai_smoke" },
   async (question: string): Promise<string> => {
     const result = await generateTextM({
-      // Fake model object — wrapGenerateText reads .modelId.
+      // Fake model object, wrapGenerateText reads .modelId.
       model: { modelId: "gpt-4o", id: "gpt-4o" },
       system: "You answer geography questions concisely.",
       prompt: question,

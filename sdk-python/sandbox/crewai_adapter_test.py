@@ -1,6 +1,6 @@
 """End-to-end smoke test for the CrewAI adapter.
 
-Doesn't require ``crewai`` to be installed — uses duck-typed mocks
+Doesn't require ``crewai`` to be installed, uses duck-typed mocks
 that mirror the Crew / Agent / LLM / AgentAction / AgentFinish /
 TaskOutput shapes the real CrewAI exposes.
 
@@ -10,7 +10,7 @@ Verifies that ``instrument_crew``:
      crew doesn't have them pre-set)
   3. The step_callback emits the right Mesedi events (one
      checkpoint per agent step + one tool_call when an underlying
-     llm_call would fire — we simulate the underlying LangChain
+     llm_call would fire, we simulate the underlying LangChain
      handler dispatch directly)
 
 Run after starting the backend on :8080:
@@ -45,7 +45,7 @@ from mesedi.integrations.crewai import (
 
 
 class _MockLLM:
-    """Mimics a LangChain ChatModel — has a mutable ``callbacks`` list."""
+    """Mimics a LangChain ChatModel, has a mutable ``callbacks`` list."""
 
     def __init__(self) -> None:
         self.callbacks: Optional[List[Any]] = None

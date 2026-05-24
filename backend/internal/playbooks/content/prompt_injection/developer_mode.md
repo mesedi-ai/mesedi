@@ -1,6 +1,6 @@
-# Prompt injection — developer / admin / jailbreak mode
+# Prompt injection, developer / admin / jailbreak mode
 
-An `llm_call` event in this execution had a `user_message` invoking a **mode-override persona** — strings like "developer mode," "jailbreak mode," or "admin mode." Mesedi treats this as a Tier-2 signal: the phrases are distinctive enough to be a strong injection signal in user input, but they can appear legitimately in developer-tool contexts and in conversations about LLM behavior.
+An `llm_call` event in this execution had a `user_message` invoking a **mode-override persona**, strings like "developer mode," "jailbreak mode," or "admin mode." Mesedi treats this as a Tier-2 signal: the phrases are distinctive enough to be a strong injection signal in user input, but they can appear legitimately in developer-tool contexts and in conversations about LLM behavior.
 
 ## What this means
 
@@ -14,13 +14,13 @@ Open the affected execution's timeline and find the matching `llm_call`. Three d
 
 1. **Did the model refuse or comply?** Read the assistant response. A clean refusal means the model's safety held. A response that addresses the meta-claim (acknowledges "developer mode," explains it doesn't have one, refuses) is also a safety-held outcome. A response that adopts the persona or produces content the constrained model would refuse is an actual breach.
 
-2. **What's the request inside the wrapper?** Same as DAN — the mode-override is the carrier, not the goal. Identify what the user is actually asking for once the persona setup is stripped away.
+2. **What's the request inside the wrapper?** Same as DAN, the mode-override is the carrier, not the goal. Identify what the user is actually asking for once the persona setup is stripped away.
 
 3. **Pattern across executions.** A user who attempts developer-mode once and gives up is a probe. A user who tries developer-mode → DAN → role-override in quick succession is iterating, and the multi-attempt sequence itself is more informative than any single pattern firing.
 
 ## How to fix
 
-Same posture as the DAN playbook — the model usually handles this, the remediation is around application policy:
+Same posture as the DAN playbook, the model usually handles this, the remediation is around application policy:
 
 - **Decide your refusal posture and apply it consistently.** Decide whether to refuse with a canned message, respond to the underlying request while ignoring the persona, or surface the attempt to a moderation queue. Pick one and apply it consistently. Inconsistent responses teach attackers which permutation works.
 
@@ -42,4 +42,4 @@ For all three, the high-count failure group is expected and not actionable. Per-
 
 ## Auto-fix in a future Mesedi release
 
-Same as the other Tier-2 patterns — v2 roadmap includes automatic intent classification (what is the user actually trying to do, once the persona wrapper is stripped) and per-project rule tuning. Both deferred until the v1 detection surface stabilizes.
+Same as the other Tier-2 patterns, v2 roadmap includes automatic intent classification (what is the user actually trying to do, once the persona wrapper is stripped) and per-project rule tuning. Both deferred until the v1 detection surface stabilizes.

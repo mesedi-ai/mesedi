@@ -1,0 +1,23 @@
+-- Migration 007: add granted_executions column for admin credit grants.
+--
+-- The founder-side admin dashboard (#150) can grant arbitrary
+-- additional executions to a project on top of the tier's base
+-- allowance. Use cases:
+--
+--   * Early-customer promo: grant 100,000 to Hobby signups to drive
+--     word-of-mouth before the first paid subscription.
+--   * Goodwill credit: a customer says "your detector misclassified
+--     and burned my quota on retries" — grant N back without
+--     touching their Stripe billing.
+--   * Comped accounts: design partners, employees, friendly press —
+--     grant a large number so they never hit the quota.
+--
+-- Effective monthly quota = tier_base_limit + granted_executions.
+-- Grants are additive across the lifetime of the project; they do NOT
+-- reset on period rollover. The admin can revoke a grant by passing a
+-- negative number through the same endpoint; the column is signed
+-- INTEGER so this works without acrobatics.
+--
+-- Default of 0 means existing rows behave unchanged after the
+-- migration runs.
+ALTER TABLE projects ADD COLUMN granted_executions INTEGER NOT NULL DEFAULT 0;

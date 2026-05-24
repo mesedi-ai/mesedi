@@ -1,5 +1,5 @@
 /**
- * wrap() — Mesedi's primary observation primitive for TypeScript.
+ * wrap(), Mesedi's primary observation primitive for TypeScript.
  *
  * TypeScript doesn't have stable decorators in regular JS, so wrap()
  * is a HIGHER-ORDER FUNCTION rather than a decorator. The shape:
@@ -65,12 +65,12 @@ export interface WrapOptions {
    * Optional per-execution budget. When set, the wrapped function
    * runs with halt-safe boundary checks at every `tool()` /
    * `checkpoint()` / Anthropic LLM-call entry point. If any limit is
-   * exceeded between calls, a MesediHalt is thrown internally —
+   * exceeded between calls, a MesediHalt is thrown internally , 
    * wrap() catches it, marks the execution status=halted (with
    * crash_signature=`halt:<trigger>`), and returns undefined.
    *
    * The wrapped function's normal try/finally cleanup runs as
-   * expected — halt is raised AT a safe boundary, never mid-tool /
+   * expected, halt is raised AT a safe boundary, never mid-tool /
    * mid-LLM-call, so user resources release cleanly.
    */
   budget?: Budget;
@@ -85,22 +85,22 @@ export function wrap<TArgs extends unknown[], TResult>(
   maybeFn?: (...args: TArgs) => Promise<TResult>,
 ): (...args: TArgs) => Promise<TResult | undefined> {
   // Support both call shapes:
-  //   wrap(fn) — no options
-  //   wrap({...opts}, fn) — with options
+  //   wrap(fn), no options
+  //   wrap({...opts}, fn), with options
   let opts: WrapOptions;
   let fn: (...args: TArgs) => Promise<TResult>;
   if (typeof fnOrOpts === "function") {
     opts = {};
     // Cast: `typeof === "function"` narrows to the broad built-in
     // `Function` type rather than to our specific signature, but at
-    // runtime it IS our signature — the call site guarantees that
+    // runtime it IS our signature, the call site guarantees that
     // shape since the function position is statically typed.
     fn = fnOrOpts as (...args: TArgs) => Promise<TResult>;
   } else {
     opts = fnOrOpts;
     if (!maybeFn) {
       throw new TypeError(
-        "wrap() requires a function — pass either wrap(fn) or wrap(options, fn).",
+        "wrap() requires a function, pass either wrap(fn) or wrap(options, fn).",
       );
     }
     fn = maybeFn;
@@ -121,7 +121,7 @@ export function wrap<TArgs extends unknown[], TResult>(
     };
 
     // Construct a budget tracker iff a budget was supplied. Stays
-    // undefined for un-budgeted wraps — checkBudget() then no-ops.
+    // undefined for un-budgeted wraps, checkBudget() then no-ops.
     const tracker = opts.budget ? new BudgetTracker(opts.budget) : undefined;
 
     // Sub-slice 21e: if a budget is configured, spawn an SSE reader
@@ -162,16 +162,16 @@ export function wrap<TArgs extends unknown[], TResult>(
       execution.ended_at = utcNowRfc3339();
 
       if (isMesediHalt(err)) {
-        // Controlled halt — record as halted, NOT crashed. The
+        // Controlled halt, record as halted, NOT crashed. The
         // crash_signature carries the trigger so the dashboard can
-        // group halts by cause (`halt:wall_clock` etc.) — same wire
+        // group halts by cause (`halt:wall_clock` etc.), same wire
         // format the Python SDK emits.
         execution.status = Status.HALTED;
         // err is narrowed to MesediHalt here by isMesediHalt's type
         // guard, so the trigger access is type-safe.
         execution.crash_signature = `halt:${err.trigger}`;
         client.submitExecutionEnd(execution);
-        // Return undefined — DON'T re-throw. The halt is a
+        // Return undefined, DON'T re-throw. The halt is a
         // controlled stop; the caller's downstream code should NOT
         // see an exception. This matches Python's `return None`
         // behavior in wrap.py.
@@ -196,7 +196,7 @@ export function wrap<TArgs extends unknown[], TResult>(
  *
  * Matches the Python SDK formula: SHA-256 of (error class name +
  * the first 5 lines of the formatted error). Truncates to 16 hex
- * chars — collision-resistant at scale, easy to display in
+ * chars, collision-resistant at scale, easy to display in
  * dashboards.
  *
  * The backend's Phase-3a crash grouper uses the same input shape, so

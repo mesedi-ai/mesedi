@@ -3,9 +3,9 @@ Hard-halt local-budget demo (sub-slice 21a).
 
 Demonstrates the three halt triggers:
 
-  1. Wall-clock — an agent that would run forever halts after N seconds
-  2. Step count — an agent that emits too many events halts after N steps
-  3. Token total — an agent that uses too many LLM tokens halts mid-run
+  1. Wall-clock, an agent that would run forever halts after N seconds
+  2. Step count, an agent that emits too many events halts after N steps
+  3. Token total, an agent that uses too many LLM tokens halts mid-run
 
 Each demo wraps a function with `@mesedi.wrap(budget=Budget(...))`
 and confirms that:
@@ -38,7 +38,7 @@ mesedi.configure(
 
 @mesedi.tool
 def slow_tool() -> str:
-    """Each call sleeps 200ms — emits one tool_call event per invocation."""
+    """Each call sleeps 200ms, emits one tool_call event per invocation."""
     time.sleep(0.2)
     return "done"
 
@@ -48,7 +48,7 @@ def slow_tool() -> str:
 
 @mesedi.wrap(budget=Budget(max_wall_clock_seconds=1.0))
 def runaway_wall_clock_agent() -> str:
-    """Would loop forever calling slow_tool — but the 1s wall-clock
+    """Would loop forever calling slow_tool, but the 1s wall-clock
     budget halts it after ~5 iterations.
 
     Cleanup runs in `finally` to prove standard Python cleanup
@@ -79,12 +79,12 @@ def runaway_step_count_agent() -> str:
     return "done"
 
 
-# ── No budget — control case ─────────────────────────────────────────
+# ── No budget, control case ─────────────────────────────────────────
 
 
 @mesedi.wrap
 def clean_agent() -> str:
-    """No budget — runs to completion normally."""
+    """No budget, runs to completion normally."""
     slow_tool()
     slow_tool()
     return "no budget, no halt"

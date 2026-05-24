@@ -1,5 +1,5 @@
 /**
- * MesediClient — HTTP client + async event shipper for Node.
+ * MesediClient, HTTP client + async event shipper for Node.
  *
  * Zero runtime dependencies: uses Node 18+ native `fetch` for HTTP
  * and the event loop for async dispatch. No background threads (Node
@@ -12,7 +12,7 @@
  * backend tightens enforcement.
  *
  * Fail-open: every observation HTTP call wraps its promise in a
- * try/catch — backend errors are logged via console.warn (configurable
+ * try/catch, backend errors are logged via console.warn (configurable
  * via a logger injection in a future polish slice) but NEVER bubble
  * back to the wrapped agent code.
  */
@@ -40,7 +40,7 @@ export class MesediClient {
             throw new Error("Mesedi API key not provided. Pass { apiKey: '...' } or set MESEDI_API_KEY in the environment.");
         }
         if (!apiKey.startsWith("mesedi_sk_")) {
-            // Mirror the backend's auth-middleware check — fail loudly on
+            // Mirror the backend's auth-middleware check, fail loudly on
             // the SDK side rather than letting the backend return 401 on
             // every call.
             throw new Error("api_key must start with 'mesedi_sk_' (received an obviously-malformed key)");
@@ -52,7 +52,7 @@ export class MesediClient {
         this.batchSize = opts.batchSize ?? 100;
         this.maxQueue = opts.maxQueue ?? 10_000;
         // Start the periodic flush timer. unref() so it doesn't keep the
-        // event loop alive on its own — the process can exit when the
+        // event loop alive on its own, the process can exit when the
         // user's code is done, and our atexit handler drains anything left.
         this.timer = setInterval(() => this.tick(), this.flushIntervalMs);
         this.timer.unref();
@@ -105,7 +105,7 @@ export class MesediClient {
         if (this.stopped) {
             // Even after shutdown is invoked, the user's main code might
             // continue running for a short tick. Best-effort: drop silently
-            // rather than throw — we're already past the contractual
+            // rather than throw, we're already past the contractual
             // observation window.
             return;
         }
@@ -119,7 +119,7 @@ export class MesediClient {
         this.queue.push(item);
     }
     /**
-     * Single tick of the shipper loop — called by setInterval. Drains
+     * Single tick of the shipper loop, called by setInterval. Drains
      * the queue, dispatches non-event items, and flushes the pending-
      * events batch if it's full OR the flush interval has elapsed.
      */
@@ -127,7 +127,7 @@ export class MesediClient {
         if (this.queue.length === 0 && this.pendingEvents.length === 0)
             return;
         // Chain onto the previous tick's promise so we serialize HTTP
-        // calls — preserves ordering (POST /executions before PATCH for
+        // calls, preserves ordering (POST /executions before PATCH for
         // the same execution).
         this.inflight = this.inflight.then(() => this.processOnce());
         await this.inflight;
@@ -142,7 +142,7 @@ export class MesediClient {
                 }
             }
             else {
-                // Non-event item — flush pending events first so the PATCH
+                // Non-event item, flush pending events first so the PATCH
                 // doesn't arrive before its preceding /events POST.
                 if (this.pendingEvents.length > 0) {
                     await this.flushPendingEvents();
@@ -181,7 +181,7 @@ export class MesediClient {
     }
     /**
      * One HTTP call with up to 3 retries on transient failure
-     * (network errors, 5xx). 4xx responses drop with a warning — the
+     * (network errors, 5xx). 4xx responses drop with a warning, the
      * request is malformed and retrying won't help.
      */
     async sendWithRetry(method, path, body, description) {
@@ -205,7 +205,7 @@ export class MesediClient {
                 if (resp.status < 400)
                     return; // success
                 if (resp.status >= 400 && resp.status < 500) {
-                    // Permanent failure — retrying won't help.
+                    // Permanent failure, retrying won't help.
                     const text = await resp.text().catch(() => "");
                     console.warn(`mesedi: ${description} rejected with ${resp.status}: ${text.slice(0, 200)}`);
                     return;

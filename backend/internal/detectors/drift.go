@@ -1,4 +1,4 @@
-// Drift detection — v0.0.1 model-mix signal.
+// Drift detection, v0.0.1 model-mix signal.
 //
 // This file implements the cheapest useful drift signal: when an
 // execution uses a model the project hasn't seen in a recent window,
@@ -52,8 +52,8 @@ import (
 //
 // Both input slices must be deduplicated and lowercase-normalized; the
 // caller (the store-layer queries) guarantees this. If historical is
-// empty — i.e. this is the first execution in the project, or the first
-// in the recent window — drift is NOT detected (every model would
+// empty, i.e. this is the first execution in the project, or the first
+// in the recent window, drift is NOT detected (every model would
 // otherwise look "new" on day one, which is noise, not signal).
 func DetectModelDrift(current, historical []string) (signature string, detected bool) {
 	if len(current) == 0 || len(historical) == 0 {
@@ -101,7 +101,7 @@ func normalize(s string) string {
 // lexical space over time. Real-world scenarios:
 //
 //   - A customer's KB articles got auto-rewritten and now the prompts
-//     synthesized by their RAG retriever look subtly different — the
+//     synthesized by their RAG retriever look subtly different, the
 //     agent's outputs degrade because the model is now seeing a slightly
 //     different distribution.
 //   - An A/B test in upstream prompt engineering shipped to 50% of
@@ -128,9 +128,9 @@ func normalize(s string) string {
 // distribution, 1 = no overlap. We bucket conservatively to keep
 // false-positive rate low at v0.0.1:
 //
-//   - drift_0.30+ : mild — vocabulary shifted, same general topic
-//   - drift_0.50+ : moderate — different sub-topic or style
-//   - drift_0.70+ : severe — completely different lexical territory
+//   - drift_0.30+ : mild, vocabulary shifted, same general topic
+//   - drift_0.50+ : moderate, different sub-topic or style
+//   - drift_0.70+ : severe, completely different lexical territory
 //
 // These thresholds are demo-visibility defaults; production tuning happens
 // against real customer data later.
@@ -165,7 +165,7 @@ var LexicalDriftThresholds = []struct {
 //
 //   - current is empty (no llm_call events with user_messages)
 //   - historical is empty (first execution in the project, or first
-//     after retention purge) — drift on day-one is noise, not signal
+//     after retention purge), drift on day-one is noise, not signal
 //   - either corpus produces an empty 3-gram bag (very short messages)
 //
 // The function is pure: no I/O, no globals mutated, safe to call from
@@ -185,7 +185,7 @@ func DetectLexicalDrift(current, historical []string) (signature string, distanc
 
 	// Thresholds are sorted highest-cutoff-first so the first match
 	// is the most-severe bucket. This is the natural "ratchet up"
-	// classification ordering — if a distance is 0.65, we want it
+	// classification ordering, if a distance is 0.65, we want it
 	// classified as drift_0.50+ (the next-highest bucket below 0.70).
 	for _, t := range LexicalDriftThresholds {
 		if distance >= t.Cutoff {
@@ -294,7 +294,7 @@ func cosineDistance(a, b map[string]int) float64 {
 		return 1.0
 	}
 	sim := dot / (math.Sqrt(normSmall) * math.Sqrt(normLarge))
-	// Clamp to [0, 1] — floating-point can produce slight negatives
+	// Clamp to [0, 1], floating-point can produce slight negatives
 	// or values > 1 on degenerate inputs.
 	if sim < 0 {
 		sim = 0
@@ -313,16 +313,16 @@ func cosineDistance(a, b map[string]int) float64 {
 // on calls where the text varies only by minor edits:
 //
 //   - Timestamp substitution: "Fetch user 1234 at 2026-05-15T10:00:00Z"
-//     vs "Fetch user 1234 at 2026-05-15T10:00:01Z" — same intent,
+//     vs "Fetch user 1234 at 2026-05-15T10:00:01Z", same intent,
 //     time field varies
 //   - ID swaps: "Look up customer cust-A1 in CRM" vs "Look up
-//     customer cust-A2 in CRM" — same intent, ID varies
+//     customer cust-A2 in CRM", same intent, ID varies
 //   - Schema-level retries: "Generate report for NDA clause..." vs
 //     "Generate report for MSA clause..."
 //
 // What it does NOT catch reliably: true semantic paraphrases like
 // "Extract the date" vs "Find the date mentioned" vs "What date
-// appears in this doc" — char-3-gram cosine distance between those
+// appears in this doc", char-3-gram cosine distance between those
 // is ~0.6-0.8 (far above the 0.20 threshold) because they share
 // little trigram overlap even though they mean the same thing.
 // Semantic-paraphrase detection requires embedding similarity, which
@@ -330,14 +330,14 @@ func cosineDistance(a, b map[string]int) float64 {
 // substrate.
 //
 // In customer-facing terms: this detector catches "the agent is
-// retrying nearly the same call with field-level edits" — a real
+// retrying nearly the same call with field-level edits", a real
 // failure mode that comes from retry logic with bad backoff, naive
 // pagination loops, or template variables that change one slot per
 // call.
 //
 // Implementation: O(N²) pairwise distance comparisons where N is the
 // number of llm_call events in this execution. For typical N=5-20
-// that's 25-400 distance computations, each <1ms — totally fine. If
+// that's 25-400 distance computations, each <1ms, totally fine. If
 // N grows past 100 we'd need a faster clustering approach (locality-
 // sensitive hashing, ball tree), but that's a future-slice problem.
 
@@ -345,7 +345,7 @@ const (
 	// SimilarCallDistanceThreshold = cosine distance below which two
 	// user_messages are considered "near-duplicates" of each other.
 	// Empirically calibrated against the trigram-bag distribution
-	// produced by buildTrigramBag — paraphrased prompts converge in
+	// produced by buildTrigramBag, paraphrased prompts converge in
 	// the 0.05-0.18 range; genuinely different prompts diverge to
 	// 0.30+. 0.20 is the right side of the gap.
 	SimilarCallDistanceThreshold = 0.20
@@ -376,7 +376,7 @@ func DetectSimilarCallLoop(userMessages []string) (callHash string, detected boo
 		return "", false
 	}
 
-	// Pre-compute trigram bags once per message — avoids O(N²)
+	// Pre-compute trigram bags once per message, avoids O(N²)
 	// re-tokenization in the pairwise loop below.
 	bags := make([]map[string]int, n)
 	for i, msg := range userMessages {
@@ -386,7 +386,7 @@ func DetectSimilarCallLoop(userMessages []string) (callHash string, detected boo
 	// For each message, count how many OTHER messages are within
 	// distance threshold. The first message with ≥ minClusterSize-1
 	// neighbors anchors the cluster. We hash this message's top
-	// trigrams as the cluster signature — different cluster patterns
+	// trigrams as the cluster signature, different cluster patterns
 	// produce different signatures.
 	for i := 0; i < n; i++ {
 		if len(bags[i]) == 0 {
@@ -414,7 +414,7 @@ func DetectSimilarCallLoop(userMessages []string) (callHash string, detected boo
 // topTrigramHash returns the first 8 hex chars of SHA-256 over the
 // top-16 most-frequent trigrams in the bag. Used to produce stable,
 // deterministic signatures for similar-call clusters across
-// executions — two executions stuck on lexically-similar patterns
+// executions, two executions stuck on lexically-similar patterns
 // will produce the same hash and aggregate into the same
 // failure_group. Different stuck patterns (one about date extraction,
 // one about email summarization) produce different hashes.

@@ -1,5 +1,5 @@
 """
-Mesedi SDK — Guardians for Autonomous AI.
+Mesedi SDK, Guardians for Autonomous AI.
 
 Public API:
 
@@ -33,14 +33,14 @@ Public API:
     mesedi.MesediHalt
         Exception class raised when a budget is exceeded. Inherits
         BaseException (not Exception) so broad `except Exception:`
-        handlers don't swallow it. Normally caught by @wrap itself
-        — user code rarely needs to see it.
+        handlers don't swallow it. Normally caught by @wrap itself,
+        so user code rarely needs to see it.
 
     mesedi.flush(timeout=5.0)
         Block until the background shipper drains.
 
     mesedi.MesediClient, mesedi.Event, mesedi.Execution,
-    mesedi.EventType, mesedi.Status — building blocks for advanced use.
+    mesedi.EventType, mesedi.Status, building blocks for advanced use.
 """
 
 from mesedi.anthropic_integration import instrument_anthropic

@@ -16,7 +16,7 @@
  *     }
  *
  * Both helpers no-op silently when called outside an active wrap()
- * execution context — same fail-open pattern as `tool()`.
+ * execution context, same fail-open pattern as `tool()`.
  */
 
 import { getClient } from "./client.js";
@@ -31,7 +31,7 @@ const MAX_VALIDATOR_MSG = 500;
  * A checkpoint is a free-form marker: a name + arbitrary metadata.
  * Typical uses: "after_retrieval", "before_synthesis", "cache_hit".
  * Useful both for Phase 3+ detector hooks (drift, cost-velocity)
- * and for ad-hoc debugging — replay UI in a future phase will
+ * and for ad-hoc debugging, replay UI in a future phase will
  * render checkpoints as anchored markers on the execution timeline.
  *
  * Outside `wrap()`: silent no-op.
@@ -76,7 +76,7 @@ export interface ValidatorResultOptions {
  *
  * Validators are checks the agent (or its framework) runs against
  * intermediate or final outputs: schema conformance, factuality,
- * relevance, safety. The result — pass or fail — becomes a discrete
+ * relevance, safety. The result, pass or fail, becomes a discrete
  * event so Phase-3 detection can spot patterns like "validator X
  * has been failing 90% of the time on this model."
  *
@@ -96,7 +96,7 @@ export function validatorResult(
     severity !== "error" &&
     severity !== "critical"
   ) {
-    // Don't throw — the caller's agent shouldn't fail because of an
+    // Don't throw, the caller's agent shouldn't fail because of an
     // SDK-side validation. Coerce to the safest default.
     severity = "error";
   }

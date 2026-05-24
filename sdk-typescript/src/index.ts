@@ -1,27 +1,27 @@
 /**
- * Mesedi TypeScript SDK — Guardians for Autonomous AI.
+ * Mesedi TypeScript SDK, Guardians for Autonomous AI.
  *
  * Public API:
  *
- *   configure(opts)          — set up the module-level default client.
+ *   configure(opts): set up the module-level default client.
  *                              Reads MESEDI_API_KEY / MESEDI_BASE_URL
  *                              from process.env as fallbacks.
- *   wrap(opts?, fn)          — higher-order function that records the
+ *   wrap(opts?, fn): higher-order function that records the
  *                              wrapped function's invocation as an
  *                              agent execution.
- *   tool(opts?, fn)          — higher-order function that records each
+ *   tool(opts?, fn): higher-order function that records each
  *                              call as a tool_call event linked to the
  *                              surrounding wrap()'d execution.
- *   checkpoint(name, meta?)  — mark a notable point in execution.
- *   validatorResult(name, passed, opts?) — report a validator outcome.
- *   instrumentAnthropic(cls?)— patch @anthropic-ai/sdk's
+ *   checkpoint(name, meta?): mark a notable point in execution.
+ *   validatorResult(name, passed, opts?), report a validator outcome.
+ *   instrumentAnthropic(cls?),  patch @anthropic-ai/sdk's
  *                              Messages.create to emit llm_call events.
  *                              Optional `cls` for testing.
- *   flush(timeoutMs?)        — wait for the background shipper to
+ *   flush(timeoutMs?): wait for the background shipper to
  *                              drain all events submitted so far.
- *   MesediClient             — explicit client for advanced use cases.
- *   Event, Execution         — wire-format dataclasses.
- *   EventType, Status        — enum-style constants.
+ *   MesediClient: explicit client for advanced use cases.
+ *   Event, Execution: wire-format dataclasses.
+ *   EventType, Status: enum-style constants.
  */
 
 export { MesediClient, configure, flush, getClient } from "./client.js";

@@ -1,5 +1,5 @@
 """
-Dashboard-halt test — sub-slice 21c.
+Dashboard-halt test, sub-slice 21c.
 
 Companion to halt_remote_test.py, but with NO auto-trigger thread.
 Lets you exercise the dashboard's operator Halt button end-to-end:
@@ -57,7 +57,7 @@ def slow_tool() -> str:
 
 @mesedi.wrap(budget=Budget(max_wall_clock_seconds=60.0))
 def dashboard_halt_agent() -> str:
-    """Loops 100 times at 300ms each — ~30s normal runtime. The 60s
+    """Loops 100 times at 300ms each, ~30s normal runtime. The 60s
     wall-clock budget will NOT trip during normal execution; the
     only way this agent halts before completing is via the dashboard
     operator Halt button (the test scenario).
@@ -84,7 +84,7 @@ def dashboard_halt_agent() -> str:
         for i in range(100):
             slow_tool()
             print(f"  [agent] iteration {i + 1} completed")
-        return "all 100 iterations done — agent ran to completion (no halt clicked)"
+        return "all 100 iterations done, agent ran to completion (no halt clicked)"
     finally:
         cleanup_ran.append(True)
         print(f"\n  [agent] finally block ran (cleanup_ran={cleanup_ran})")
@@ -96,7 +96,7 @@ def _ms(seconds: float) -> str:
 
 if __name__ == "__main__":
     print("\n── Dashboard-halt demo ──")
-    print("  No auto-trigger thread — YOU click Halt in the dashboard.")
+    print("  No auto-trigger thread, YOU click Halt in the dashboard.")
     t = time.perf_counter()
     result = dashboard_halt_agent()
     print(f"\n  wall-clock: {_ms(time.perf_counter() - t)}")
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     if result is None:
         print("  → halted cleanly via dashboard")
     else:
-        print("  → ran to completion — you didn't click Halt in time")
+        print("  → ran to completion, you didn't click Halt in time")
 
     print("\n── Flushing shipper queue... ──")
     t = time.perf_counter()

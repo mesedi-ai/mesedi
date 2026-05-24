@@ -10,9 +10,9 @@ message) truncated to 8 chars, so multiple loops with different prompts
 in the same project end up in distinct groups.
 
 Three runs:
-  1. clean_agent — three DIFFERENT prompts. Not classified as loop.
-  2. stuck_agent — same prompt 4 times. Triggers identical_call.
-  3. doubly_stuck_agent — same prompt 6 times with a different
+  1. clean_agent, three DIFFERENT prompts. Not classified as loop.
+  2. stuck_agent, same prompt 4 times. Triggers identical_call.
+  3. doubly_stuck_agent, same prompt 6 times with a different
      prompt-text than #2, so it gets a DIFFERENT signature hash.
 
 Prereqs:
@@ -76,7 +76,7 @@ mesedi.instrument_anthropic(messages_class=FakeMessages)
 
 @mesedi.wrap
 def clean_agent(query: str) -> str:
-    """Three different prompts — should NOT be classified as a loop."""
+    """Three different prompts, should NOT be classified as a loop."""
     c = FakeAnthropicClient()
     c.messages.create(model="claude-opus-4-6",
                       messages=[{"role": "user", "content": "What is 2+2?"}],
@@ -92,7 +92,7 @@ def clean_agent(query: str) -> str:
 
 @mesedi.wrap
 def stuck_agent(query: str) -> str:
-    """Same prompt 4 times — should trigger identical_call loop."""
+    """Same prompt 4 times, should trigger identical_call loop."""
     c = FakeAnthropicClient()
     for _ in range(4):
         c.messages.create(
@@ -105,7 +105,7 @@ def stuck_agent(query: str) -> str:
 
 @mesedi.wrap
 def doubly_stuck_agent(query: str) -> str:
-    """Same prompt 6 times — different prompt-text than stuck_agent,
+    """Same prompt 6 times, different prompt-text than stuck_agent,
     so gets a different signature hash → separate failure_group."""
     c = FakeAnthropicClient()
     for _ in range(6):
@@ -122,12 +122,12 @@ def _ms(seconds: float) -> str:
 
 
 if __name__ == "__main__":
-    print("\n── Run 1: clean_agent (3 different prompts — should NOT trigger) ──")
+    print("\n── Run 1: clean_agent (3 different prompts, should NOT trigger) ──")
     t = time.perf_counter()
     clean_agent("x")
     print(f"  wall-clock: {_ms(time.perf_counter() - t)}")
 
-    print("\n── Run 2: stuck_agent (same prompt 4x — triggers identical_call) ──")
+    print("\n── Run 2: stuck_agent (same prompt 4x, triggers identical_call) ──")
     t = time.perf_counter()
     stuck_agent("x")
     print(f"  wall-clock: {_ms(time.perf_counter() - t)}")

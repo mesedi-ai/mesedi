@@ -1,5 +1,5 @@
 """
-MesediClient — HTTP client + event shipper for the Mesedi backend.
+MesediClient, HTTP client + event shipper for the Mesedi backend.
 
 The client owns two things:
 
@@ -42,7 +42,7 @@ SCHEMA_VERSION = "1"
 
 # Module-level singleton client. Populated by mesedi.configure() and
 # consumed by the @wrap decorator. Most callers need exactly one client
-# per process — Mesedi is meant to observe agent code, not to be
+# per process, Mesedi is meant to observe agent code, not to be
 # instantiated per-call.
 _default_client: Optional["MesediClient"] = None
 
@@ -67,7 +67,7 @@ class MesediClient:
         if not api_key:
             raise ValueError("api_key is required")
         if not api_key.startswith("mesedi_sk_"):
-            # Match the backend's auth-middleware check — fail loudly on
+            # Match the backend's auth-middleware check, fail loudly on
             # the SDK side rather than letting the backend return 401 on
             # every call.
             raise ValueError(

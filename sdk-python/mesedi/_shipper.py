@@ -1,5 +1,5 @@
 """
-Background event shipper — async, ordered, retry-on-transient-failure.
+Background event shipper, async, ordered, retry-on-transient-failure.
 
 The shipper owns a single daemon thread that pulls items from a thread-
 safe queue and dispatches them to the Mesedi backend. Items come in
@@ -20,13 +20,13 @@ best-case "fire 100 events" produces 1 HTTP call.
 
 **Retry.** Transient failures (network errors, 5xx) retry up to 3 times
 with exponential backoff (0.1s, 0.5s, 2.0s). Permanent failures (4xx)
-drop the item with a warning log — retrying a malformed request never
+drop the item with a warning log, retrying a malformed request never
 helps.
 
 **Shutdown.** ``atexit`` registers a shutdown handler that flushes the
 queue with a timeout (default 5s). Daemon thread would otherwise die
 with the interpreter if the shutdown handler doesn't run (e.g., kill -9,
-unhandled crash before atexit can fire) — at that point unflushed events
+unhandled crash before atexit can fire), at that point unflushed events
 are lost. In normal operation, queue-to-flush latency is single-digit
 milliseconds, so the loss window is small.
 
@@ -146,7 +146,7 @@ class EventShipper:
         """Stop the worker thread; flush remaining items with timeout.
 
         Safe to call multiple times. Registered with ``atexit`` at
-        construction time, so an explicit call is normally unnecessary —
+        construction time, so an explicit call is normally unnecessary , 
         but explicit ``client.close()`` will trigger this immediately
         rather than waiting for interpreter shutdown.
         """
@@ -168,7 +168,7 @@ class EventShipper:
 
         while True:
             # Termination condition: stop flag is set AND queue is empty.
-            # We do NOT stop the instant stop_set is true — we keep
+            # We do NOT stop the instant stop_set is true, we keep
             # draining whatever is already queued, so an explicit
             # shutdown() doesn't drop in-flight work.
             if self._stop.is_set() and self._queue.empty():
@@ -205,7 +205,7 @@ class EventShipper:
                 assert isinstance(item.body, threading.Event)
                 item.body.set()
             else:
-                # Non-event item — flush pending events FIRST to preserve
+                # Non-event item, flush pending events FIRST to preserve
                 # ordering (a PATCH must not arrive before its preceding
                 # events for the same execution).
                 if pending_events:
@@ -280,7 +280,7 @@ class EventShipper:
                         r.text[:200],
                     )
                     return
-                # 5xx — transient, retry.
+                # 5xx, transient, retry.
                 last_err = f"HTTP {r.status_code}"
             except Exception as exc:
                 last_err = exc

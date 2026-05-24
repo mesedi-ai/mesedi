@@ -1,5 +1,5 @@
 """
-Example using the real Mesedi SDK (v0.0.3 — @wrap + @tool + async).
+Example using the real Mesedi SDK (v0.0.3, @wrap + @tool + async).
 
 Demonstrates both decorators together: a @wrap'd agent function that
 calls several @tool-decorated tool functions. Each invocation produces
@@ -79,7 +79,7 @@ def agent_with_tools(query: str) -> str:
     results = search_web(query)
     total = calculator(len(results), 10, op="*")
 
-    # Try the flaky lookup but recover if it fails — we want @wrap to
+    # Try the flaky lookup but recover if it fails, we want @wrap to
     # see a "completed" execution even when an inner @tool raises.
     try:
         cached = flaky_database_lookup(query)

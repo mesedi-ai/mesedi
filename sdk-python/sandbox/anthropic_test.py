@@ -1,5 +1,5 @@
 """
-End-to-end test of mesedi.instrument_anthropic() — WITHOUT requiring
+End-to-end test of mesedi.instrument_anthropic(), WITHOUT requiring
 the real anthropic package to be installed.
 
 How it works: ``instrument_anthropic()`` accepts an optional
@@ -109,7 +109,7 @@ class FakeMessages:
 
 
 class FakeAnthropicClient:
-    """Stand-in for anthropic.Anthropic — exposes a .messages attribute."""
+    """Stand-in for anthropic.Anthropic, exposes a .messages attribute."""
 
     def __init__(self):
         self.messages = FakeMessages()
@@ -119,7 +119,7 @@ class FakeAnthropicClient:
 
 
 # Inject our fake into instrument_anthropic. This is the exact same
-# patching code that runs against the real anthropic package — we just
+# patching code that runs against the real anthropic package, we just
 # point it at FakeMessages instead.
 patched_ok = mesedi.instrument_anthropic(messages_class=FakeMessages)
 print(f"\ninstrument_anthropic(FakeMessages) → {patched_ok}")

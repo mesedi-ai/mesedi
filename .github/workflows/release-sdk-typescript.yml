@@ -3,7 +3,7 @@
 # Triggers on a `sdk-typescript-v*` git tag push (monorepo convention so
 # the TS SDK and the Python SDK can release independently). Verifies the
 # type-check + build, then publishes to npm with provenance attestation
-# via Trusted Publishing (OIDC) — no NPM_TOKEN secret required.
+# via Trusted Publishing (OIDC), no NPM_TOKEN secret required.
 #
 # To cut a new release:
 #
@@ -25,14 +25,14 @@
 #         Repository:       mesedi
 #         Workflow file:    .github/workflows/release-sdk-typescript.yml
 #         Environment:      npm
-#   4. For the *initial* publish, the package name must already exist —
+#   4. For the *initial* publish, the package name must already exist , 
 #      either do one manual `npm publish` from a local machine first to
 #      claim `mesedi`, OR use npm's "pending publisher" flow.
 #
 # npm Trusted Publishing (OIDC) requires npm CLI v11.5.0 or newer.
 # Node 20/22 LTS still ships with npm 10.x by default, which does not
 # auto-detect Trusted Publisher config and falls back to no-auth publish
-# — which the registry rejects with a misleading 404. The upgrade step
+#, which the registry rejects with a misleading 404. The upgrade step
 # below pulls the latest npm 11.x into the runner image before any
 # publish work happens.
 
@@ -87,7 +87,7 @@ jobs:
         run: npm run build
 
       - name: Publish to npm with provenance
-        # Authentication is via npm Trusted Publishing (OIDC) — no
+        # Authentication is via npm Trusted Publishing (OIDC), no
         # NPM_TOKEN secret needed. The `id-token: write` permission at
         # the workflow level provides the Sigstore OIDC token; npm
         # validates the OIDC claims against the Trusted Publisher

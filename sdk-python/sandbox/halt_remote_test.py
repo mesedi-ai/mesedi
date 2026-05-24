@@ -1,5 +1,5 @@
 """
-Remote-halt demo — sub-slice 21b.2.
+Remote-halt demo, sub-slice 21b.2.
 
 Demonstrates the SSE remote-halt channel end-to-end inside a single
 Python process:
@@ -12,8 +12,8 @@ Python process:
      triggering the halt remotely.
   3. The reader thread receives the SSE event, calls
      `tracker.signal_remote_halt(reason)`.
-  4. The next halt-safe boundary check inside the agent — at a
-     `@tool` entry or at `mesedi.checkpoint()` — raises MesediHalt
+  4. The next halt-safe boundary check inside the agent, at a
+     `@tool` entry or at `mesedi.checkpoint()`, raises MesediHalt
      with `trigger="remote_signal"`.
   5. `@mesedi.wrap`'s exception handler catches the halt, marks the
      execution `status=halted` with `crash_signature="halt:remote_signal"`,
@@ -65,7 +65,7 @@ def _trigger_halt_after(execution_id: str, delay_seconds: float) -> None:
     """Wait, then POST /halt for the given execution.
 
     Runs in its own thread, separate from the wrapped agent. Stands
-    in for the dashboard / a detector publishing the halt — in
+    in for the dashboard / a detector publishing the halt, in
     production this would be triggered by an HTTP call from the
     operator-facing surface, not from inside the agent itself.
     """
@@ -82,13 +82,13 @@ def _trigger_halt_after(execution_id: str, delay_seconds: float) -> None:
             timeout=5.0,
         )
         print(f"  [trigger] POST /halt → status={r.status_code} body={r.text}")
-    except Exception as exc:  # noqa: BLE001 — demo script, log and continue
+    except Exception as exc:  # noqa: BLE001, demo script, log and continue
         print(f"  [trigger] POST /halt failed: {exc}")
 
 
 @mesedi.wrap(budget=Budget(max_wall_clock_seconds=60.0))
 def runaway_remote_halt_agent() -> str:
-    """Loops 100 times at 300ms each — would finish in 30s if left
+    """Loops 100 times at 300ms each, would finish in 30s if left
     alone, well within the 60s wall-clock budget. The trigger thread
     fires a halt at t=2s; the agent halts at the next @tool entry
     (~1-2 iterations later)."""

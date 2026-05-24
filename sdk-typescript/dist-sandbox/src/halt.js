@@ -1,14 +1,14 @@
 /**
- * Hard-halt primitives — TypeScript port of the Python `mesedi/halt.py`.
+ * Hard-halt primitives, TypeScript port of the Python `mesedi/halt.py`.
  *
  * Three exports:
  *
- *   - `Budget`     — interface describing the per-execution limits
+ *   - `Budget`    , interface describing the per-execution limits
  *                    (wall-clock seconds, step count, input/output
  *                    tokens). Any subset of fields can be set; unset
  *                    fields are "no limit on that axis."
  *
- *   - `MesediHalt` — Error subclass that the runtime throws when a
+ *   - `MesediHalt`, Error subclass that the runtime throws when a
  *                    `Budget` is exceeded. Carries a `reason` and a
  *                    `trigger` so callers / dashboards can tell which
  *                    axis blew the budget. Marked with an internal
@@ -17,15 +17,15 @@
  *                    `try { ... } catch (err) { ... }` and re-threw
  *                    something else.
  *
- *   - `BudgetTracker` — runtime counter struct. One per execution.
+ *   - `BudgetTracker`, runtime counter struct. One per execution.
  *                    Tracks wall-clock start (via `performance.now()`
- *                    — JS's monotonic clock equivalent of Python's
+ *                   , JS's monotonic clock equivalent of Python's
  *                    `time.monotonic()`), step count, token totals.
  *                    `check()` throws MesediHalt if any limit is
  *                    exceeded; the wrap()'d entry points call it as
  *                    a halt-safe boundary BEFORE doing work, so the
  *                    halt always fires between tool/llm/checkpoint
- *                    calls — never mid-call.
+ *                    calls, never mid-call.
  *
  * Cross-language wire-format parity:
  *
@@ -44,7 +44,7 @@
  * Why a marker Symbol on MesediHalt:
  *
  *   In Python, `MesediHalt(BaseException)` evades `except Exception:`
- *   handlers — broad except blocks miss it. JavaScript has no
+ *   handlers, broad except blocks miss it. JavaScript has no
  *   equivalent of BaseException; `catch (err)` always catches
  *   everything. So we mark MesediHalt with a hidden Symbol-keyed
  *   property and `wrap()` looks for that symbol, not just an
@@ -68,7 +68,7 @@ const MESEDI_HALT_MARKER = Symbol.for("mesedi.halt.marker");
 export class MesediHalt extends Error {
     reason;
     trigger;
-    // Symbol-keyed marker — invisible to JSON.stringify, hard for user
+    // Symbol-keyed marker, invisible to JSON.stringify, hard for user
     // code to spoof.
     [MESEDI_HALT_MARKER] = true;
     constructor(reason, trigger) {
@@ -95,7 +95,7 @@ export function isMesediHalt(err) {
     if (err[MESEDI_HALT_MARKER]) {
         return true;
     }
-    // Walk Error.cause chain — ES2022 standard for wrapped errors.
+    // Walk Error.cause chain, ES2022 standard for wrapped errors.
     let cursor = err.cause;
     let safety = 0;
     while (cursor && safety < 10) {
@@ -110,15 +110,15 @@ export function isMesediHalt(err) {
 }
 /**
  * Runtime counter struct. One instance per execution, lives on the
- * ExecutionContext. Thread-safety isn't a concern in Node — the
- * single-threaded event loop guarantees serial access — but the
+ * ExecutionContext. Thread-safety isn't a concern in Node, the
+ * single-threaded event loop guarantees serial access, but the
  * counter writes still need to be coherent across async boundaries,
  * which AsyncLocalStorage gives us for free.
  *
  * `check()` is the halt-safe boundary. Callers (tool, anthropic
  * patch, checkpoint) call it FIRST, then increment counters. If any
  * limit is already exceeded at the time of check, a MesediHalt is
- * thrown — the caller's work is never started.
+ * thrown, the caller's work is never started.
  */
 export class BudgetTracker {
     budget;
@@ -135,7 +135,7 @@ export class BudgetTracker {
     constructor(budget) {
         this.budget = budget;
         // performance.now() returns a monotonic millisecond timer that
-        // doesn't jump backward on NTP adjustments — the JS equivalent
+        // doesn't jump backward on NTP adjustments, the JS equivalent
         // of Python's time.monotonic().
         this.startMs = performance.now();
     }
@@ -147,7 +147,7 @@ export class BudgetTracker {
      * `check()` call will throw `MesediHalt(trigger='remote_signal')`
      * with the supplied reason.
      *
-     * Idempotent — multiple signals overwrite the reason (last one
+     * Idempotent, multiple signals overwrite the reason (last one
      * wins). Concurrency is fine: Node's single-threaded event loop
      * means the reader thread's write and the agent thread's read
      * can't interleave at the JS level.
@@ -165,7 +165,7 @@ export class BudgetTracker {
      * axis. Local budgets only trip when no remote halt is pending.
      */
     check() {
-        // Remote halt check — runs even when the budget is unbounded,
+        // Remote halt check, runs even when the budget is unbounded,
         // so a wrap()'d agent without explicit local limits can still
         // be remote-halted (dashboard panic-stop semantics).
         if (this.remoteHaltReason !== undefined) {
@@ -177,7 +177,7 @@ export class BudgetTracker {
             this.remoteHaltReason = undefined;
             throw new MesediHalt(reason, "remote_signal");
         }
-        // Wall-clock — checked first among the local axes because it's
+        // Wall-clock, checked first among the local axes because it's
         // the most common trigger in practice. A runaway agent burns
         // time before it burns steps or tokens.
         if (this.budget.maxWallClockSeconds !== undefined) {

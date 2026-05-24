@@ -1,5 +1,5 @@
 """
-SSE halt-stream reader — sub-slice 21b.2.
+SSE halt-stream reader, sub-slice 21b.2.
 
 When `@mesedi.wrap` is entered with a `budget=Budget(...)` set, the
 wrap layer spawns a `HaltStreamReader` daemon thread for the lifetime
@@ -16,13 +16,13 @@ Design points:
   - **Daemon thread.** The reader is `daemon=True` so it can't prevent
     process shutdown. When `@wrap` exits (normally or via halt /
     crash), it calls `reader.stop()` which sets a stop event and
-    closes the streaming HTTP connection — the reader thread sees
+    closes the streaming HTTP connection, the reader thread sees
     the close and exits cleanly.
 
   - **Fail-open posture.** If the SSE subscription fails (backend
     unreachable, 4xx/5xx response, network blip), the reader logs and
     returns. It does NOT crash the wrapped agent. Remote-halt is a
-    nice-to-have on top of the local-budget primitive — if it doesn't
+    nice-to-have on top of the local-budget primitive, if it doesn't
     work, the wrap()'d agent continues to run with whatever local
     budget it was given.
 
@@ -31,7 +31,7 @@ Design points:
     the SSE connection after the same event; both sides agree the
     halt is a single signal per subscription.
 
-  - **No SDK API surface.** `HaltStreamReader` is internal — customers
+  - **No SDK API surface.** `HaltStreamReader` is internal, customers
     don't construct it directly. It's exposed only to `wrap.py`'s
     halt-safe setup code.
 """
@@ -48,7 +48,7 @@ import httpx
 logger = logging.getLogger("mesedi.halt_stream")
 
 # Connect timeout for the SSE stream. We don't want to hang the
-# wrapped agent's startup if the backend is unreachable — fail-fast,
+# wrapped agent's startup if the backend is unreachable, fail-fast,
 # fall back to local-budget-only operation.
 _CONNECT_TIMEOUT_SECONDS = 5.0
 
@@ -79,14 +79,14 @@ class HaltStreamReader:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         # Hold the open httpx Response so .stop() can close it
-        # promptly — otherwise the reader thread blocks in
+        # promptly, otherwise the reader thread blocks in
         # iter_lines() until the keepalive triggers or the max-
         # lifetime times out.
         self._response_lock = threading.Lock()
         self._open_response: Optional[httpx.Response] = None
 
     def start(self) -> None:
-        """Spawn the reader thread. Idempotent — second call is a no-op."""
+        """Spawn the reader thread. Idempotent, second call is a no-op."""
         if self._thread is not None:
             return
         self._thread = threading.Thread(
@@ -99,7 +99,7 @@ class HaltStreamReader:
     def stop(self) -> None:
         """Signal the reader to exit and close any open HTTP stream.
 
-        Safe to call multiple times. Does NOT join the thread —
+        Safe to call multiple times. Does NOT join the thread , 
         daemon=True means it dies with the process; we just unblock
         it so it exits gracefully.
         """
@@ -110,7 +110,7 @@ class HaltStreamReader:
         if resp is not None:
             try:
                 resp.close()
-            except Exception:  # noqa: BLE001 — defensive cleanup
+            except Exception:  # noqa: BLE001, defensive cleanup
                 pass
 
     # ── Internal ────────────────────────────────────────────────
@@ -124,7 +124,7 @@ class HaltStreamReader:
         }
         # Connect timeout caps how long we'll wait to establish the
         # subscription. Read timeout=None lets the stream stay open
-        # indefinitely — the backend's `: keepalive` comments every
+        # indefinitely, the backend's `: keepalive` comments every
         # 15s keep the TCP connection warm; without that we'd hit a
         # read timeout. write/pool timeouts are conservative because
         # neither path matters for a single GET stream.
@@ -152,7 +152,7 @@ class HaltStreamReader:
                 # (defaults to "message") and accumulate data lines
                 # until a blank line dispatches the event. The
                 # backend only ever sends one event type we care
-                # about — "halt" — so the parser stays tiny.
+                # about, "halt", so the parser stays tiny.
                 current_event = "message"
                 data_buf: list[str] = []
                 for line in resp.iter_lines():
@@ -163,12 +163,12 @@ class HaltStreamReader:
                         # Blank line dispatches the accumulated event.
                         if current_event == "halt" and data_buf:
                             self._dispatch_halt("\n".join(data_buf))
-                            return  # one-shot — done
+                            return  # one-shot, done
                         current_event = "message"
                         data_buf = []
                         continue
                     if line.startswith(":"):
-                        # Comment / keepalive — ignore.
+                        # Comment / keepalive, ignore.
                         continue
                     if line.startswith("event:"):
                         current_event = line[len("event:"):].strip() or "message"
@@ -183,7 +183,7 @@ class HaltStreamReader:
                 "halt-stream connection failed (fail-open)",
                 extra={"execution_id": self._execution_id, "error": str(exc)},
             )
-        except Exception as exc:  # noqa: BLE001 — defensive
+        except Exception as exc:  # noqa: BLE001, defensive
             logger.debug(
                 "halt-stream reader crashed (fail-open)",
                 extra={"execution_id": self._execution_id, "error": str(exc)},
@@ -196,7 +196,7 @@ class HaltStreamReader:
         """Parse the data payload and signal the halt back to the wrap.
 
         Defensive: malformed JSON falls back to a generic reason
-        string. The reader's job is to fire the halt — we never want
+        string. The reader's job is to fire the halt, we never want
         a parse glitch to silently swallow the signal.
         """
         reason = "remote halt"
@@ -206,13 +206,13 @@ class HaltStreamReader:
                 reason = data["reason"]
         except json.JSONDecodeError:
             logger.debug(
-                "halt-stream data was not JSON — using generic reason",
+                "halt-stream data was not JSON, using generic reason",
                 extra={"execution_id": self._execution_id, "raw": raw_data[:200]},
             )
         try:
             self._on_halt(reason)
-        except Exception as exc:  # noqa: BLE001 — defensive
+        except Exception as exc:  # noqa: BLE001, defensive
             logger.warning(
-                "halt-stream on_halt callback raised — halt may not have fired",
+                "halt-stream on_halt callback raised, halt may not have fired",
                 extra={"execution_id": self._execution_id, "error": str(exc)},
             )

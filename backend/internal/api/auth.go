@@ -11,7 +11,7 @@
 //  5. Asynchronously updates last_used_at on the matched key.
 //
 // Phase 1.5: auth is REQUIRED for /executions and /events. /health is
-// public (used by load-balancer probes — should never require auth).
+// public (used by load-balancer probes, should never require auth).
 // Phase 2+: per-project rate limiting layers on top of this.
 package api
 
@@ -39,7 +39,7 @@ const (
 
 // ProjectIDFromContext returns the authenticated project ID associated
 // with the request, or empty + false if no project ID was attached
-// (which means the middleware did not authorize this request — caller
+// (which means the middleware did not authorize this request, caller
 // should never have reached this code path under normal middleware
 // ordering, but the false return makes the safety check explicit).
 func ProjectIDFromContext(ctx context.Context) (string, bool) {
@@ -48,7 +48,7 @@ func ProjectIDFromContext(ctx context.Context) (string, bool) {
 }
 
 // APIKeyIDFromContext returns the authenticated API key ID. Useful for
-// audit logging — every action a key takes can be traced back.
+// audit logging, every action a key takes can be traced back.
 func APIKeyIDFromContext(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(ctxKeyAPIKeyID).(string)
 	return v, ok
@@ -57,7 +57,7 @@ func APIKeyIDFromContext(ctx context.Context) (string, bool) {
 // HashAPIKey returns the SHA-256 hex digest of the raw key. The same
 // hash is used both at mint time (stored in api_keys.key_hash) and at
 // verification time (computed from the bearer token, looked up against
-// the stored hash). SHA-256 is sufficient here — the secret never leaves
+// the stored hash). SHA-256 is sufficient here, the secret never leaves
 // the customer's machine, and rainbow-table risk is mitigated by the
 // keys being long random strings, not passwords.
 func HashAPIKey(rawKey string) string {
@@ -120,7 +120,7 @@ func authMiddleware(s store.Store) func(http.Handler) http.Handler {
 			ctx := context.WithValue(r.Context(), ctxKeyProjectID, key.ProjectID)
 			ctx = context.WithValue(ctx, ctxKeyAPIKeyID, key.KeyID)
 
-			// Touch last_used_at asynchronously — fire-and-forget so a slow
+			// Touch last_used_at asynchronously, fire-and-forget so a slow
 			// DB write doesn't add latency to the request hot path.
 			go func(keyID string) {
 				_ = s.TouchAPIKey(context.Background(), keyID)

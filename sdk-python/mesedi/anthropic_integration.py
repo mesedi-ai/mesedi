@@ -1,23 +1,23 @@
 """
-Anthropic SDK monkey-patch — auto-emit llm_call events for every
+Anthropic SDK monkey-patch, auto-emit llm_call events for every
 ``Messages.create`` call inside a ``@mesedi.wrap`` execution.
 
 Activation is **opt-in**: call ``mesedi.instrument_anthropic()`` once at
 process startup. This matches the Datadog / Sentry / OpenTelemetry
-pattern — observability instrumentation should be explicit, not magical.
+pattern, observability instrumentation should be explicit, not magical.
 
 What gets captured per call:
 
   - ``model`` (e.g. "claude-opus-4-6")
-  - ``system_prompt`` — truncated to 1000 chars
-  - ``user_message`` — the LAST user-role message in the conversation,
+  - ``system_prompt``, truncated to 1000 chars
+  - ``user_message``, the LAST user-role message in the conversation,
     truncated to 1000 chars
-  - ``response_text`` — concatenated text-block content from the
+  - ``response_text``, concatenated text-block content from the
     response, truncated to 1000 chars
-  - ``input_tokens`` / ``output_tokens`` — from response.usage
-  - ``duration_ms`` — wall-clock time of the API call
-  - ``status`` — "ok" if the call returned, "failed" if it raised
-  - ``exception_type`` / ``exception_message`` — on failure
+  - ``input_tokens`` / ``output_tokens``, from response.usage
+  - ``duration_ms``, wall-clock time of the API call
+  - ``status``, "ok" if the call returned, "failed" if it raised
+  - ``exception_type`` / ``exception_message``, on failure
 
 Truncation budget is intentionally bounded (1000 chars per text field)
 so the events table doesn't bloat from agents that paste whole web
@@ -26,10 +26,10 @@ that lands in a future sub-slice.
 
 Out of scope for this sub-slice:
 
-  - ``AsyncAnthropic.messages.create`` (async client) — patched in the
+  - ``AsyncAnthropic.messages.create`` (async client), patched in the
     async-support sub-slice
-  - ``Messages.stream()`` / streaming responses — patched separately
-  - Anthropic tools / tool_use response blocks — handled by @mesedi.tool
+  - ``Messages.stream()`` / streaming responses, patched separately
+  - Anthropic tools / tool_use response blocks, handled by @mesedi.tool
     at the agent layer, not at the LLM-call layer
 
 Patching is idempotent: calling ``instrument_anthropic()`` twice has no
@@ -38,7 +38,7 @@ additional effect.
 Dependency injection: ``instrument_anthropic()`` accepts an optional
 ``messages_class`` parameter so this code path is testable without
 installing the actual ``anthropic`` package. Pass any class that has a
-``create`` method to patch — the sandbox test does this with a fake
+``create`` method to patch, the sandbox test does this with a fake
 class to verify the patching logic end-to-end.
 """
 
@@ -75,7 +75,7 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
         messages_class: The class whose ``create`` method should be
             patched. When ``None`` (the default), tries to import
             ``anthropic.resources.messages.Messages``. Passing an
-            explicit class is intended for testing — production callers
+            explicit class is intended for testing, production callers
             should leave this as None and let the function auto-locate
             the real Anthropic class.
 
@@ -104,7 +104,7 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
     def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
         if ctx is None:
-            # No active execution — run unobserved. Same fail-open
+            # No active execution, run unobserved. Same fail-open
             # pattern as @tool and @wrap.
             return original_create(self, *args, **kwargs)
 

@@ -4,7 +4,7 @@
 // stdout. Storage (Postgres) and detection (loops, drift, etc.) come
 // online in Phase 1.5 and Phases 3+.
 //
-// Handlers do not authenticate yet — Phase 1.5 adds bearer-token auth
+// Handlers do not authenticate yet, Phase 1.5 adds bearer-token auth
 // via middleware. For local dev today, any caller can post to /events
 // and /executions; that is intentional and matches the "ship phase
 // acceptance, iterate after" principle of the development checklist.
@@ -38,12 +38,12 @@ import (
 type Handlers struct {
 	Logger        *slog.Logger
 	Store         store.Store
-	HaltSubs      *HaltSubscribers // sub-slice 21b — SSE halt-channel registry
-	WebhookClient *http.Client     // task #83 — outbound dispatcher HTTP client
+	HaltSubs      *HaltSubscribers // sub-slice 21b, SSE halt-channel registry
+	WebhookClient *http.Client     // task #83, outbound dispatcher HTTP client
 	// DashboardURL is the public origin of the React dashboard
 	// (e.g. https://mesedi.vercel.app). Used to build deep-links in
 	// webhook payloads and Discord embeds. When empty, the dispatcher
-	// falls back to the inbound request's scheme + host — correct for
+	// falls back to the inbound request's scheme + host, correct for
 	// local dev where the dashboard is same-origin with the API, wrong
 	// in prod where the dashboard lives on a different host.
 	DashboardURL string
@@ -74,7 +74,7 @@ func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg Stri
 }
 
 // RegisterRoutes attaches every protected route to the provided ServeMux.
-// Keep this list short and explicit — it doubles as the API surface
+// Keep this list short and explicit, it doubles as the API surface
 // inventory for documentation.
 // RegisterPublicRoutes attaches handlers that intentionally bypass
 // bearer-token auth. /signup is public because a browser visiting it
@@ -92,38 +92,38 @@ func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Phase 1 ingest surface.
 	mux.HandleFunc("POST /executions", h.HandleCreateExecution)
-	// #118 Slice 1 — read-side project surface for the dashboard.
+	// #118 Slice 1, read-side project surface for the dashboard.
 	mux.HandleFunc("GET /project", h.HandleGetProject)
 	mux.HandleFunc("PATCH /executions/{id}", h.HandleUpdateExecution)
 	mux.HandleFunc("POST /events", h.HandleIngestEvents)
-	// Phase 3b — read-side execution surface for the dashboard.
+	// Phase 3b, read-side execution surface for the dashboard.
 	mux.HandleFunc("GET /executions", h.HandleListExecutions)
 	mux.HandleFunc("GET /executions/{id}", h.HandleGetExecution)
 	mux.HandleFunc("GET /stats", h.HandleStats)
-	// Phase 3a — read-side failure_group surface for the dashboard.
+	// Phase 3a, read-side failure_group surface for the dashboard.
 	mux.HandleFunc("GET /failure-groups", h.HandleListFailureGroups)
 	mux.HandleFunc("GET /failure-groups/{id}", h.HandleGetFailureGroup)
-	// Phase 3b sub-slice 9 — executions inside a failure_group.
+	// Phase 3b sub-slice 9, executions inside a failure_group.
 	mux.HandleFunc("GET /failure-groups/{id}/executions", h.HandleListExecutionsInFailureGroup)
-	// Phase 3b sub-slice 18 — API key management surface.
+	// Phase 3b sub-slice 18, API key management surface.
 	mux.HandleFunc("GET /api-keys", h.HandleListAPIKeys)
 	mux.HandleFunc("POST /api-keys", h.HandleCreateAPIKey)
 	mux.HandleFunc("DELETE /api-keys/{id}", h.HandleRevokeAPIKey)
-	// Sub-slice 21b — SSE remote-halt channel.
+	// Sub-slice 21b, SSE remote-halt channel.
 	mux.HandleFunc("GET /executions/{id}/halt-stream", h.HandleHaltStream)
 	mux.HandleFunc("POST /executions/{id}/halt", h.HandleTriggerHalt)
-	// Tier 1 Playbooks — canonical fix descriptions per failure-class
+	// Tier 1 Playbooks, canonical fix descriptions per failure-class
 	// signature. Plain GET with query params; content is the embedded
 	// markdown shipped in internal/playbooks/content/.
 	mux.HandleFunc("GET /playbooks", h.HandleGetPlaybook)
-	// Task #83 — webhook escalation config + dispatcher.
+	// Task #83, webhook escalation config + dispatcher.
 	mux.HandleFunc("GET /webhooks", h.HandleListWebhooks)
 	mux.HandleFunc("POST /webhooks", h.HandleCreateWebhook)
 	mux.HandleFunc("DELETE /webhooks/{id}", h.HandleDeleteWebhook)
 	// Slice 2: manual test-delivery trigger + deliveries log read.
 	mux.HandleFunc("POST /webhooks/{id}/test", h.HandleTestWebhook)
 	mux.HandleFunc("GET /webhooks/{id}/deliveries", h.HandleListWebhookDeliveries)
-	// Task #120 — Stripe billing endpoints (auth-required).
+	// Task #120, Stripe billing endpoints (auth-required).
 	mux.HandleFunc("GET /billing", h.HandleGetBilling)
 	mux.HandleFunc("GET /billing/usage", h.HandleGetBillingUsage)
 	mux.HandleFunc("POST /billing/checkout", h.HandleCreateCheckout)
@@ -133,11 +133,11 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 // HandleGetPlaybook returns the markdown content for the playbook
 // matching (failure_class, signature) query parameters. Returns:
 //
-//	200 + text/markdown  — content
-//	400                  — missing or empty query params
-//	404                  — no playbook matches this (class, signature)
+//	200 + text/markdown: content
+//	400: missing or empty query params
+//	404: no playbook matches this (class, signature)
 //
-// No auth-context project check needed — playbook content is
+// No auth-context project check needed, playbook content is
 // universal (doesn't reference any particular project's data), so
 // authenticated callers in any project can read any playbook.
 func (h *Handlers) HandleGetPlaybook(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +186,7 @@ func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Auth-attached project_id is the source of truth. If the request
-	// body provided one and it doesn't match, reject — this catches
+	// body provided one and it doesn't match, reject, this catches
 	// SDK bugs where the wrong API key was used for the wrong project.
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
@@ -216,7 +216,7 @@ func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// #120 — increment the per-period execution counter. Best-effort:
+	// #120, increment the per-period execution counter. Best-effort:
 	// a failure here logs a warning but does not propagate to the
 	// caller. Counting must never block ingest. Enforcement (Hobby
 	// silent-drop, Pro overage metering) lands in a follow-up slice
@@ -244,7 +244,7 @@ func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request)
 }
 
 // HandleUpdateExecution marks an existing execution as completed, crashed,
-// halted, etc. Idempotent — repeated PATCH calls with the same status are
+// halted, etc. Idempotent, repeated PATCH calls with the same status are
 // silently accepted.
 //
 // Phase 3a addition: if the PATCH transitions an execution to status=crashed
@@ -291,7 +291,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Phase 7 v0.0.1: model-drift detector — runs FIRST in the detection
+	// Phase 7 v0.0.1: model-drift detector, runs FIRST in the detection
 	// chain so it wins the idempotency claim over crashes when the crash
 	// IS caused by a new model. The classic case: agent calls a model
 	// that doesn't exist (deprecated, typo, misrouted), Anthropic
@@ -308,13 +308,13 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// safe: it only diverts the model-driven crashes, leaving
 	// non-model-related crashes unaffected.
 	//
-	// Best-effort throughout — drift query failures log and continue
+	// Best-effort throughout, drift query failures log and continue
 	// rather than blocking the rest of the detection pipeline.
 	if isTerminalStatus(patch.Status) {
-		// 7-day historical window — same for both drift signals.
+		// 7-day historical window, same for both drift signals.
 		cutoff := time.Now().Add(-7 * 24 * time.Hour)
 
-		// ── Drift v1 — model-mix signal ─────────────────────────────
+		// ── Drift v1, model-mix signal ─────────────────────────────
 		// Catches: this execution used a model the project hasn't seen.
 		currentModels, mErr := h.Store.ListModelsForExecution(r.Context(), executionID)
 		if mErr != nil {
@@ -351,13 +351,13 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			}
 		}
 
-		// Drift v2 (lexical) moved to the tail of the detector chain —
+		// Drift v2 (lexical) moved to the tail of the detector chain , 
 		// see the cost_velocity block below.
 	}
 
-	// Phase 3a: link crashed executions to their failure_group. Best-effort —
+	// Phase 3a: link crashed executions to their failure_group. Best-effort , 
 	// a grouping failure doesn't fail the PATCH because the execution itself
-	// is already correctly recorded. Runs AFTER drift — if drift already
+	// is already correctly recorded. Runs AFTER drift, if drift already
 	// claimed this execution, GroupCrashedExecution's idempotency check
 	// short-circuits as a no-op.
 	if patch.Status == events.StatusCrashed && patch.CrashSignature != "" {
@@ -393,7 +393,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// Phase 3b sub-slice 11: step-count detector. Any terminal execution
 	// with > 10 events gets grouped as loops/step-count. Runs after the
 	// crash and time-budget checks, so it's the lowest-priority
-	// classification — an execution that crashed, took too long, AND
+	// classification, an execution that crashed, took too long, AND
 	// emitted lots of events ends up classified as crashes (first match
 	// wins via the failure_group_id short-circuit). Threshold of 10 is
 	// artificially low for v0.0.1 demo visibility; production default
@@ -421,12 +421,12 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// Phase 3b sub-slice 13: tool-failures detector. If any tool_call
 	// event in the execution had payload.status="failed", classify the
 	// execution as tool_failures with signature=tool_name. Different
-	// from crashes (where the exception escaped @wrap) — tool-failures
+	// from crashes (where the exception escaped @wrap), tool-failures
 	// catches the silent-degradation pattern where the agent recovers
 	// from a tool exception and ran to completion but produced
 	// degraded output. Runs after the loop detectors so an execution
 	// that BOTH had a failed tool AND was a runaway loop classifies
-	// as the loop (loops are higher-priority — they waste more).
+	// as the loop (loops are higher-priority, they waste more).
 	if isTerminalStatus(patch.Status) {
 		toolName, err := h.Store.FindFirstFailedToolName(r.Context(), executionID)
 		if err != nil {
@@ -451,7 +451,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// validator_result event in the execution had payload.passed=false,
 	// classify the execution as validator_failures with
 	// signature=validator_name. Same silent-degradation family as
-	// tool-failures — the agent ran to completion but produced output
+	// tool-failures, the agent ran to completion but produced output
 	// that a downstream quality check failed.
 	if isTerminalStatus(patch.Status) {
 		validatorName, err := h.Store.FindFirstFailedValidator(r.Context(), executionID)
@@ -475,7 +475,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 
 	// Phase 3b sub-slices 12 + 15: events-driven post-processing. Both
 	// cost computation and prompt-injection detection walk the same
-	// event list, so fetch ONCE and feed both. Best-effort throughout —
+	// event list, so fetch ONCE and feed both. Best-effort throughout , 
 	// failures here never fail the PATCH.
 	if isTerminalStatus(patch.Status) {
 		evts, err := h.Store.ListEventsForExecution(r.Context(), executionID)
@@ -530,7 +530,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 
 			// Sub-slice 81: similar-call loop detector. Catches the
 			// "stuck-loop with paraphrased prompts" pattern that
-			// identical_call misses — different exact text, same
+			// identical_call misses, different exact text, same
 			// semantic intent, ≥3 near-duplicates within one
 			// execution. Runs AFTER identical_call so exact-text
 			// loops win the more-specific signature; only loops with
@@ -558,7 +558,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// hitting the same attack pattern cluster together.
 			//
 			// PRIORITY NOTE: injection runs BEFORE cost-velocity (just
-			// below) because a prompt-injection is a security event —
+			// below) because a prompt-injection is a security event , 
 			// "this execution was attacked" is a more important
 			// classification than "this execution was expensive."
 			// The failure_group_id idempotency short-circuit means an
@@ -593,7 +593,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocitySignature(effectiveCost), isNew, gErr)
 			}
 
-			// Drift v2 — lexical signal. Char-3-gram cosine distance
+			// Drift v2, lexical signal. Char-3-gram cosine distance
 			// between current execution's user_messages and the
 			// project's recent history. Runs LAST in the chain on
 			// purpose: lexical drift is a SOFT behavioral signal that
@@ -602,7 +602,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// GroupDriftSignal means any execution already grouped
 			// (crashes, loops, tool_failures, validator_failures,
 			// prompt_injection, cost_velocity, or model-drift) skips
-			// drift v2 — which is the right priority: specific causal
+			// drift v2, which is the right priority: specific causal
 			// classifications beat the "prompts have shifted" pattern.
 			//
 			// The signal still gets logged when computed but
@@ -729,7 +729,7 @@ func (h *Handlers) HandleGetFailureGroup(w http.ResponseWriter, r *http.Request)
 	}
 
 	if group.ProjectID != authProjectID {
-		// Don't reveal that the group exists in another project — return
+		// Don't reveal that the group exists in another project, return
 		// 404 same as a non-existent group.
 		writeError(w, http.StatusNotFound, "failure group not found")
 		return
@@ -738,7 +738,7 @@ func (h *Handlers) HandleGetFailureGroup(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, group)
 }
 
-// HandleIngestEvents accepts a batch of Events. Batching is required —
+// HandleIngestEvents accepts a batch of Events. Batching is required , 
 // the SDK buffers events client-side and flushes in groups of ~100, so
 // the ingest path is array-shaped from day one. A single-event POST is
 // accepted as a 1-element array; rejecting non-array bodies catches
@@ -805,7 +805,7 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────
 
-// decodeJSON enforces strict decoding — unknown JSON fields cause a 400.
+// decodeJSON enforces strict decoding, unknown JSON fields cause a 400.
 // Strict decoding catches schema drift early during SDK development;
 // once the schema is stable post-Phase 4 we may relax to forward-compat.
 func decodeJSON(r *http.Request, dst any) error {
@@ -907,7 +907,7 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 	// accurate execution-level totals without requiring every SDK to
 	// thread a running counter into the @wrap exit path.
 	//
-	// SDK-supplied values win when present (non-zero) — a future SDK
+	// SDK-supplied values win when present (non-zero), a future SDK
 	// slice can authoritatively report totals (e.g. accumulating
 	// across streaming chunks the event payloads can't see) and the
 	// dashboard will trust that report.
@@ -944,7 +944,7 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 
 // HandleListExecutionsInFailureGroup returns the executions that belong
 // to a given failure_group. Verifies cross-tenant access by first
-// fetching the group and confirming group.project_id == auth project —
+// fetching the group and confirming group.project_id == auth project , 
 // 404 if it doesn't match (don't leak group_id existence).
 func (h *Handlers) HandleListExecutionsInFailureGroup(w http.ResponseWriter, r *http.Request) {
 	groupID := r.PathValue("id")
@@ -1050,7 +1050,7 @@ func (h *Handlers) HandleStats(w http.ResponseWriter, r *http.Request) {
 //
 // Events with unknown models contribute 0 (pricing.ComputeLLMCost
 // returns 0 for keys not in the pricing table). Events whose payload
-// fails to unmarshal are skipped silently — a single malformed event
+// fails to unmarshal are skipped silently, a single malformed event
 // shouldn't break cost computation for the whole execution.
 func computeExecutionCost(evts []*events.Event) float64 {
 	total := 0.0
@@ -1078,7 +1078,7 @@ func computeExecutionCost(evts []*events.Event) float64 {
 // user_message field from every llm_call event, in sequence order.
 // Used by the similar-call loop detector to assemble the corpus for
 // pairwise cosine-distance clustering. Skips events whose payload is
-// missing or malformed — the detector handles empty slices.
+// missing or malformed, the detector handles empty slices.
 //
 // Mirrors computeExecutionCost's payload-shape-tolerant approach:
 // unmarshal into a tiny struct that extracts only the field we need,
@@ -1110,7 +1110,7 @@ func extractLLMUserMessages(evts []*events.Event) []string {
 // ─────────────────────────────────────────────────────────────────────────
 
 // HandleListAPIKeys returns the calling project's API keys (without
-// the hash — never serialized).
+// the hash, never serialized).
 func (h *Handlers) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
@@ -1131,7 +1131,7 @@ func (h *Handlers) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCreateAPIKey mints a new API key for the calling project and
-// returns the RAW KEY VALUE ONCE — this is the only moment a caller
+// returns the RAW KEY VALUE ONCE, this is the only moment a caller
 // ever sees it. The server only persists the hash. Caller must store
 // the raw key immediately; a lost raw key requires a new mint.
 //
@@ -1146,7 +1146,7 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name,omitempty"`
 	}
-	// Empty body is fine — name is optional. Skip the strict-decode
+	// Empty body is fine, name is optional. Skip the strict-decode
 	// path here because the field is intentionally permissive.
 	if r.ContentLength > 0 {
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -1185,7 +1185,7 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		"raw_key":  rawKey,
 		"prefix":   prefix,
 		"name":     body.Name,
-		"warning":  "Store this raw_key now — it will never be shown again.",
+		"warning":  "Store this raw_key now, it will never be shown again.",
 	})
 }
 
@@ -1240,7 +1240,7 @@ var validFailureClasses = map[string]struct{}{
 }
 
 // HandleListWebhooks returns the calling project's webhooks. The
-// `secret` field is never serialized — it's only ever shown once at
+// `secret` field is never serialized, it's only ever shown once at
 // creation time.
 func (h *Handlers) HandleListWebhooks(w http.ResponseWriter, r *http.Request) {
 	authProjectID, ok := ProjectIDFromContext(r.Context())
@@ -1313,7 +1313,7 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate enabled_classes — every entry must match a known class.
+	// Validate enabled_classes, every entry must match a known class.
 	// Unknown class names would just silently never fire, which is the
 	// worst failure mode for an alerting feature; reject loudly.
 	for _, c := range body.EnabledClasses {
@@ -1374,7 +1374,7 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		"enabled_classes": body.EnabledClasses,
 		"enabled":         enabled,
 		"secret":          secret,
-		"warning":         "Store this secret now — it will never be shown again. Use it to verify the X-Mesedi-Signature header on inbound webhook deliveries.",
+		"warning":         "Store this secret now, it will never be shown again. Use it to verify the X-Mesedi-Signature header on inbound webhook deliveries.",
 	})
 }
 
@@ -1417,7 +1417,7 @@ func (h *Handlers) HandleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 //
 // Project-scoped: the webhook must belong to the calling project. The
 // dashboard URL embedded in the payload is derived from the request's
-// Host header — adequate for local-dev; a future slice will make this
+// Host header, adequate for local-dev; a future slice will make this
 // configurable via a flag/env var for production deployments.
 func (h *Handlers) HandleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	webhookID := r.PathValue("id")
@@ -1441,7 +1441,7 @@ func (h *Handlers) HandleTestWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dashboard base URL — configured via MESEDI_DASHBOARD_URL in prod
+	// Dashboard base URL, configured via MESEDI_DASHBOARD_URL in prod
 	// (e.g. https://mesedi.vercel.app); falls back to request-derived
 	// scheme + host for local-dev.
 	dashboardBase := h.resolveDashboardBase(r)
@@ -1458,7 +1458,7 @@ func (h *Handlers) HandleTestWebhook(w http.ResponseWriter, r *http.Request) {
 
 	payload := webhooks.BuildTestPayload(wh, dashboardBase, deliveryID)
 
-	// Run delivery — synchronous for slice 2; slice 3's auto-fire path
+	// Run delivery, synchronous for slice 2; slice 3's auto-fire path
 	// will run this in a goroutine.
 	result, attempts := webhooks.Deliver(r.Context(), h.Logger, h.WebhookClient, wh, payload)
 
@@ -1536,7 +1536,7 @@ func (h *Handlers) HandleListWebhookDeliveries(w http.ResponseWriter, r *http.Re
 }
 
 // newWebhookID returns a short stable identifier for a webhook row.
-// Format: "wh-<16-hex-chars>" — readable in logs, sortable, no
+// Format: "wh-<16-hex-chars>", readable in logs, sortable, no
 // information leak about creation time. 64 bits of entropy is plenty
 // for a per-project identifier space.
 func newWebhookID() (string, error) {
@@ -1562,12 +1562,12 @@ func newWebhookSecret() (string, error) {
 // (model + user_message) that appears at least `threshold` times in
 // the event slice, plus true. If no call repeats that many times,
 // returns ("", false). The hash is the SHA-256 of model+user_message
-// truncated to 8 hex chars — readable, collision-resistant at scale,
+// truncated to 8 hex chars, readable, collision-resistant at scale,
 // and acts as the failure_group signature so distinct repeated
 // prompts cluster into distinct groups.
 //
 // Detection fires on the FIRST event that pushes a hash to the
-// threshold — earlier events of the same hash are already counted but
+// threshold, earlier events of the same hash are already counted but
 // haven't yet crossed the line. This makes the function cheap (O(n)
 // with early return) without needing to scan the entire event list
 // twice.
@@ -1604,7 +1604,7 @@ func scanForIdenticalCalls(evts []*events.Event, threshold int) (string, bool) {
 // injection chronologically wins.
 //
 // Both user_message and system_prompt are scanned because injections
-// can come from either side — a compromised system prompt is rarer
+// can come from either side, a compromised system prompt is rarer
 // but more dangerous, so we want it caught.
 func scanForInjection(evts []*events.Event) (string, bool) {
 	for _, e := range evts {
@@ -1633,7 +1633,7 @@ func scanForInjection(evts []*events.Event) (string, bool) {
 
 // isTerminalStatus returns true for any execution status that means
 // "the agent run is over." Detection passes (time-budget, future
-// drift / cost-velocity) only fire on terminal statuses — running
+// drift / cost-velocity) only fire on terminal statuses, running
 // executions don't have a final duration yet.
 func isTerminalStatus(s events.ExecutionStatus) bool {
 	switch s {
@@ -1675,7 +1675,7 @@ func parseIntQuery(r *http.Request, key string, defaultVal, min, max int) int {
 // project.
 //
 // Returns project_id, name, owner_email, created_at. Does not return
-// the API key prefix or any sensitive material — the calling client
+// the API key prefix or any sensitive material, the calling client
 // already has the key in localStorage and any rename/revoke flows
 // happen through other endpoints that already audit-log by key_id.
 func (h *Handlers) HandleGetProject(w http.ResponseWriter, r *http.Request) {

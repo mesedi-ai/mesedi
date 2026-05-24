@@ -11,29 +11,29 @@ The Mesedi v1 surface is "detect, cluster, optionally stop, escalate, drop-in ad
 This is a monorepo. Each top-level directory is independently buildable; cross-directory changes (e.g. backend wire-format updates that ripple to both SDKs) land as single atomic commits.
 
 ```
-backend/         — Go HTTP service. Ingests telemetry, runs the seven
-                   failure-class detectors, dedupes into failure_groups,
-                   serves the dashboard, fires webhooks on first
-                   occurrence of a new failure class. SQLite for local
-                   development; Postgres for production (deferred).
-sdk-python/      — Python SDK shipped to PyPI as `mesedi`. @wrap +
-                   @tool decorators, AsyncShipper, Anthropic auto-
-                   instrument, hard-halt with budgets + SSE remote
-                   channel. Optional `[langchain]` / `[crewai]`
-                   extras for framework adapters.
-sdk-typescript/  — TypeScript / Node SDK shipped to npm as `mesedi`.
-                   Feature-parity with Python — wrap()/tool(),
-                   AsyncShipper, Anthropic patch, hard-halt + SSE.
-                   `mesedi/integrations/vercel_ai` adapter for Vercel
-                   AI SDK's generateText.
-synthetic-org/   — Five-industry dogfood substrate (financial-research,
-                   support-triage, clinical-summary, contract-review,
-                   incident-response). Runs hourly via launchd to keep
-                   the dashboard continuously populated during dev.
-docs/            — Roadmap, repair-tier strategy, project registry,
-                   pilot pitch, development checklist.
-branding/        — Logo and favicon assets.
+backend/         Go HTTP service. Ingests telemetry, runs the seven
+                 failure-class detectors, dedupes into failure_groups,
+                 serves the dashboard, fires webhooks on first
+                 occurrence of a new failure class. SQLite today,
+                 Postgres migration on the roadmap.
+sdk-python/      Python SDK shipped to PyPI as `mesedi`. @wrap +
+                 @tool decorators, AsyncShipper, Anthropic auto-
+                 instrument, hard-halt with budgets + SSE remote
+                 channel. Optional `[langchain]` / `[crewai]`
+                 extras for framework adapters.
+sdk-typescript/  TypeScript / Node SDK shipped to npm as `mesedi`.
+                 Feature-parity with Python: wrap()/tool(),
+                 AsyncShipper, Anthropic patch, hard-halt + SSE.
+                 `mesedi/integrations/vercel_ai` adapter for Vercel
+                 AI SDK's generateText.
+synthetic-org/   Five-industry dogfood substrate (financial-research,
+                 support-triage, clinical-summary, contract-review,
+                 incident-response). Runs hourly via launchd to keep
+                 the dashboard continuously populated during dev.
+branding/        Logo and favicon assets.
 ```
+
+The customer-facing marketing site, pricing, signup, and live dashboard live in a separate repository (the Next.js front end at https://mesedi.vercel.app).
 
 ## Local quickstart
 
@@ -42,7 +42,7 @@ Prerequisites:
 - Go 1.22+
 - Python 3.9+
 - Node 18+
-- A local SQLite (bundled; no install)
+- A local SQLite (bundled, no install)
 
 Start the backend (Terminal 1):
 
@@ -83,29 +83,20 @@ bash synthetic-org/scripts/install_continuous_traffic.sh
 # Stop: bash synthetic-org/scripts/stop_continuous_traffic.sh
 ```
 
-## Status and posture
+## Status
 
-**Phase:** v1 in flight (Sunday, 2026-05-17). All seven failure-class detectors shipped, failure-group deduplication, hard-halt with local budgets plus SSE remote channel, dashboard with collapse-by-class view, continuous synthetic-org traffic, operator Halt button, webhook escalation on first-occurrence, framework adapters for LangChain / CrewAI / Vercel AI SDK, Tier 1 Playbooks v1 covering every detector-signature shape.
+All seven failure-class detectors are live, plus failure-group deduplication, hard-halt with local budgets plus SSE remote channel, dashboard with collapse-by-class view, continuous synthetic-org traffic, operator Halt button, webhook escalation on first-occurrence, framework adapters for LangChain / CrewAI / Vercel AI SDK, and Tier 1 Playbooks v1 covering every detector-signature shape.
 
-**Remaining v1 work:** docs and quickstart polish, production deployment (Fly.io + Postgres + KMS), PyPI / npm publication.
+The hosted Cloud version runs on Fly.io. Self-host instructions are in `backend/README.md`.
 
-**Repository posture:** Private during local-dev. SDK repositories will go public when they ship to PyPI / npm. Backend service stays private indefinitely.
+## Documentation
 
-## Key documents
+Each subdirectory has its own README:
 
-- [`docs/REPAIR_TIER_ROADMAP.md`](docs/REPAIR_TIER_ROADMAP.md) — Tier 1 (Recommendation) → Tier 2 (Suggested diff) → Tier 3 (Auto-fix) → Tier 4 (Closed loop) and what ships when
-- [`docs/PROJECT_REGISTRY.md`](docs/PROJECT_REGISTRY.md) — separation of concerns between Mesedi and Verdifax, what lives in each
-- [`docs/PILOT_PITCH.md`](docs/PILOT_PITCH.md) — first-customer outreach narrative
-- [`docs/DEVELOPMENT_CHECKLIST.md`](docs/DEVELOPMENT_CHECKLIST.md) — discipline and slicing principles used across the codebase
-- [`docs/V2_DEFERRAL_NOTES.md`](docs/V2_DEFERRAL_NOTES.md) — what's intentionally not in v1
-- [`backend/README.md`](backend/README.md) — backend-specific runbook
-- [`sdk-python/README.md`](sdk-python/README.md) — Python SDK API and framework adapters
-- [`sdk-typescript/README.md`](sdk-typescript/README.md) — TypeScript SDK API and Vercel AI SDK adapter
-
-## Brand
-
-Mesedi is operated by **Canary Systems, LLC** — a holding company anchored around the canary-in-a-coal-mine metaphor (early-warning systems for high-stakes failure modes). See `docs/canary systems/` for the holding-company brand assets and posture.
+- [`backend/README.md`](backend/README.md): backend runbook, configuration, schema versioning, rate limiting
+- [`sdk-python/README.md`](sdk-python/README.md): Python SDK API, framework adapters, hard-halt
+- [`sdk-typescript/README.md`](sdk-typescript/README.md): TypeScript SDK API, Vercel AI SDK adapter
 
 ## License
 
-Proprietary. All rights reserved. Public license terms for the SDK repositories will be announced when those repositories ship to their respective package registries.
+MIT. See [`LICENSE`](LICENSE). Mesedi is operated by Verdifax, LLC d/b/a Mesedi, a Delaware limited liability company.

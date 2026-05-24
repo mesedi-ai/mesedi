@@ -52,7 +52,7 @@ function ms(t) {
     return `${t.toFixed(1)}ms`;
 }
 async function main() {
-    console.log("\n── Run 1: instant_agent (no work — showing wrap() overhead) ──");
+    console.log("\n── Run 1: instant_agent (no work, showing wrap() overhead) ──");
     let t = performance.now();
     await instantAgent();
     console.log(`  wall-clock: ${ms(performance.now() - t)} (target: < 5ms)`);

@@ -11,10 +11,10 @@ completion, but the downstream quality check (schema conformance,
 output non-emptiness, factuality, safety, etc.) failed.
 
 Three runs:
-  1. agent_with_passing_validators — both validators pass. Not grouped.
-  2. agent_with_empty_output — schema validator passes, but the
+  1. agent_with_passing_validators, both validators pass. Not grouped.
+  2. agent_with_empty_output, schema validator passes, but the
      non_empty_response validator fails (signature: non_empty_response).
-  3. agent_with_schema_failure — non_empty validator passes, but
+  3. agent_with_schema_failure, non_empty validator passes, but
      schema_conformance fails (signature: schema_conformance).
 
 Two distinct validator names → two separate failure groups.
@@ -39,7 +39,7 @@ mesedi.configure(
 
 @mesedi.wrap
 def agent_with_passing_validators(query: str) -> str:
-    """Both validators pass — should NOT trigger validator-failures."""
+    """Both validators pass, should NOT trigger validator-failures."""
     answer = f"Answer to {query!r}: a reasonable response."
     mesedi.validator_result("schema_conformance", passed=True)
     mesedi.validator_result("non_empty_response", passed=True)
@@ -48,7 +48,7 @@ def agent_with_passing_validators(query: str) -> str:
 
 @mesedi.wrap
 def agent_with_empty_output(query: str) -> str:
-    """non_empty_response validator fails — should group as
+    """non_empty_response validator fails, should group as
     validator_failures with signature=non_empty_response."""
     answer = ""  # uh oh
     mesedi.validator_result("schema_conformance", passed=True)
@@ -63,7 +63,7 @@ def agent_with_empty_output(query: str) -> str:
 
 @mesedi.wrap
 def agent_with_schema_failure(query: str) -> str:
-    """schema_conformance validator fails — should group as
+    """schema_conformance validator fails, should group as
     validator_failures with signature=schema_conformance."""
     answer = "not a JSON object even though we promised one"
     mesedi.validator_result(
@@ -81,17 +81,17 @@ def _ms(seconds: float) -> str:
 
 
 if __name__ == "__main__":
-    print("\n── Run 1: agent_with_passing_validators — should NOT be grouped ──")
+    print("\n── Run 1: agent_with_passing_validators, should NOT be grouped ──")
     t = time.perf_counter()
     agent_with_passing_validators("hi")
     print(f"  wall-clock: {_ms(time.perf_counter() - t)}")
 
-    print("\n── Run 2: agent_with_empty_output — should group as non_empty_response ──")
+    print("\n── Run 2: agent_with_empty_output, should group as non_empty_response ──")
     t = time.perf_counter()
     agent_with_empty_output("hi")
     print(f"  wall-clock: {_ms(time.perf_counter() - t)}")
 
-    print("\n── Run 3: agent_with_schema_failure — should group as schema_conformance ──")
+    print("\n── Run 3: agent_with_schema_failure, should group as schema_conformance ──")
     t = time.perf_counter()
     agent_with_schema_failure("hi")
     print(f"  wall-clock: {_ms(time.perf_counter() - t)}")

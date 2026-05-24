@@ -2,7 +2,7 @@
 Throwaway test agent that exercises the Mesedi backend ingest surface
 using the local dev API key.
 
-NOT the real SDK — that's Phase 2 (with @wrap decorator, Anthropic
+NOT the real SDK, that's Phase 2 (with @wrap decorator, Anthropic
 monkey-patching, async event buffer, etc.). This file is exploration:
 shape-match the wire format the backend already accepts, watch what a
 realistic agent execution looks like end-to-end, see what an SDK actually

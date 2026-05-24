@@ -13,7 +13,7 @@
 //     URL parse error) record a final "failed" row and stop.
 //
 // The dispatcher is intentionally synchronous from the caller's
-// perspective for slice 2 — the test endpoint blocks while the
+// perspective for slice 2, the test endpoint blocks while the
 // delivery is attempted so the operator sees the result. Slice 3
 // will add a non-blocking `Dispatch` variant that starts a goroutine
 // for the auto-fire path.
@@ -37,7 +37,7 @@ import (
 )
 
 // Default retry/backoff policy. Three attempts total: initial + 2
-// retries. Backoff is 1s and then 4s — modest enough to absorb a
+// retries. Backoff is 1s and then 4s, modest enough to absorb a
 // receiver that's briefly overloaded, short enough that the operator
 // sees a result quickly during local testing.
 const (
@@ -53,7 +53,7 @@ const (
 
 // Payload is the JSON structure POSTed to the customer's receiver.
 // Versioned via the Version field so future schema changes don't
-// silently break customer-side parsers — they can switch on it.
+// silently break customer-side parsers, they can switch on it.
 //
 // Test deliveries (slice 2) set Test=true and use synthetic values
 // for FailureClass/Signature/SampleExecutionID; real deliveries
@@ -93,7 +93,7 @@ func BuildTestPayload(webhook *store.ProjectWebhook, dashboardBaseURL, deliveryI
 		WebhookID:    webhook.WebhookID,
 		FailureClass: "crashes",
 		Signature:    "test_signature",
-		// SampleExecutionID intentionally empty for test deliveries —
+		// SampleExecutionID intentionally empty for test deliveries , 
 		// avoids putting "exec-test" (a 404 link) into Discord/Slack.
 		DashboardURL: dashboardBaseURL,
 		PlaybookURL:  "",
@@ -300,7 +300,7 @@ func Deliver(
 			"attempt", attempt,
 			"http_status", httpStatus,
 		)
-		// 4xx (except 429) is a permanent error — retry won't fix
+		// 4xx (except 429) is a permanent error, retry won't fix
 		// "Forbidden" or "Bad Request." Only retry on 5xx and 429.
 		if httpStatus < 500 && httpStatus != http.StatusTooManyRequests {
 			break
@@ -335,7 +335,7 @@ func readLimited(r io.Reader, limit int) string {
 }
 
 // DefaultHTTPClient returns the HTTP client the dispatcher uses by
-// default — strict timeouts, no follow of redirects (a webhook
+// default, strict timeouts, no follow of redirects (a webhook
 // receiver should be a single concrete URL, not a redirect chain).
 func DefaultHTTPClient() *http.Client {
 	return &http.Client{

@@ -18,8 +18,8 @@ Design:
 
 The ``@mesedi.wrap`` decorator manages the execution boundary
 (execution_started, execution_completed, crash signature). The
-callback handler emits the intra-execution events — ``llm_call``
-and ``tool_call`` — that Mesedi's detectors consume. Splitting
+callback handler emits the intra-execution events, ``llm_call``
+and ``tool_call``, that Mesedi's detectors consume. Splitting
 responsibility this way lets the customer adopt Mesedi without
 reshaping their LangChain code: the @wrap goes around their entry
 point, the callback gets attached at the existing ``callbacks=``
@@ -28,7 +28,7 @@ slot the LangChain config already accepts.
 LangChain's import path has churned over versions. We try the
 ``langchain-core`` location first (modern), then fall back to the
 legacy ``langchain`` location, then to a stub (so the module
-imports cleanly even when neither package is installed — tests can
+imports cleanly even when neither package is installed, tests can
 exercise the translation logic by calling the handler's methods
 directly).
 
@@ -40,16 +40,16 @@ LangChain is installed it subclasses the real base; when not it
 subclasses a local stub. Either way, the methods do the same work.
 
 Out of scope for this slice:
-  - Streaming responses (on_llm_new_token) — receivers see only
+  - Streaming responses (on_llm_new_token), receivers see only
     the final assembled response. Streaming attribution is a v2
     concern that needs an event-payload schema change.
-  - Async callbacks (async on_llm_start etc) — sync only for slice
+  - Async callbacks (async on_llm_start etc), sync only for slice
     1; async parity follows when we wire up async-shipper.
-  - Per-chain depth tracking — every chain on_chain_start fires,
+  - Per-chain depth tracking, every chain on_chain_start fires,
     but we ignore them because @wrap already owns the execution
     boundary. A chain-as-execution mode (no @wrap required) is a
     later iteration.
-  - Multi-modal content blocks (images in messages) — we extract
+  - Multi-modal content blocks (images in messages), we extract
     the text part and ignore the rest.
 """
 
@@ -67,7 +67,7 @@ from mesedi.observe import emit_llm_call
 
 
 # Lazy import of LangChain's BaseCallbackHandler. The integration is
-# OPTIONAL — importing this module does not require langchain to be
+# OPTIONAL, importing this module does not require langchain to be
 # installed. Customers who actually use it will have langchain in
 # their environment; tests stub it out by calling the handler's
 # methods directly.
@@ -90,7 +90,7 @@ except ImportError:
             pass
 
 
-# Truncation budgets — kept in sync with mesedi.observe.emit_llm_call
+# Truncation budgets, kept in sync with mesedi.observe.emit_llm_call
 # and mesedi.tool so wire-format payloads from this adapter and from
 # hand-written code are indistinguishable.
 _MAX_TOOL_INPUT_REPR = 200
@@ -132,7 +132,7 @@ class MesediCallbackHandler(BaseCallbackHandler):
     wire format from ``emit_llm_call`` and the Anthropic patch) and
     one ``tool_call`` event per tool invocation (matching the wire
     format from ``@mesedi.tool``). Both event types feed the standard
-    Mesedi detector chain — drift, identical/similar-call loops,
+    Mesedi detector chain, drift, identical/similar-call loops,
     tool-failures, cost-velocity, prompt-injection.
 
     Outside a ``@mesedi.wrap`` execution, all emissions silently
@@ -167,7 +167,7 @@ class MesediCallbackHandler(BaseCallbackHandler):
 
         ``prompts`` is a list of completed prompt strings (LangChain
         has already done its template substitution). We record the
-        last prompt as ``user_message`` — for the common case of a
+        last prompt as ``user_message``, for the common case of a
         single-prompt invocation that IS the prompt; for the rare
         multi-prompt case we record the last one and accept the
         truncation.
@@ -499,7 +499,7 @@ class MesediCallbackHandler(BaseCallbackHandler):
         the same detector chain as hand-written @mesedi.tool calls.
         The ``arguments`` slot mimics the @tool layout
         ({"args": [...], "kwargs": {...}}) so dashboard rendering is
-        uniform — LangChain tools take a single ``input`` string, so
+        uniform, LangChain tools take a single ``input`` string, so
         we put it in ``args[0]``.
         """
         ctx = current_execution_context()

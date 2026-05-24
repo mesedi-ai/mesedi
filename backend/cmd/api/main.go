@@ -5,13 +5,13 @@
 // See the per-component READMEs in this repo for runtime configuration,
 // failure-class detectors, and SDK integration patterns.
 //
-// Configuration (12-factor — flags or env vars; flags win):
+// Configuration (12-factor, flags or env vars; flags win):
 //
 //	Flag             Env var                 Default
 //	--port           MESEDI_PORT             8080
 //	--log-level      MESEDI_LOG_LEVEL        info
 //	--db-url         MESEDI_DB_URL           file:./mesedi-dev.db?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)
-//	--dashboard-url  MESEDI_DASHBOARD_URL    (empty — falls back to request Host)
+//	--dashboard-url  MESEDI_DASHBOARD_URL    (empty, falls back to request Host)
 //
 // MESEDI_DASHBOARD_URL is the public origin of the React dashboard
 // (Vercel-hosted in prod, e.g. https://mesedi.vercel.app). When set,
@@ -55,20 +55,23 @@ type runtimeConfig struct {
 	DBURL        string
 	DashboardURL string
 	// Stripe billing config (#120). Any of these may be empty in
-	// local dev — the billing endpoints respond 503 when missing.
+	// local dev, the billing endpoints respond 503 when missing.
 	StripeSecretKey     string
 	StripeWebhookSecret string
 	StripeProPriceID    string
+	// Admin dashboard bearer token (#150). When empty the /admin/*
+	// routes refuse every request with 503 (fail-closed posture).
+	AdminToken string
 }
 
 // bootstrapDevProject creates a default "dev" project and a fixed test
-// API key on first run. Idempotent — repeated runs return early when
+// API key on first run. Idempotent, repeated runs return early when
 // the project already exists. The test key value is intentionally
 // non-secret and hardcoded; never use this pattern in production.
 func bootstrapDevProject(ctx context.Context, st *store.SQLiteStore, logger *slog.Logger) error {
 	const devProjectID = "proj-dev"
 	const devKeyID = "key-dev"
-	// SHA-256 of the literal string "mesedi_sk_dev_local_only" — fixed so
+	// SHA-256 of the literal string "mesedi_sk_dev_local_only", fixed so
 	// SDK smoke tests can authenticate without per-run key minting during
 	// local dev. Verify via: echo -n "mesedi_sk_dev_local_only" | sha256sum
 	const devKeyHash = "63aee0bafbf5a68577021746b028842f70d922c2809776e1a1de0ecf6fc7fb33"
@@ -137,17 +140,17 @@ func main() {
 	logger.Info("store ready", "backend", "sqlite")
 
 	// Bootstrap a dev project + API key on first run so the SDK has
-	// something to authenticate against locally. Idempotent — repeated
+	// something to authenticate against locally. Idempotent, repeated
 	// runs are no-ops because the project already exists.
 	if err := bootstrapDevProject(context.Background(), st, logger); err != nil {
 		logger.Warn("bootstrap dev project failed (continuing)", "error", err.Error())
 	}
 
 	// Build the routing tree in three layers:
-	//   1. `public`  — routes that bypass auth (only /health today).
-	//   2. `private` — routes that require a valid bearer token. Auth
+	//   1. `public`: routes that bypass auth (only /health today).
+	//   2. `private`, routes that require a valid bearer token. Auth
 	//                  middleware wraps these.
-	//   3. `mux`     — top-level router that fans out to public or
+	//   3. `mux`: top-level router that fans out to public or
 	//                  private as appropriate.
 	//
 	// Top-level middleware (recover, request log) wraps everything; auth
@@ -180,6 +183,15 @@ func main() {
 	handlers.RegisterPublicRoutes(signupMux)
 	signupHandler := api.CORSMiddleware()(signupMux)
 
+	// Founder-side admin dashboard (#150). Gated by MESEDI_ADMIN_TOKEN
+	// bearer; refuses every request when the env var is empty so an
+	// accidentally-misconfigured deploy can't leak project listings.
+	// CORS so the dashboard at mesedi.vercel.app can call cross-origin.
+	adminMux := http.NewServeMux()
+	handlers.RegisterAdminRoutes(adminMux)
+	adminHandler := api.CORSMiddleware()(api.AdminAuth(cfg.AdminToken)(adminMux))
+	logger.Info("admin endpoints configured", "configured", cfg.AdminToken != "")
+
 	mux := http.NewServeMux()
 	mux.Handle("GET /health", publicMux)
 	mux.Handle("GET /ui/", publicMux)
@@ -188,32 +200,32 @@ func main() {
 	mux.Handle("POST /executions", privateHandler)
 	mux.Handle("PATCH /executions/{id}", privateHandler)
 	mux.Handle("POST /events", privateHandler)
-	// #118 Slice 1 — dashboard reads the calling project's identity.
+	// #118 Slice 1, dashboard reads the calling project's identity.
 	mux.Handle("GET /project", privateHandler)
-	// Phase 3b — read-side execution + stats surface for the dashboard.
+	// Phase 3b, read-side execution + stats surface for the dashboard.
 	mux.Handle("GET /executions", privateHandler)
 	mux.Handle("GET /executions/{id}", privateHandler)
 	mux.Handle("GET /stats", privateHandler)
-	// Phase 3a — failure_group read surface (auth-required).
+	// Phase 3a, failure_group read surface (auth-required).
 	mux.Handle("GET /failure-groups", privateHandler)
 	mux.Handle("GET /failure-groups/{id}", privateHandler)
 	mux.Handle("GET /failure-groups/{id}/executions", privateHandler)
-	// Phase 3b sub-slice 18 — API key management (auth-required).
+	// Phase 3b sub-slice 18, API key management (auth-required).
 	mux.Handle("GET /api-keys", privateHandler)
 	mux.Handle("POST /api-keys", privateHandler)
 	mux.Handle("DELETE /api-keys/{id}", privateHandler)
-	// Sub-slice 21b — SSE remote-halt channel (auth-required).
+	// Sub-slice 21b, SSE remote-halt channel (auth-required).
 	mux.Handle("GET /executions/{id}/halt-stream", privateHandler)
 	mux.Handle("POST /executions/{id}/halt", privateHandler)
 	// Tier 1 Playbooks (auth-required).
 	mux.Handle("GET /playbooks", privateHandler)
-	// Task #83 — webhook escalation config + dispatcher (auth-required).
+	// Task #83, webhook escalation config + dispatcher (auth-required).
 	mux.Handle("GET /webhooks", privateHandler)
 	mux.Handle("POST /webhooks", privateHandler)
 	mux.Handle("DELETE /webhooks/{id}", privateHandler)
 	mux.Handle("POST /webhooks/{id}/test", privateHandler)
 	mux.Handle("GET /webhooks/{id}/deliveries", privateHandler)
-	// #120 — Stripe billing (auth-required for everything except
+	// #120, Stripe billing (auth-required for everything except
 	// the Stripe-server-to-server webhook receiver, which is wired
 	// below alongside the signup endpoint).
 	mux.Handle("GET /billing", privateHandler)
@@ -221,6 +233,23 @@ func main() {
 	mux.Handle("POST /billing/checkout", privateHandler)
 	mux.Handle("POST /billing/portal", privateHandler)
 	mux.Handle("POST /billing/webhook", signupHandler)
+	// Founder-side admin dashboard (#150). Token-gated; refuses every
+	// request when MESEDI_ADMIN_TOKEN is empty. CORS preflight OPTIONS
+	// is needed because the dashboard at mesedi.vercel.app calls
+	// cross-origin from a different host than mesedi-api.fly.dev.
+	mux.Handle("GET /admin/projects", adminHandler)
+	mux.Handle("OPTIONS /admin/projects", adminHandler)
+	mux.Handle("GET /admin/projects/{id}", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}", adminHandler)
+	mux.Handle("POST /admin/projects/{id}/tier", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}/tier", adminHandler)
+	mux.Handle("POST /admin/projects/{id}/grant", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}/grant", adminHandler)
+	mux.Handle("GET /admin/projects/{id}/export", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}/export", adminHandler)
+	mux.Handle("DELETE /admin/projects/{id}", adminHandler)
+	mux.Handle("GET /admin/storage", adminHandler)
+	mux.Handle("OPTIONS /admin/storage", adminHandler)
 
 	// Top-level middleware: recover from panics, log every request.
 	root := api.NewTopChain(logger)(mux)
@@ -276,6 +305,7 @@ func loadConfig() runtimeConfig {
 		StripeSecretKey:     envString("MESEDI_STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret: envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),
 		StripeProPriceID:    envString("MESEDI_STRIPE_PRO_PRICE_ID", ""),
+		AdminToken:          envString("MESEDI_ADMIN_TOKEN", ""),
 	}
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "TCP port for the HTTP API")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log verbosity: debug | info | warn | error")

@@ -1,5 +1,5 @@
 /**
- * Execution-context tracking using `AsyncLocalStorage` — Node's
+ * Execution-context tracking using `AsyncLocalStorage`, Node's
  * equivalent of Python's `contextvars`.
  *
  * When `wrap()` is entered, it pushes a fresh `ExecutionContext`
@@ -9,7 +9,7 @@
  * helpers read the context to learn which execution to attach to.
  *
  * Why AsyncLocalStorage: it tracks "logical call context" across
- * promise boundaries automatically — passing context through every
+ * promise boundaries automatically, passing context through every
  * await would be invasive and error-prone. AsyncLocalStorage is the
  * Node-native way to do what Python contextvars does.
  */

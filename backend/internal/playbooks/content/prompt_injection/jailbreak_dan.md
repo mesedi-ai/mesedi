@@ -1,6 +1,6 @@
-# Prompt injection — DAN-style jailbreak
+# Prompt injection, DAN-style jailbreak
 
-An `llm_call` event in this execution had a `user_message` invoking the **DAN ("Do Anything Now") persona** or close variants. The matching regex catches `do anything now`, the literal `DAN` token, and `act as DAN`. Mesedi treats this as a Tier-2 signal because the strings are highly distinctive — they show up in plain user prose almost never.
+An `llm_call` event in this execution had a `user_message` invoking the **DAN ("Do Anything Now") persona** or close variants. The matching regex catches `do anything now`, the literal `DAN` token, and `act as DAN`. Mesedi treats this as a Tier-2 signal because the strings are highly distinctive, they show up in plain user prose almost never.
 
 ## What this means
 
@@ -12,9 +12,9 @@ If you see a DAN attempt against your agent, the user has crossed three threshol
 
 Open the affected execution's timeline and find the matching `llm_call`. Three diagnostics:
 
-1. **Did the model refuse, comply, or partially comply?** Read the assistant response. Modern frontier models almost always refuse DAN directly — if your model produced a refusal, the safety RLHF held. If it complied or partially complied (started in DAN voice, addressed the meta-request), you have an actual jailbreak success and the response should be reviewed manually.
+1. **Did the model refuse, comply, or partially comply?** Read the assistant response. Modern frontier models almost always refuse DAN directly, if your model produced a refusal, the safety RLHF held. If it complied or partially complied (started in DAN voice, addressed the meta-request), you have an actual jailbreak success and the response should be reviewed manually.
 
-2. **What was the actual request inside the DAN wrapper?** DAN is almost never the goal — it's the carrier for something else. Look at the part of the prompt that comes after the DAN setup. That's what the user actually wants and that's what tells you whether the attempt is hostile (asking for harmful content, asking to bypass terms of service) or curious (testing whether your safety holds, no real downstream use).
+2. **What was the actual request inside the DAN wrapper?** DAN is almost never the goal, it's the carrier for something else. Look at the part of the prompt that comes after the DAN setup. That's what the user actually wants and that's what tells you whether the attempt is hostile (asking for harmful content, asking to bypass terms of service) or curious (testing whether your safety holds, no real downstream use).
 
 3. **Is this the only execution from this user/session?** Check the affected-executions table. A single DAN attempt is usually a one-off probe. Multiple attempts from the same source with escalating sophistication is a campaign worth flagging to whoever handles your trust-and-safety surface.
 
@@ -28,12 +28,12 @@ DAN attempts mostly bounce off frontier model safety on their own, so the remedi
 
 - **Rate-limit by user/IP/session when a jailbreak pattern fires.** An attacker who's iterating on jailbreak attempts will produce 50 of them in a session. Make the 50th attempt take 10 seconds longer than the first and most attackers give up.
 
-- **Log the surrounding context.** When this playbook fires, the structured signal you want is "what was the user trying to get?" — not just "they tried DAN." Capture the prompt context and review periodically for trends.
+- **Log the surrounding context.** When this playbook fires, the structured signal you want is "what was the user trying to get?", not just "they tried DAN." Capture the prompt context and review periodically for trends.
 
 ## What this does NOT mean
 
-DAN appears legitimately in academic security research, in red-team prompts you yourself wrote to test your defenses, and in agents whose purpose is to study or demonstrate jailbreaks. Same per-project tuning caveat as the other injection patterns — Mesedi v2 will let you opt out.
+DAN appears legitimately in academic security research, in red-team prompts you yourself wrote to test your defenses, and in agents whose purpose is to study or demonstrate jailbreaks. Same per-project tuning caveat as the other injection patterns, Mesedi v2 will let you opt out.
 
 ## Auto-fix in a future Mesedi release
 
-Tier 2 capabilities on the roadmap include automatic classification of "what is the user actually trying to do" when an injection signature fires — strips the jailbreak wrapper and surfaces the underlying request as a separate signal. That makes the human review step much faster.
+Tier 2 capabilities on the roadmap include automatic classification of "what is the user actually trying to do" when an injection signature fires, strips the jailbreak wrapper and surfaces the underlying request as a separate signal. That makes the human review step much faster.

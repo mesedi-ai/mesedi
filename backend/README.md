@@ -2,7 +2,7 @@
 
 Go HTTP service that ingests AI agent execution telemetry, runs detection engines, and surfaces alerts via webhook + dashboard.
 
-**Status:** Phase 1 scaffolding (local development only — no public repo yet).
+**Status:** v1 in production. Hosted at https://mesedi-api.fly.dev (Fly.io). Self-hostable from this directory.
 
 ## Quickstart (local development)
 
@@ -27,7 +27,7 @@ curl http://localhost:8080/health
 
 ### Verify auth-required endpoints
 
-The local dev environment auto-bootstraps a fixed API key for testing. **This key is non-secret and is hardcoded — never use it for anything other than local development.**
+The local dev environment auto-bootstraps a fixed API key for testing. **This key is non-secret and is hardcoded, never use it for anything other than local development.**
 
 ```bash
 # The dev API key
@@ -73,7 +73,7 @@ curl -X POST http://localhost:8080/executions \
   -d '{"execution_id":"exec-schema-test","status":"started"}'
 ```
 
-Once the real SDK ships with the header set by default, the policy tightens to "missing → 400" too — at that point any unversioned caller is a legacy bug worth surfacing loudly.
+Once the real SDK ships with the header set by default, the policy tightens to "missing → 400" too, at that point any unversioned caller is a legacy bug worth surfacing loudly.
 
 ### Rate limiting (per-project token bucket)
 
@@ -86,9 +86,9 @@ A well-behaved SDK (events buffered client-side, flushed in batches of ~100 ever
 
 Every response (200 and 429 alike) includes the standard headers:
 
-- `X-RateLimit-Limit` — bucket capacity
-- `X-RateLimit-Remaining` — tokens left after this request
-- `X-RateLimit-Reset` — Unix timestamp when the bucket would refill to full
+- `X-RateLimit-Limit`, bucket capacity
+- `X-RateLimit-Remaining`, tokens left after this request
+- `X-RateLimit-Reset`, Unix timestamp when the bucket would refill to full
 
 On 429, AWS-style `Retry-After: 1` is also set.
 
@@ -147,17 +147,8 @@ backend/
 └── README.md
 ```
 
-## Roadmap (from `mesedi/docs/DEVELOPMENT_CHECKLIST.md`)
+## Roadmap
 
-Current: Phase 1 scaffold — `/health` endpoint serving locally.
+All seven failure-class detectors are live (crash, time-budget, step-count, tool-failure, validator-failure, prompt-injection, cost-velocity, drift, identical-call loop, similar-call loop). Failure-group deduplication, hard-halt with local budgets + SSE remote channel, webhook escalation on first-occurrence, and framework adapters for LangChain, CrewAI, and the Vercel AI SDK are all shipped.
 
-Next:
-- Phase 1 completion: `POST /executions`, `POST /events`, bearer-token auth, basic rate limiting
-- Phase 2: Python SDK with `@wrap` decorator pattern
-- Phase 3: crash detection + dashboard MVP
-
-Full phase-by-phase plan in `../docs/DEVELOPMENT_CHECKLIST.md` (or `../docs/DEVELOPMENT_CHECKLIST.pdf`).
-
-## Local-only posture
-
-This codebase is intentionally not on GitHub or any public surface until Verdifax LOI signs. All development happens locally. Don't push to any remote, don't share screenshots publicly, don't mention the project name externally.
+Next on the production-hardening track: Postgres migration (currently SQLite on a Fly volume), backups + disaster recovery, end-to-end monitoring + alerting on the backend itself.

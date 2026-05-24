@@ -1,21 +1,19 @@
 // Package dashboard embeds and serves the local-development UI.
 //
-// This is NOT the production dashboard. The eventual production
-// surface is a Next.js app on Vercel at app.mesedi.ai with Clerk auth.
-// Both are deferred to post-LOI per the local-only posture in
-// docs/DEVELOPMENT_CHECKLIST.md.
+// This is NOT the production dashboard. The production surface is a
+// Next.js app on Vercel that lives in a separate repository.
 //
 // What this is: a single static HTML file (with inline CSS + JS, no
 // build step, no framework) embedded in the Go binary and served at
 // GET /ui/. Hits the same backend's read-side endpoints to render
 // failure_groups live. Hardcodes the dev bearer token because that's
 // the only key that exists on localhost and the page is only served
-// when the backend is running locally — it's a dev convenience, not a
+// when the backend is running locally, it's a dev convenience, not a
 // public surface.
 //
 // Routing pattern: registering at `GET /ui/` lets us serve / under the
 // embedded `ui/` directory directly. The trailing slash is significant
-// — Go's http.ServeMux requires it for prefix matching.
+// because Go's http.ServeMux requires it for prefix matching.
 package dashboard
 
 import (
@@ -39,7 +37,7 @@ func Handler() http.Handler {
 	// maps cleanly onto the embedded paths (which all start with ui/).
 	sub, err := fs.Sub(uiFS, "ui")
 	if err != nil {
-		// Embed.FS is built at compile time — if Sub fails here it's
+		// Embed.FS is built at compile time, so if Sub fails here it's
 		// a programmer error, not a runtime condition. Panic so the
 		// binary doesn't silently serve nothing.
 		panic("dashboard: ui/ subdirectory not embedded: " + err.Error())

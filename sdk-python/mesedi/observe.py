@@ -3,7 +3,7 @@ Direct-emission helpers for events that don't fit the decorator pattern.
 
 @wrap and @tool wrap functions so observation is implicit at the
 boundary. Checkpoints and validator results don't have a natural
-"function" to wrap — they're markers inserted at points of interest
+"function" to wrap, they're markers inserted at points of interest
 inside agent code, often inside the same function the @wrap decorator
 already covers. For those, a plain function call is the right API:
 
@@ -18,7 +18,7 @@ already covers. For those, a plain function call is the right API:
         )
 
 Both helpers no-op when called outside an active @wrap execution
-context — same fail-open pattern as @tool. This means a sandbox
+context, same fail-open pattern as @tool. This means a sandbox
 script that calls checkpoint() at module load without setting up a
 @wrap'd function won't crash; it just won't record anything.
 
@@ -56,7 +56,7 @@ def checkpoint(name: str, **metadata: Any) -> None:
     A checkpoint is a free-form marker: a name and arbitrary keyword
     metadata. Typical uses: "after_retrieval", "before_synthesis",
     "cache_hit", etc. Useful both for Phase-3+ detector hooks (drift,
-    cost-velocity) and for ad-hoc debugging — replay UI in a later
+    cost-velocity) and for ad-hoc debugging, replay UI in a later
     phase will render checkpoints as anchored markers on the
     execution timeline.
 
@@ -69,7 +69,7 @@ def checkpoint(name: str, **metadata: Any) -> None:
             json.dumps; defensive: callers should pre-serialize
             anything unusual.
 
-    Outside @wrap: no-op. Drops the event silently — the caller still
+    Outside @wrap: no-op. Drops the event silently, the caller still
     runs; nothing observed.
     """
     ctx = current_execution_context()
@@ -107,7 +107,7 @@ def validator_result(
 
     Validators are checks the agent (or its framework) runs against
     intermediate or final outputs: schema conformance, factuality,
-    relevance, safety. The result of each check — pass or fail —
+    relevance, safety. The result of each check, pass or fail , 
     becomes a discrete event so Phase-3 detection can spot patterns
     like "validator X has been failing 90% of the time on this
     model".
@@ -130,7 +130,7 @@ def validator_result(
         return
 
     if severity not in {"warning", "error", "critical"}:
-        # Don't raise — the caller's agent shouldn't fail because of
+        # Don't raise, the caller's agent shouldn't fail because of
         # an SDK-side validation. Coerce to the safest default.
         severity = "error"
 

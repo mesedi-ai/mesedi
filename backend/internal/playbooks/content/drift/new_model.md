@@ -1,8 +1,8 @@
-# Drift — new model
+# Drift, new model
 
-An execution in this project used **a model name that hasn't appeared in the project's recent history**. Mesedi's drift detector compares the set of models used in the current execution against the set used in prior executions over the historical window and flags any that are new. The signature on this failure group encodes the alphabetically-first new model — e.g. `new_model:claude-opus-4-6`.
+An execution in this project used **a model name that hasn't appeared in the project's recent history**. Mesedi's drift detector compares the set of models used in the current execution against the set used in prior executions over the historical window and flags any that are new. The signature on this failure group encodes the alphabetically-first new model, e.g. `new_model:claude-opus-4-6`.
 
-This is categorical drift — the model identifier literally changed. It's the cheapest useful drift signal and v0.0.1 ships only this version. Future Mesedi versions catch distributional drift (continuous prompt evolution) via the lexical-drift detector, which is the sibling failure-group class on this dashboard.
+This is categorical drift, the model identifier literally changed. It's the cheapest useful drift signal and v0.0.1 ships only this version. Future Mesedi versions catch distributional drift (continuous prompt evolution) via the lexical-drift detector, which is the sibling failure-group class on this dashboard.
 
 ## Why this matters
 
@@ -16,13 +16,13 @@ Three concrete failure modes this detector catches:
 
 2. **A/B test leak.** A model variant that was supposed to be confined to a test cohort is now appearing in production traffic. The routing logic has a bug that's leaking the variant to a broader population.
 
-3. **Misconfiguration.** A typo, an env-var mistake, a stale config file, a feature flag default — something routed traffic to the wrong model and nobody noticed because the wrong model is still producing plausible output.
+3. **Misconfiguration.** A typo, an env-var mistake, a stale config file, a feature flag default, something routed traffic to the wrong model and nobody noticed because the wrong model is still producing plausible output.
 
 ## What this does NOT mean
 
-If your project legitimately uses many models — a router that picks a model per task type, a customer-facing product where users choose a model, a multi-tenant deployment — the new-model signal will fire whenever a model is used for the first time in the historical window. After enough executions, the signal stabilizes (no model is "new" once it's been seen) and the failure-group ages out. Until then, expect noise.
+If your project legitimately uses many models, a router that picks a model per task type, a customer-facing product where users choose a model, a multi-tenant deployment, the new-model signal will fire whenever a model is used for the first time in the historical window. After enough executions, the signal stabilizes (no model is "new" once it's been seen) and the failure-group ages out. Until then, expect noise.
 
-The detector also doesn't distinguish "new to the project" from "new to anyone" — `claude-opus-4-6` is a real well-tested model; the signal is that YOUR PROJECT hasn't used it before, not that it's experimental.
+The detector also doesn't distinguish "new to the project" from "new to anyone", `claude-opus-4-6` is a real well-tested model; the signal is that YOUR PROJECT hasn't used it before, not that it's experimental.
 
 ## How to investigate
 
@@ -36,7 +36,7 @@ Open one of the affected executions. Three diagnostics:
 
 ## How to fix
 
-If the new model is intentional, the fix is not in code but in process — make the change visible:
+If the new model is intentional, the fix is not in code but in process, make the change visible:
 
 - **Announce model changes before deploying.** A brief note in your team chat ("upgrading agent X from haiku to sonnet, watch for cost and latency changes for the next 24h") turns a Mesedi alert from "what just happened" into "we knew this was coming."
 
@@ -52,4 +52,4 @@ If the new model is unintentional, the fix is structural:
 
 ## Auto-fix in a future Mesedi release
 
-The v2 roadmap includes a per-project expected-models allowlist managed via the dashboard — Mesedi only fires the new-model signal for models outside the allowlist, dramatically reducing false-positive volume on multi-model projects. The detector itself stays unchanged; the failure-group classification gets a "matches allowlist / does not match allowlist" axis.
+The v2 roadmap includes a per-project expected-models allowlist managed via the dashboard, Mesedi only fires the new-model signal for models outside the allowlist, dramatically reducing false-positive volume on multi-model projects. The detector itself stays unchanged; the failure-group classification gets a "matches allowlist / does not match allowlist" axis.

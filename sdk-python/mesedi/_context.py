@@ -4,7 +4,7 @@ Execution-context tracking via ``contextvars``.
 When ``@mesedi.wrap`` decorates a function, it sets a context variable
 to identify the currently-executing run. Inside that function, any
 ``@mesedi.tool``-decorated tool call reads the same variable to learn
-which execution it belongs to — so tool_call events can attach to the
+which execution it belongs to, so tool_call events can attach to the
 right Execution at the backend.
 
 Why ``contextvars`` and not threading.local or a global dict:
@@ -58,7 +58,7 @@ class ExecutionContext:
     def next_sequence(self) -> int:
         """Return the next sequence number for this execution.
 
-        Thread-safe — two tool calls fired concurrently from different
+        Thread-safe, two tool calls fired concurrently from different
         threads in the same execution still get distinct sequence
         numbers.
         """

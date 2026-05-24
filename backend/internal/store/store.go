@@ -32,7 +32,7 @@ type Project struct {
 	// Tier: "hobby" | "pro" | "enterprise". Always populated;
 	// migration 006 backfills existing rows to "hobby".
 	Tier string `json:"tier"`
-	// Stripe identifiers — populated after a successful Checkout.
+	// Stripe identifiers, populated after a successful Checkout.
 	// Empty for hobby-tier projects that never upgraded.
 	StripeCustomerID     string `json:"stripe_customer_id,omitempty"`
 	StripeSubscriptionID string `json:"stripe_subscription_id,omitempty"`
@@ -48,6 +48,67 @@ type Project struct {
 	// period (lazy reset: handlers compare CurrentPeriodEnd to now and
 	// roll over before incrementing).
 	ExecutionsThisPeriod int64 `json:"executions_this_period"`
+	// GrantedExecutions is the admin-granted extra quota on top of the
+	// tier's base allowance (migration 007). Additive across the
+	// lifetime of the project, does NOT reset at period rollover.
+	// May be negative if the admin revoked a previous grant; effective
+	// quota math floors at zero, but the column itself is signed for
+	// auditability.
+	GrantedExecutions int64 `json:"granted_executions"`
+	// GrantedExecutionsExpiresAt is the moment the grant stops counting
+	// (migration 008). Nil means "never expires". Enforcement is lazy:
+	// billing.go's read handler compares this to now and treats the
+	// grant as zero when expired. The column value itself stays.
+	GrantedExecutionsExpiresAt *time.Time `json:"granted_executions_expires_at,omitempty"`
+	// TierExpiresAt is the moment an admin-flipped tier reverts to
+	// Hobby (migration 008). Nil means the tier doesn't auto-revert
+	// (the default for paid Stripe subscriptions and permanent admin
+	// flips). Enforced lazily in HandleGetBilling.
+	TierExpiresAt *time.Time `json:"tier_expires_at,omitempty"`
+}
+
+// AdminProjectRow is one row in the founder-side admin dashboard's
+// project list. Extends the bare Project with activity aggregates
+// (last_activity_at, total_executions) computed via LEFT JOIN to the
+// executions table. Returned only via the admin-token-gated
+// /admin/projects endpoint; never reachable from the customer dashboard.
+type AdminProjectRow struct {
+	// Core project identity (same fields as Project).
+	ProjectID            string     `json:"project_id"`
+	Name                 string     `json:"name"`
+	OwnerEmail           string     `json:"owner_email,omitempty"`
+	CreatedAt            time.Time  `json:"created_at"`
+	Tier                 string     `json:"tier"`
+	StripeCustomerID     string     `json:"stripe_customer_id,omitempty"`
+	StripeSubscriptionID string     `json:"stripe_subscription_id,omitempty"`
+	CurrentPeriodStart   *time.Time `json:"current_period_start,omitempty"`
+	CurrentPeriodEnd     *time.Time `json:"current_period_end,omitempty"`
+	ExecutionsThisPeriod       int64      `json:"executions_this_period"`
+	GrantedExecutions          int64      `json:"granted_executions"`
+	GrantedExecutionsExpiresAt *time.Time `json:"granted_executions_expires_at,omitempty"`
+	TierExpiresAt              *time.Time `json:"tier_expires_at,omitempty"`
+	// Activity aggregates joined from executions table. Nil/zero when
+	// the project has never produced an execution (e.g., signed up but
+	// never integrated the SDK).
+	LastActivityAt  *time.Time `json:"last_activity_at,omitempty"`
+	TotalExecutions int64      `json:"total_executions"`
+}
+
+// ProjectStorage is one row of the admin storage view's per-project
+// breakdown. EstimatedBytes is computed from SUM(LENGTH()) over the
+// large text columns (events.payload, executions.input_summary,
+// executions.output_summary, executions.crash_signature), close
+// enough to disk usage at our scale, doesn't require dbstat.
+type ProjectStorage struct {
+	ProjectID         string `json:"project_id"`
+	Name              string `json:"name"`
+	OwnerEmail        string `json:"owner_email,omitempty"`
+	Tier              string `json:"tier"`
+	Executions        int64  `json:"executions"`
+	Events            int64  `json:"events"`
+	FailureGroups     int64  `json:"failure_groups"`
+	WebhookDeliveries int64  `json:"webhook_deliveries"`
+	EstimatedBytes    int64  `json:"estimated_bytes"`
 }
 
 // DailyExecutionCount is one bucket of an execution-usage time series.
@@ -60,7 +121,7 @@ type DailyExecutionCount struct {
 }
 
 // APIKey is an authentication credential bound to a project. The raw
-// key is never persisted — only the SHA-256 hash. The prefix is a
+// key is never persisted, only the SHA-256 hash. The prefix is a
 // non-secret display string for the developer to identify the key.
 type APIKey struct {
 	KeyID      string     `json:"key_id"`
@@ -84,7 +145,7 @@ type APIKey struct {
 // column at rest with KMS.
 //
 // EnabledClasses is a JSON-encoded array of failure-class names. Empty
-// or nil means "all classes" — the common case. Validation that
+// or nil means "all classes", the common case. Validation that
 // supplied class names match the FailureClass* constants happens at
 // the handler layer.
 type ProjectWebhook struct {
@@ -141,7 +202,7 @@ const (
 //
 // group_id is derived deterministically from (project_id, failure_class,
 // signature), so the same signature always maps to the same group_id
-// across runs and restarts — no UUID coordination required.
+// across runs and restarts, no UUID coordination required.
 type FailureGroup struct {
 	GroupID            string     `json:"group_id"`
 	ProjectID          string     `json:"project_id"`
@@ -162,7 +223,51 @@ type Store interface {
 	// Projects + API keys (admin / bootstrap operations).
 	CreateProject(ctx context.Context, p *Project) error
 	GetProject(ctx context.Context, projectID string) (*Project, error)
-	// Billing (#120 — Stripe integration).
+	// UpdateProjectTier flips a project's tier without going through
+	// Stripe. Founder-side admin lever (#150). Does NOT touch the
+	// Stripe customer/subscription columns; if a project was
+	// previously on Pro and we manually drop to Hobby, the dangling
+	// Stripe subscription is the founder's problem to cancel.
+	//
+	// expiresAt sets tier_expires_at (nil = never expires). Lazy
+	// enforcement: when expiresAt has passed, HandleGetBilling
+	// treats the tier as Hobby. Pass nil to make a permanent flip.
+	UpdateProjectTier(ctx context.Context, projectID, tier string, expiresAt *time.Time) error
+	// AddGrantedExecutions adds delta to the granted_executions
+	// column atomically. Positive delta grants quota; negative delta
+	// revokes a previous grant. Used for the early-customer 100K
+	// promo and for goodwill credits.
+	//
+	// expiresAt overwrites granted_executions_expires_at (nil = never).
+	// Single-expiration-per-project model: each call replaces the
+	// existing expiration regardless of whether delta is positive or
+	// negative.
+	AddGrantedExecutions(ctx context.Context, projectID string, delta int64, expiresAt *time.Time) error
+	// GetProjectStorageStats returns one row per project with counts
+	// across the major child tables plus an EstimatedBytes total from
+	// SUM(LENGTH()) over the large text columns. Used by the admin
+	// dashboard's Storage page (#173) to spot heavy users before the
+	// SQLite volume fills up. Founder-only, never expose this through
+	// the customer API.
+	GetProjectStorageStats(ctx context.Context) ([]*ProjectStorage, error)
+	// DeleteProject permanently removes a project and (via the FK
+	// ON DELETE CASCADE on every child table) all of its api keys,
+	// executions, events, failure_groups, webhooks, and webhook
+	// deliveries. Used by the admin DELETE endpoint to honor the
+	// Privacy Policy's customer-data-deletion right.
+	//
+	// The caller (admin handler) is responsible for refusing the
+	// deletion if a Stripe subscription is still active, the store
+	// has no Stripe-awareness and will happily wipe a paying
+	// customer.
+	DeleteProject(ctx context.Context, projectID string) error
+	// ListAllProjects returns every project in the database with
+	// aggregate activity stats (last execution time, total execution
+	// count) joined in. Used by the founder-side admin dashboard
+	// (#150), NEVER expose this through the customer-facing API.
+	// Ordered by created_at DESC so newest signups appear first.
+	ListAllProjects(ctx context.Context) ([]*AdminProjectRow, error)
+	// Billing (#120, Stripe integration).
 	// UpdateProjectBilling sets the tier, Stripe identifiers, and
 	// current period bounds in one call. Called from the Stripe
 	// webhook handler after checkout.session.completed and from
@@ -199,7 +304,7 @@ type Store interface {
 	ListAPIKeysForProject(ctx context.Context, projectID string) ([]*APIKey, error)
 	// DeleteAPIKey revokes (hard-deletes) an API key by id, but ONLY
 	// if it belongs to the given project. Returns ErrNotFound if the
-	// key doesn't exist or belongs to a different project — protects
+	// key doesn't exist or belongs to a different project, protects
 	// against cross-tenant deletion via id-guessing.
 	DeleteAPIKey(ctx context.Context, keyID, projectID string) error
 
@@ -210,7 +315,7 @@ type Store interface {
 	CreateProjectWebhook(ctx context.Context, wh *ProjectWebhook) error
 	// ListProjectWebhooksForProject returns every webhook (enabled and
 	// disabled) for a project, sorted by CreatedAt DESC. The Secret
-	// field is intentionally cleared on the returned values — the
+	// field is intentionally cleared on the returned values, the
 	// secret is shown ONLY at creation time.
 	ListProjectWebhooksForProject(ctx context.Context, projectID string) ([]*ProjectWebhook, error)
 	// ListEnabledProjectWebhooks returns only the enabled webhooks for
@@ -248,7 +353,7 @@ type Store interface {
 	// ListExecutionsByFailureGroup returns executions whose
 	// failure_group_id matches groupID, sorted by started_at DESC.
 	// Caller should verify (group.project_id == auth_project_id) BEFORE
-	// calling — this method does NOT enforce project scoping.
+	// calling, this method does NOT enforce project scoping.
 	ListExecutionsByFailureGroup(ctx context.Context, groupID string, limit, offset int) ([]*events.Execution, error)
 	// ListEventsForExecution returns the events recorded against a
 	// single execution, sorted by sequence ASC. Used by the dashboard's
@@ -263,14 +368,14 @@ type Store interface {
 	// Events (batch ingest path is the hot one; single-event ingest is for tests).
 	SaveEvents(ctx context.Context, batch []events.Event) error
 
-	// Failure groups (Phase 3a — crash detection, Phase 3b/4 — loops).
+	// Failure groups (Phase 3a, crash detection, Phase 3b/4, loops).
 	//
 	// Every Group* method returns (isNew bool, error). isNew is true
 	// iff this call CREATED a new failure_group row (this is the first
 	// occurrence of this (project, class, signature) tuple).
 	// Subsequent occurrences return isNew=false. Used by the webhook
 	// escalation dispatcher (task #83) to fire on first occurrence only,
-	// not on every re-occurrence. Idempotency is unchanged — an
+	// not on every re-occurrence. Idempotency is unchanged, an
 	// already-grouped execution is still a no-op and returns
 	// (false, nil).
 	GroupCrashedExecution(ctx context.Context, executionID, projectID, signature string) (bool, error)
@@ -348,7 +453,7 @@ type Store interface {
 	// baseline corpus the lexical drift detector compares against.
 	// limit caps the number of messages returned (most recent first);
 	// pass 0 for "no limit" but the caller is responsible for sensible
-	// bounds — a 7-day window on a busy project can be thousands of
+	// bounds, a 7-day window on a busy project can be thousands of
 	// rows.
 	ListLLMUserMessagesForProjectSince(ctx context.Context, projectID string, cutoff time.Time, excludeExecutionID string, limit int) ([]string, error)
 	// ListFailureGroups returns the project's failure groups sorted by

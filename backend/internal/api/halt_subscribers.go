@@ -1,8 +1,8 @@
-// SSE remote-halt channel — backend infrastructure (sub-slice 21b.1).
+// SSE remote-halt channel, backend infrastructure (sub-slice 21b.1).
 //
 // Two HTTP endpoints + an in-memory subscriber registry:
 //
-//   GET  /executions/{id}/halt-stream   — Server-Sent Events. Opens a
+//   GET  /executions/{id}/halt-stream: Server-Sent Events. Opens a
 //     long-lived text/event-stream connection. The Python/TS SDK
 //     subscribes here when an execution is wrapped with a budget; the
 //     handler holds the connection open, sending periodic keepalive
@@ -10,7 +10,7 @@
 //     for this execution, the client disconnects, or the connection
 //     idles past a hard timeout.
 //
-//   POST /executions/{id}/halt          — admin/dashboard-triggered.
+//   POST /executions/{id}/halt: admin/dashboard-triggered.
 //     Body: {"reason": "..."}. Looks up all active subscribers for
 //     this execution_id in the in-memory registry and pushes a single
 //     `event: halt\ndata: {"reason":"..."}\n\n` to each. Returns 200
@@ -32,7 +32,7 @@
 //   handler reads from in a loop. When a halt is pushed via POST, we
 //   send to every subscriber's channel (non-blocking; if any
 //   subscriber's channel is full somehow, we just drop the message
-//   for that subscriber — the alternative is blocking the POST
+//   for that subscriber, the alternative is blocking the POST
 //   handler, which is worse).
 //
 //   Registry is per-process. Multi-instance backends would need
@@ -58,7 +58,7 @@ import (
 
 // haltSubscriber is one open SSE connection waiting for a halt event.
 // The channel receives the halt reason; the handler reads from it and
-// writes the SSE frame on receive. Buffered size 1 — a halt is a
+// writes the SSE frame on receive. Buffered size 1, a halt is a
 // single-shot signal, no point queueing.
 type haltSubscriber struct {
 	ch chan string
@@ -103,7 +103,7 @@ func (h *HaltSubscribers) register(executionID string, sub *haltSubscriber) (cle
 }
 
 // publish pushes a halt reason to every subscriber for executionID.
-// Returns the number of subscribers notified. Non-blocking — if a
+// Returns the number of subscribers notified. Non-blocking, if a
 // subscriber's channel is full (shouldn't happen with buffered
 // size-1 + the handler reading immediately, but defensive), we drop
 // rather than block the publisher.
@@ -118,7 +118,7 @@ func (h *HaltSubscribers) publish(executionID, reason string) int {
 		case s.ch <- reason:
 			count++
 		default:
-			// Subscriber channel full — drop. With buffered size 1
+			// Subscriber channel full, drop. With buffered size 1
 			// and a single halt per execution lifecycle, this should
 			// never fire; logging-or-dropping is the right tradeoff
 			// vs blocking the POST.
@@ -146,14 +146,14 @@ func (h *Handlers) HandleHaltStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cross-tenant guard — lenient on missing-execution to handle the
+	// Cross-tenant guard, lenient on missing-execution to handle the
 	// SDK's async-shipper ordering: wrap() submits create-execution
 	// to the shipper queue (fire-and-forget) and then starts the
 	// halt-stream reader immediately. The reader can race ahead of
 	// the shipper, hitting this endpoint before the execution row
 	// exists. Subscribe has no side effects beyond registry insert,
 	// so accepting "execution doesn't exist yet" subscriptions is
-	// safe — they just sit in the registry until something
+	// safe, they just sit in the registry until something
 	// (eventually) publishes against the same id, which can only
 	// come from a caller in the SAME project (publish-side enforces
 	// the strict project-id match). If the execution NEVER appears,
@@ -197,14 +197,14 @@ func (h *Handlers) HandleHaltStream(w http.ResponseWriter, r *http.Request) {
 
 	// Send an initial comment so the client knows the connection is
 	// live and registered. Comments in SSE start with `:` and are
-	// ignored by client parsers — they just keep the connection warm.
+	// ignored by client parsers, they just keep the connection warm.
 	if _, err := fmt.Fprintf(w, ": subscribed execution=%s\n\n", executionID); err != nil {
 		return
 	}
 	flusher.Flush()
 
 	const keepaliveInterval = 15 * time.Second
-	// Hard cap on connection lifetime — SDK should re-subscribe past
+	// Hard cap on connection lifetime, SDK should re-subscribe past
 	// this. 1 hour matches typical agent execution upper bound; longer
 	// runs that need halt-channel coverage will see the SDK reconnect.
 	const maxLifetime = 1 * time.Hour
@@ -222,7 +222,7 @@ func (h *Handlers) HandleHaltStream(w http.ResponseWriter, r *http.Request) {
 			return
 		case reason := <-sub.ch:
 			// Halt was published for this execution. Send the SSE
-			// frame and return — this is a one-shot signal; we don't
+			// frame and return, this is a one-shot signal; we don't
 			// keep the connection open for further events.
 			payload, _ := json.Marshal(map[string]string{"reason": reason})
 			if _, err := fmt.Fprintf(w, "event: halt\ndata: %s\n\n", payload); err != nil {
@@ -231,7 +231,7 @@ func (h *Handlers) HandleHaltStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			return
 		case <-ticker.C:
-			// Keepalive — comment frame, ignored by client.
+			// Keepalive, comment frame, ignored by client.
 			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
 				return
 			}
@@ -247,8 +247,8 @@ func (h *Handlers) HandleHaltStream(w http.ResponseWriter, r *http.Request) {
 //
 // Returns:
 //
-//	200 OK { "ok": true, "notified": N }   — N >= 1 subscribers
-//	404 Not Found                          — no active subscribers
+//	200 OK { "ok": true, "notified": N }: N >= 1 subscribers
+//	404 Not Found: no active subscribers
 //	                                         (execution probably done,
 //	                                         or SDK never subscribed)
 func (h *Handlers) HandleTriggerHalt(w http.ResponseWriter, r *http.Request) {

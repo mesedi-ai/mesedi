@@ -2,7 +2,7 @@
 
 Exercises mesedi.integrations.langchain.MesediCallbackHandler by
 calling its callback methods directly with mock LangChain-shaped
-arguments. Does NOT require the langchain package to be installed —
+arguments. Does NOT require the langchain package to be installed , 
 the handler's stub-base fallback path means importing the module
 works regardless. The dispatch surface is the same shape LangChain's
 CallbackManager would use, so a passing test here implies the real
@@ -105,7 +105,7 @@ def run_smoke() -> str:
     )
     handler.on_tool_end(output="ACME Corp", run_id=run_id_2)
 
-    # ── 3. A failed tool call (silent-degradation pattern — Mesedi
+    # ── 3. A failed tool call (silent-degradation pattern, Mesedi
     #       classifies as tool_failures). ──────────────────────────────
     run_id_3 = uuid.uuid4()
     handler.on_tool_start(

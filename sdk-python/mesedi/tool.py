@@ -1,12 +1,12 @@
 """
-@tool decorator — observe a function as an agent tool invocation.
+@tool decorator, observe a function as an agent tool invocation.
 
 When called from inside a ``@mesedi.wrap``-decorated function, each
 invocation emits a ``tool_call`` event linked to the surrounding
 execution. The event carries:
 
   - ``tool_name``: the function's ``__name__`` (or override via
-    ``@tool(name="...")`` — coming in a later sub-slice)
+    ``@tool(name="...")``, coming in a later sub-slice)
   - ``arguments``: sanitized, truncated repr of positional + keyword args
   - ``status``: "ok" if the function returned, "failed" if it raised
   - ``result_summary``: truncated repr of the return value (on success)
@@ -15,7 +15,7 @@ execution. The event carries:
 
 If ``@tool`` is called OUTSIDE a ``@wrap`` context (no active execution
 in the context var), the wrapped function runs normally and no event is
-emitted — fail-open, matching the design of @wrap.
+emitted, fail-open, matching the design of @wrap.
 
 Exception semantics: exceptions raised by the tool propagate to the
 caller unchanged. The tool_call event records the failure but does NOT
@@ -39,7 +39,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 # Payload-truncation budgets. Tools that take or return huge strings
 # (a whole web page, a long prompt, etc.) should not blow up the events
-# table — the truncated repr is enough for debugging and pattern
+# table, the truncated repr is enough for debugging and pattern
 # recognition.
 _MAX_ARG_REPR = 200
 _MAX_RESULT_REPR = 500
@@ -71,7 +71,7 @@ def tool(func: F) -> F:
     def inner(*args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
         if ctx is None:
-            # No active execution — run unobserved. This is the
+            # No active execution, run unobserved. This is the
             # fail-open path for tests / scripts that call a tool
             # directly without going through @wrap.
             return func(*args, **kwargs)

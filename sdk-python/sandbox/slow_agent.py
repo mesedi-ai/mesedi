@@ -7,9 +7,9 @@ failure_class=loops and a duration-bucketed signature
 (time_budget_1s+, _10s+, _60s+, _10m+, _1h+).
 
 This script fires three runs:
-  1. A 0.5s agent — UNDER the threshold, no time-budget grouping.
-  2. A 2s agent — 1s+ bucket, gets grouped into time_budget_1s+ group.
-  3. A 12s agent — 10s+ bucket, gets grouped into time_budget_10s+ group.
+  1. A 0.5s agent, UNDER the threshold, no time-budget grouping.
+  2. A 2s agent, 1s+ bucket, gets grouped into time_budget_1s+ group.
+  3. A 12s agent, 10s+ bucket, gets grouped into time_budget_10s+ group.
 
 After running, the dashboard's Failure groups table should show TWO
 new rows (one per signature bucket), each with failure_class=loops
@@ -39,21 +39,21 @@ mesedi.configure(
 
 @mesedi.wrap
 def quick_agent(query: str) -> str:
-    """500ms — under the 1s threshold, no time-budget grouping."""
+    """500ms, under the 1s threshold, no time-budget grouping."""
     time.sleep(0.5)
     return f"finished quickly: {query}"
 
 
 @mesedi.wrap
 def slow_agent(query: str) -> str:
-    """2s — over the 1s threshold, lands in time_budget_1s+ bucket."""
+    """2s, over the 1s threshold, lands in time_budget_1s+ bucket."""
     time.sleep(2.0)
     return f"finished slowly: {query}"
 
 
 @mesedi.wrap
 def very_slow_agent(query: str) -> str:
-    """12s — over the 10s threshold, lands in time_budget_10s+ bucket."""
+    """12s, over the 10s threshold, lands in time_budget_10s+ bucket."""
     time.sleep(12.0)
     return f"finished after a long wait: {query}"
 
@@ -63,17 +63,17 @@ def _ms(seconds: float) -> str:
 
 
 if __name__ == "__main__":
-    print("\n── Run 1: quick_agent (500ms — should NOT trigger time-budget) ──")
+    print("\n── Run 1: quick_agent (500ms, should NOT trigger time-budget) ──")
     t = time.perf_counter()
     quick_agent("ping")
     print(f"  wall-clock: {_ms(time.perf_counter() - t)}")
 
-    print("\n── Run 2: slow_agent (2s — should land in time_budget_1s+) ──")
+    print("\n── Run 2: slow_agent (2s, should land in time_budget_1s+) ──")
     t = time.perf_counter()
     slow_agent("medium")
     print(f"  wall-clock: {_ms(time.perf_counter() - t)}")
 
-    print("\n── Run 3: very_slow_agent (12s — should land in time_budget_10s+) ──")
+    print("\n── Run 3: very_slow_agent (12s, should land in time_budget_10s+) ──")
     print("  (this run takes 12 seconds, be patient)")
     t = time.perf_counter()
     very_slow_agent("long")

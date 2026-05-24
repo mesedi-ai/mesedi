@@ -1,5 +1,5 @@
 /**
- * SSE halt-stream reader — sub-slice 21e (TS port of 21b.2).
+ * SSE halt-stream reader, sub-slice 21e (TS port of 21b.2).
  *
  * When `wrap()` is entered with a `budget` configured, the wrap layer
  * spawns a HaltStreamReader that opens an HTTP stream against
@@ -14,7 +14,7 @@
  *   - **No thread.** JavaScript is single-threaded; the reader is
  *     just an async function returning a Promise that we kick off
  *     without awaiting. The fetch's underlying I/O runs on Node's
- *     libuv pool — same effective concurrency as a Python daemon
+ *     libuv pool, same effective concurrency as a Python daemon
  *     thread.
  *
  *   - **AbortController for stop().** We can't "interrupt" an async
@@ -28,7 +28,7 @@
  *     stdlib. We pull bytes off `response.body.getReader()`, decode
  *     UTF-8 chunks via TextDecoder, accumulate into a buffer, and
  *     split on newlines to get SSE lines. The SSE spec uses `\n` or
- *     `\r\n` or `\r` as line separators — we normalize all three.
+ *     `\r\n` or `\r` as line separators, we normalize all three.
  *
  *   - **Fail-open posture.** If subscription fails (connect error,
  *     non-200 response, parse error), the reader logs at debug-level
@@ -38,7 +38,7 @@
  *
  *   - **One-shot semantics.** After dispatching a halt event, the
  *     reader exits. The backend closes the SSE connection at the
- *     same moment — both sides agree halt is one signal per
+ *     same moment, both sides agree halt is one signal per
  *     subscription.
  *
  * No public API surface: customers don't construct HaltStreamReader.
@@ -63,8 +63,8 @@ export class HaltStreamReader {
         this.controller = new AbortController();
     }
     /**
-     * Kick off the async read loop. Idempotent — second call is a no-op.
-     * Does NOT await — the wrap layer fires this and continues.
+     * Kick off the async read loop. Idempotent, second call is a no-op.
+     * Does NOT await, the wrap layer fires this and continues.
      */
     start() {
         if (this.started)
@@ -86,7 +86,7 @@ export class HaltStreamReader {
             this.controller.abort();
         }
         catch {
-            // ignore — abort can throw on some Node versions if already aborted
+            // ignore, abort can throw on some Node versions if already aborted
         }
     }
     async _run() {
@@ -101,7 +101,7 @@ export class HaltStreamReader {
         };
         // Connect-timeout is a separate signal so it doesn't kill the
         // long-lived read after connect succeeds. AbortSignal.timeout()
-        // is Node 17.3+ / native; AbortSignal.any() is Node 20+ — we
+        // is Node 17.3+ / native; AbortSignal.any() is Node 20+, we
         // compose them manually for broader compatibility (Node 18 LTS).
         const connectTimeout = setTimeout(() => this.controller.abort(), CONNECT_TIMEOUT_MS);
         let resp;
@@ -158,14 +158,14 @@ export class HaltStreamReader {
                         // Blank line dispatches the accumulated event.
                         if (currentEvent === "halt" && dataLines.length > 0) {
                             this._dispatchHalt(dataLines.join("\n"));
-                            return; // one-shot — done
+                            return; // one-shot, done
                         }
                         currentEvent = "message";
                         dataLines = [];
                         continue;
                     }
                     if (line.startsWith(":")) {
-                        // Comment frame (`: keepalive`) — ignore.
+                        // Comment frame (`: keepalive`), ignore.
                         continue;
                     }
                     if (line.startsWith("event:")) {
@@ -207,7 +207,7 @@ export class HaltStreamReader {
             this.onHalt(reason);
         }
         catch (err) {
-            console.warn("[mesedi.halt_stream] onHalt callback threw — halt may not have fired", { executionId: this.executionId, error: String(err) });
+            console.warn("[mesedi.halt_stream] onHalt callback threw, halt may not have fired", { executionId: this.executionId, error: String(err) });
         }
     }
 }

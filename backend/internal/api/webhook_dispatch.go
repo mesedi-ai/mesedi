@@ -10,7 +10,7 @@
 //     GetFailureGroupByClassSignature (gives us the
 //     sample_execution_id Mesedi just assigned).
 //  2. Lists every enabled webhook for the project.
-//  3. Filters webhooks by the failure_class — webhooks with an empty
+//  3. Filters webhooks by the failure_class, webhooks with an empty
 //     enabled_classes accept everything; others must include this
 //     class explicitly.
 //  4. Builds a payload, calls webhooks.Deliver, and records every
@@ -36,7 +36,7 @@ import (
 // dispatchTimeout caps how long a single failure-group's worth of
 // deliveries can run before the dispatcher's context cancels them.
 // Three attempts with 1s + 4s backoff worst-case is ~5s per receiver,
-// plus per-attempt timeouts — 60s is comfortable headroom even for
+// plus per-attempt timeouts, 60s is comfortable headroom even for
 // projects with many webhooks registered.
 const dispatchTimeout = 60 * time.Second
 
@@ -45,7 +45,7 @@ const dispatchTimeout = 60 * time.Second
 // goroutine; never blocks the request path.
 //
 // dashboardBase is captured from the request (scheme + host) at the
-// handler before goroutine spawn — by the time the goroutine runs,
+// handler before goroutine spawn, by the time the goroutine runs,
 // the original request is gone.
 func (h *Handlers) dispatchFailureGroupCreated(
 	projectID, failureClass, signature, dashboardBase string,
@@ -69,7 +69,7 @@ func (h *Handlers) runFailureGroupDispatch(
 
 	// Fetch the failure_group row so we have the canonical
 	// sample_execution_id for the payload. If lookup fails we still
-	// dispatch with empty sample — the receiver gets less context but
+	// dispatch with empty sample, the receiver gets less context but
 	// the notification still fires.
 	group, err := h.Store.GetFailureGroupByClassSignature(ctx, projectID, failureClass, signature)
 	if err != nil {
@@ -90,14 +90,14 @@ func (h *Handlers) runFailureGroupDispatch(
 	}
 	if len(hooks) == 0 {
 		// No webhooks configured for this project. Common case during
-		// onboarding — don't warn, just return.
+		// onboarding, don't warn, just return.
 		return
 	}
 
 	// Pre-build the playbook URL once. Resolve() only tells us if a
 	// playbook exists; the actual content is served at
 	// /app/playbooks on the React dashboard (the URL search params
-	// use "class" — the dashboard side maps that to the backend's
+	// use "class", the dashboard side maps that to the backend's
 	// "failure_class" query param for the JSON endpoint).
 	var playbookURL string
 	if _, ok := playbooks.Resolve(failureClass, signature); ok {
@@ -175,7 +175,7 @@ func classMatchesFilter(failureClass string, enabledClasses []string) bool {
 // auto-fire path. Different from the test-endpoint id because we
 // don't want manual-test and real-fire IDs to collide in the log.
 func newDispatchDeliveryID() string {
-	// Reuse hex(time.Now().UnixNano()) — guaranteed unique within a
+	// Reuse hex(time.Now().UnixNano()), guaranteed unique within a
 	// process, readable, sortable. Crypto-random would be overkill
 	// for an internal identifier the receiver only uses for
 	// idempotency.

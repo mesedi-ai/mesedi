@@ -1,5 +1,5 @@
 """
-@wrap decorator — observe a function as an agent execution.
+@wrap decorator, observe a function as an agent execution.
 
 A function decorated with @wrap becomes "an agent execution" from the
 Mesedi backend's point of view. The decorator records start, completion
@@ -21,7 +21,7 @@ events to this execution.
     ``status=crashed`` but never consumes the exception.
   - **Async-by-default.** ``submit_*`` returns immediately; actual HTTP
     happens in the background shipper thread. Latency added to the
-    wrapped call is dataclass-construction + queue-enqueue —
+    wrapped call is dataclass-construction + queue-enqueue , 
     microseconds-scale.
   - **Nested @wrap calls.** A @wrap'd function calling another @wrap'd
     function produces two distinct executions; the inner one becomes
@@ -85,13 +85,13 @@ def wrap(
       - Always: pop the execution context, even on exception.
     """
 
-    # Support both call shapes — bare `@mesedi.wrap` and
+    # Support both call shapes, bare `@mesedi.wrap` and
     # `@mesedi.wrap(budget=Budget(...))`. Detect which we got:
     # if `func` is None, we're in the "called with kwargs" form and
     # need to return a decorator factory. Otherwise this IS the
     # decorator.
     if func is None:
-        # `@mesedi.wrap(budget=...)` — return a factory that takes
+        # `@mesedi.wrap(budget=...)`, return a factory that takes
         # the actual function on the next call.
         def factory(actual: F) -> F:
             return wrap(actual, budget=budget)  # type: ignore[return-value]
@@ -104,7 +104,7 @@ def wrap(
         execution = Execution(execution_id=execution_id)
 
         # Submit start AFTER constructing the Execution so the timer
-        # captures only the user's function — not the SDK's own overhead.
+        # captures only the user's function, not the SDK's own overhead.
         client.submit_execution_start(execution)
         start_wall = time.perf_counter()
         ctx_token = push_execution_context(execution_id, budget=budget)
@@ -132,10 +132,10 @@ def wrap(
             try:
                 result = func(*args, **kwargs)
             except MesediHalt as halt_exc:
-                # Halt is NOT a crash — it's a controlled stop the SDK
+                # Halt is NOT a crash, it's a controlled stop the SDK
                 # itself raised because a budget was exceeded. Mark
                 # the execution `halted` with the trigger metadata
-                # and return cleanly. We do NOT re-raise — the caller
+                # and return cleanly. We do NOT re-raise, the caller
                 # of the @wrap'd function sees a None return (or
                 # whatever the agent's normal "I gave up" value is)
                 # rather than an exception.
@@ -166,12 +166,12 @@ def wrap(
         finally:
             # Stop the halt-stream reader BEFORE popping the context,
             # so any in-flight signal_remote_halt() call against the
-            # tracker still finds a valid context. Daemon thread —
+            # tracker still finds a valid context. Daemon thread , 
             # safe to leave running; stop() just unblocks it.
             if halt_reader is not None:
                 halt_reader.stop()
-            # Pop the execution context on EVERY exit path — return,
-            # exception, even keyboard-interrupt — so nested wraps
+            # Pop the execution context on EVERY exit path, return,
+            # exception, even keyboard-interrupt, so nested wraps
             # correctly restore the outer context.
             pop_execution_context(ctx_token)
 
@@ -188,7 +188,7 @@ def _crash_signature(exc: BaseException) -> str:
 
     Computes SHA-256 over: exception class name + first 5 lines of the
     formatted traceback (most-recent-call frames are the most
-    identifying). Truncates to 16 hex chars — collisions across
+    identifying). Truncates to 16 hex chars, collisions across
     distinct crash sites are astronomically unlikely at this length and
     the shorter signature is easier to display in dashboards.
 

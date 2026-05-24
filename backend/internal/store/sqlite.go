@@ -1,6 +1,6 @@
 // SQLite implementation of the Store interface.
 //
-// Uses `modernc.org/sqlite` — a pure-Go SQLite driver, no cgo required.
+// Uses `modernc.org/sqlite`, a pure-Go SQLite driver, no cgo required.
 // Slightly slower than the cgo variant under heavy write load, but for
 // local development and the eventual Phase 1.5 acceptance criterion
 // (events survive process restart), performance is not the constraint.
@@ -250,15 +250,18 @@ func (s *SQLiteStore) GetProject(ctx context.Context, projectID string) (*Projec
 	p := &Project{}
 	var owner, email, stripeCust, stripeSub sql.NullString
 	var periodStart, periodEnd sql.NullInt64
+	var grantExpires, tierExpires sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT project_id, name, owner_user_id, owner_email, created_at,
 		       tier, stripe_customer_id, stripe_subscription_id,
-		       current_period_start, current_period_end, executions_this_period
+		       current_period_start, current_period_end, executions_this_period,
+		       granted_executions, granted_executions_expires_at, tier_expires_at
 		FROM projects WHERE project_id = ?
 	`, projectID).Scan(
 		&p.ProjectID, &p.Name, &owner, &email, &p.CreatedAt,
 		&p.Tier, &stripeCust, &stripeSub,
 		&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
+		&p.GrantedExecutions, &grantExpires, &tierExpires,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -286,7 +289,262 @@ func (s *SQLiteStore) GetProject(ctx context.Context, projectID string) (*Projec
 		t := time.Unix(periodEnd.Int64, 0).UTC()
 		p.CurrentPeriodEnd = &t
 	}
+	if grantExpires.Valid {
+		t := time.Unix(grantExpires.Int64, 0).UTC()
+		p.GrantedExecutionsExpiresAt = &t
+	}
+	if tierExpires.Valid {
+		t := time.Unix(tierExpires.Int64, 0).UTC()
+		p.TierExpiresAt = &t
+	}
 	return p, nil
+}
+
+// GetProjectStorageStats returns per-project counts + an estimated
+// bytes total computed from SUM(LENGTH()) over the large text
+// columns. Multiple correlated subqueries, fine at our scale,
+// would warrant a rewrite if projects grow past a few thousand.
+//
+// Bytes are estimated, not exact: SQLite stores text with overhead
+// (NULL terminator, variable-length row encoding), and there are
+// indexes that take additional space the LENGTH sum doesn't see.
+// The number is "close enough" for capacity planning, within
+// maybe 30% of real disk footprint.
+func (s *SQLiteStore) GetProjectStorageStats(ctx context.Context) ([]*ProjectStorage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			p.project_id,
+			p.name,
+			COALESCE(p.owner_email, ''),
+			p.tier,
+			COALESCE((
+				SELECT COUNT(*) FROM executions e
+				WHERE e.project_id = p.project_id
+			), 0) AS executions,
+			COALESCE((
+				SELECT COUNT(*)
+				FROM events ev
+				JOIN executions e ON ev.execution_id = e.execution_id
+				WHERE e.project_id = p.project_id
+			), 0) AS events,
+			COALESCE((
+				SELECT COUNT(*) FROM failure_groups fg
+				WHERE fg.project_id = p.project_id
+			), 0) AS failure_groups,
+			COALESCE((
+				SELECT COUNT(*) FROM webhook_deliveries wd
+				WHERE wd.project_id = p.project_id
+			), 0) AS webhook_deliveries,
+			COALESCE((
+				SELECT SUM(LENGTH(e.input_summary) +
+				           LENGTH(e.output_summary) +
+				           LENGTH(e.crash_signature))
+				FROM executions e WHERE e.project_id = p.project_id
+			), 0) +
+			COALESCE((
+				SELECT SUM(LENGTH(ev.payload))
+				FROM events ev
+				JOIN executions e ON ev.execution_id = e.execution_id
+				WHERE e.project_id = p.project_id
+			), 0) AS estimated_bytes
+		FROM projects p
+		ORDER BY estimated_bytes DESC, executions DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query project storage stats: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*ProjectStorage{}
+	for rows.Next() {
+		var row ProjectStorage
+		if err := rows.Scan(
+			&row.ProjectID, &row.Name, &row.OwnerEmail, &row.Tier,
+			&row.Executions, &row.Events,
+			&row.FailureGroups, &row.WebhookDeliveries,
+			&row.EstimatedBytes,
+		); err != nil {
+			return nil, fmt.Errorf("scan storage row: %w", err)
+		}
+		out = append(out, &row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate storage rows: %w", err)
+	}
+	return out, nil
+}
+
+// DeleteProject hard-deletes a project. Schema has ON DELETE CASCADE
+// on every child table's project_id FK (api_keys, executions,
+// failure_groups, project_webhooks, webhook_deliveries) and on the
+// events→executions FK, so the cascade is complete without manual
+// child-table cleanup.
+//
+// Returns ErrNotFound when no rows were deleted (project never
+// existed). The admin handler turns that into a 404, same behavior
+// as the read path.
+func (s *SQLiteStore) DeleteProject(ctx context.Context, projectID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM projects WHERE project_id = ?
+	`, projectID)
+	if err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListAllProjects returns every project plus activity aggregates from
+// the executions table. Used only by the founder-side admin dashboard
+// (#150); the customer-facing API has no equivalent endpoint.
+//
+// The LEFT JOIN preserves projects that have never produced an
+// execution (signup-without-integration accounts), they show up with
+// NULL last_activity and zero total_executions. SQLite's MAX/COUNT on
+// an outer-joined NULL-rich relation correctly returns NULL/0.
+//
+// Ordering by created_at DESC puts newest signups at the top, which is
+// what the founder wants to see first when checking for new activity.
+func (s *SQLiteStore) ListAllProjects(ctx context.Context) ([]*AdminProjectRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			p.project_id, p.name, p.owner_email, p.created_at,
+			p.tier, p.stripe_customer_id, p.stripe_subscription_id,
+			p.current_period_start, p.current_period_end,
+			p.executions_this_period, p.granted_executions,
+			p.granted_executions_expires_at, p.tier_expires_at,
+			MAX(e.started_at) AS last_activity_at,
+			COUNT(e.execution_id) AS total_executions
+		FROM projects p
+		LEFT JOIN executions e ON e.project_id = p.project_id
+		GROUP BY p.project_id
+		ORDER BY p.created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query all projects: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*AdminProjectRow{}
+	for rows.Next() {
+		var (
+			row                          AdminProjectRow
+			email, stripeCust, stripeSub sql.NullString
+			periodStart, periodEnd       sql.NullInt64
+			grantExpires, tierExpires    sql.NullInt64
+			lastActivity                 sql.NullTime
+		)
+		if err := rows.Scan(
+			&row.ProjectID, &row.Name, &email, &row.CreatedAt,
+			&row.Tier, &stripeCust, &stripeSub,
+			&periodStart, &periodEnd,
+			&row.ExecutionsThisPeriod, &row.GrantedExecutions,
+			&grantExpires, &tierExpires,
+			&lastActivity, &row.TotalExecutions,
+		); err != nil {
+			return nil, fmt.Errorf("scan project row: %w", err)
+		}
+		if email.Valid {
+			row.OwnerEmail = email.String
+		}
+		if stripeCust.Valid {
+			row.StripeCustomerID = stripeCust.String
+		}
+		if stripeSub.Valid {
+			row.StripeSubscriptionID = stripeSub.String
+		}
+		if periodStart.Valid {
+			t := time.Unix(periodStart.Int64, 0).UTC()
+			row.CurrentPeriodStart = &t
+		}
+		if periodEnd.Valid {
+			t := time.Unix(periodEnd.Int64, 0).UTC()
+			row.CurrentPeriodEnd = &t
+		}
+		if lastActivity.Valid {
+			t := lastActivity.Time.UTC()
+			row.LastActivityAt = &t
+		}
+		out = append(out, &row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate project rows: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateProjectTier flips a project to a different tier without
+// touching the Stripe columns. Founder admin lever (#150). Returns
+// ErrNotFound if the project doesn't exist; the admin handler turns
+// that into a 404. Permissible tier values are not enforced at the
+// store layer, the API layer validates against the canonical
+// TierHobby/TierPro/TierEnterprise constants.
+func (s *SQLiteStore) UpdateProjectTier(
+	ctx context.Context,
+	projectID, tier string,
+	expiresAt *time.Time,
+) error {
+	var expires sql.NullInt64
+	if expiresAt != nil {
+		expires = sql.NullInt64{Int64: expiresAt.Unix(), Valid: true}
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE projects
+		SET tier = ?, tier_expires_at = ?
+		WHERE project_id = ?
+	`, tier, expires, projectID)
+	if err != nil {
+		return fmt.Errorf("update project tier: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// AddGrantedExecutions adjusts the granted_executions column by delta.
+// Positive delta grants additional quota; negative delta revokes a
+// prior grant. The column is signed INTEGER so the result may go
+// negative (e.g., admin granted 100K then revoked 200K); effective-
+// quota math in billing.go floors at zero so a negative value never
+// produces a "negative available" condition.
+func (s *SQLiteStore) AddGrantedExecutions(
+	ctx context.Context,
+	projectID string,
+	delta int64,
+	expiresAt *time.Time,
+) error {
+	var expires sql.NullInt64
+	if expiresAt != nil {
+		expires = sql.NullInt64{Int64: expiresAt.Unix(), Valid: true}
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE projects
+		SET granted_executions = granted_executions + ?,
+		    granted_executions_expires_at = ?
+		WHERE project_id = ?
+	`, delta, expires, projectID)
+	if err != nil {
+		return fmt.Errorf("update granted executions: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // UpdateProjectBilling sets the tier, Stripe identifiers, and period
@@ -473,7 +731,7 @@ func (s *SQLiteStore) TouchAPIKey(ctx context.Context, keyID string) error {
 
 // ListAPIKeysForProject returns every API key bound to the given
 // project, NEWEST first. key_hash is intentionally omitted from the
-// returned structs — that field is never serialized to clients or
+// returned structs, that field is never serialized to clients or
 // callers; only the hash on the server's authoritative copy ever
 // touches the auth path.
 func (s *SQLiteStore) ListAPIKeysForProject(
@@ -523,7 +781,7 @@ func (s *SQLiteStore) ListAPIKeysForProject(
 // DeleteAPIKey hard-deletes an API key, but ONLY if the key belongs
 // to the given project. Returns ErrNotFound if the key doesn't exist
 // OR if it belongs to a different project (don't leak existence
-// across tenants). After deletion the key's hash is gone — re-minting
+// across tenants). After deletion the key's hash is gone, re-minting
 // requires a new random key.
 func (s *SQLiteStore) DeleteAPIKey(
 	ctx context.Context,
@@ -553,7 +811,7 @@ func (s *SQLiteStore) DeleteAPIKey(
 
 // CreateProjectWebhook inserts a new webhook configuration row. The
 // caller is expected to set WebhookID + Secret; CreatedAt is set if
-// zero. EnabledClasses is JSON-encoded into the TEXT column — nil/empty
+// zero. EnabledClasses is JSON-encoded into the TEXT column, nil/empty
 // slice persists as NULL (interpreted as "all classes" by the
 // dispatcher).
 func (s *SQLiteStore) CreateProjectWebhook(ctx context.Context, wh *ProjectWebhook) error {
@@ -604,7 +862,7 @@ func (s *SQLiteStore) CreateProjectWebhook(ctx context.Context, wh *ProjectWebho
 
 // ListProjectWebhooksForProject returns every webhook for a project,
 // sorted newest first. The Secret field is intentionally NOT populated
-// — it's only ever surfaced once at creation time, never on list.
+//, it's only ever surfaced once at creation time, never on list.
 func (s *SQLiteStore) ListProjectWebhooksForProject(
 	ctx context.Context,
 	projectID string,
@@ -646,7 +904,7 @@ func (s *SQLiteStore) ListProjectWebhooksForProject(
 // ListEnabledProjectWebhooks returns only the enabled webhooks for a
 // project, WITH the Secret populated. Used by the dispatcher to sign
 // payloads. Never call this from a handler that returns the result to
-// a client — the secret is sensitive.
+// a client, the secret is sensitive.
 func (s *SQLiteStore) ListEnabledProjectWebhooks(
 	ctx context.Context,
 	projectID string,
@@ -687,7 +945,7 @@ func (s *SQLiteStore) ListEnabledProjectWebhooks(
 
 // DeleteProjectWebhook hard-deletes a webhook by id, scoped to project.
 // Returns ErrNotFound if the webhook is absent OR belongs to another
-// project — don't leak cross-tenant existence via id-guessing.
+// project, don't leak cross-tenant existence via id-guessing.
 func (s *SQLiteStore) DeleteProjectWebhook(
 	ctx context.Context,
 	webhookID, projectID string,
@@ -710,7 +968,7 @@ func (s *SQLiteStore) DeleteProjectWebhook(
 }
 
 // GetProjectWebhook returns one webhook by id with the Secret
-// populated. Project-scoped — passing a webhook_id that belongs to a
+// populated. Project-scoped, passing a webhook_id that belongs to a
 // different project returns ErrNotFound (not 403) so we don't leak
 // cross-tenant existence.
 func (s *SQLiteStore) GetProjectWebhook(
@@ -768,7 +1026,7 @@ func (s *SQLiteStore) RecordWebhookDelivery(
 	}
 	if d.DeliveryID == "" {
 		// Deterministic-ish: hash (webhook_id + created_at_nano + attempt).
-		// Doesn't need to be cryptographically unique — collision space is
+		// Doesn't need to be cryptographically unique, collision space is
 		// minuscule and a collision would just upsert one row.
 		raw := d.WebhookID + d.CreatedAt.Format(time.RFC3339Nano) +
 			fmt.Sprintf("/%d", d.Attempt)
@@ -884,7 +1142,7 @@ func nullableString(s string) sql.NullString {
 }
 
 // parseEnabledClasses converts the JSON TEXT column into a Go slice.
-// Returns nil if the column is NULL or malformed — both are
+// Returns nil if the column is NULL or malformed, both are
 // interpreted as "all classes" by the dispatcher, so the conservative
 // fallback is safe.
 func parseEnabledClasses(s sql.NullString) []string {
@@ -1029,7 +1287,7 @@ func (s *SQLiteStore) SaveEvents(ctx context.Context, batch []events.Event) erro
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback() // safe to call after Commit — becomes a no-op
+	defer tx.Rollback() // safe to call after Commit, becomes a no-op
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO events (event_id, execution_id, event_type, sequence, timestamp, duration_ms, payload)
@@ -1143,7 +1401,7 @@ func (s *SQLiteStore) ListExecutions(
 // ListExecutionsByFailureGroup returns executions whose failure_group_id
 // matches groupID, sorted by started_at DESC. Caller is expected to have
 // already verified that the group belongs to the auth context's project
-// (this method does not enforce project scoping — the failure_group_id
+// (this method does not enforce project scoping, the failure_group_id
 // column on executions IS already scoped to a project by virtue of the
 // failure_groups foreign key, but we never reach into that here).
 func (s *SQLiteStore) ListExecutionsByFailureGroup(
@@ -1228,7 +1486,7 @@ func scanExecutionRows(rows *sql.Rows) ([]*events.Execution, error) {
 }
 
 // ListEventsForExecution returns the events recorded against a single
-// execution, sorted by sequence ASC (oldest first — matching the order
+// execution, sorted by sequence ASC (oldest first, matching the order
 // they were emitted by the agent).
 func (s *SQLiteStore) ListEventsForExecution(
 	ctx context.Context,
@@ -1302,7 +1560,7 @@ func (s *SQLiteStore) CountExecutionsByStatusSince(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Phase 3a — Failure groups (crash detection)
+// Phase 3a, Failure groups (crash detection)
 // ─────────────────────────────────────────────────────────────────────────
 
 // parseFlexTime parses a timestamp written by either of the two
@@ -1325,7 +1583,7 @@ func parseFlexTime(s string) time.Time {
 
 // deriveGroupID returns a deterministic group_id for a given
 // (project_id, failure_class, signature) tuple. Same inputs always
-// produce the same output, across runs and across restarts — so no
+// produce the same output, across runs and across restarts, so no
 // coordination is needed to look up "the" group for a signature.
 //
 // 16 hex chars from SHA-256 = 64 bits of entropy, which is comfortably
@@ -1339,14 +1597,14 @@ func deriveGroupID(projectID, failureClass, signature string) string {
 
 // groupExecutionInternal is the shared upsert path for all detection
 // classes. Both GroupCrashedExecution and GroupTimeBudgetExceedance
-// are thin wrappers around this — they just supply the appropriate
+// are thin wrappers around this, they just supply the appropriate
 // failure_class + signature.
 //
 // Idempotency: if the execution already has a failure_group_id set
 // (because it was already linked to a different group, or a previous
 // call already linked it to this group), the function returns nil
 // without double-counting. This is also how "crash classification
-// wins over time-budget overlap" is enforced — the crash grouping
+// wins over time-budget overlap" is enforced, the crash grouping
 // runs first in the handler, sets failure_group_id, then the
 // subsequent time-budget call short-circuits here.
 func (s *SQLiteStore) groupExecutionInternal(
@@ -1379,7 +1637,7 @@ func (s *SQLiteStore) groupExecutionInternal(
 	// Newness probe: does the failure_group already exist? If not, this
 	// call is about to create it and we'll report isNew=true to the
 	// caller so it can fire webhook escalation. Racy under concurrent
-	// writers for the same signature — both observers could see "not
+	// writers for the same signature, both observers could see "not
 	// found" and both report isNew=true. For v1 with low concurrency the
 	// worst case is duplicate webhook deliveries, not data corruption.
 	// Production hardening (RETURNING-clause or transactional upsert)
@@ -1507,7 +1765,7 @@ func StepCountSignature(count int) string {
 
 // GroupStepCountExceedance upserts a failure_group with
 // failure_class=loops and an event-count-bucketed signature. Same
-// idempotency contract as the other groupers — runs in the handler
+// idempotency contract as the other groupers, runs in the handler
 // AFTER both crash and time-budget checks, so it's the lowest-priority
 // classification of the three.
 func (s *SQLiteStore) GroupStepCountExceedance(
@@ -1599,7 +1857,7 @@ func (s *SQLiteStore) FindFirstFailedToolName(
 
 // GroupToolFailure upserts a failure_group with
 // failure_class=tool_failures and signature=toolName. Same idempotency
-// contract as the other groupers — if the execution is already linked
+// contract as the other groupers, if the execution is already linked
 // to a higher-priority group (crash, time-budget, step-count), this is
 // a no-op.
 func (s *SQLiteStore) GroupToolFailure(
@@ -1672,7 +1930,7 @@ func (s *SQLiteStore) GroupPromptInjection(
 
 // costVelocityThresholdUSD is the absolute cost threshold at which an
 // execution is flagged as cost_velocity. Artificially low for v0.0.1
-// demo visibility — production would either raise this OR move to a
+// demo visibility, production would either raise this OR move to a
 // baseline-relative detector (Phase 5+).
 const costVelocityThresholdUSD = 0.001
 
@@ -1697,7 +1955,7 @@ func CostVelocitySignature(costUSD float64) string {
 
 // GroupCostVelocity upserts a failure_group with
 // failure_class=cost_velocity and a cost-bucketed signature. Same
-// idempotency contract — if the execution is already in a higher-
+// idempotency contract, if the execution is already in a higher-
 // priority group (crash, loop, tool/validator failure), this is a
 // no-op.
 func (s *SQLiteStore) GroupCostVelocity(
@@ -1730,7 +1988,7 @@ func (s *SQLiteStore) GroupIdenticalCallLoop(
 // GroupSimilarCallLoop upserts a failure_group with
 // failure_class=loops and signature="similar_call_<callHash>".
 // callHash is computed in the handler as a hash of the dominant
-// trigrams in the cluster — different stuck-pattern clusters get
+// trigrams in the cluster, different stuck-pattern clusters get
 // different signatures so they aggregate as distinct rows in the
 // dashboard.
 func (s *SQLiteStore) GroupSimilarCallLoop(
@@ -1823,7 +2081,7 @@ func (s *SQLiteStore) ListModelsForProjectSince(
 
 // GroupDriftSignal upserts a failure_group with failure_class=drift
 // and the caller-supplied signature. Same idempotency contract as the
-// other groupers — if the execution is already in a higher-priority
+// other groupers, if the execution is already in a higher-priority
 // group (crash, injection), this is a no-op.
 func (s *SQLiteStore) GroupDriftSignal(
 	ctx context.Context,
@@ -1837,7 +2095,7 @@ func (s *SQLiteStore) GroupDriftSignal(
 
 // ListLLMUserMessagesForExecution returns user_messages from this
 // execution's llm_call events, in sequence order. Empty / NULL
-// user_messages are filtered out — they don't contribute lexical
+// user_messages are filtered out, they don't contribute lexical
 // signal.
 func (s *SQLiteStore) ListLLMUserMessagesForExecution(
 	ctx context.Context,
@@ -1875,7 +2133,7 @@ func (s *SQLiteStore) ListLLMUserMessagesForExecution(
 // the current execution. Sorted by timestamp DESC (most recent first)
 // so when callers apply a limit, they get the freshest signal.
 //
-// Bounded by limit. Pass 0 for "no limit" — typically callers should
+// Bounded by limit. Pass 0 for "no limit", typically callers should
 // pass 500 or 1000 for v0.0.1; once we have a project-volume signal,
 // the limit becomes adaptive.
 func (s *SQLiteStore) ListLLMUserMessagesForProjectSince(
@@ -1928,7 +2186,7 @@ func (s *SQLiteStore) ListLLMUserMessagesForProjectSince(
 //
 // cost_wasted_usd is computed live as SUM(executions.estimated_cost_usd)
 // across all executions linked to the group. The stored
-// failure_groups.cost_wasted_usd column is currently unused — kept for
+// failure_groups.cost_wasted_usd column is currently unused, kept for
 // a future "manual override / human-adjusted" path. For now the
 // computed sum always wins.
 func (s *SQLiteStore) ListFailureGroups(
@@ -2006,7 +2264,7 @@ func (s *SQLiteStore) GetFailureGroupByClassSignature(
 	return s.GetFailureGroup(ctx, groupID)
 }
 
-// rowScanner is satisfied by both *sql.Row and *sql.Rows — letting
+// rowScanner is satisfied by both *sql.Row and *sql.Rows, letting
 // scanFailureGroup serve both single-row and iteration paths.
 type rowScanner interface {
 	Scan(dest ...any) error

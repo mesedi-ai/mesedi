@@ -11,7 +11,7 @@
 //	    authMiddleware(store),
 //	)(mux)
 //
-// The middlewares execute in the order listed — recover first (so a panic
+// The middlewares execute in the order listed, recover first (so a panic
 // in any subsequent middleware is caught), then logging (so even panic-
 // recovery actions are logged), then auth.
 package api
@@ -40,7 +40,7 @@ func NewTopChain(logger *slog.Logger) Middleware {
 // NewAuthChain returns the inner middleware that runs ONLY on protected
 // routes (POST /executions, POST /events, PATCH /executions/{id}). Today
 // this is bearer-token auth, schema-version enforcement, and per-project
-// rate limiting (in that order — auth must run first to attach project_id
+// rate limiting (in that order, auth must run first to attach project_id
 // to context; the rate limiter consumes that). Request-ID generation
 // will layer on top in a future slice without touching callers.
 func NewAuthChain(logger *slog.Logger, s store.Store) Middleware {
@@ -65,8 +65,8 @@ const CurrentSchemaVersion = "1"
 // tests and the bring-up README). A present-but-unsupported version is
 // rejected with 400.
 //
-// Once the real SDK ships with the header by default — i.e. once we can
-// assume any legitimate caller will set it — this policy tightens to
+// Once the real SDK ships with the header by default, i.e. once we can
+// assume any legitimate caller will set it, this policy tightens to
 // "missing → 400" as well. Until then, soft-mode minimizes friction
 // during local exploration.
 func schemaVersionMiddleware() Middleware {
@@ -102,7 +102,7 @@ func chain(mws ...Middleware) Middleware {
 // recoverMiddleware catches any panic in downstream handlers, logs the
 // stack trace, and returns a generic 500 to the client. Without this,
 // a panic would crash the entire process because Go's default behavior
-// is to abort on unrecovered panic in a goroutine — and each HTTP
+// is to abort on unrecovered panic in a goroutine, and each HTTP
 // request runs in its own goroutine.
 func recoverMiddleware(logger *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
@@ -117,7 +117,7 @@ func recoverMiddleware(logger *slog.Logger) Middleware {
 					)
 					// If headers haven't been sent yet, return 500. If they
 					// have, the connection is already partially written and
-					// the client will see a truncated response — nothing we
+					// the client will see a truncated response, nothing we
 					// can do about that besides log loudly.
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)

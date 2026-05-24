@@ -12,7 +12,7 @@
 // table keys are the canonical model identifiers (e.g. "claude-opus-4-6");
 // matchers like "claude-opus-4-6-20260301" still hit the row because the
 // stable price is keyed on the family. Unknown models return (0, 0, false)
-// — cost stays $0 rather than guessing.
+//, cost stays $0 rather than guessing.
 //
 // **Units**: prices in the table are USD per 1 million tokens, matching
 // the way every provider currently publishes them. The compute helper
@@ -69,8 +69,8 @@ var priceTable = map[string]modelPrice{
 //
 // Resolution: tries the model name as given (case-insensitive), then
 // falls back to prefix matches against the table keys. Unknown models
-// return 0.0 (no estimated cost) rather than guessing — the dashboard
-// renders this as "—" naturally.
+// return 0.0 (no estimated cost) rather than guessing, the dashboard
+// renders this as ", " naturally.
 //
 // Example:
 //
@@ -111,7 +111,7 @@ func lookup(model string) (modelPrice, bool) {
 	}
 	// Prefix-match: scan the table, prefer the longest key that's a
 	// prefix of the input. This avoids accidentally matching
-	// "claude-opus-4-1" with a row keyed "claude" — we want the most
+	// "claude-opus-4-1" with a row keyed "claude", we want the most
 	// specific known family.
 	var (
 		best    modelPrice

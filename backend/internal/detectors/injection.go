@@ -2,7 +2,7 @@
 // the storage layer (where SQL handles the predicate-pushable bits) or
 // the handler layer (which orchestrates but doesn't classify).
 //
-// Today's only detector is prompt-injection — regex pattern matching
+// Today's only detector is prompt-injection, regex pattern matching
 // against LLM user messages. Future detectors planned for this package:
 //
 //   - Identical-call loop detector (the 3rd Phase-4 sub-detector)
@@ -10,7 +10,7 @@
 //   - Drift detector (semantic drift over time)
 //   - Cost-velocity detector (cost > baseline × N)
 //
-// All detectors should be PURE FUNCTIONS — given input text/events,
+// All detectors should be PURE FUNCTIONS, given input text/events,
 // return a classification. Side effects (DB writes) live in handlers.
 package detectors
 
@@ -29,12 +29,12 @@ type InjectionPattern struct {
 // DetectInjection returns the FIRST match, so the most-specific
 // patterns must come first.
 //
-// Tier 1 (literal sentinels — high precision, low recall): patterns
+// Tier 1 (literal sentinels, high precision, low recall): patterns
 // that match literal strings rarely found in benign text. If we see
 // "[INST]" or "<<SYS>>" in user input, it's almost certainly an attack
 // trying to spoof a chat-template control token.
 //
-// Tier 2 (named jailbreak / mode phrases): "DAN", "developer mode" —
+// Tier 2 (named jailbreak / mode phrases): "DAN", "developer mode" , 
 // well-known persona overrides.
 //
 // Tier 3 (semantic role override): "you are now", "from now on you".
@@ -90,7 +90,7 @@ var injectionPatterns = []InjectionPattern{
 // and returns the first match's signature name. Returns ("", false)
 // when no patterns match.
 //
-// This is a low-recall / high-precision detector by design — false
+// This is a low-recall / high-precision detector by design, false
 // positives are far worse than false negatives for an alerting
 // surface. Customers will tune their own patterns once the dashboard
 // supports per-project rules (Phase 7+).

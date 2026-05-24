@@ -1,16 +1,16 @@
 /**
- * Event types and execution records — the TypeScript mirror of the Go
+ * Event types and execution records, the TypeScript mirror of the Go
  * backend's wire format and the Python SDK's data model.
  *
  * Source-of-truth lives in the Go backend at
  * `backend/internal/events/types.go`. Any new EventType or Status
- * added there MUST be added here too — strict-JSON decoding on the
+ * added there MUST be added here too, strict-JSON decoding on the
  * backend will reject events whose fields it doesn't recognize.
  *
  * The wire format uses RFC 3339 UTC timestamps for every time field.
  */
 /**
- * RFC 3339 UTC timestamp with microsecond precision — the format the
+ * RFC 3339 UTC timestamp with microsecond precision, the format the
  * Go backend's time.Time RFC3339 marshaller accepts. Example:
  * "2026-05-14T22:17:33.123456Z".
  *
@@ -52,7 +52,7 @@ export const Status = {
     VALIDATION_FAILED: "validation_failed",
 };
 /**
- * Build the body for POST /executions — only the fields valid at
+ * Build the body for POST /executions, only the fields valid at
  * execution start.
  */
 export function executionStartPayload(e) {
@@ -65,7 +65,7 @@ export function executionStartPayload(e) {
     };
 }
 /**
- * Build the body for PATCH /executions/{id} — omit any undefined
+ * Build the body for PATCH /executions/{id}, omit any undefined
  * fields so the backend's strict-decode doesn't reject them.
  */
 export function executionEndPayload(e) {

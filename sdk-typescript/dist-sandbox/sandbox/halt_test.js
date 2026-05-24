@@ -4,16 +4,16 @@
  * Direct port of `sdk-python/sandbox/halt_test.py`. Demonstrates the
  * three halt triggers in the TypeScript SDK:
  *
- *   1. Wall-clock — an agent that would run forever halts after N seconds
- *   2. Step count — an agent that emits too many events halts after N steps
- *   3. Token total — an agent that consumes too many tokens halts mid-run
+ *   1. Wall-clock, an agent that would run forever halts after N seconds
+ *   2. Step count, an agent that emits too many events halts after N steps
+ *   3. Token total, an agent that consumes too many tokens halts mid-run
  *
  * For each demo: wraps a function with `wrap({ budget }, fn)` and
  * confirms that:
  *   - MesediHalt fires at a safe boundary (between tool calls, not
  *     mid-tool-call)
  *   - The wrapped function returns `undefined` (caller doesn't see
- *     the exception — same semantics as Python's `return None`)
+ *     the exception, same semantics as Python's `return None`)
  *   - The execution lands in SQLite with status=halted and a
  *     crash_signature like `halt:wall_clock`
  *   - Standard try/finally cleanup still runs
@@ -30,7 +30,7 @@ configure({
     apiKey: "mesedi_sk_dev_local_only",
     baseUrl: "http://localhost:8080",
 });
-// 200ms sleep per call — emits one tool_call event per invocation, so
+// 200ms sleep per call, emits one tool_call event per invocation, so
 // the step-count budget will trip after N calls. The sleep also
 // guarantees wall-clock budgets trip predictably.
 const slowTool = tool(async function slowTool() {
@@ -40,7 +40,7 @@ const slowTool = tool(async function slowTool() {
 // ── Wall-clock halt ──────────────────────────────────────────────────
 const runawayWallClockBudget = { maxWallClockSeconds: 1.0 };
 const runawayWallClockAgent = wrap({ budget: runawayWallClockBudget }, async function runaway_wall_clock_agent() {
-    // Would loop forever calling slowTool — but the 1s wall-clock
+    // Would loop forever calling slowTool, but the 1s wall-clock
     // budget halts it after ~5 iterations. Cleanup runs in `finally`
     // to prove standard JS cleanup semantics survive the halt.
     const cleanupRan = [];
@@ -67,9 +67,9 @@ const runawayStepCountAgent = wrap({ budget: runawayStepCountBudget }, async fun
     }
     return "done";
 });
-// ── No budget — control case ─────────────────────────────────────────
+// ── No budget, control case ─────────────────────────────────────────
 const cleanAgent = wrap(async function clean_agent() {
-    // No budget — runs to completion normally.
+    // No budget, runs to completion normally.
     await slowTool();
     await slowTool();
     return "no budget, no halt";

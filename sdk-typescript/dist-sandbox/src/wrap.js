@@ -1,5 +1,5 @@
 /**
- * wrap() — Mesedi's primary observation primitive for TypeScript.
+ * wrap(), Mesedi's primary observation primitive for TypeScript.
  *
  * TypeScript doesn't have stable decorators in regular JS, so wrap()
  * is a HIGHER-ORDER FUNCTION rather than a decorator. The shape:
@@ -49,22 +49,22 @@ import { HaltStreamReader } from "./halt_stream.js";
  */
 export function wrap(fnOrOpts, maybeFn) {
     // Support both call shapes:
-    //   wrap(fn) — no options
-    //   wrap({...opts}, fn) — with options
+    //   wrap(fn), no options
+    //   wrap({...opts}, fn), with options
     let opts;
     let fn;
     if (typeof fnOrOpts === "function") {
         opts = {};
         // Cast: `typeof === "function"` narrows to the broad built-in
         // `Function` type rather than to our specific signature, but at
-        // runtime it IS our signature — the call site guarantees that
+        // runtime it IS our signature, the call site guarantees that
         // shape since the function position is statically typed.
         fn = fnOrOpts;
     }
     else {
         opts = fnOrOpts;
         if (!maybeFn) {
-            throw new TypeError("wrap() requires a function — pass either wrap(fn) or wrap(options, fn).");
+            throw new TypeError("wrap() requires a function, pass either wrap(fn) or wrap(options, fn).");
         }
         fn = maybeFn;
     }
@@ -82,7 +82,7 @@ export function wrap(fnOrOpts, maybeFn) {
             sdk_version: "0.0.4",
         };
         // Construct a budget tracker iff a budget was supplied. Stays
-        // undefined for un-budgeted wraps — checkBudget() then no-ops.
+        // undefined for un-budgeted wraps, checkBudget() then no-ops.
         const tracker = opts.budget ? new BudgetTracker(opts.budget) : undefined;
         // Sub-slice 21e: if a budget is configured, spawn an SSE reader
         // subscribed to /executions/{id}/halt-stream. When the backend
@@ -116,16 +116,16 @@ export function wrap(fnOrOpts, maybeFn) {
             execution.duration_ms = Math.round(performance.now() - startWall);
             execution.ended_at = utcNowRfc3339();
             if (isMesediHalt(err)) {
-                // Controlled halt — record as halted, NOT crashed. The
+                // Controlled halt, record as halted, NOT crashed. The
                 // crash_signature carries the trigger so the dashboard can
-                // group halts by cause (`halt:wall_clock` etc.) — same wire
+                // group halts by cause (`halt:wall_clock` etc.), same wire
                 // format the Python SDK emits.
                 execution.status = Status.HALTED;
                 // err is narrowed to MesediHalt here by isMesediHalt's type
                 // guard, so the trigger access is type-safe.
                 execution.crash_signature = `halt:${err.trigger}`;
                 client.submitExecutionEnd(execution);
-                // Return undefined — DON'T re-throw. The halt is a
+                // Return undefined, DON'T re-throw. The halt is a
                 // controlled stop; the caller's downstream code should NOT
                 // see an exception. This matches Python's `return None`
                 // behavior in wrap.py.
@@ -149,7 +149,7 @@ export function wrap(fnOrOpts, maybeFn) {
  *
  * Matches the Python SDK formula: SHA-256 of (error class name +
  * the first 5 lines of the formatted error). Truncates to 16 hex
- * chars — collision-resistant at scale, easy to display in
+ * chars, collision-resistant at scale, easy to display in
  * dashboards.
  *
  * The backend's Phase-3a crash grouper uses the same input shape, so

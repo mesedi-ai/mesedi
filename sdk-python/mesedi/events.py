@@ -118,7 +118,7 @@ class Execution:
 class Event:
     """A single observation within an execution.
 
-    The `payload` field is intentionally opaque JSON — the backend stores
+    The `payload` field is intentionally opaque JSON, the backend stores
     it as a raw blob and doesn't validate shape, so per-event-type
     payload schemas live SDK-side (Phase 3+) rather than as backend
     contracts. For v0.0.1, callers pass whatever dict makes sense for
@@ -134,7 +134,7 @@ class Event:
     payload: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Wire-format dict — drop None duration_ms to keep the body lean."""
+        """Wire-format dict, drop None duration_ms to keep the body lean."""
         out: Dict[str, Any] = {
             "event_id": self.event_id,
             "execution_id": self.execution_id,

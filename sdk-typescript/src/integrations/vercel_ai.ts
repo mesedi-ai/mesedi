@@ -1,5 +1,5 @@
 /**
- * Vercel AI SDK integration — wrap `generateText` to emit Mesedi
+ * Vercel AI SDK integration, wrap `generateText` to emit Mesedi
  * telemetry.
  *
  * Usage:
@@ -29,7 +29,7 @@
  * `wrapGenerateText` is a higher-order function that takes the real
  * Vercel `generateText` and returns a drop-in replacement with the
  * same signature plus telemetry side effects. Customers don't have
- * to refactor their agent code — they just swap the import.
+ * to refactor their agent code, they just swap the import.
  *
  * Multi-step (ReAct) generation is the common case for agent
  * workflows: `generateText({ maxSteps: 5, tools: { ... } })` makes
@@ -42,10 +42,10 @@
  * Mesedi instrumentation produces.
  *
  * Out of scope for this slice:
- *   - `streamText` / `streamObject` — emit-on-stream-end variant
+ *   - `streamText` / `streamObject`, emit-on-stream-end variant
  *     would need to drain the stream first or instrument the
  *     stream's transform. Deferred to a later slice.
- *   - `generateObject` — structured output. The shape is similar to
+ *   - `generateObject`, structured output. The shape is similar to
  *     `generateText`'s but the response field is `.object` not
  *     `.text`. Will compose well with the same wrapper pattern.
  *   - OpenTelemetry-based instrumentation via `experimental_telemetry`.
@@ -58,7 +58,7 @@ import { getClient } from "../client.js";
 import { currentExecutionContext, newEventId } from "../context.js";
 import { Event, EventType, utcNowRfc3339 } from "../events.js";
 
-// Truncation budgets — kept in sync with the Python emit_llm_call and
+// Truncation budgets, kept in sync with the Python emit_llm_call and
 // the TS Anthropic patch so wire-format payloads from this adapter and
 // from hand-written code are byte-indistinguishable.
 const MAX_SYSTEM = 1000;
@@ -87,7 +87,7 @@ interface GenerateTextOptionsLike {
 /**
  * Loose duck-typed shape for the Vercel `generateText` result. We
  * read .text, .usage, .toolCalls, .toolResults, .steps. All fields
- * are optional — older versions, custom providers, or streaming
+ * are optional, older versions, custom providers, or streaming
  * adapters may omit them.
  */
 interface GenerateTextResultLike {
@@ -140,7 +140,7 @@ export type GenerateTextLike = (
  * each invocation emits Mesedi telemetry. Returns a function with
  * the same signature.
  *
- * Outside a `wrap()` execution, the events silently no-op — same
+ * Outside a `wrap()` execution, the events silently no-op, same
  * fail-open pattern as every other Mesedi primitive.
  */
 export function wrapGenerateText<F extends GenerateTextLike>(
@@ -176,7 +176,7 @@ export function wrapGenerateText<F extends GenerateTextLike>(
     const durationMs = Date.now() - startedAt;
     const ctx = currentExecutionContext();
     if (!ctx) {
-      // No active execution — nothing to attach events to. Return
+      // No active execution, nothing to attach events to. Return
       // the result unchanged.
       return result;
     }
@@ -232,7 +232,7 @@ export function wrapGenerateText<F extends GenerateTextLike>(
 }
 
 /**
- * Inline emit_llm_call helper — direct equivalent of the Python
+ * Inline emit_llm_call helper, direct equivalent of the Python
  * `mesedi.observe.emit_llm_call`. Drift / similar-call /
  * identical-call / cost-velocity / prompt-injection detectors all
  * read from the resulting event payload, so a manually-emitted
@@ -252,7 +252,7 @@ function emitLlmCallEvent(args: {
   const ctx = currentExecutionContext();
   if (!ctx) return;
 
-  // Halt-safe boundary — matches @mesedi.tool, the Anthropic patch,
+  // Halt-safe boundary, matches @mesedi.tool, the Anthropic patch,
   // and the Python emit_llm_call.
   ctx.checkBudget();
   if (ctx.budgetTracker) {
@@ -379,7 +379,7 @@ function emitToolCallEvent(
  * Extract a stable model identifier from a Vercel model object.
  *
  * Vercel provider models expose either `.modelId` (newer) or
- * `.id` (older). For unknown shapes we try toString() — most
+ * `.id` (older). For unknown shapes we try toString(), most
  * providers stringify to a human-readable label. Last resort:
  * "unknown".
  */

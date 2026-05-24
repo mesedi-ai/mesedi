@@ -1,6 +1,6 @@
 # Similar-call loop
 
-Your agent made **three or more LLM calls whose `user_message` text was nearly identical** — same prompt structure, only minor field-level edits between calls. Mesedi's `similar_call` detector computes char-3-gram cosine distance between every pair of `llm_call` events in the execution and flags clusters where 3+ messages fall within a 0.20 distance of each other. The signature hash is derived from the cluster's dominant trigrams, so different stuck patterns across different executions aggregate as different failure groups.
+Your agent made **three or more LLM calls whose `user_message` text was nearly identical**, same prompt structure, only minor field-level edits between calls. Mesedi's `similar_call` detector computes char-3-gram cosine distance between every pair of `llm_call` events in the execution and flags clusters where 3+ messages fall within a 0.20 distance of each other. The signature hash is derived from the cluster's dominant trigrams, so different stuck patterns across different executions aggregate as different failure groups.
 
 ## What this catches that `identical_call` misses
 
@@ -12,11 +12,11 @@ Your agent made **three or more LLM calls whose `user_message` text was nearly i
 
 ## What this does NOT catch
 
-True semantic paraphrases — `"Extract the date"` vs `"Find the date mentioned"` vs `"What date appears in this doc"` — usually share too few char-3-grams to cluster, even though a human reads them as the same intent. Semantic-paraphrase detection requires embedding similarity, which is on the roadmap once Mesedi has an embeddings substrate.
+True semantic paraphrases, `"Extract the date"` vs `"Find the date mentioned"` vs `"What date appears in this doc"`, usually share too few char-3-grams to cluster, even though a human reads them as the same intent. Semantic-paraphrase detection requires embedding similarity, which is on the roadmap once Mesedi has an embeddings substrate.
 
 ## How to find the bug
 
-Open the execution's event timeline and scan the `user_message` field across the `llm_call` events. The cluster will be visually obvious: three or more rows where the text is 90%+ the same and only one field changes between them. The field that's changing IS the bug — that's the loop variable.
+Open the execution's event timeline and scan the `user_message` field across the `llm_call` events. The cluster will be visually obvious: three or more rows where the text is 90%+ the same and only one field changes between them. The field that's changing IS the bug, that's the loop variable.
 
 Three common shapes:
 
@@ -40,4 +40,4 @@ The remediation depends on which shape it is, but the four standard patterns:
 
 ## Auto-fix in a future Mesedi release
 
-The v2 roadmap (`docs/REPAIR_TIER_ROADMAP.md`) includes SDK-layer near-duplicate dedup as a Tier 3 capability: when the SDK observes `similar_call` clustering inside a live execution, it can either short-circuit the loop with an error or return the first call's response for the duplicates. Opt-in per project per class, never on by default — false positives on this would silently corrupt agent behavior.
+The v2 roadmap (`docs/REPAIR_TIER_ROADMAP.md`) includes SDK-layer near-duplicate dedup as a Tier 3 capability: when the SDK observes `similar_call` clustering inside a live execution, it can either short-circuit the loop with an error or return the first call's response for the duplicates. Opt-in per project per class, never on by default, false positives on this would silently corrupt agent behavior.

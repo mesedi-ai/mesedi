@@ -7,8 +7,8 @@ failure_class=loops and a count-bucketed signature (step_count_10+,
 _50+, _100+, _500+, _5000+).
 
 This script fires two runs:
-  1. A polite agent emitting 5 tool calls — UNDER the threshold.
-  2. A chatty agent emitting 15 tool calls — over the threshold,
+  1. A polite agent emitting 5 tool calls, UNDER the threshold.
+  2. A chatty agent emitting 15 tool calls, over the threshold,
      lands in step_count_10+ bucket.
 
 After running, the dashboard's Failure groups table should show ONE
@@ -35,7 +35,7 @@ mesedi.configure(
 
 @mesedi.tool
 def echo(s: str) -> str:
-    """Trivial tool — every call emits a tool_call event."""
+    """Trivial tool, every call emits a tool_call event."""
     return s
 
 
@@ -66,13 +66,13 @@ def _ms(seconds: float) -> str:
 
 
 if __name__ == "__main__":
-    print("\n── Run 1: polite_agent (5 tool_calls — under threshold) ──")
+    print("\n── Run 1: polite_agent (5 tool_calls, under threshold) ──")
     t = time.perf_counter()
     result = polite_agent("hi")
     print(f"  wall-clock: {_ms(time.perf_counter() - t)}")
     print(f"  emitted: 5 tool_call events")
 
-    print("\n── Run 2: chatty_agent (15 tool_calls — over threshold) ──")
+    print("\n── Run 2: chatty_agent (15 tool_calls, over threshold) ──")
     t = time.perf_counter()
     result = chatty_agent("hi")
     print(f"  wall-clock: {_ms(time.perf_counter() - t)}")

@@ -1,28 +1,28 @@
 // Stripe billing endpoints. This file implements the four backend
 // surfaces #120 needs:
 //
-//   POST /billing/checkout   — auth-required. Creates a Stripe
+//   POST /billing/checkout: auth-required. Creates a Stripe
 //                              Checkout session for the calling
 //                              project to upgrade Hobby → Pro;
 //                              returns the hosted-Checkout URL.
 //
-//   POST /billing/portal     — auth-required. Creates a Stripe
+//   POST /billing/portal: auth-required. Creates a Stripe
 //                              Customer Portal session so an
 //                              already-paying project can update
 //                              card, see invoices, or cancel.
 //
-//   GET  /billing            — auth-required. Returns the calling
+//   GET  /billing: auth-required. Returns the calling
 //                              project's tier, current-period
 //                              executions used, period bounds, and
 //                              tier-defined limits. Drives the
 //                              dashboard /app/billing page.
 //
-//   GET  /billing/usage      — auth-required. Returns daily
+//   GET  /billing/usage: auth-required. Returns daily
 //                              execution counts for the last 30
 //                              days. Drives the usage chart on the
 //                              billing page.
 //
-//   POST /billing/webhook    — PUBLIC (no bearer). Receives Stripe
+//   POST /billing/webhook: PUBLIC (no bearer). Receives Stripe
 //                              events. Authenticity is verified via
 //                              the Stripe-Signature header and the
 //                              shared webhook secret. Dispatches
@@ -32,7 +32,7 @@
 //                              invoice.paid.
 //
 // Enforcement (Hobby silent-drop, Pro overage usage records) is
-// deliberately not wired in this slice — the counter increments on
+// deliberately not wired in this slice, the counter increments on
 // every POST /executions but nothing gates on it yet. The follow-up
 // enforcement slice adds those gates without changing the schema.
 package api
@@ -150,6 +150,21 @@ type BillingStatusResponse struct {
 	Tier                     string     `json:"tier"`
 	ExecutionsThisPeriod     int64      `json:"executions_this_period"`
 	IncludedExecutions       int64      `json:"included_executions"`
+	// GrantedExecutions surfaces the raw admin-granted bonus so the
+	// dashboard can render it as marketing social proof on the tier
+	// card ("5,000 included · +100,000 admin granted"). Zero means
+	// no grant; negative means a prior grant was revoked. This value
+	// is zeroed out in the response when the grant has expired.
+	GrantedExecutions int64 `json:"granted_executions"`
+	// GrantedExecutionsExpiresAt is the moment the bonus stops
+	// counting. Nil means no expiration set. When the dashboard
+	// renders the grant on the tier card, it should also show this
+	// date + a days-remaining countdown.
+	GrantedExecutionsExpiresAt *time.Time `json:"granted_executions_expires_at,omitempty"`
+	// TierExpiresAt is the moment an admin-flipped tier reverts to
+	// Hobby. Nil means the tier is permanent. The dashboard shows
+	// this on the current-tier row when set.
+	TierExpiresAt            *time.Time `json:"tier_expires_at,omitempty"`
 	OveragePricePerExecution float64    `json:"overage_price_per_execution_usd"`
 	CurrentPeriodStart       *time.Time `json:"current_period_start,omitempty"`
 	CurrentPeriodEnd         *time.Time `json:"current_period_end,omitempty"`
@@ -203,19 +218,53 @@ func (h *Handlers) HandleGetBilling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Lazy expiration enforcement (#168).
+	// 1) If tier_expires_at has passed, the project effectively
+	//    reverts to Hobby for response purposes. The DB column still
+	//    holds the original tier value for auditing.
+	// 2) If granted_executions_expires_at has passed, the bonus
+	//    counts as zero for the included-executions math, and the
+	//    granted_executions field in the response is zeroed too so
+	//    the customer dashboard doesn't show a stale "+N admin
+	//    granted" badge.
+	now := time.Now().UTC()
+	effectiveTier := p.Tier
+	if p.TierExpiresAt != nil && now.After(*p.TierExpiresAt) {
+		effectiveTier = TierHobby
+	}
+	effectiveGrant := p.GrantedExecutions
+	if p.GrantedExecutionsExpiresAt != nil && now.After(*p.GrantedExecutionsExpiresAt) {
+		effectiveGrant = 0
+	}
+
+	// Effective included executions = base tier allowance + any admin-
+	// granted credits (see #150 promo lever). Enterprise has 0 base
+	// (treated as unlimited via the bool below) and the grant adds
+	// on top of that conceptually; in practice enterprise customers
+	// don't go through the grant flow.
+	included := tierExecutionLimit(effectiveTier) + effectiveGrant
+	if included < 0 {
+		// Negative grants larger than the tier base would produce a
+		// nonsense effective limit; floor at zero so the dashboard
+		// renders "0 of 0" instead of a confusing negative.
+		included = 0
+	}
 	resp := BillingStatusResponse{
-		OK:                       true,
-		ProjectID:                p.ProjectID,
-		Tier:                     p.Tier,
-		ExecutionsThisPeriod:     p.ExecutionsThisPeriod,
-		IncludedExecutions:       tierExecutionLimit(p.Tier),
-		OveragePricePerExecution: ProOveragePriceUSD,
-		CurrentPeriodStart:       p.CurrentPeriodStart,
-		CurrentPeriodEnd:         p.CurrentPeriodEnd,
-		StripeCustomerID:         p.StripeCustomerID,
-		StripeSubscriptionID:     p.StripeSubscriptionID,
-		CanUpgrade:               p.Tier == TierHobby && h.Stripe.Configured(),
-		CanManage:                p.StripeCustomerID != "" && h.Stripe.Configured(),
+		OK:                         true,
+		ProjectID:                  p.ProjectID,
+		Tier:                       effectiveTier,
+		ExecutionsThisPeriod:       p.ExecutionsThisPeriod,
+		IncludedExecutions:         included,
+		GrantedExecutions:          effectiveGrant,
+		GrantedExecutionsExpiresAt: p.GrantedExecutionsExpiresAt,
+		TierExpiresAt:              p.TierExpiresAt,
+		OveragePricePerExecution:   ProOveragePriceUSD,
+		CurrentPeriodStart:         p.CurrentPeriodStart,
+		CurrentPeriodEnd:           p.CurrentPeriodEnd,
+		StripeCustomerID:           p.StripeCustomerID,
+		StripeSubscriptionID:       p.StripeSubscriptionID,
+		CanUpgrade:                 effectiveTier == TierHobby && h.Stripe.Configured(),
+		CanManage:                  p.StripeCustomerID != "" && h.Stripe.Configured(),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -254,7 +303,7 @@ func (h *Handlers) HandleGetBillingUsage(w http.ResponseWriter, r *http.Request)
 // URL the dashboard will window.location.assign to.
 //
 // Idempotency: clicking the upgrade button twice creates two
-// sessions; that's fine — Stripe expires unused sessions after 24h.
+// sessions; that's fine, Stripe expires unused sessions after 24h.
 // On the success URL Stripe redirects with ?session_id={CHECKOUT_SESSION_ID}
 // so the dashboard can read the current /billing state immediately.
 func (h *Handlers) HandleCreateCheckout(w http.ResponseWriter, r *http.Request) {
@@ -380,7 +429,7 @@ func (h *Handlers) HandleCreatePortal(w http.ResponseWriter, r *http.Request) {
 // event (even when we choose not to act) so Stripe stops retrying.
 //
 // The handler must read the raw request body for signature
-// verification — make sure no upstream middleware consumes it
+// verification, make sure no upstream middleware consumes it
 // before this runs. Today the chain is recover → log → router, and
 // none of those touch the body.
 func (h *Handlers) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
@@ -392,7 +441,7 @@ func (h *Handlers) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cap body size to prevent abuse — Stripe events are kilobytes,
+	// Cap body size to prevent abuse, Stripe events are kilobytes,
 	// not megabytes; 1 MB is comfortable headroom.
 	const maxBody = 1 << 20
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
@@ -407,7 +456,14 @@ func (h *Handlers) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := webhook.ConstructEvent(body, sig, h.Stripe.WebhookSecret)
+	// Use ConstructEventWithOptions with IgnoreAPIVersionMismatch so a
+	// newer Stripe API version on the webhook endpoint (e.g. dahlia)
+	// doesn't reject events when stripe-go is pinned to an older one
+	// (e.g. basil). The fields we read (id, type, data.object) are
+	// stable across these versions.
+	event, err := webhook.ConstructEventWithOptions(body, sig, h.Stripe.WebhookSecret, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
 	if err != nil {
 		// Invalid signature is the normal case for misconfigured
 		// secrets or replay attempts; return 400 (not 401, which
@@ -438,7 +494,7 @@ func (h *Handlers) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 // silently acknowledged. The context passed in is the request
 // context; per-handler database calls use context.Background()
 // because Stripe should not see request cancellation as "event
-// failed" — the response status is what controls Stripe's retry
+// failed", the response status is what controls Stripe's retry
 // behavior, not whether the side effects finished.
 func (h *Handlers) dispatchStripeEvent(
 	ctx context.Context,
@@ -449,7 +505,15 @@ func (h *Handlers) dispatchStripeEvent(
 	switch event.Type {
 	case "checkout.session.completed":
 		return h.handleCheckoutCompleted(event)
-	case "customer.subscription.updated":
+	case "customer.subscription.created", "customer.subscription.updated":
+		// Stripe fires `created` when the Checkout flow finalizes a new
+		// subscription and `updated` on subsequent changes (renewal,
+		// cancel-at-period-end, plan switch). Both events carry the
+		// same stripe.Subscription payload shape, so the same handler
+		// works for both, and listening on `created` is critical
+		// because the Checkout session itself doesn't carry the period
+		// bounds, so without this case the dashboard would show
+		// "current period syncing…" until the next renewal.
 		return h.handleSubscriptionUpdated(event)
 	case "customer.subscription.deleted":
 		return h.handleSubscriptionDeleted(event)
@@ -490,7 +554,7 @@ func (h *Handlers) handleCheckoutCompleted(event stripe.Event) error {
 	}
 	// Period bounds may not be on the Checkout session itself; the
 	// subsequent customer.subscription.updated event will fill them
-	// in. For now, set to nil — the dashboard handles missing bounds
+	// in. For now, set to nil, the dashboard handles missing bounds
 	// gracefully.
 	return h.Store.UpdateProjectBilling(
 		context.Background(),
@@ -569,7 +633,7 @@ func (h *Handlers) handleInvoicePaid(event stripe.Event) error {
 	}
 	periodStart, periodEnd := invoicePeriodBounds(&invoice)
 	if periodStart == nil || periodEnd == nil {
-		// Invoice without period bounds — nothing to roll over.
+		// Invoice without period bounds, nothing to roll over.
 		return nil
 	}
 	return h.Store.ResetExecutionsThisPeriod(

@@ -1,6 +1,6 @@
 /**
  * Parity smoke test: exercises every TS-SDK helper that mirrors the
- * Python SDK — checkpoint(), validatorResult(), instrumentAnthropic().
+ * Python SDK, checkpoint(), validatorResult(), instrumentAnthropic().
  *
  * Like sdk-python/sandbox/{observe_test.py, anthropic_test.py,
  * injection_test.py} compressed into a single script.

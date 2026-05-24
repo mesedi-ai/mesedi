@@ -1,4 +1,4 @@
-"""CrewAI integration — auto-instrument a Crew with Mesedi telemetry.
+"""CrewAI integration, auto-instrument a Crew with Mesedi telemetry.
 
 Usage:
 
@@ -8,13 +8,13 @@ Usage:
     @mesedi.wrap
     def run_my_crew(question: str) -> str:
         crew = build_crew()       # however you construct yours
-        instrument_crew(crew)     # one-liner — see below for what this does
+        instrument_crew(crew)     # one-liner, see below for what this does
         result = crew.kickoff(inputs={"question": question})
         return str(result)
 
 Design:
 
-CrewAI builds on LangChain for the LLM layer — every Agent owns a
+CrewAI builds on LangChain for the LLM layer, every Agent owns a
 LangChain ChatModel as its ``llm`` attribute. That means the
 LangChain ``MesediCallbackHandler`` we already ship gets us full
 LLM-call and tool-call visibility "for free" if we just attach it to
@@ -23,7 +23,7 @@ each agent's LLM. ``instrument_crew`` does exactly that.
 On top of LLM-level telemetry, CrewAI exposes two crew-level
 callbacks that surface CrewAI's own semantics:
 
-  step_callback(step)    — fires for each ReAct-style agent step
+  step_callback(step): fires for each ReAct-style agent step
                            (AgentAction when the agent chooses a
                            tool, AgentFinish when it stops). Emits
                            ``checkpoint`` events tagged
@@ -32,7 +32,7 @@ callbacks that surface CrewAI's own semantics:
                            timeline shows the agent's reasoning
                            rhythm in addition to the underlying LLM
                            calls.
-  task_callback(output)  — fires when a Task completes. Emits a
+  task_callback(output): fires when a Task completes. Emits a
                            ``crewai.task_completed`` checkpoint.
 
 These checkpoint events complement, not duplicate, the LangChain
@@ -51,7 +51,7 @@ Out of scope for this slice:
     used in CrewAI 0.30+; if a future major version moves them, the
     instrumentation silently no-ops on those attributes (rather than
     raising) and the surface still works at the LangChain layer.
-  - Hierarchical / manager-agent Crews — the manager's LLM is also
+  - Hierarchical / manager-agent Crews, the manager's LLM is also
     attached because it shows up in ``crew.agents``. If a future
     version stores the manager separately, we'd need to walk
     additional attributes; we'll add that when a customer reports it.
@@ -90,7 +90,7 @@ def instrument_crew(
     needed (e.g. to a separate ChatModel not owned by an agent).
 
     Outside a ``@mesedi.wrap`` execution, the emitted events silently
-    no-op — same fail-open pattern as every other Mesedi primitive.
+    no-op, same fail-open pattern as every other Mesedi primitive.
     """
     if handler is None:
         handler = MesediCallbackHandler()
@@ -107,7 +107,7 @@ def instrument_crew(
         except Exception:
             # Some CrewAI versions use Pydantic models that reject
             # attribute assignment after instantiation; degrade
-            # gracefully — LLM-level telemetry still works.
+            # gracefully, LLM-level telemetry still works.
             pass
 
     # 3. Set task_callback if not already set.
@@ -164,11 +164,11 @@ def _attach_handler_to_llm(agent: Any, handler: MesediCallbackHandler) -> None:
                 pass
         return
 
-    # Pattern 1: nothing there — assign a new list.
+    # Pattern 1: nothing there, assign a new list.
     try:
         setattr(llm, "callbacks", [handler])
     except Exception:
-        # Frozen Pydantic model or similar — give up silently. LLM
+        # Frozen Pydantic model or similar, give up silently. LLM
         # observability via this Agent will be missing but the
         # CrewAI-level step/task callbacks still work.
         pass
@@ -179,7 +179,7 @@ def mesedi_step_callback(step: Any) -> None:
 
     The ``step`` argument is either an ``AgentAction`` (the agent
     chose a tool to invoke) or an ``AgentFinish`` (the agent has
-    decided it's done). Both classes are duck-typed below — we don't
+    decided it's done). Both classes are duck-typed below, we don't
     import them from CrewAI so this module is import-safe in
     environments where crewai is not installed (e.g. test runs).
 
@@ -203,13 +203,13 @@ def mesedi_step_callback(step: Any) -> None:
             tool_input=tool_input,
         )
     elif hasattr(step, "return_values") or hasattr(step, "output"):
-        # AgentFinish — final answer. We don't try to capture
+        # AgentFinish, final answer. We don't try to capture
         # return_values content here because it can be large; the
         # underlying LangChain handler's llm_call event already
         # records the response text.
         checkpoint("crewai.agent_finish")
     else:
-        # Unknown step shape — record a generic checkpoint so the
+        # Unknown step shape, record a generic checkpoint so the
         # timeline doesn't have an unexplained gap.
         checkpoint("crewai.agent_step", step_type=type(step).__name__)
 

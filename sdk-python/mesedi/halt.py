@@ -1,17 +1,17 @@
 """
-Local hard-halt budgets — Phase 10 sub-slice 21a.
+Local hard-halt budgets, Phase 10 sub-slice 21a.
 
 A `Budget` is a per-execution policy: "halt if this run takes more
 than N seconds, OR emits more than N events, OR uses more than N
 tokens." When any constraint trips, the SDK raises `MesediHalt`
-synchronously at the next halt-safe checkpoint — between LLM-call
+synchronously at the next halt-safe checkpoint, between LLM-call
 boundaries, between tool-call boundaries, or wherever the user
 explicitly calls `mesedi.checkpoint()`.
 
 `MesediHalt` is a regular Python exception. That means:
 
   - Standard `try`/`finally` cleanup blocks run as the exception
-    unwinds the stack — open files close, locks release, context
+    unwinds the stack, open files close, locks release, context
     managers exit. The SDK doesn't need a separate "cleanup hooks"
     machinery; Python's exception model already provides it.
   - The `@mesedi.wrap` decorator catches `MesediHalt` AT THE TOP of
@@ -60,7 +60,7 @@ class MesediHalt(BaseException):
 class Budget:
     """A per-execution halt policy.
 
-    All limits are optional — pass `None` for "no limit on this axis."
+    All limits are optional, pass `None` for "no limit on this axis."
     `Budget()` with all defaults is a no-op (never halts).
 
     Attributes:
@@ -79,7 +79,7 @@ class Budget:
     max_tokens_out: Optional[int] = None
 
     def is_unbounded(self) -> bool:
-        """True if no field is set — Budget() is a no-op halt policy."""
+        """True if no field is set, Budget() is a no-op halt policy."""
         return (
             self.max_wall_clock_seconds is None
             and self.max_steps is None
@@ -95,7 +95,7 @@ class BudgetTracker:
     monkey-patch, and `checkpoint()` as events flow through the
     execution. Checked at safe boundaries via `check_or_halt()`.
 
-    Thread-safe — concurrent tool calls in the same execution that
+    Thread-safe, concurrent tool calls in the same execution that
     bump the counters simultaneously won't corrupt the totals.
     """
 
@@ -110,7 +110,7 @@ class BudgetTracker:
         # halt event for this execution, it sets this field via
         # signal_remote_halt(). The next check_or_halt() call reads it
         # FIRST (before any budget-axis check) and raises with
-        # trigger="remote_signal". Stored as the reason string —
+        # trigger="remote_signal". Stored as the reason string , 
         # None means "no remote halt pending."
         self._remote_halt_reason: Optional[str] = None
 
@@ -141,8 +141,8 @@ class BudgetTracker:
         next `check_or_halt()` call will raise
         `MesediHalt(trigger="remote_signal")` with the supplied reason.
 
-        Idempotent — multiple signals just overwrite the reason (the
-        last one wins). Thread-safe — the reader runs in its own
+        Idempotent, multiple signals just overwrite the reason (the
+        last one wins). Thread-safe, the reader runs in its own
         thread so this is concurrent with `check_or_halt()` running
         from the agent's thread.
         """
@@ -152,7 +152,7 @@ class BudgetTracker:
     def check_or_halt(self) -> None:
         """Inspect the budget; raise MesediHalt if any limit is exceeded.
 
-        Called at every halt-safe checkpoint — LLM-call entry, tool-
+        Called at every halt-safe checkpoint, LLM-call entry, tool-
         call entry, explicit `checkpoint()`. Cheap when the budget is
         unbounded (early-return) so it's safe to call frequently.
 
@@ -160,7 +160,7 @@ class BudgetTracker:
         explicitly told us to halt, operator intent beats any budget
         axis. Local budgets only trip when no remote halt is pending.
         """
-        # Remote halt check — runs even when the budget is unbounded,
+        # Remote halt check, runs even when the budget is unbounded,
         # so a wrap()'d agent without a local Budget can still be
         # remote-halted (e.g. for dashboard panic-stop semantics).
         with self._lock:
@@ -168,7 +168,7 @@ class BudgetTracker:
                 reason = self._remote_halt_reason
                 # Clear the flag so successive check_or_halt() calls
                 # don't repeat-raise after the first MesediHalt has
-                # already escaped to @wrap. Belt-and-suspenders —
+                # already escaped to @wrap. Belt-and-suspenders , 
                 # @wrap catches the halt and returns immediately, so
                 # this should never matter, but it costs nothing.
                 self._remote_halt_reason = None

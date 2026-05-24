@@ -3,7 +3,7 @@
 # Triggers on a `sdk-python-v*` git tag push (monorepo convention so the
 # Python SDK and the TypeScript SDK can release independently). Verifies
 # the build, validates the distributions with twine, then publishes to
-# PyPI via Trusted Publishing (OIDC) — no PYPI_TOKEN secret required.
+# PyPI via Trusted Publishing (OIDC), no PYPI_TOKEN secret required.
 #
 # To cut a new release:
 #
@@ -24,7 +24,7 @@
 #         Repository:       mesedi
 #         Workflow name:    release-sdk-python.yml
 #         Environment:      pypi
-#   3. For the *initial* publish, PyPI requires the project to exist —
+#   3. For the *initial* publish, PyPI requires the project to exist , 
 #      use the "pending publisher" flow: register the publisher on the
 #      packaging page BEFORE the first release, and PyPI will create
 #      the project on first successful upload from this workflow.

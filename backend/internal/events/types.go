@@ -2,7 +2,7 @@
 // instrumented agents and the execution-level metadata that frames them.
 //
 // The schema mirrors §6 of the detailed concept document
-// (mesedi/concept idea/DETAILED_CONCEPT.md §6 — Data model). Each event
+// (mesedi/concept idea/DETAILED_CONCEPT.md §6, Data model). Each event
 // is bound to an Execution via execution_id; an Execution is a tree of
 // time-ordered events terminated by exactly one terminal event.
 //
@@ -75,7 +75,7 @@ type Execution struct {
 }
 
 // Event is the polymorphic envelope for every recorded step in an execution.
-// Payload's interpretation is determined by EventType — handlers may
+// Payload's interpretation is determined by EventType, handlers may
 // unmarshal Payload into the corresponding typed struct (LLMCallPayload,
 // ToolCallPayload, etc.) using json.Unmarshal.
 //
@@ -94,7 +94,7 @@ type Event struct {
 // Typed payloads (decoded from Event.Payload based on EventType)
 //
 // Each payload corresponds to one EventType value above. Keeping payloads
-// as separate types — rather than fields on a single Event struct — lets
+// as separate types, rather than fields on a single Event struct, lets
 // the schema evolve per event class without breaking the wire format.
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -151,7 +151,7 @@ type ValidatorResultPayload struct {
 	Reason        string `json:"reason,omitempty"`
 }
 
-// DriftSignalPayload is the outcome of one drift-detection pass — emitted
+// DriftSignalPayload is the outcome of one drift-detection pass, emitted
 // periodically (at step boundaries or on judge-invocation cadence) when
 // the composite drift score crosses configured thresholds.
 type DriftSignalPayload struct {
@@ -165,7 +165,7 @@ type DriftSignalPayload struct {
 }
 
 // InjectionAlertPayload is the outcome of one prompt-injection / boundary-
-// violation scan — fired by the input-scan, tool-return-scan, or output-
+// violation scan, fired by the input-scan, tool-return-scan, or output-
 // scan layer of §4.7 detection.
 type InjectionAlertPayload struct {
 	ScanLayer       string  `json:"scan_layer"` // "input" | "tool_return" | "output"

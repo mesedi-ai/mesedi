@@ -1,5 +1,5 @@
 /**
- * Remote-halt demo — sub-slice 21e (TS port of halt_remote_test.py).
+ * Remote-halt demo, sub-slice 21e (TS port of halt_remote_test.py).
  *
  * Demonstrates the SSE remote-halt channel end-to-end inside a single
  * Node process:
@@ -12,8 +12,8 @@
  *      triggering the halt remotely.
  *   3. The reader receives the SSE event and calls
  *      tracker.signalRemoteHalt(reason).
- *   4. The next halt-safe boundary check inside the agent — at a
- *      tool() entry — throws MesediHalt with trigger='remote_signal'.
+ *   4. The next halt-safe boundary check inside the agent, at a
+ *      tool() entry, throws MesediHalt with trigger='remote_signal'.
  *   5. wrap()'s catch block converts the halt to status=halted with
  *      crash_signature='halt:remote_signal' and returns undefined.
  *
@@ -69,7 +69,7 @@ async function triggerHaltAfter(executionId: string, delayMs: number): Promise<v
 
 // Inline import of the context primitive so the agent can grab its
 // own execution_id at runtime. The TS SDK doesn't currently export
-// currentExecutionContext — read from internal module path.
+// currentExecutionContext, read from internal module path.
 import { currentExecutionContext } from "../src/context.js";
 
 const budget: Budget = { maxWallClockSeconds: 60.0 };
@@ -129,7 +129,7 @@ async function main(): Promise<void> {
   );
   console.log(
     "  Expect at least one row with sdk_language='typescript' AND " +
-      "crash_signature='halt:remote_signal' — proving the TS halt landed " +
+      "crash_signature='halt:remote_signal', proving the TS halt landed " +
       "with the same wire format as Python.",
   );
 }

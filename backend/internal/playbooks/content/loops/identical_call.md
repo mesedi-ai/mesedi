@@ -14,7 +14,7 @@ Three common causes, in rough order of frequency:
 
 ## How to find the bug
 
-Open the affected execution's event timeline (link in the Affected executions table below) and look at the `llm_call` events. You'll see the same `user_message` text three or more times in a row. The first place to look is your retry path — somewhere in your agent code, an LLM call is being invoked from inside a loop with a condition that doesn't change between iterations.
+Open the affected execution's event timeline (link in the Affected executions table below) and look at the `llm_call` events. You'll see the same `user_message` text three or more times in a row. The first place to look is your retry path, somewhere in your agent code, an LLM call is being invoked from inside a loop with a condition that doesn't change between iterations.
 
 A useful debugging hack: temporarily log the call site for every LLM invocation. If all the duplicate calls come from the same stack frame, you've found a retry bug. If they come from different stack frames, you've found a state-machine bug.
 
@@ -26,9 +26,9 @@ The remediation depends on the cause, but four standard patterns:
 
 - **Cap retry attempts at 3 or 5.** Unlimited retries are almost never the right answer. After N attempts return an error or fall back to a degraded path.
 
-- **Make the retried prompt actually different.** If your agent is retrying because the LLM's first response was unsatisfactory, the next prompt should include the previous response and ask for a refinement. Identical retries on identical inputs almost always give identical outputs — the agent is wasting tokens.
+- **Make the retried prompt actually different.** If your agent is retrying because the LLM's first response was unsatisfactory, the next prompt should include the previous response and ask for a refinement. Identical retries on identical inputs almost always give identical outputs, the agent is wasting tokens.
 
-- **Fix the cache key.** If caching is the culprit, the key must include every field that materially distinguishes one request from another — user_id, session_id, the full text of the prompt, model name, temperature, system prompt hash.
+- **Fix the cache key.** If caching is the culprit, the key must include every field that materially distinguishes one request from another, user_id, session_id, the full text of the prompt, model name, temperature, system prompt hash.
 
 ## Auto-fix in a future Mesedi release
 

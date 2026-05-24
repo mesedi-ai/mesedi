@@ -1,5 +1,5 @@
 /**
- * tool() — wraps an async function as an instrumented agent tool.
+ * tool(), wraps an async function as an instrumented agent tool.
  *
  * Mirrors the Python `@mesedi.tool` decorator, but as a higher-order
  * function (TS doesn't have stable decorators yet). When the
@@ -51,7 +51,7 @@ export function tool<TArgs extends unknown[], TResult>(
     opts = fnOrOpts;
     if (!maybeFn) {
       throw new TypeError(
-        "tool() requires a function — pass either tool(fn) or tool(options, fn).",
+        "tool() requires a function, pass either tool(fn) or tool(options, fn).",
       );
     }
     fn = maybeFn;
@@ -61,14 +61,14 @@ export function tool<TArgs extends unknown[], TResult>(
   return async function inner(...args: TArgs): Promise<TResult> {
     const ctx = currentExecutionContext();
     if (!ctx) {
-      // No active execution — run unobserved.
+      // No active execution, run unobserved.
       return fn(...args);
     }
 
     // Halt-safe boundary: check the budget BEFORE doing any work.
     // If a budget exists and is exceeded, this throws MesediHalt
     // which propagates up to wrap()'s catch block. The user's tool
-    // code never runs — guarantees halt fires at the boundary, not
+    // code never runs, guarantees halt fires at the boundary, not
     // mid-tool. wrap() also incrementing steps post-check matches
     // the Python pattern (check, then count).
     ctx.checkBudget();

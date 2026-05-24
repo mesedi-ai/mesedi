@@ -20,8 +20,8 @@
 // Defaults today: 100 burst capacity, 10 tokens refilled per second.
 // That is generous enough that a well-behaved SDK (batches of ~100 events
 // flushed at most every few hundred ms) never sees a 429, while tight
-// enough that an obvious bug — infinite-loop agent with no retry
-// backoff — surfaces a 429 within a second or two.
+// enough that an obvious bug, infinite-loop agent with no retry
+// backoff, surfaces a 429 within a second or two.
 //
 // Per-project overrides will eventually come from the `projects` table
 // (rate_limit_capacity, rate_limit_refill_per_sec columns). For now
