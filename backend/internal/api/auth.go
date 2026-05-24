@@ -120,6 +120,11 @@ func authMiddleware(s store.Store) func(http.Handler) http.Handler {
 			ctx := context.WithValue(r.Context(), ctxKeyProjectID, key.ProjectID)
 			ctx = context.WithValue(ctx, ctxKeyAPIKeyID, key.KeyID)
 
+			// Stamp project_id onto the wrapped ResponseWriter so the
+			// request-log middleware (which runs in the outer chain
+			// without context access) can include it in the log line.
+			SetProjectIDForLogging(w, key.ProjectID)
+
 			// Touch last_used_at asynchronously, fire-and-forget so a slow
 			// DB write doesn't add latency to the request hot path.
 			go func(keyID string) {

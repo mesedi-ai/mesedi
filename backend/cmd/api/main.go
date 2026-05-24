@@ -68,6 +68,9 @@ type runtimeConfig struct {
 	// suitable for local dev and CI.
 	ResendAPIKey string
 	ResendFrom   string
+	// 5xx alert webhook URL (#130). When non-empty the request-log
+	// middleware POSTs an alert on every 5xx response.
+	AlertWebhookURL string
 }
 
 // bootstrapDevProject creates a default "dev" project and a fixed test
@@ -177,6 +180,17 @@ func main() {
 		ProPriceID:    cfg.StripeProPriceID,
 	}
 	logger.Info("stripe billing configured", "configured", stripeCfg.Configured())
+
+	// 5xx alert webhook (#130). When set, the request-log middleware
+	// POSTs an alert payload to this URL on every 5xx response so the
+	// operator gets paged before customers notice. Auto-detects Slack
+	// and Discord webhook URL shapes. Empty disables alerting.
+	api.SetAlertWebhookURL(cfg.AlertWebhookURL)
+	if cfg.AlertWebhookURL != "" {
+		logger.Info("alert webhook configured", "host_present", true)
+	} else {
+		logger.Info("alert webhook disabled", "reason", "MESEDI_ALERT_WEBHOOK_URL not set")
+	}
 
 	// Transactional email (#127). Falls back to NoopMailer when no
 	// RESEND_API_KEY is configured so signups still complete in
@@ -327,6 +341,7 @@ func loadConfig() runtimeConfig {
 		AdminToken:          envString("MESEDI_ADMIN_TOKEN", ""),
 		ResendAPIKey:        envString("RESEND_API_KEY", ""),
 		ResendFrom:          envString("MESEDI_MAIL_FROM", "Mesedi <onboarding@resend.dev>"),
+		AlertWebhookURL:     envString("MESEDI_ALERT_WEBHOOK_URL", ""),
 	}
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "TCP port for the HTTP API")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log verbosity: debug | info | warn | error")
