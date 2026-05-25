@@ -143,8 +143,13 @@ func (r *rateLimiter) bucketFor(projectID string) *tokenBucket {
 // context); if no project_id is present, the request is passed through
 // untouched as a defense-in-depth no-op (routing should never let
 // this happen, but middleware should fail open rather than crash).
+//
+// Every 429 is also fed to the AbuseDetector which fires a Discord/
+// Slack alert when a single project sustains the abuse threshold
+// (#172).
 func rateLimitMiddleware(logger *slog.Logger) Middleware {
 	limiter := newRateLimiter(DefaultRateLimitCapacity, DefaultRateLimitRefillPerSec)
+	abuseDetector := NewAbuseDetector(logger)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			projectID, ok := ProjectIDFromContext(r.Context())
@@ -177,6 +182,10 @@ func rateLimitMiddleware(logger *slog.Logger) Middleware {
 					"path", r.URL.Path,
 					"retry_after_sec", retryAfter,
 				)
+				// Feed the abuse detector. Cheap and non-blocking; the
+				// detector's own internal cooldown means this won't
+				// fan out alerts even under sustained 429 traffic.
+				abuseDetector.RecordRateLimit(projectID, r.Method, r.URL.Path)
 				writeError(w, http.StatusTooManyRequests,
 					"rate limit exceeded for project "+projectID)
 				return
