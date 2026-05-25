@@ -61,6 +61,11 @@ type Handlers struct {
 	// transactional email templates. Falls back to DashboardURL +
 	// "/docs" if empty.
 	DocsURL string
+	// Abuse is the process-wide detector. Carried on Handlers so the
+	// rate-limit middleware, auth middleware (key-leak detector),
+	// ingest middleware (oversized payload), and signup handler all
+	// share the same in-memory rolling counters.
+	Abuse *AbuseDetector
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
@@ -86,6 +91,7 @@ func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg Stri
 		DashboardURL:  strings.TrimRight(dashboardURL, "/"),
 		Stripe:        stripeCfg,
 		Mailer:        mailer,
+		Abuse:         NewAbuseDetector(logger, s),
 	}
 }
 

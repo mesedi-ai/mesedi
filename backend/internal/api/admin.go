@@ -87,6 +87,8 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/projects/{id}/export", h.HandleAdminExportProject)
 	mux.HandleFunc("DELETE /admin/projects/{id}", h.HandleAdminDeleteProject)
 	mux.HandleFunc("GET /admin/storage", h.HandleAdminStorage)
+	mux.HandleFunc("GET /admin/abuse", h.HandleAdminListAbuseSignals)
+	mux.HandleFunc("POST /admin/abuse/{id}/resolve", h.HandleAdminResolveAbuseSignal)
 }
 
 // AdminProjectDetail bundles everything the founder dashboard's

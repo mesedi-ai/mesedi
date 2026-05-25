@@ -66,11 +66,16 @@ func NewTopChain(logger *slog.Logger) Middleware {
 // rate limiting (in that order, auth must run first to attach project_id
 // to context; the rate limiter consumes that). Request-ID generation
 // will layer on top in a future slice without touching callers.
-func NewAuthChain(logger *slog.Logger, s store.Store) Middleware {
+//
+// detector is the process-wide AbuseDetector carried on Handlers. It
+// feeds the rate-limit-sustained detector from inside the rate limit
+// middleware and the key-leak detector from inside the auth middleware.
+func NewAuthChain(logger *slog.Logger, s store.Store, detector *AbuseDetector) Middleware {
 	return chain(
-		authMiddleware(s),
+		authMiddleware(s, detector),
 		schemaVersionMiddleware(),
-		rateLimitMiddleware(logger),
+		oversizedPayloadMiddleware(detector),
+		rateLimitMiddleware(logger, detector),
 	)
 }
 
@@ -361,5 +366,26 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 func (s *statusRecorder) Flush() {
 	if f, ok := s.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
+	}
+}
+
+// oversizedPayloadMiddleware peeks at the Content-Length header and
+// feeds the oversized-payload detector when a request body exceeds
+// the configured byte threshold. Does NOT block the request: we let
+// the handler run normally so the detector signal is informational,
+// not a hard block. If a project starts spamming megabyte payloads,
+// the worker auto-suspends 24h later just like any other abuse kind.
+//
+// Must run AFTER auth so we know which project is calling.
+func oversizedPayloadMiddleware(detector *AbuseDetector) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > oversizedPayloadByteThreshold && detector != nil {
+				if projectID, ok := ProjectIDFromContext(r.Context()); ok {
+					detector.RecordOversizedPayload(r.Context(), projectID, r.ContentLength, r.Method, r.URL.Path)
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
 	}
 }

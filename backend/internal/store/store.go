@@ -469,7 +469,61 @@ type Store interface {
 	// first-occurrence time.
 	GetFailureGroupByClassSignature(ctx context.Context, projectID, failureClass, signature string) (*FailureGroup, error)
 
+	// Abuse signals + project suspension (#172).
+	//
+	// CreateAbuseSignal inserts a new row. detected_at is set by the
+	// caller; the worker controls notified_at / suspended_at /
+	// resolved_at lifecycle transitions via the Mark... methods below.
+	CreateAbuseSignal(ctx context.Context, sig *AbuseSignal) error
+	// ListAbuseSignals returns signals sorted by detected_at DESC.
+	// When unresolvedOnly is true the resolved column must be NULL.
+	// limit caps results (0 means no cap, but callers should bound).
+	ListAbuseSignals(ctx context.Context, unresolvedOnly bool, limit int) ([]*AbuseSignal, error)
+	// GetAbuseSignal fetches one by id; ErrNotFound when absent.
+	GetAbuseSignal(ctx context.Context, signalID string) (*AbuseSignal, error)
+	// MarkAbuseSignalNotified records the time the 24h-warning email
+	// was sent. The background worker calls this immediately after a
+	// successful email dispatch so notification idempotency holds
+	// across worker restarts.
+	MarkAbuseSignalNotified(ctx context.Context, signalID string, notifiedAt time.Time) error
+	// MarkAbuseSignalSuspended records the auto-suspension transition
+	// (notified_at + 24h with no human resolution). The same call
+	// MUST also flip projects.suspended_at; implementations should
+	// either run both updates in a single transaction or document the
+	// best-effort ordering. SQLite implementation runs them in a
+	// transaction.
+	MarkAbuseSignalSuspended(ctx context.Context, signalID, projectID, reason string, suspendedAt time.Time) error
+	// ResolveAbuseSignal closes out a signal with operator metadata.
+	// If the project was suspended due to this signal, the caller is
+	// responsible for also calling UnsuspendProject to reactivate.
+	ResolveAbuseSignal(ctx context.Context, signalID, resolvedBy, note string, resolvedAt time.Time) error
+	// UnsuspendProject clears suspended_at + suspension_reason. Used
+	// when an operator resolves a signal that triggered suspension and
+	// chooses to reactivate the project.
+	UnsuspendProject(ctx context.Context, projectID string) error
+	// IsProjectSuspended is a fast read for the auth middleware to
+	// reject authenticated requests on suspended projects. Returns
+	// (false, "", nil) for active projects, (true, reason, nil) for
+	// suspended ones.
+	IsProjectSuspended(ctx context.Context, projectID string) (bool, string, error)
+
 	// Lifecycle.
 	Close() error
 	Ping(ctx context.Context) error
+}
+
+// AbuseSignal is one detected abuse event. Schema mirrors
+// migrations/009_abuse_signals.sql one-to-one.
+type AbuseSignal struct {
+	SignalID       string     `json:"signal_id"`
+	ProjectID      string     `json:"project_id"`
+	Kind           string     `json:"kind"`
+	Severity       string     `json:"severity"`
+	Detail         string     `json:"detail,omitempty"` // JSON-encoded
+	DetectedAt     time.Time  `json:"detected_at"`
+	NotifiedAt     *time.Time `json:"notified_at,omitempty"`
+	SuspendedAt    *time.Time `json:"suspended_at,omitempty"`
+	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
+	ResolvedBy     string     `json:"resolved_by,omitempty"`
+	ResolutionNote string     `json:"resolution_note,omitempty"`
 }

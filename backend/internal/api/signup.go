@@ -218,6 +218,12 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	//    in local dev makes this a no-op.
 	h.sendWelcomeEmail(email, projectName, prefix)
 
+	// 7. Feed the suspicious-signup detector. Many signups from a
+	//    single IP in a short window fire an abuse signal (#172).
+	if h.Abuse != nil {
+		h.Abuse.RecordSignupFromIP(r.Context(), ip, projectID, email)
+	}
+
 	writeJSON(w, http.StatusCreated, SignupResponse{
 		OK:          true,
 		ProjectID:   projectID,

@@ -92,7 +92,13 @@ func MintAPIKey() (rawKey, hash, prefix string, err error) {
 // authMiddleware constructs the bearer-token verification middleware.
 // Returns a function that wraps an http.Handler; failed auth returns
 // 401 without calling the wrapped handler.
-func authMiddleware(s store.Store) func(http.Handler) http.Handler {
+//
+// detector (may be nil) is the process-wide AbuseDetector. After a
+// successful key lookup, the middleware feeds it (a) the project +
+// IP pair so the key-leak detector can spot keys seen from too many
+// IPs, and (b) the project-suspension check so suspended projects
+// get 403 instead of being allowed through.
+func authMiddleware(s store.Store, detector *AbuseDetector) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := extractBearer(r.Header.Get("Authorization"))
@@ -116,6 +122,24 @@ func authMiddleware(s store.Store) func(http.Handler) http.Handler {
 				return
 			}
 
+			// Suspension check (#172). Fast read against the projects
+			// table. If suspended, refuse every authenticated request
+			// with 403 + the suspension reason so the customer's
+			// client gets a clear signal instead of a generic 401.
+			suspended, reason, sErr := s.IsProjectSuspended(r.Context(), key.ProjectID)
+			if sErr != nil {
+				writeError(w, http.StatusInternalServerError, "suspension lookup failed: "+sErr.Error())
+				return
+			}
+			if suspended {
+				msg := "project suspended"
+				if reason != "" {
+					msg = msg + " (" + reason + "). Contact mesediai@gmail.com to appeal."
+				}
+				writeError(w, http.StatusForbidden, msg)
+				return
+			}
+
 			// Attach project + key IDs to the request context for handlers.
 			ctx := context.WithValue(r.Context(), ctxKeyProjectID, key.ProjectID)
 			ctx = context.WithValue(ctx, ctxKeyAPIKeyID, key.KeyID)
@@ -124,6 +148,12 @@ func authMiddleware(s store.Store) func(http.Handler) http.Handler {
 			// request-log middleware (which runs in the outer chain
 			// without context access) can include it in the log line.
 			SetProjectIDForLogging(w, key.ProjectID)
+
+			// Feed the key-leak detector. Cheap; the detector's own
+			// rolling-window state filters out the noise.
+			if detector != nil {
+				detector.RecordRequestForKeyLeak(r.Context(), key.ProjectID, key.KeyPrefix, extractClientIP(r))
+			}
 
 			// Touch last_used_at asynchronously, fire-and-forget so a slow
 			// DB write doesn't add latency to the request hot path.

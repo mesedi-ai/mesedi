@@ -144,12 +144,11 @@ func (r *rateLimiter) bucketFor(projectID string) *tokenBucket {
 // untouched as a defense-in-depth no-op (routing should never let
 // this happen, but middleware should fail open rather than crash).
 //
-// Every 429 is also fed to the AbuseDetector which fires a Discord/
-// Slack alert when a single project sustains the abuse threshold
-// (#172).
-func rateLimitMiddleware(logger *slog.Logger) Middleware {
+// Every 429 is also fed to the AbuseDetector which fires an alert
+// and persists an abuse_signals row when a single project sustains
+// the threshold (#172).
+func rateLimitMiddleware(logger *slog.Logger, detector *AbuseDetector) Middleware {
 	limiter := newRateLimiter(DefaultRateLimitCapacity, DefaultRateLimitRefillPerSec)
-	abuseDetector := NewAbuseDetector(logger)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			projectID, ok := ProjectIDFromContext(r.Context())
@@ -168,9 +167,6 @@ func rateLimitMiddleware(logger *slog.Logger) Middleware {
 			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(resetIn).Unix(), 10))
 
 			if !allowed {
-				// Retry-After in whole seconds, minimum 1. The bucket
-				// refills 1 token in (1 / refillPerSec) seconds, so
-				// that's the earliest a retry could succeed.
 				retryAfter := int(math.Ceil(1.0 / limiter.refillPerSec))
 				if retryAfter < 1 {
 					retryAfter = 1
@@ -182,10 +178,9 @@ func rateLimitMiddleware(logger *slog.Logger) Middleware {
 					"path", r.URL.Path,
 					"retry_after_sec", retryAfter,
 				)
-				// Feed the abuse detector. Cheap and non-blocking; the
-				// detector's own internal cooldown means this won't
-				// fan out alerts even under sustained 429 traffic.
-				abuseDetector.RecordRateLimit(projectID, r.Method, r.URL.Path)
+				if detector != nil {
+					detector.RecordRateLimit(r.Context(), projectID, r.Method, r.URL.Path)
+				}
 				writeError(w, http.StatusTooManyRequests,
 					"rate limit exceeded for project "+projectID)
 				return

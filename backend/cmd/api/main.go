@@ -206,7 +206,14 @@ func main() {
 
 	handlers := api.New(logger, st, cfg.DashboardURL, stripeCfg, mailer)
 	handlers.RegisterRoutes(privateMux)
-	privateHandler := api.NewAuthChain(logger, st)(privateMux)
+	privateHandler := api.NewAuthChain(logger, st, handlers.Abuse)(privateMux)
+
+	// Abuse-detection background worker (#172). Reads unresolved
+	// signals every few minutes, sends the 24h-warning email, then
+	// auto-suspends the project 24h later if still unresolved. Uses
+	// context.Background() so the worker runs for the life of the
+	// process; the OS kills it on SIGTERM along with the HTTP server.
+	api.StartAbuseWorker(context.Background(), st, mailer, logger, cfg.DashboardURL)
 
 	// Public POST /signup bypasses the bearer-token auth chain (visitors
 	// have no key yet) but still needs CORS so the marketing site at
@@ -283,6 +290,10 @@ func main() {
 	mux.Handle("DELETE /admin/projects/{id}", adminHandler)
 	mux.Handle("GET /admin/storage", adminHandler)
 	mux.Handle("OPTIONS /admin/storage", adminHandler)
+	mux.Handle("GET /admin/abuse", adminHandler)
+	mux.Handle("OPTIONS /admin/abuse", adminHandler)
+	mux.Handle("POST /admin/abuse/{id}/resolve", adminHandler)
+	mux.Handle("OPTIONS /admin/abuse/{id}/resolve", adminHandler)
 
 	// Top-level middleware: recover from panics, log every request.
 	root := api.NewTopChain(logger)(mux)

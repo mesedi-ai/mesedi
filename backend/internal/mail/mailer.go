@@ -24,6 +24,18 @@ import (
 // Implementations: ResendMailer (production) and NoopMailer (dev/test).
 type Mailer interface {
 	SendWelcome(ctx context.Context, in WelcomeInput) error
+	SendSuspensionWarning(ctx context.Context, in SuspensionWarningInput) error
+}
+
+// SuspensionWarningInput is everything the suspension-warning
+// template needs. Sent 24h after an abuse signal is detected; the
+// recipient has 24h more before auto-suspension fires.
+type SuspensionWarningInput struct {
+	ToEmail      string
+	ProjectName  string
+	SignalKind   string
+	DetectedAt   time.Time
+	DashboardURL string
 }
 
 // WelcomeInput is everything the welcome template needs.
@@ -47,6 +59,17 @@ func (m NoopMailer) SendWelcome(ctx context.Context, in WelcomeInput) error {
 		m.Logger.Debug("mail: welcome (noop, no RESEND_API_KEY)",
 			"to", in.ToEmail,
 			"project", in.ProjectName,
+		)
+	}
+	return nil
+}
+
+func (m NoopMailer) SendSuspensionWarning(ctx context.Context, in SuspensionWarningInput) error {
+	if m.Logger != nil {
+		m.Logger.Debug("mail: suspension warning (noop, no RESEND_API_KEY)",
+			"to", in.ToEmail,
+			"project", in.ProjectName,
+			"signal_kind", in.SignalKind,
 		)
 	}
 	return nil
@@ -141,6 +164,51 @@ func (m *ResendMailer) SendWelcome(ctx context.Context, in WelcomeInput) error {
 		m.Logger.Info("mail: welcome sent",
 			"to", in.ToEmail,
 			"resend_id", parsed.ID,
+		)
+	}
+	return nil
+}
+
+// SendSuspensionWarning renders and ships the abuse-signal warning
+// email. Body explains the signal that fired, the 24h grace window
+// before auto-suspension, and how to reach support to dispute.
+func (m *ResendMailer) SendSuspensionWarning(ctx context.Context, in SuspensionWarningInput) error {
+	subject := "Mesedi: action required on your project"
+
+	body, err := json.Marshal(resendRequest{
+		From:    m.From,
+		To:      []string{in.ToEmail},
+		Subject: subject,
+		HTML:    suspensionWarningHTML(in),
+		Text:    suspensionWarningText(in),
+	})
+	if err != nil {
+		return fmt.Errorf("mail: marshal suspension warning: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("mail: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mail: post to resend: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mail: resend returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	if m.Logger != nil {
+		m.Logger.Info("mail: suspension warning sent",
+			"to", in.ToEmail,
+			"signal_kind", in.SignalKind,
 		)
 	}
 	return nil
