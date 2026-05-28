@@ -1,9 +1,11 @@
 // CORS middleware for the Mesedi backend.
 //
-// Allows the browser-based Next.js dashboard hosted on Vercel to call
-// the Fly-hosted API directly. Production origin is mesedi.vercel.app;
-// preview deployments use mesedi-*-mesediai.vercel.app; local dev uses
-// localhost:3000 (default Next.js dev server).
+// Allows the browser-based Next.js dashboard to call the Fly-hosted API
+// directly. Production origins are mesedi.ai (marketing) and
+// app.mesedi.ai (dashboard); mesedi.vercel.app is preserved for the
+// soft-cutover redirect window. Preview deployments use
+// mesedi-*-mesediai.vercel.app; local dev uses localhost:3000 (default
+// Next.js dev server).
 //
 // Handles the CORS preflight OPTIONS request inline (returns 204 with
 // the appropriate Access-Control-* headers) and forwards everything
@@ -21,9 +23,10 @@ import (
 )
 
 // allowedOrigins is the set of explicit, exact-match origins permitted
-// to call this API from a browser. Add new origins (e.g. custom domains
-// like mesedi.ai or app.mesedi.ai) by extending this list.
+// to call this API from a browser. Add new origins by extending this list.
 var allowedOrigins = map[string]struct{}{
+	"https://mesedi.ai":         {},
+	"https://app.mesedi.ai":     {},
 	"https://mesedi.vercel.app": {},
 	"http://localhost:3000":     {},
 	"http://localhost:3001":     {},

@@ -28,9 +28,8 @@ primary_region = "iad"
   # holds the lock; foreign_keys=on enforces ON DELETE CASCADE.
   MESEDI_DB_URL = "file:/data/mesedi.db?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)"
   # Public origin of the React dashboard. Used to build deep-link
-  # URLs in webhook payloads and Discord/Slack embeds. When mesedi.ai
-  # domain ships, swap this to https://app.mesedi.ai.
-  MESEDI_DASHBOARD_URL = "https://mesedi.vercel.app"
+  # URLs in webhook payloads and Discord/Slack embeds.
+  MESEDI_DASHBOARD_URL = "https://app.mesedi.ai"
 
 # Persistent volume for SQLite database + WAL/SHM files. 1GB is
 # generous for v0.1 telemetry volume — at ~1KB per event, that's
