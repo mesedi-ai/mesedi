@@ -7,11 +7,21 @@
 //
 // Configuration (12-factor, flags or env vars; flags win):
 //
-//	Flag             Env var                 Default
-//	--port           MESEDI_PORT             8080
-//	--log-level      MESEDI_LOG_LEVEL        info
-//	--db-url         MESEDI_DB_URL           file:./mesedi-dev.db?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)
-//	--dashboard-url  MESEDI_DASHBOARD_URL    (empty, falls back to request Host)
+//	Flag                  Env var                       Default
+//	--port                MESEDI_PORT                   8080
+//	--log-level           MESEDI_LOG_LEVEL              info
+//	--db-url              MESEDI_DB_URL                 file:./mesedi-dev.db?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)
+//	--db-url-postgres     MESEDI_DB_URL_POSTGRES        (empty; when set, Postgres backend used; SQLite fallback otherwise)
+//	--dashboard-url       MESEDI_DASHBOARD_URL          (empty, falls back to request Host)
+//
+// When MESEDI_DB_URL_POSTGRES is set (non-empty), the backend connects
+// to Postgres via the pgx driver and runs the postgres-flavored
+// migrations from internal/store/migrations-postgres/. When unset,
+// the backend falls back to SQLite via MESEDI_DB_URL (the v0.1
+// production posture on Fly volumes). #128 Phase 1 ships the dispatch
+// + the connect/migrate path; Phase 2 ports the remaining Store
+// methods (anything beyond CreateProject/GetProject/DeleteProject
+// currently returns ErrPostgresNotYetPorted).
 //
 // MESEDI_DASHBOARD_URL is the public origin of the React dashboard
 // (Vercel-hosted in prod, e.g. https://mesedi.vercel.app). When set,
@@ -51,10 +61,11 @@ const (
 )
 
 type runtimeConfig struct {
-	Port         int
-	LogLevel     string
-	DBURL        string
-	DashboardURL string
+	Port            int
+	LogLevel        string
+	DBURL           string
+	DBURLPostgres   string
+	DashboardURL    string
 	// Stripe billing config (#120). Any of these may be empty in
 	// local dev, the billing endpoints respond 503 when missing.
 	StripeSecretKey     string
@@ -77,7 +88,12 @@ type runtimeConfig struct {
 // API key on first run. Idempotent, repeated runs return early when
 // the project already exists. The test key value is intentionally
 // non-secret and hardcoded; never use this pattern in production.
-func bootstrapDevProject(ctx context.Context, st *store.SQLiteStore, logger *slog.Logger) error {
+//
+// Takes store.Store so it works against either SQLite or Postgres. On
+// the Postgres backend during Phase 1 (#128), CreateAPIKey returns
+// ErrPostgresNotYetPorted, the caller logs the warning and continues.
+// Once Phase 2 ports CreateAPIKey this restriction goes away.
+func bootstrapDevProject(ctx context.Context, st store.Store, logger *slog.Logger) error {
 	const devProjectID = "proj-dev"
 	const devKeyID = "key-dev"
 	// SHA-256 of the literal string "mesedi_sk_dev_local_only", fixed so
@@ -131,27 +147,69 @@ func main() {
 	cfg := loadConfig()
 	logger := newLogger(cfg.LogLevel)
 
+	// Effective DSN: prefer the Postgres URL when set, fall back to
+	// the SQLite path. Logged form is redacted so passwords don't
+	// reach stdout. Backend tag indicates which engine actually opened.
+	effectiveDSN := cfg.DBURL
+	backend := "sqlite"
+	if strings.TrimSpace(cfg.DBURLPostgres) != "" {
+		effectiveDSN = cfg.DBURLPostgres
+		backend = "postgres"
+	}
 	logger.Info("mesedi backend starting",
 		"port", cfg.Port,
 		"log_level", cfg.LogLevel,
-		"db_url", redactDSN(cfg.DBURL),
+		"db_url", redactDSN(effectiveDSN),
+		"backend_selected", backend,
 	)
 
 	// ── persistence ─────────────────────────────────────────────────
-	// SQLite for local dev; Postgres implementation comes online when
-	// MESEDI_DB_URL points at a postgres:// URL in a later slice.
-	st, err := store.OpenSQLite(cfg.DBURL, logger)
-	if err != nil {
-		logger.Error("store open failed", "error", err.Error())
-		os.Exit(1)
+	// Dispatch by which DSN is set:
+	//   MESEDI_DB_URL_POSTGRES set, non-empty -> Postgres (pgx driver)
+	//   otherwise                            -> SQLite (Fly volume v0.1 posture)
+	//
+	// #128 Phase 2 (shipped 2026-05-25): every Store method is ported to
+	// Postgres. The remaining steps before flipping production are:
+	//   1. Build + run the test suite against a local Postgres / Neon
+	//   2. Run the data-migration tool to copy live SQLite -> Postgres
+	//   3. Confirm parity (row counts, spot-check a few SDK round trips)
+	//   4. Flip MESEDI_DB_URL_POSTGRES via fly secrets and `fly deploy`
+	var st store.Store
+	if backend == "postgres" {
+		pst, err := store.OpenPostgres(cfg.DBURLPostgres, logger)
+		if err != nil {
+			logger.Error("postgres store open failed", "error", err.Error())
+			os.Exit(1)
+		}
+		st = pst
+	} else {
+		sst, err := store.OpenSQLite(cfg.DBURL, logger)
+		if err != nil {
+			logger.Error("sqlite store open failed", "error", err.Error())
+			os.Exit(1)
+		}
+		st = sst
 	}
 	defer func() { _ = st.Close() }()
-	logger.Info("store ready", "backend", "sqlite")
+	logger.Info("store ready", "backend", backend)
 
 	// Bootstrap a dev project + API key on first run so the SDK has
 	// something to authenticate against locally. Idempotent, repeated
-	// runs are no-ops because the project already exists.
-	if err := bootstrapDevProject(context.Background(), st, logger); err != nil {
+	// runs are no-ops because the project already exists. Works
+	// against both SQLite and Postgres backends (#128 Phase 2 ported
+	// CreateAPIKey on the Postgres path).
+	//
+	// Production guard: Fly sets FLY_APP_NAME in every running machine.
+	// When that env var is present we skip the bootstrap entirely so
+	// the well-known dev API key (SHA-256 of "mesedi_sk_dev_local_only")
+	// never lands in a production database. This re-applies the same
+	// posture that task #104 established when it manually revoked the
+	// key from the original Fly+SQLite production DB, so the Postgres
+	// cutover doesn't accidentally re-introduce the backdoor on a
+	// fresh Neon database.
+	if os.Getenv("FLY_APP_NAME") != "" {
+		logger.Info("bootstrap dev project skipped (production, FLY_APP_NAME set)")
+	} else if err := bootstrapDevProject(context.Background(), st, logger); err != nil {
 		logger.Warn("bootstrap dev project failed (continuing)", "error", err.Error())
 	}
 
@@ -345,6 +403,7 @@ func loadConfig() runtimeConfig {
 		Port:                envInt("MESEDI_PORT", 8080),
 		LogLevel:            envString("MESEDI_LOG_LEVEL", "info"),
 		DBURL:               envString("MESEDI_DB_URL", defaultDBURL),
+		DBURLPostgres:       envString("MESEDI_DB_URL_POSTGRES", ""),
 		DashboardURL:        envString("MESEDI_DASHBOARD_URL", ""),
 		StripeSecretKey:     envString("MESEDI_STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret: envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),
@@ -356,7 +415,8 @@ func loadConfig() runtimeConfig {
 	}
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "TCP port for the HTTP API")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log verbosity: debug | info | warn | error")
-	flag.StringVar(&cfg.DBURL, "db-url", cfg.DBURL, "Postgres connection string (required for Phase 1.5+)")
+	flag.StringVar(&cfg.DBURL, "db-url", cfg.DBURL, "SQLite DSN (used when --db-url-postgres is empty)")
+	flag.StringVar(&cfg.DBURLPostgres, "db-url-postgres", cfg.DBURLPostgres, "Postgres DSN (postgres:// or postgresql://); when set, used in preference to --db-url")
 	flag.StringVar(&cfg.DashboardURL, "dashboard-url", cfg.DashboardURL, "public origin of the React dashboard (e.g. https://mesedi.vercel.app)")
 	flag.Parse()
 	return cfg
