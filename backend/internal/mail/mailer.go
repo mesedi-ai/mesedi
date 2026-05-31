@@ -26,6 +26,20 @@ type Mailer interface {
 	SendWelcome(ctx context.Context, in WelcomeInput) error
 	SendSuspensionWarning(ctx context.Context, in SuspensionWarningInput) error
 	SendBudgetCeilingBreach(ctx context.Context, in BudgetCeilingBreachInput) error
+	SendOrgInvite(ctx context.Context, in OrgInviteInput) error
+}
+
+// OrgInviteInput is everything the team-invite email template needs
+// (#263). Sent when an admin clicks 'Invite' on /app/team. AcceptURL
+// carries the invite token and lands the invitee on the public
+// accept page.
+type OrgInviteInput struct {
+	ToEmail      string
+	OrgName      string
+	InviterEmail string
+	Role         string
+	AcceptURL    string
+	ExpiresAt    time.Time
 }
 
 // BudgetCeilingBreachInput is everything the tenant-budget-ceiling
@@ -95,6 +109,18 @@ func (m NoopMailer) SendBudgetCeilingBreach(ctx context.Context, in BudgetCeilin
 			"to", in.ToEmail,
 			"burn_usd", in.BurnUSD,
 			"ceiling_usd", in.CeilingUSD,
+		)
+	}
+	return nil
+}
+
+func (m NoopMailer) SendOrgInvite(ctx context.Context, in OrgInviteInput) error {
+	if m.Logger != nil {
+		m.Logger.Debug("mail: org invite (noop, no RESEND_API_KEY)",
+			"to", in.ToEmail,
+			"org", in.OrgName,
+			"role", in.Role,
+			"inviter", in.InviterEmail,
 		)
 	}
 	return nil
@@ -304,6 +330,70 @@ func (m *ResendMailer) SendBudgetCeilingBreach(ctx context.Context, in BudgetCei
 			"to", in.ToEmail,
 			"burn_usd", in.BurnUSD,
 			"ceiling_usd", in.CeilingUSD,
+		)
+	}
+	return nil
+}
+
+// SendOrgInvite renders and ships the team-invite email (#263). The
+// invitee receives a link to the accept page carrying the token.
+func (m *ResendMailer) SendOrgInvite(ctx context.Context, in OrgInviteInput) error {
+	subject := fmt.Sprintf("%s invited you to %s on Mesedi",
+		in.InviterEmail, in.OrgName)
+
+	textBody := fmt.Sprintf(
+		"%s has invited you to join the %s organization on Mesedi as a %s.\n\n"+
+			"Accept the invite: %s\n\n"+
+			"This invite expires on %s. If you weren't expecting this, you can ignore the message.\n",
+		in.InviterEmail, in.OrgName, in.Role,
+		in.AcceptURL,
+		in.ExpiresAt.Format("Jan 2, 2006"),
+	)
+	htmlBody := fmt.Sprintf(
+		"<p><strong>%s</strong> has invited you to join the <strong>%s</strong> "+
+			"organization on Mesedi as a <strong>%s</strong>.</p>"+
+			"<p><a href=\"%s\">Accept the invite</a></p>"+
+			"<p>This invite expires on %s. If you weren't expecting this, you can ignore the message.</p>",
+		in.InviterEmail, in.OrgName, in.Role,
+		in.AcceptURL,
+		in.ExpiresAt.Format("Jan 2, 2006"),
+	)
+
+	body, err := json.Marshal(resendRequest{
+		From:    m.From,
+		To:      []string{in.ToEmail},
+		Subject: subject,
+		HTML:    htmlBody,
+		Text:    textBody,
+	})
+	if err != nil {
+		return fmt.Errorf("mail: marshal org invite: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("mail: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mail: post to resend: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mail: resend returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	if m.Logger != nil {
+		m.Logger.Info("mail: org invite sent",
+			"to", in.ToEmail,
+			"org", in.OrgName,
+			"role", in.Role,
 		)
 	}
 	return nil

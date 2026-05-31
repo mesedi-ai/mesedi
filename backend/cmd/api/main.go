@@ -371,6 +371,22 @@ func main() {
 	// Task #262, per-project data retention configuration.
 	mux.Handle("GET /me/retention", privateHandler)
 	mux.Handle("PUT /me/retention", privateHandler)
+	// Task #263, Team / multi-seat. Admin endpoints under
+	// /me/organization/* go through privateHandler (project API key
+	// auth + admin-role guard inside the handler). Public accept
+	// endpoints go through signupHandler since they're token-auth
+	// only and need CORS for the dashboard's /invites/{token} page.
+	mux.Handle("GET /me/organization", privateHandler)
+	mux.Handle("GET /me/organization/members", privateHandler)
+	mux.Handle("PATCH /me/organization/members/{user}", privateHandler)
+	mux.Handle("DELETE /me/organization/members/{user}", privateHandler)
+	mux.Handle("GET /me/organization/invites", privateHandler)
+	mux.Handle("POST /me/organization/invites", privateHandler)
+	mux.Handle("DELETE /me/organization/invites/{invite}", privateHandler)
+	mux.Handle("GET /invites/{token}", signupHandler)
+	mux.Handle("POST /invites/{token}/accept", signupHandler)
+	mux.Handle("OPTIONS /invites/{token}", signupHandler)
+	mux.Handle("OPTIONS /invites/{token}/accept", signupHandler)
 	// Founder-side admin dashboard (#150). Token-gated; refuses every
 	// request when MESEDI_ADMIN_TOKEN is empty. CORS preflight OPTIONS
 	// is needed because the dashboard at mesedi.vercel.app calls

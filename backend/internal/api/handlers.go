@@ -111,6 +111,12 @@ func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
 	// handler via the Stripe-Signature header against the configured
 	// webhook secret.
 	mux.HandleFunc("POST /billing/webhook", h.HandleStripeWebhook)
+	// Task #263, public invite-accept endpoints. Auth IS the token:
+	// the random hex string in the URL path is the authentication.
+	// GET surfaces the invite info so the accept page can render
+	// "you've been invited to X as Y" before the user redeems.
+	mux.HandleFunc("GET /invites/{token}", h.HandleGetInviteByToken)
+	mux.HandleFunc("POST /invites/{token}/accept", h.HandleAcceptInvite)
 }
 
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
@@ -142,6 +148,16 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Task #262, per-project data retention.
 	mux.HandleFunc("GET /me/retention", h.HandleGetRetention)
 	mux.HandleFunc("PUT /me/retention", h.HandleSetRetention)
+	// Task #263, Team / multi-seat. Admin-gated endpoints for
+	// managing the org + members + invites under the auth project's
+	// tenant_id. resolveAdminContext() guards each handler.
+	mux.HandleFunc("GET /me/organization", h.HandleGetOrganization)
+	mux.HandleFunc("GET /me/organization/members", h.HandleListMembers)
+	mux.HandleFunc("PATCH /me/organization/members/{user}", h.HandleUpdateMemberRole)
+	mux.HandleFunc("DELETE /me/organization/members/{user}", h.HandleRemoveMember)
+	mux.HandleFunc("GET /me/organization/invites", h.HandleListInvites)
+	mux.HandleFunc("POST /me/organization/invites", h.HandleCreateInvite)
+	mux.HandleFunc("DELETE /me/organization/invites/{invite}", h.HandleRevokeInvite)
 	// Phase 3a, read-side failure_group surface for the dashboard.
 	mux.HandleFunc("GET /failure-groups", h.HandleListFailureGroups)
 	mux.HandleFunc("GET /failure-groups/{id}", h.HandleGetFailureGroup)
