@@ -759,9 +759,9 @@ func (s *SQLiteStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 		k.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt)
+		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID))
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
 	}
@@ -770,12 +770,12 @@ func (s *SQLiteStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 
 func (s *SQLiteStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error) {
 	k := &APIKey{}
-	var name sql.NullString
+	var name, userID sql.NullString
 	var lastUsed sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at
+		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id
 		FROM api_keys WHERE key_hash = ?
-	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed)
+	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -784,6 +784,9 @@ func (s *SQLiteStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*API
 	}
 	if name.Valid {
 		k.Name = name.String
+	}
+	if userID.Valid {
+		k.UserID = userID.String
 	}
 	if lastUsed.Valid {
 		t := lastUsed.Time

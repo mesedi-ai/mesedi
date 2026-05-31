@@ -1835,12 +1835,27 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	keyID := "key-" + prefix[len("mesedi_sk_"):] + "-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	// Tag the new key with the caller's user_id so it authenticates
+	// as the same org member that created it (#263 RBAC). If the
+	// caller is on a legacy key with no user_id, the new key inherits
+	// the project's owner identity so the chain doesn't break.
+	callerUserID, _ := UserIDFromContext(r.Context())
+	if callerUserID == "" {
+		if p, perr := h.Store.GetProject(r.Context(), authProjectID); perr == nil && p != nil {
+			if p.OwnerUserID != "" {
+				callerUserID = p.OwnerUserID
+			} else {
+				callerUserID = p.OwnerEmail
+			}
+		}
+	}
 	rec := &store.APIKey{
 		KeyID:     keyID,
 		ProjectID: authProjectID,
 		KeyHash:   hash,
 		KeyPrefix: prefix,
 		Name:      body.Name,
+		UserID:    callerUserID,
 	}
 	if err := h.Store.CreateAPIKey(r.Context(), rec); err != nil {
 		writeError(w, http.StatusInternalServerError, "persist key: "+err.Error())

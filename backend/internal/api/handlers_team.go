@@ -111,12 +111,19 @@ func (h *Handlers) resolveAdminContext(w http.ResponseWriter, r *http.Request) (
 			"project_id", projectID, "org_id", bootstrapped)
 	}
 
-	// The caller's user_id is owner_user_id if populated; otherwise
-	// owner_email (matches the email-as-user-id convention used by the
-	// invite-accept flow until session auth ships).
-	caller := p.OwnerUserID
+	// The caller's identity comes from the API key's user_id (set at
+	// mint time for post-014 keys). Falls back to project.OwnerUserID
+	// or OwnerEmail for legacy pre-014 keys that haven't been
+	// re-minted -- those keys will still resolve to the project
+	// owner / admin until the customer rotates them. This is the
+	// pivot from "all keys authenticate as project owner" to
+	// "each key authenticates as a specific member."
+	caller, _ := UserIDFromContext(r.Context())
 	if caller == "" {
-		caller = p.OwnerEmail
+		caller = p.OwnerUserID
+		if caller == "" {
+			caller = p.OwnerEmail
+		}
 	}
 	if caller == "" {
 		writeError(w, http.StatusConflict, "project has no owner identity (legacy state, contact support)")
@@ -632,6 +639,13 @@ func (h *Handlers) HandleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 				KeyHash:   hash,
 				KeyPrefix: prefix,
 				Name:      "Invite key for " + body.Email,
+				// Stamp the invitee's identity (email-as-user-id pre-
+				// session-auth). This is what makes the role check in
+				// resolveAdminContext actually scope to the invitee
+				// instead of the project owner. Without this line,
+				// every minted key effectively grants admin via the
+				// owner_user_id fallback.
+				UserID: userID, // userID := body.Email above
 			}
 			if persistErr := h.Store.CreateAPIKey(r.Context(), rec); persistErr != nil {
 				h.Logger.Warn("accept invite: persist key failed (member still added)",

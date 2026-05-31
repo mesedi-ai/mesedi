@@ -161,6 +161,12 @@ type APIKey struct {
 	Name       string     `json:"name,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	// UserID is the org-member identity this key authenticates as
+	// (#263). Required for per-member role enforcement. Migration 014
+	// added the column nullable so pre-014 keys still work; auth
+	// middleware falls back to project.owner_user_id when UserID is
+	// empty so existing customer integrations don't break overnight.
+	UserID string `json:"user_id,omitempty"`
 }
 
 // ProjectWebhook is a per-project webhook configuration for failure-class

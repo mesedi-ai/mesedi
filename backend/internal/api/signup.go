@@ -202,6 +202,13 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		KeyHash:   hash,
 		KeyPrefix: prefix,
 		Name:      "Signup key",
+		// Tag the key with the signup email as user_id so the auth
+		// chain knows which org member this key authenticates as
+		// (#263 RBAC). Future-compat: when session auth lands, the
+		// signup user_id will be the session's user_id, but email-as-
+		// user-id is the convention until then -- matches the
+		// invite-accept flow and bootstrapOrgForProject's admin row.
+		UserID: email,
 	}
 	if err := h.Store.CreateAPIKey(r.Context(), keyRecord); err != nil {
 		h.Logger.Error("signup: persist key failed", "error", err.Error(), "project_id", projectID)

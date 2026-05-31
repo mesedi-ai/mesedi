@@ -35,6 +35,7 @@ type ctxKey int
 const (
 	ctxKeyProjectID ctxKey = iota + 1
 	ctxKeyAPIKeyID
+	ctxKeyUserID
 )
 
 // ProjectIDFromContext returns the authenticated project ID associated
@@ -51,6 +52,16 @@ func ProjectIDFromContext(ctx context.Context) (string, bool) {
 // audit logging, every action a key takes can be traced back.
 func APIKeyIDFromContext(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(ctxKeyAPIKeyID).(string)
+	return v, ok
+}
+
+// UserIDFromContext returns the org-member user_id this request is
+// authenticated as (#263 RBAC). Empty string + false when the key
+// pre-dates migration 014 (legacy keys without a user_id). Callers
+// that need to enforce roles should fall back to project.OwnerUserID
+// or OwnerEmail when this is empty.
+func UserIDFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(ctxKeyUserID).(string)
 	return v, ok
 }
 
@@ -143,6 +154,13 @@ func authMiddleware(s store.Store, detector *AbuseDetector) func(http.Handler) h
 			// Attach project + key IDs to the request context for handlers.
 			ctx := context.WithValue(r.Context(), ctxKeyProjectID, key.ProjectID)
 			ctx = context.WithValue(ctx, ctxKeyAPIKeyID, key.KeyID)
+			// Attach the API key's user_id so downstream handlers can
+			// enforce per-member roles (#263). Empty for legacy pre-014
+			// keys; downstream handlers fall back to project.OwnerUserID
+			// or OwnerEmail in that case.
+			if key.UserID != "" {
+				ctx = context.WithValue(ctx, ctxKeyUserID, key.UserID)
+			}
 
 			// Stamp project_id onto the wrapped ResponseWriter so the
 			// request-log middleware (which runs in the outer chain
