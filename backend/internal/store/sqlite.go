@@ -1469,6 +1469,30 @@ func (s *SQLiteStore) ListExecutions(
 	return scanExecutionRows(rows)
 }
 
+// ListActiveExecutionsByProject returns executions that are still
+// running (status = "started"). Used by the budget-ceiling halt
+// fan-out (#252) to enumerate halt targets when a tenant breaches.
+func (s *SQLiteStore) ListActiveExecutionsByProject(
+	ctx context.Context,
+	projectID string,
+) ([]*events.Execution, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			execution_id, project_id, status,
+			started_at, ended_at,
+			duration_ms, total_tokens_in, total_tokens_out,
+			estimated_cost_usd, sdk_language, sdk_version, crash_signature
+		FROM executions
+		WHERE project_id = ? AND status = ?
+		ORDER BY started_at DESC
+	`, projectID, string(events.StatusStarted))
+	if err != nil {
+		return nil, fmt.Errorf("query active executions: %w", err)
+	}
+	defer rows.Close()
+	return scanExecutionRows(rows)
+}
+
 // ListExecutionsByFailureGroup returns executions whose failure_group_id
 // matches groupID, sorted by started_at DESC. Caller is expected to have
 // already verified that the group belongs to the auth context's project

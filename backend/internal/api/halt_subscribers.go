@@ -102,6 +102,14 @@ func (h *HaltSubscribers) register(executionID string, sub *haltSubscriber) (cle
 	}
 }
 
+// TriggerHalt is the exported convenience wrapper for publish. Used
+// by the budget-ceiling scheduler (#252) when a tenant breach fires
+// halt-fan-out across many executions. Returns the number of
+// subscribers notified (same as publish).
+func (h *HaltSubscribers) TriggerHalt(executionID, reason string) int {
+	return h.publish(executionID, reason)
+}
+
 // publish pushes a halt reason to every subscriber for executionID.
 // Returns the number of subscribers notified. Non-blocking, if a
 // subscriber's channel is full (shouldn't happen with buffered

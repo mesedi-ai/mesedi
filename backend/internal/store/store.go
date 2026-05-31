@@ -67,6 +67,36 @@ type Project struct {
 	TierExpiresAt *time.Time `json:"tier_expires_at,omitempty"`
 }
 
+// TenantBudgetCeiling is the persisted configuration that powers
+// the Enterprise-tier monthly budget ceiling feature (#252).
+//
+// v0.1 tenant = owner_user_id (single-user account). The scheduler
+// evaluates each ceiling row every 5 minutes by summing
+// estimated_cost_usd across all projects owned by the same
+// owner_user_id since the start of the current month, and compares
+// the sum to MonthlyCeilingUSD.
+//
+// BreachAction is "warn" (notify only) or "halt" (notify + auto-halt
+// across the tenant's active executions). v0.1 only emits
+// notifications regardless of value; v1.1 wires in the halt fan-out.
+//
+// BreachedAt is set by the scheduler the first time burn crosses
+// the ceiling within a calendar month, and cleared at month rollover.
+// Notification dispatch reads this column to dedupe: we send one
+// email + one webhook per breach event, not one every 5 minutes for
+// the rest of the month.
+type TenantBudgetCeiling struct {
+	OwnerUserID        string     `json:"owner_user_id"`
+	MonthlyCeilingUSD  float64    `json:"monthly_ceiling_usd"`
+	BreachAction       string     `json:"breach_action"`              // "warn" | "halt"
+	NotifyEmail        string     `json:"notify_email,omitempty"`     // optional override; falls back to project owner_email
+	NotifyWebhookURL   string     `json:"notify_webhook_url,omitempty"` // optional; if set, dispatcher posts a JSON payload
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	LastEvaluatedAt    *time.Time `json:"last_evaluated_at,omitempty"`
+	BreachedAt         *time.Time `json:"breached_at,omitempty"`
+}
+
 // AdminProjectRow is one row in the founder-side admin dashboard's
 // project list. Extends the bare Project with activity aggregates
 // (last_activity_at, total_executions) computed via LEFT JOIN to the
@@ -385,6 +415,33 @@ type Store interface {
 	//
 	// since=zero-time means "all time".
 	SumExecutionCostByProjectSince(ctx context.Context, projectID string, since time.Time) (totalCostUSD float64, totalCount int, err error)
+
+	// ListActiveExecutionsByProject returns executions for projectID
+	// that have not yet ended (status = "started"). Used by the
+	// tenant budget-ceiling breach handler (#252) to enumerate
+	// halt targets when a ceiling breach fires. Sorted by started_at
+	// DESC (newest active first).
+	ListActiveExecutionsByProject(ctx context.Context, projectID string) ([]*events.Execution, error)
+
+	// Tenant budget ceilings (#252). v0.1 tenant = owner_user_id.
+	GetTenantBudgetCeiling(ctx context.Context, ownerUserID string) (*TenantBudgetCeiling, error)
+	// UpsertTenantBudgetCeiling inserts or updates the ceiling row.
+	// Caller sets MonthlyCeilingUSD, BreachAction, NotifyEmail,
+	// NotifyWebhookURL. Store sets CreatedAt on insert, always sets
+	// UpdatedAt to now. LastEvaluatedAt and BreachedAt are NOT
+	// touched by this method; the scheduler manages those.
+	UpsertTenantBudgetCeiling(ctx context.Context, c *TenantBudgetCeiling) error
+	// ListTenantBudgetCeilings returns every ceiling row. Used by
+	// the scheduler at tick time. Order is unspecified.
+	ListTenantBudgetCeilings(ctx context.Context) ([]*TenantBudgetCeiling, error)
+	// MarkTenantCeilingEvaluated bumps last_evaluated_at to `at`.
+	// Called by the scheduler after each successful evaluation.
+	MarkTenantCeilingEvaluated(ctx context.Context, ownerUserID string, at time.Time) error
+	// SetTenantCeilingBreached sets breached_at (nil clears it; non-nil
+	// records a breach). Called by the scheduler when the burn-vs-
+	// ceiling state transitions: nil -> now() on first breach,
+	// non-nil -> nil on month-rollover reset.
+	SetTenantCeilingBreached(ctx context.Context, ownerUserID string, breachedAt *time.Time) error
 
 	// Events (batch ingest path is the hot one; single-event ingest is for tests).
 	SaveEvents(ctx context.Context, batch []events.Event) error

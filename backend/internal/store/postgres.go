@@ -1148,6 +1148,27 @@ func (s *PostgresStore) ListExecutions(ctx context.Context, projectID string, li
 	return scanExecutionRowsPg(rows)
 }
 
+// ListActiveExecutionsByProject is the Postgres counterpart to
+// SQLiteStore.ListActiveExecutionsByProject. See that method's doc
+// comment for contract.
+func (s *PostgresStore) ListActiveExecutionsByProject(ctx context.Context, projectID string) ([]*events.Execution, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			execution_id, project_id, status,
+			started_at, ended_at,
+			duration_ms, total_tokens_in, total_tokens_out,
+			estimated_cost_usd, sdk_language, sdk_version, crash_signature
+		FROM executions
+		WHERE project_id = $1 AND status = $2
+		ORDER BY started_at DESC
+	`, projectID, string(events.StatusStarted))
+	if err != nil {
+		return nil, fmt.Errorf("query active executions: %w", err)
+	}
+	defer rows.Close()
+	return scanExecutionRowsPg(rows)
+}
+
 func (s *PostgresStore) ListExecutionsByFailureGroup(ctx context.Context, groupID string, limit, offset int) ([]*events.Execution, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT

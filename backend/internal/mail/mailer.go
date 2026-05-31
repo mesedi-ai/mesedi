@@ -25,6 +25,20 @@ import (
 type Mailer interface {
 	SendWelcome(ctx context.Context, in WelcomeInput) error
 	SendSuspensionWarning(ctx context.Context, in SuspensionWarningInput) error
+	SendBudgetCeilingBreach(ctx context.Context, in BudgetCeilingBreachInput) error
+}
+
+// BudgetCeilingBreachInput is everything the tenant-budget-ceiling
+// breach email needs (#252). Sent the first time a tenant's
+// month-to-date burn crosses its configured ceiling. One send per
+// breach per calendar month.
+type BudgetCeilingBreachInput struct {
+	ToEmail        string
+	BurnUSD        float64
+	CeilingUSD     float64
+	BreachAction   string // "warn" | "halt"
+	ProjectCount   int
+	DashboardURL   string
 }
 
 // SuspensionWarningInput is everything the suspension-warning
@@ -70,6 +84,17 @@ func (m NoopMailer) SendSuspensionWarning(ctx context.Context, in SuspensionWarn
 			"to", in.ToEmail,
 			"project", in.ProjectName,
 			"signal_kind", in.SignalKind,
+		)
+	}
+	return nil
+}
+
+func (m NoopMailer) SendBudgetCeilingBreach(ctx context.Context, in BudgetCeilingBreachInput) error {
+	if m.Logger != nil {
+		m.Logger.Debug("mail: budget ceiling breach (noop, no RESEND_API_KEY)",
+			"to", in.ToEmail,
+			"burn_usd", in.BurnUSD,
+			"ceiling_usd", in.CeilingUSD,
 		)
 	}
 	return nil
@@ -209,6 +234,76 @@ func (m *ResendMailer) SendSuspensionWarning(ctx context.Context, in SuspensionW
 		m.Logger.Info("mail: suspension warning sent",
 			"to", in.ToEmail,
 			"signal_kind", in.SignalKind,
+		)
+	}
+	return nil
+}
+
+// SendBudgetCeilingBreach renders and ships the tenant budget-ceiling
+// breach email (#252). Sent the first time a tenant's MTD burn
+// crosses the configured ceiling.
+func (m *ResendMailer) SendBudgetCeilingBreach(ctx context.Context, in BudgetCeilingBreachInput) error {
+	subject := fmt.Sprintf("Mesedi budget ceiling breached: $%.2f / $%.2f",
+		in.BurnUSD, in.CeilingUSD)
+
+	textBody := fmt.Sprintf(
+		"Your Mesedi tenant just crossed its monthly budget ceiling.\n\n"+
+			"Month-to-date burn: $%.2f\n"+
+			"Configured ceiling: $%.2f\n"+
+			"Action taken:       %s\n"+
+			"Projects in tenant: %d\n\n"+
+			"View the rollup: %s/app/org\n",
+		in.BurnUSD, in.CeilingUSD, in.BreachAction, in.ProjectCount,
+		in.DashboardURL,
+	)
+	htmlBody := fmt.Sprintf(
+		"<p>Your Mesedi tenant just crossed its monthly budget ceiling.</p>"+
+			"<ul>"+
+			"<li><strong>Month-to-date burn:</strong> $%.2f</li>"+
+			"<li><strong>Configured ceiling:</strong> $%.2f</li>"+
+			"<li><strong>Action taken:</strong> %s</li>"+
+			"<li><strong>Projects in tenant:</strong> %d</li>"+
+			"</ul>"+
+			"<p><a href=\"%s/app/org\">View the rollup</a></p>",
+		in.BurnUSD, in.CeilingUSD, in.BreachAction, in.ProjectCount,
+		in.DashboardURL,
+	)
+
+	body, err := json.Marshal(resendRequest{
+		From:    m.From,
+		To:      []string{in.ToEmail},
+		Subject: subject,
+		HTML:    htmlBody,
+		Text:    textBody,
+	})
+	if err != nil {
+		return fmt.Errorf("mail: marshal budget ceiling breach: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("mail: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mail: post to resend: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mail: resend returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	if m.Logger != nil {
+		m.Logger.Info("mail: budget ceiling breach sent",
+			"to", in.ToEmail,
+			"burn_usd", in.BurnUSD,
+			"ceiling_usd", in.CeilingUSD,
 		)
 	}
 	return nil

@@ -127,6 +127,11 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// same user (v0.1 tenant model = owner_user_id). Resolves the
 	// authenticated project's owner, sums burn across sibling projects.
 	mux.HandleFunc("GET /me/rollup", h.HandleOrgRollup)
+	// Task #252, tenant monthly budget ceiling. GET fetches the
+	// configured ceiling (ErrNotFound -> 404 so the UI can render
+	// the "set up a ceiling" empty state). PUT upserts.
+	mux.HandleFunc("GET /me/budget-ceiling", h.HandleGetBudgetCeiling)
+	mux.HandleFunc("PUT /me/budget-ceiling", h.HandleUpsertBudgetCeiling)
 	// Phase 3a, read-side failure_group surface for the dashboard.
 	mux.HandleFunc("GET /failure-groups", h.HandleListFailureGroups)
 	mux.HandleFunc("GET /failure-groups/{id}", h.HandleGetFailureGroup)
@@ -1238,6 +1243,118 @@ func writeOrgRollup(
 		},
 		"projects": rollups,
 	})
+}
+
+// HandleGetBudgetCeiling returns the configured tenant budget ceiling
+// for the authenticated project's owner (#252). 404 with a structured
+// body when no ceiling has been configured, so the UI can render an
+// empty state and prompt the user to set one up.
+func (h *Handlers) HandleGetBudgetCeiling(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	ctx := r.Context()
+
+	authProject, err := h.Store.GetProject(ctx, authProjectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load authenticated project")
+		return
+	}
+	if authProject.OwnerUserID == "" {
+		writeError(w, http.StatusNotFound, "no ceiling configured")
+		return
+	}
+
+	c, err := h.Store.GetTenantBudgetCeiling(ctx, authProject.OwnerUserID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "no ceiling configured")
+			return
+		}
+		h.Logger.Error("get budget ceiling failed",
+			"owner_user_id", authProject.OwnerUserID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load ceiling")
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+// HandleUpsertBudgetCeiling configures or updates the tenant budget
+// ceiling for the authenticated project's owner (#252).
+//
+// Body shape:
+//
+//	{
+//	  "monthly_ceiling_usd": 1000.0,
+//	  "breach_action": "warn" | "halt",
+//	  "notify_email": "ops@example.com",     // optional
+//	  "notify_webhook_url": "https://..."     // optional
+//	}
+func (h *Handlers) HandleUpsertBudgetCeiling(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	ctx := r.Context()
+
+	authProject, err := h.Store.GetProject(ctx, authProjectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load authenticated project")
+		return
+	}
+	if authProject.OwnerUserID == "" {
+		writeError(w, http.StatusForbidden, "this project has no owner; cannot configure a tenant ceiling")
+		return
+	}
+
+	var body struct {
+		MonthlyCeilingUSD float64 `json:"monthly_ceiling_usd"`
+		BreachAction      string  `json:"breach_action"`
+		NotifyEmail       string  `json:"notify_email"`
+		NotifyWebhookURL  string  `json:"notify_webhook_url"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.MonthlyCeilingUSD <= 0 {
+		writeError(w, http.StatusBadRequest, "monthly_ceiling_usd must be > 0")
+		return
+	}
+	if body.BreachAction == "" {
+		body.BreachAction = "warn"
+	}
+	if body.BreachAction != "warn" && body.BreachAction != "halt" {
+		writeError(w, http.StatusBadRequest, "breach_action must be 'warn' or 'halt'")
+		return
+	}
+
+	c := &store.TenantBudgetCeiling{
+		OwnerUserID:       authProject.OwnerUserID,
+		MonthlyCeilingUSD: body.MonthlyCeilingUSD,
+		BreachAction:      body.BreachAction,
+		NotifyEmail:       body.NotifyEmail,
+		NotifyWebhookURL:  body.NotifyWebhookURL,
+	}
+	if err := h.Store.UpsertTenantBudgetCeiling(ctx, c); err != nil {
+		h.Logger.Error("upsert budget ceiling failed",
+			"owner_user_id", authProject.OwnerUserID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not save ceiling")
+		return
+	}
+
+	// Echo back the saved row (now includes server-set created_at /
+	// updated_at) for the UI to re-render without a follow-up GET.
+	saved, err := h.Store.GetTenantBudgetCeiling(ctx, authProject.OwnerUserID)
+	if err != nil {
+		// Save succeeded but read-back failed; return what we have.
+		writeJSON(w, http.StatusOK, c)
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
 }
 
 // computeExecutionCost sums the estimated USD cost across every

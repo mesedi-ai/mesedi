@@ -273,6 +273,23 @@ func main() {
 	// process; the OS kills it on SIGTERM along with the HTTP server.
 	api.StartAbuseWorker(context.Background(), st, mailer, logger, cfg.DashboardURL)
 
+	// Tenant budget-ceiling scheduler (#252). Walks every
+	// tenant_budget_ceilings row every 5 minutes, evaluates MTD burn
+	// against the configured ceiling, and (on first crossing within
+	// the calendar month) fires email + webhook notifications and
+	// (when BreachAction == "halt") halts every active execution
+	// under the tenant. Same context.Background() lifetime as the
+	// abuse worker.
+	budgetCeilingScheduler := &api.BudgetCeilingScheduler{
+		Store:        st,
+		Logger:       logger,
+		HaltSubs:     handlers.HaltSubs,
+		Mailer:       mailer,
+		WebhookHTTP:  &http.Client{Timeout: 10 * time.Second},
+		DashboardURL: cfg.DashboardURL,
+	}
+	budgetCeilingScheduler.Start(context.Background())
+
 	// Public POST /signup bypasses the bearer-token auth chain (visitors
 	// have no key yet) but still needs CORS so the marketing site at
 	// mesedi.vercel.app can POST cross-origin. The signup handler's
