@@ -1367,17 +1367,47 @@ func (h *Handlers) HandleUpsertBudgetCeiling(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, saved)
 }
 
+// tierRetentionCap returns the maximum retention_days a project of
+// the given tier may configure, and whether the tier may set
+// indefinite retention. Tier strings are normalized lowercase; an
+// unknown tier falls through to Hobby semantics (conservative).
+//
+// Caps match the /pricing card promises (#262):
+//
+//	Hobby:      up to 7 days,    no indefinite
+//	Pro:        up to 30 days,   no indefinite
+//	Enterprise: up to 3650 days, indefinite allowed
+//
+// The 3650-day max on Enterprise is a sanity ceiling matching the
+// global validation in HandleSetRetention; anyone wanting longer is
+// expected to flip to indefinite, which is what "audit history"
+// customers really want anyway.
+func tierRetentionCap(tier string) (maxDays int, allowIndefinite bool) {
+	switch strings.ToLower(tier) {
+	case "enterprise":
+		return 3650, true
+	case "pro":
+		return 30, false
+	default:
+		// Hobby, empty, or unknown tier.
+		return 7, false
+	}
+}
+
 // HandleGetRetention returns the configured retention for the
-// authenticated project (#262). The response shape always includes
-// both retention_days (nullable int) and is_indefinite (boolean) so
-// the UI doesn't have to special-case nulls.
+// authenticated project (#262). The response includes the tier's
+// caps so the UI can disable the indefinite checkbox / cap the day
+// input without an extra round-trip.
 //
 // Response:
 //
 //	{
 //	  "ok": true,
-//	  "retention_days": 30,    // or null when indefinite
-//	  "is_indefinite": false
+//	  "retention_days": 30,        // or null when indefinite
+//	  "is_indefinite": false,
+//	  "tier": "pro",
+//	  "max_days": 30,              // tier-specific cap
+//	  "allow_indefinite": false    // only true on enterprise
 //	}
 func (h *Handlers) HandleGetRetention(w http.ResponseWriter, r *http.Request) {
 	authProjectID, ok := ProjectIDFromContext(r.Context())
@@ -1385,38 +1415,47 @@ func (h *Handlers) HandleGetRetention(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no project context")
 		return
 	}
-	days, err := h.Store.GetProjectRetentionDays(r.Context(), authProjectID)
+	p, err := h.Store.GetProject(r.Context(), authProjectID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "project not found")
 			return
 		}
+		h.Logger.Error("get retention: load project failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load retention")
+		return
+	}
+	days, err := h.Store.GetProjectRetentionDays(r.Context(), authProjectID)
+	if err != nil {
 		h.Logger.Error("get retention failed",
 			"project_id", authProjectID, "error", err.Error())
 		writeError(w, http.StatusInternalServerError, "could not load retention")
 		return
 	}
+	maxDays, allowIndefinite := tierRetentionCap(p.Tier)
 	resp := map[string]any{
-		"ok":             true,
-		"retention_days": days,
-		"is_indefinite":  days == nil,
+		"ok":               true,
+		"retention_days":   days,
+		"is_indefinite":    days == nil,
+		"tier":             p.Tier,
+		"max_days":         maxDays,
+		"allow_indefinite": allowIndefinite,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleSetRetention updates the retention window for the
-// authenticated project (#262).
+// authenticated project (#262). Tier-gated:
 //
-// Body:
+//	Hobby:      max 7 days,    no indefinite
+//	Pro:        max 30 days,   no indefinite
+//	Enterprise: max 3650 days, indefinite allowed
 //
-//	{
-//	  "retention_days": 30,        // omit or null for indefinite
-//	  "is_indefinite": false       // optional, takes precedence over retention_days when true
-//	}
-//
-// Sanity caps: minimum 1 day (anything less and you may as well
-// disable telemetry), maximum 3650 days (~10 years; anyone needing
-// longer should switch to indefinite which is free of a cap).
+// Returns 403 with the tier's caps in the response when the customer
+// asks for more than their tier permits, so the dashboard can render
+// a clear "upgrade for longer retention" message instead of a generic
+// validation failure.
 func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
@@ -1433,15 +1472,43 @@ func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load project so we can enforce tier caps. Done BEFORE generic
+	// validation so a Hobby customer asking for indefinite gets the
+	// tier-specific 403 instead of a generic 400.
+	p, err := h.Store.GetProject(r.Context(), authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("set retention: load project failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load project")
+		return
+	}
+	maxDays, allowIndefinite := tierRetentionCap(p.Tier)
+
+	// Tier guard: indefinite only on Enterprise.
+	if body.IsIndefinite && !allowIndefinite {
+		writeError(w, http.StatusForbidden,
+			"indefinite retention is an Enterprise feature; current tier '"+p.Tier+
+				"' is capped at "+strconv.Itoa(maxDays)+" days")
+		return
+	}
+
+	// Tier guard: requested days must be within the tier's cap.
 	var days *int
 	if !body.IsIndefinite && body.RetentionDays != nil {
 		v := *body.RetentionDays
 		if v < 1 {
-			writeError(w, http.StatusBadRequest, "retention_days must be at least 1 (or set is_indefinite=true)")
+			writeError(w, http.StatusBadRequest,
+				"retention_days must be at least 1")
 			return
 		}
-		if v > 3650 {
-			writeError(w, http.StatusBadRequest, "retention_days must be at most 3650 (use is_indefinite=true for longer)")
+		if v > maxDays {
+			writeError(w, http.StatusForbidden,
+				"current tier '"+p.Tier+"' is capped at "+strconv.Itoa(maxDays)+
+					" days; upgrade for longer retention")
 			return
 		}
 		days = &v
@@ -1460,13 +1527,17 @@ func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
 
 	h.Logger.Info("retention updated",
 		"project_id", authProjectID,
+		"tier", p.Tier,
 		"retention_days", days,
 		"is_indefinite", days == nil)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":             true,
-		"retention_days": days,
-		"is_indefinite":  days == nil,
+		"ok":               true,
+		"retention_days":   days,
+		"is_indefinite":    days == nil,
+		"tier":             p.Tier,
+		"max_days":         maxDays,
+		"allow_indefinite": allowIndefinite,
 	})
 }
 
