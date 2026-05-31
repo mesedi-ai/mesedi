@@ -253,10 +253,24 @@ func main() {
 	// Transactional email (#127). Falls back to NoopMailer when no
 	// RESEND_API_KEY is configured so signups still complete in
 	// local dev and CI.
+	//
+	// Loud startup WARN if the From is still the Resend sandbox
+	// "onboarding@resend.dev" sender. That address only delivers to
+	// the Resend account owner's own email; every send to a real
+	// customer or invitee gets a 403 validation_error and is silently
+	// swallowed by the call-site (which logs but doesn't surface to
+	// the customer). Triggered the org-invite bug 2026-05-31; the
+	// WARN below makes a repeat trip-up impossible to miss on deploy.
 	var mailer mail.Mailer
 	if cfg.ResendAPIKey != "" {
 		mailer = mail.NewResendMailer(cfg.ResendAPIKey, cfg.ResendFrom, logger)
 		logger.Info("transactional email configured", "provider", "resend", "from", cfg.ResendFrom)
+		if strings.Contains(cfg.ResendFrom, "@resend.dev") {
+			logger.Warn(
+				"MESEDI_MAIL_FROM is the Resend sandbox sender; outbound emails will only deliver to the Resend account owner. Set MESEDI_MAIL_FROM to an address on a verified domain (e.g. 'Mesedi <hello@mesedi.ai>') to fix.",
+				"current_from", cfg.ResendFrom,
+			)
+		}
 	} else {
 		mailer = mail.NoopMailer{Logger: logger}
 		logger.Info("transactional email disabled", "reason", "RESEND_API_KEY not set")
