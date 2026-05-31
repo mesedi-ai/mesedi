@@ -189,6 +189,18 @@ type ProjectWebhook struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+// ProjectClassSeverity is the per-project override of the hardcoded
+// failure-class-to-severity default map (#261). Absent rows fall back
+// to severity.Default(failureClass) in Go code. Customers set
+// overrides via PUT /me/class-severities/{class} on the dashboard
+// settings page.
+type ProjectClassSeverity struct {
+	ProjectID    string    `json:"project_id"`
+	FailureClass string    `json:"failure_class"`
+	Severity     string    `json:"severity"` // "critical" | "warning" | "info"
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 // WebhookDelivery is one attempted POST to a registered webhook URL.
 // One row per attempt (including retries); a single failure-group
 // escalation may produce up to 3 rows under the default retry policy.
@@ -442,6 +454,23 @@ type Store interface {
 	// ceiling state transitions: nil -> now() on first breach,
 	// non-nil -> nil on month-rollover reset.
 	SetTenantCeilingBreached(ctx context.Context, ownerUserID string, breachedAt *time.Time) error
+
+	// Per-project failure-class severity overrides (#261).
+	// GetProjectClassSeverity returns the override for (projectID,
+	// failureClass), or ErrNotFound if no override exists (caller
+	// then falls back to severity.Default).
+	GetProjectClassSeverity(ctx context.Context, projectID, failureClass string) (*ProjectClassSeverity, error)
+	// UpsertProjectClassSeverity inserts or updates an override row.
+	// Caller validates Severity is one of "critical"|"warning"|"info"
+	// before invoking; store does not enforce.
+	UpsertProjectClassSeverity(ctx context.Context, override *ProjectClassSeverity) error
+	// DeleteProjectClassSeverity removes the override so the
+	// dispatcher reverts to severity.Default for that class.
+	DeleteProjectClassSeverity(ctx context.Context, projectID, failureClass string) error
+	// ListProjectClassSeverityOverrides returns every override for
+	// the given project. The dashboard settings page uses this to
+	// render which classes have been customized vs left at default.
+	ListProjectClassSeverityOverrides(ctx context.Context, projectID string) ([]*ProjectClassSeverity, error)
 
 	// Events (batch ingest path is the hot one; single-event ingest is for tests).
 	SaveEvents(ctx context.Context, batch []events.Event) error
