@@ -1319,6 +1319,9 @@ func (h *Handlers) HandleGetBudgetCeiling(w http.ResponseWriter, r *http.Request
 //	  "notify_webhook_url": "https://..."     // optional
 //	}
 func (h *Handlers) HandleUpsertBudgetCeiling(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no project context")
@@ -1473,6 +1476,9 @@ func (h *Handlers) HandleGetRetention(w http.ResponseWriter, r *http.Request) {
 // a clear "upgrade for longer retention" message instead of a generic
 // validation failure.
 func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no project context")
@@ -1646,6 +1652,9 @@ func (h *Handlers) HandleListClassSeverities(w http.ResponseWriter, r *http.Requ
 //	PUT /me/class-severities/loops
 //	{ "severity": "critical" }
 func (h *Handlers) HandleUpsertClassSeverity(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no project context")
@@ -1693,6 +1702,9 @@ func (h *Handlers) HandleUpsertClassSeverity(w http.ResponseWriter, r *http.Requ
 // so the dispatcher reverts to severity.Default for that class (#261).
 // Idempotent: 200 OK even if no override existed.
 func (h *Handlers) HandleDeleteClassSeverity(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no project context")
@@ -1813,6 +1825,9 @@ func (h *Handlers) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 //
 // Request body (optional): {"name": "human-readable label"}.
 func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no project context")
@@ -1881,8 +1896,12 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleRevokeAPIKey hard-deletes an API key. Project-scoped via the
-// Store method's project_id guard.
+// Store method's project_id guard. Admin-only (#263 RBAC): a Read or
+// Write member could otherwise revoke the admin's own key.
 func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
 	keyID := r.PathValue("id")
 	if keyID == "" {
 		writeError(w, http.StatusBadRequest, "key_id path parameter required")
@@ -1969,6 +1988,9 @@ func (h *Handlers) HandleListWebhooks(w http.ResponseWriter, r *http.Request) {
 // enabled=true and the failure_group's class is either in
 // enabled_classes OR enabled_classes is empty.
 func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no project context")
@@ -2096,6 +2118,9 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 // store method's project_id guard; cross-tenant id-guessing returns
 // 404, not 403, to avoid leaking which ids exist.
 func (h *Handlers) HandleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
 	webhookID := r.PathValue("id")
 	if webhookID == "" {
 		writeError(w, http.StatusBadRequest, "webhook_id path parameter required")
@@ -2134,6 +2159,9 @@ func (h *Handlers) HandleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 // Host header, adequate for local-dev; a future slice will make this
 // configurable via a flag/env var for production deployments.
 func (h *Handlers) HandleTestWebhook(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
 	webhookID := r.PathValue("id")
 	if webhookID == "" {
 		writeError(w, http.StatusBadRequest, "webhook_id path parameter required")

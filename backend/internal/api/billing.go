@@ -307,6 +307,9 @@ func (h *Handlers) HandleGetBillingUsage(w http.ResponseWriter, r *http.Request)
 // On the success URL Stripe redirects with ?session_id={CHECKOUT_SESSION_ID}
 // so the dashboard can read the current /billing state immediately.
 func (h *Handlers) HandleCreateCheckout(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
 	if !h.Stripe.Configured() {
 		billingNotConfigured(w)
 		return
@@ -379,6 +382,9 @@ func (h *Handlers) HandleCreateCheckout(w http.ResponseWriter, r *http.Request) 
 // view invoices, or cancel. Requires that the project has a Stripe
 // customer id already (set after the first successful Checkout).
 func (h *Handlers) HandleCreatePortal(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
 	if !h.Stripe.Configured() {
 		billingNotConfigured(w)
 		return
