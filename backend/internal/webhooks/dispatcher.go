@@ -66,6 +66,13 @@ type Payload struct {
 	WebhookID         string    `json:"webhook_id"`
 	GroupID           string    `json:"group_id,omitempty"`
 	FailureClass      string    `json:"failure_class"`
+	// Severity is the resolved severity for this event (#261), one of
+	// "critical", "warning", or "info". Sourced from the customer's
+	// per-class override if one exists, otherwise severity.Default
+	// for the failure_class. Receivers can route on this field
+	// (PagerDuty integrations typically map critical -> page, warning
+	// -> ticket, info -> log).
+	Severity          string    `json:"severity"`
 	Signature         string    `json:"signature"`
 	SampleExecutionID string    `json:"sample_execution_id,omitempty"`
 	DashboardURL      string    `json:"dashboard_url,omitempty"`

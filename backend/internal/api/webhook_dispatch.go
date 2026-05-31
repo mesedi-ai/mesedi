@@ -23,12 +23,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"mesedi/backend/internal/playbooks"
+	"mesedi/backend/internal/severity"
 	"mesedi/backend/internal/store"
 	"mesedi/backend/internal/webhooks"
 )
@@ -106,9 +108,35 @@ func (h *Handlers) runFailureGroupDispatch(
 			url.QueryEscape(signature)
 	}
 
+	// Compute event severity ONCE for this failure_group (#261).
+	// Override-first lookup: if the customer has set a per-class
+	// override for (project, failure_class), use it; otherwise fall
+	// back to severity.Default for the class. The result rides on the
+	// webhook payload AND determines per-webhook filter eligibility
+	// in the loop below.
+	eventSeverity := severity.Default(failureClass)
+	if override, oerr := h.Store.GetProjectClassSeverity(ctx, projectID, failureClass); oerr == nil && override != nil {
+		if severity.Valid(override.Severity) {
+			eventSeverity = severity.Severity(override.Severity)
+		}
+	} else if oerr != nil && !errors.Is(oerr, store.ErrNotFound) {
+		// Non-trivial DB error reading the override. Log and
+		// continue with the default so we don't drop notifications
+		// over a config-lookup hiccup.
+		logger.Warn("webhook dispatch: severity override lookup failed (using default)",
+			"error", oerr.Error())
+	}
+
 	matched := 0
 	for _, wh := range hooks {
 		if !classMatchesFilter(failureClass, wh.EnabledClasses) {
+			continue
+		}
+		// Severity filter (#261). Empty SeverityFilter = fire on
+		// every severity (backward compatible with pre-#261 webhooks).
+		// Non-empty SeverityFilter = drop the event when its severity
+		// is not in the allow-list.
+		if filter := severity.ParseFilter(wh.SeverityFilter); !severity.Allows(filter, eventSeverity) {
 			continue
 		}
 		matched++
@@ -119,6 +147,7 @@ func (h *Handlers) runFailureGroupDispatch(
 			WebhookID:         wh.WebhookID,
 			GroupID:           group.GroupID,
 			FailureClass:      failureClass,
+			Severity:          string(eventSeverity),
 			Signature:         signature,
 			SampleExecutionID: group.SampleExecutionID,
 			// DashboardURL is the React-dashboard root (no trailing

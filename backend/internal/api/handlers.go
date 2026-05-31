@@ -1772,6 +1772,12 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		URL            string   `json:"url"`
 		EnabledClasses []string `json:"enabled_classes,omitempty"`
 		Enabled        *bool    `json:"enabled,omitempty"`
+		// SeverityFilter is a comma-separated list of severities this
+		// webhook should fire on (#261). Empty/omitted = fire on every
+		// severity (backward compatible). Unknown tokens are dropped
+		// by severity.ParseFilter, but we explicitly validate here so
+		// a typo doesn't silently produce a fire-on-nothing webhook.
+		SeverityFilter string `json:"severity_filter,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
@@ -1807,6 +1813,20 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate severity_filter (#261). Normalize whitespace + case,
+	// reject if non-empty input parsed to no valid severities (which
+	// would mean every token was misspelled). Empty input is fine,
+	// it means "fire on every severity".
+	if strings.TrimSpace(body.SeverityFilter) != "" {
+		parsed := severity.ParseFilter(body.SeverityFilter)
+		if len(parsed) == 0 {
+			writeError(w, http.StatusBadRequest,
+				"severity_filter contains no valid severities (valid: critical, warning, info)")
+			return
+		}
+		body.SeverityFilter = severity.FormatFilter(parsed) // canonicalize
+	}
+
 	enabled := true
 	if body.Enabled != nil {
 		enabled = *body.Enabled
@@ -1828,13 +1848,14 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rec := &store.ProjectWebhook{
-		WebhookID:      webhookID,
-		ProjectID:      authProjectID,
-		Name:           body.Name,
-		URL:            body.URL,
-		Secret:         secret,
-		EnabledClasses: body.EnabledClasses,
-		Enabled:        enabled,
+		WebhookID:       webhookID,
+		ProjectID:       authProjectID,
+		Name:            body.Name,
+		URL:             body.URL,
+		Secret:          secret,
+		EnabledClasses:  body.EnabledClasses,
+		Enabled:         enabled,
+		SeverityFilter:  body.SeverityFilter,
 	}
 	if err := h.Store.CreateProjectWebhook(r.Context(), rec); err != nil {
 		writeError(w, http.StatusInternalServerError, "persist webhook: "+err.Error())
@@ -1847,6 +1868,7 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		"url", body.URL,
 		"enabled", enabled,
 		"class_filter_count", len(body.EnabledClasses),
+		"severity_filter", body.SeverityFilter,
 	)
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1856,6 +1878,7 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		"name":            body.Name,
 		"enabled_classes": body.EnabledClasses,
 		"enabled":         enabled,
+		"severity_filter": body.SeverityFilter,
 		"secret":          secret,
 		"warning":         "Store this secret now, it will never be shown again. Use it to verify the X-Mesedi-Signature header on inbound webhook deliveries.",
 	})
