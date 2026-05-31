@@ -267,6 +267,18 @@ type Store interface {
 	// (#150), NEVER expose this through the customer-facing API.
 	// Ordered by created_at DESC so newest signups appear first.
 	ListAllProjects(ctx context.Context) ([]*AdminProjectRow, error)
+	// ListProjectsByOwner returns every project owned by ownerUserID,
+	// ordered by created_at ASC (oldest first, which mirrors how the
+	// org rollup dashboard wants to lay them out left-to-right). Used
+	// by the customer-facing /me/rollup endpoint (#259) to discover
+	// the set of project_ids that make up one tenant in v0.1 (where
+	// "tenant" is defined as a single user account; the proper
+	// organizations table comes later when multi-seat enterprises
+	// onboard).
+	//
+	// Returns an empty slice (not ErrNotFound) when ownerUserID has no
+	// projects, so callers can blanket-aggregate without special-casing.
+	ListProjectsByOwner(ctx context.Context, ownerUserID string) ([]*Project, error)
 	// Billing (#120, Stripe integration).
 	// UpdateProjectBilling sets the tier, Stripe identifiers, and
 	// current period bounds in one call. Called from the Stripe
@@ -364,6 +376,15 @@ type Store interface {
 	// stat cards (e.g. "crashed in last 24h"). cutoff = zero-time means
 	// "all-time count for that status."
 	CountExecutionsByStatusSince(ctx context.Context, projectID, status string, cutoff time.Time) (int, error)
+	// SumExecutionCostByProjectSince returns (totalCostUSD, totalCount)
+	// across all executions of projectID that started_at >= since.
+	// Used by the org-rollup endpoint (#259) for per-project burn
+	// aggregation. Sums the persisted executions.estimated_cost_usd
+	// column directly; this is the same column the per-execution
+	// dashboard surfaces use, so the two views stay in agreement.
+	//
+	// since=zero-time means "all time".
+	SumExecutionCostByProjectSince(ctx context.Context, projectID string, since time.Time) (totalCostUSD float64, totalCount int, err error)
 
 	// Events (batch ingest path is the hot one; single-event ingest is for tests).
 	SaveEvents(ctx context.Context, batch []events.Event) error

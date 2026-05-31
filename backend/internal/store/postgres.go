@@ -241,6 +241,74 @@ func (s *PostgresStore) GetProject(ctx context.Context, projectID string) (*Proj
 	return p, nil
 }
 
+// ListProjectsByOwner is the Postgres counterpart to
+// SQLiteStore.ListProjectsByOwner. See that method's doc comment for
+// the contract and the tenant-model rationale (#259).
+func (s *PostgresStore) ListProjectsByOwner(ctx context.Context, ownerUserID string) ([]*Project, error) {
+	if ownerUserID == "" {
+		return []*Project{}, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT project_id, name, owner_user_id, owner_email, created_at,
+		       tier, stripe_customer_id, stripe_subscription_id,
+		       current_period_start, current_period_end, executions_this_period,
+		       granted_executions, granted_executions_expires_at, tier_expires_at
+		FROM projects
+		WHERE owner_user_id = $1
+		ORDER BY created_at ASC
+	`, ownerUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list projects by owner: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*Project, 0, 4)
+	for rows.Next() {
+		p := &Project{}
+		var owner, email, stripeCust, stripeSub sql.NullString
+		var periodStart, periodEnd sql.NullInt64
+		var grantExpires, tierExpires sql.NullInt64
+		if err := rows.Scan(
+			&p.ProjectID, &p.Name, &owner, &email, &p.CreatedAt,
+			&p.Tier, &stripeCust, &stripeSub,
+			&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
+			&p.GrantedExecutions, &grantExpires, &tierExpires,
+		); err != nil {
+			return nil, fmt.Errorf("scan project: %w", err)
+		}
+		if owner.Valid {
+			p.OwnerUserID = owner.String
+		}
+		if email.Valid {
+			p.OwnerEmail = email.String
+		}
+		if stripeCust.Valid {
+			p.StripeCustomerID = stripeCust.String
+		}
+		if stripeSub.Valid {
+			p.StripeSubscriptionID = stripeSub.String
+		}
+		if periodStart.Valid {
+			t := time.Unix(periodStart.Int64, 0).UTC()
+			p.CurrentPeriodStart = &t
+		}
+		if periodEnd.Valid {
+			t := time.Unix(periodEnd.Int64, 0).UTC()
+			p.CurrentPeriodEnd = &t
+		}
+		if grantExpires.Valid {
+			t := time.Unix(grantExpires.Int64, 0).UTC()
+			p.GrantedExecutionsExpiresAt = &t
+		}
+		if tierExpires.Valid {
+			t := time.Unix(tierExpires.Int64, 0).UTC()
+			p.TierExpiresAt = &t
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (s *PostgresStore) GetProjectStorageStats(ctx context.Context) ([]*ProjectStorage, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
@@ -1212,6 +1280,28 @@ func (s *PostgresStore) CountExecutionsByStatusSince(ctx context.Context, projec
 		return 0, fmt.Errorf("count executions: %w", err)
 	}
 	return n, nil
+}
+
+// SumExecutionCostByProjectSince is the Postgres counterpart to
+// SQLiteStore.SumExecutionCostByProjectSince. See that method's doc
+// comment for contract.
+func (s *PostgresStore) SumExecutionCostByProjectSince(
+	ctx context.Context,
+	projectID string,
+	since time.Time,
+) (float64, int, error) {
+	query := "SELECT COALESCE(SUM(estimated_cost_usd), 0), COUNT(*) FROM executions WHERE project_id = $1"
+	args := []any{projectID}
+	if !since.IsZero() {
+		query += " AND started_at >= $2"
+		args = append(args, since.UTC())
+	}
+	var cost float64
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&cost, &count); err != nil {
+		return 0, 0, fmt.Errorf("sum execution cost: %w", err)
+	}
+	return cost, count, nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────
