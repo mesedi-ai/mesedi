@@ -37,6 +37,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -588,7 +589,11 @@ func (h *Handlers) HandleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, store.ErrAlreadyAccepted) {
 			// Race: another concurrent accept won. Membership row
 			// already exists (or just got upserted), so report success
-			// to keep the UX clean.
+			// to keep the UX clean. Skip the API-key mint on the
+			// duplicate path -- we can't know which key the first
+			// winner saw, so re-minting would just confuse the user
+			// with a second one. They can rotate from /app/api-keys
+			// if they need fresh credentials.
 			writeJSON(w, http.StatusOK, map[string]any{
 				"ok":      true,
 				"org_id":  inv.OrgID,
@@ -603,16 +608,61 @@ func (h *Handlers) HandleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mint a fresh API key for the invitee so they can sign in to the
+	// dashboard. v0.1 auth is project-API-key-based: an invite without
+	// a key is a dead end. We attach the key to the first project in
+	// the org (today this is always exactly one project; when multi-
+	// project orgs land, the admin can choose the scope at invite time).
+	// Best-effort: if mint or persist fails, the invitee is still a
+	// member and can ask the admin to generate a key from /app/api-keys.
+	var rawKey, keyPrefix string
+	projects, _ := h.Store.ListProjectsByTenant(r.Context(), inv.OrgID)
+	if len(projects) > 0 {
+		targetProject := projects[0]
+		raw, hash, prefix, mintErr := MintAPIKey()
+		if mintErr != nil {
+			h.Logger.Warn("accept invite: mint key failed (member still added)",
+				"invite_id", inv.InviteID, "error", mintErr.Error())
+		} else {
+			now := time.Now().UTC()
+			keyID := fmt.Sprintf("key-%s-%d", prefix[len("mesedi_sk_"):], now.UnixNano())
+			rec := &store.APIKey{
+				KeyID:     keyID,
+				ProjectID: targetProject.ProjectID,
+				KeyHash:   hash,
+				KeyPrefix: prefix,
+				Name:      "Invite key for " + body.Email,
+			}
+			if persistErr := h.Store.CreateAPIKey(r.Context(), rec); persistErr != nil {
+				h.Logger.Warn("accept invite: persist key failed (member still added)",
+					"invite_id", inv.InviteID, "error", persistErr.Error())
+			} else {
+				rawKey = raw
+				keyPrefix = prefix
+				h.Logger.Info("accept invite: minted key for new member",
+					"invite_id", inv.InviteID,
+					"project_id", targetProject.ProjectID,
+					"key_prefix", prefix)
+			}
+		}
+	}
+
 	h.Logger.Info("invite accepted",
 		"invite_id", inv.InviteID,
 		"org_id", inv.OrgID,
 		"email", body.Email,
 		"role", inv.Role)
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"ok":     true,
 		"org_id": inv.OrgID,
 		"role":   inv.Role,
-	})
+	}
+	if rawKey != "" {
+		resp["api_key"] = rawKey
+		resp["key_prefix"] = keyPrefix
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
+
 
