@@ -290,6 +290,17 @@ func main() {
 	}
 	budgetCeilingScheduler.Start(context.Background())
 
+	// Data retention scheduler (#262). Daily tick walks every project
+	// with retention_days set and prunes executions outside the
+	// window. Indefinite-retention projects are excluded at the
+	// query level (ListProjectsForRetention). Same context lifetime
+	// as the abuse + budget-ceiling workers.
+	retentionScheduler := &api.RetentionScheduler{
+		Store:  st,
+		Logger: logger,
+	}
+	retentionScheduler.Start(context.Background())
+
 	// Public POST /signup bypasses the bearer-token auth chain (visitors
 	// have no key yet) but still needs CORS so the marketing site at
 	// mesedi.vercel.app can POST cross-origin. The signup handler's
@@ -357,6 +368,9 @@ func main() {
 	mux.Handle("GET /me/class-severities", privateHandler)
 	mux.Handle("PUT /me/class-severities/{class}", privateHandler)
 	mux.Handle("DELETE /me/class-severities/{class}", privateHandler)
+	// Task #262, per-project data retention configuration.
+	mux.Handle("GET /me/retention", privateHandler)
+	mux.Handle("PUT /me/retention", privateHandler)
 	// Founder-side admin dashboard (#150). Token-gated; refuses every
 	// request when MESEDI_ADMIN_TOKEN is empty. CORS preflight OPTIONS
 	// is needed because the dashboard at mesedi.vercel.app calls

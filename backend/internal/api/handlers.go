@@ -139,6 +139,9 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /me/class-severities", h.HandleListClassSeverities)
 	mux.HandleFunc("PUT /me/class-severities/{class}", h.HandleUpsertClassSeverity)
 	mux.HandleFunc("DELETE /me/class-severities/{class}", h.HandleDeleteClassSeverity)
+	// Task #262, per-project data retention.
+	mux.HandleFunc("GET /me/retention", h.HandleGetRetention)
+	mux.HandleFunc("PUT /me/retention", h.HandleSetRetention)
 	// Phase 3a, read-side failure_group surface for the dashboard.
 	mux.HandleFunc("GET /failure-groups", h.HandleListFailureGroups)
 	mux.HandleFunc("GET /failure-groups/{id}", h.HandleGetFailureGroup)
@@ -1362,6 +1365,109 @@ func (h *Handlers) HandleUpsertBudgetCeiling(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, saved)
+}
+
+// HandleGetRetention returns the configured retention for the
+// authenticated project (#262). The response shape always includes
+// both retention_days (nullable int) and is_indefinite (boolean) so
+// the UI doesn't have to special-case nulls.
+//
+// Response:
+//
+//	{
+//	  "ok": true,
+//	  "retention_days": 30,    // or null when indefinite
+//	  "is_indefinite": false
+//	}
+func (h *Handlers) HandleGetRetention(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	days, err := h.Store.GetProjectRetentionDays(r.Context(), authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("get retention failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load retention")
+		return
+	}
+	resp := map[string]any{
+		"ok":             true,
+		"retention_days": days,
+		"is_indefinite":  days == nil,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandleSetRetention updates the retention window for the
+// authenticated project (#262).
+//
+// Body:
+//
+//	{
+//	  "retention_days": 30,        // omit or null for indefinite
+//	  "is_indefinite": false       // optional, takes precedence over retention_days when true
+//	}
+//
+// Sanity caps: minimum 1 day (anything less and you may as well
+// disable telemetry), maximum 3650 days (~10 years; anyone needing
+// longer should switch to indefinite which is free of a cap).
+func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	var body struct {
+		RetentionDays *int `json:"retention_days"`
+		IsIndefinite  bool `json:"is_indefinite"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	var days *int
+	if !body.IsIndefinite && body.RetentionDays != nil {
+		v := *body.RetentionDays
+		if v < 1 {
+			writeError(w, http.StatusBadRequest, "retention_days must be at least 1 (or set is_indefinite=true)")
+			return
+		}
+		if v > 3650 {
+			writeError(w, http.StatusBadRequest, "retention_days must be at most 3650 (use is_indefinite=true for longer)")
+			return
+		}
+		days = &v
+	}
+
+	if err := h.Store.SetProjectRetentionDays(r.Context(), authProjectID, days); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("set retention failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not save retention")
+		return
+	}
+
+	h.Logger.Info("retention updated",
+		"project_id", authProjectID,
+		"retention_days", days,
+		"is_indefinite", days == nil)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"retention_days": days,
+		"is_indefinite":  days == nil,
+	})
 }
 
 // HandleListClassSeverities returns the full map of failure classes

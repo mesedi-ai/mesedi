@@ -207,6 +207,15 @@ type ProjectClassSeverity struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// ProjectRetention is one row returned by ListProjectsForRetention
+// (#262). Carries just the project_id + retention_days the
+// scheduler needs to compute the delete cutoff. Skips rows where
+// retention_days IS NULL (indefinite retention).
+type ProjectRetention struct {
+	ProjectID     string `json:"project_id"`
+	RetentionDays int    `json:"retention_days"`
+}
+
 // WebhookDelivery is one attempted POST to a registered webhook URL.
 // One row per attempt (including retries); a single failure-group
 // escalation may produce up to 3 rows under the default retry policy.
@@ -460,6 +469,31 @@ type Store interface {
 	// ceiling state transitions: nil -> now() on first breach,
 	// non-nil -> nil on month-rollover reset.
 	SetTenantCeilingBreached(ctx context.Context, ownerUserID string, breachedAt *time.Time) error
+
+	// Per-project data retention (#262). retention_days = nil means
+	// "indefinite, never prune" (the Enterprise-friendly default for
+	// existing rows). retention_days = positive int means the
+	// nightly retention scheduler deletes executions older than that
+	// many days; FK CASCADE constraints handle events,
+	// failure_groups, and webhook_deliveries.
+	GetProjectRetentionDays(ctx context.Context, projectID string) (*int, error)
+	// SetProjectRetentionDays writes nil for indefinite or a positive
+	// int for a finite window. Handlers validate the value before
+	// invoking; store accepts whatever's passed.
+	SetProjectRetentionDays(ctx context.Context, projectID string, days *int) error
+	// ListProjectsForRetention returns one row per project whose
+	// retention_days IS NOT NULL. Used by the retention scheduler
+	// (#262) at tick time. Indefinite-retention projects are
+	// intentionally excluded so the scheduler never even considers
+	// them for deletion.
+	ListProjectsForRetention(ctx context.Context) ([]*ProjectRetention, error)
+	// DeleteExecutionsOlderThan removes executions for the given
+	// projectID whose started_at < cutoff. Returns the number of
+	// rows deleted so the scheduler can log prune volume. The
+	// FK ON DELETE CASCADE chain takes care of events,
+	// failure_groups, and webhook_deliveries owned by the same
+	// executions.
+	DeleteExecutionsOlderThan(ctx context.Context, projectID string, cutoff time.Time) (deleted int64, err error)
 
 	// Per-project failure-class severity overrides (#261).
 	// GetProjectClassSeverity returns the override for (projectID,
