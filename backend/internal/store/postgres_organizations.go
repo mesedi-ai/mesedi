@@ -389,6 +389,23 @@ func scanOrganizationInviteRowsPg(rows *sql.Rows) (*OrganizationInvite, error) {
 // Projects ↔ tenant lookups
 // =====================================================================
 
+func (s *PostgresStore) SetProjectTenantID(ctx context.Context, projectID, tenantID string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE projects SET tenant_id = $1 WHERE project_id = $2
+	`, tenantID, projectID)
+	if err != nil {
+		return fmt.Errorf("set project tenant_id: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set project tenant_id rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) GetProjectTenantID(ctx context.Context, projectID string) (*string, error) {
 	var tenantID sql.NullString
 	err := s.db.QueryRowContext(ctx, `

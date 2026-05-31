@@ -387,6 +387,23 @@ func scanOrganizationInviteRows(rows *sql.Rows) (*OrganizationInvite, error) {
 // Projects ↔ tenant lookups
 // =====================================================================
 
+func (s *SQLiteStore) SetProjectTenantID(ctx context.Context, projectID, tenantID string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE projects SET tenant_id = ? WHERE project_id = ?
+	`, tenantID, projectID)
+	if err != nil {
+		return fmt.Errorf("set project tenant_id: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set project tenant_id rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLiteStore) GetProjectTenantID(ctx context.Context, projectID string) (*string, error) {
 	var tenantID sql.NullString
 	err := s.db.QueryRowContext(ctx, `

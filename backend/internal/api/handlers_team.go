@@ -33,6 +33,7 @@ package api
 //   schema or the data model below.
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -59,26 +60,19 @@ var validRoles = map[string]bool{"admin": true, "write": true, "read": true}
 // endpoint. It returns (orgID, callerUserID, ok). On any failure it
 // has already written the appropriate HTTP error and the caller
 // should return immediately.
+//
+// Self-heal path: projects created in the brief window between deploy
+// and migration 013, or projects whose 013 backfill skipped them
+// because their owner_user_id was NULL, end up with no tenant_id and
+// hit a hard 409 on first /me/organization call. Instead of stranding
+// the customer, this function auto-bootstraps an org for any project
+// that has at least an owner_email. The bootstrap is idempotent:
+// org_id = "org_" + project_id, so a repeat call after a partial
+// failure picks up where it left off.
 func (h *Handlers) resolveAdminContext(w http.ResponseWriter, r *http.Request) (orgID, callerUserID string, ok bool) {
 	projectID, hasProject := ProjectIDFromContext(r.Context())
 	if !hasProject {
 		writeError(w, http.StatusUnauthorized, "no project context")
-		return "", "", false
-	}
-
-	tenantPtr, err := h.Store.GetProjectTenantID(r.Context(), projectID)
-	if err != nil {
-		h.Logger.Error("team: get project tenant_id failed",
-			"project_id", projectID, "error", err.Error())
-		writeError(w, http.StatusInternalServerError, "could not resolve org")
-		return "", "", false
-	}
-	if tenantPtr == nil || *tenantPtr == "" {
-		// Legacy project with no tenant_id (escaped the migration 013
-		// backfill). The customer needs to upgrade to a tier+state
-		// that gives them an org; this is a corner case the founder
-		// can fix manually.
-		writeError(w, http.StatusConflict, "project has no organization (legacy state, contact support)")
 		return "", "", false
 	}
 
@@ -89,19 +83,53 @@ func (h *Handlers) resolveAdminContext(w http.ResponseWriter, r *http.Request) (
 		writeError(w, http.StatusInternalServerError, "could not load project")
 		return "", "", false
 	}
-	if p.OwnerUserID == "" {
-		writeError(w, http.StatusConflict, "project has no owner_user_id (legacy state)")
+
+	tenantPtr, err := h.Store.GetProjectTenantID(r.Context(), projectID)
+	if err != nil {
+		h.Logger.Error("team: get project tenant_id failed",
+			"project_id", projectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not resolve org")
 		return "", "", false
 	}
 
-	member, err := h.Store.GetOrganizationMember(r.Context(), *tenantPtr, p.OwnerUserID)
+	// Self-heal: project has no tenant_id but we know its owner_email
+	// (signup always sets this). Bootstrap a fresh org + admin member,
+	// then point projects.tenant_id at the new row. The bootstrap mirrors
+	// the 013 backfill exactly so legacy and self-healed projects are
+	// indistinguishable downstream.
+	if tenantPtr == nil || *tenantPtr == "" {
+		bootstrapped, hErr := h.bootstrapOrgForProject(r.Context(), p)
+		if hErr != nil {
+			h.Logger.Error("team: bootstrap org failed",
+				"project_id", projectID, "error", hErr.Error())
+			writeError(w, http.StatusConflict, "project has no organization (legacy state, contact support)")
+			return "", "", false
+		}
+		tenantPtr = &bootstrapped
+		h.Logger.Info("team: bootstrapped org for legacy project",
+			"project_id", projectID, "org_id", bootstrapped)
+	}
+
+	// The caller's user_id is owner_user_id if populated; otherwise
+	// owner_email (matches the email-as-user-id convention used by the
+	// invite-accept flow until session auth ships).
+	caller := p.OwnerUserID
+	if caller == "" {
+		caller = p.OwnerEmail
+	}
+	if caller == "" {
+		writeError(w, http.StatusConflict, "project has no owner identity (legacy state, contact support)")
+		return "", "", false
+	}
+
+	member, err := h.Store.GetOrganizationMember(r.Context(), *tenantPtr, caller)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusForbidden, "not a member of this organization")
 			return "", "", false
 		}
 		h.Logger.Error("team: get member failed",
-			"org_id", *tenantPtr, "user_id", p.OwnerUserID, "error", err.Error())
+			"org_id", *tenantPtr, "user_id", caller, "error", err.Error())
 		writeError(w, http.StatusInternalServerError, "could not load membership")
 		return "", "", false
 	}
@@ -110,7 +138,78 @@ func (h *Handlers) resolveAdminContext(w http.ResponseWriter, r *http.Request) (
 		return "", "", false
 	}
 
-	return *tenantPtr, p.OwnerUserID, true
+	return *tenantPtr, caller, true
+}
+
+// bootstrapOrgForProject creates a fresh organization for a project
+// that escaped migration 013, then attaches the project to it. The
+// project's owner becomes the admin member. Idempotent: org_id is
+// deterministic from project_id, and CreateOrganization is a no-op
+// if the row already exists (returns nil for duplicate primary key).
+//
+// Returns the org_id on success. Used by:
+//   - resolveAdminContext (self-heal on first /me/organization call)
+//   - signup handler (bootstrap at project-create time so subsequent
+//     calls never hit the self-heal path)
+func (h *Handlers) bootstrapOrgForProject(ctx context.Context, p *store.Project) (string, error) {
+	// Pick a user_id for the admin row. Use owner_user_id if it's
+	// already populated, else fall back to owner_email (the same
+	// convention the invite-accept flow uses pre-session-auth).
+	adminUserID := p.OwnerUserID
+	if adminUserID == "" {
+		adminUserID = p.OwnerEmail
+	}
+	if adminUserID == "" {
+		return "", errors.New("project has no owner identity to use as admin")
+	}
+
+	orgID := "org_" + p.ProjectID
+	name := p.Name
+	if name == "" {
+		name = "Personal"
+	}
+
+	// Create the org. If it already exists (idempotent retry path), the
+	// store layer surfaces a duplicate-key error which we swallow.
+	if err := h.Store.CreateOrganization(ctx, &store.Organization{
+		OrgID:           orgID,
+		Name:            name,
+		CreatedByUserID: adminUserID,
+	}); err != nil && !isDuplicateOrgErr(err) {
+		return "", err
+	}
+
+	// Add admin member. AddOrganizationMember is upsert-on-conflict, so
+	// a repeat call refreshes the role/email without erroring.
+	if err := h.Store.AddOrganizationMember(ctx, &store.OrganizationMember{
+		OrgID:  orgID,
+		UserID: adminUserID,
+		Role:   "admin",
+		Email:  p.OwnerEmail,
+	}); err != nil {
+		return "", err
+	}
+
+	// Link the project. If tenant_id was already set to something other
+	// than this org (unlikely), we'd overwrite it; the only way this
+	// helper runs is when tenant_id is empty.
+	if err := h.Store.SetProjectTenantID(ctx, p.ProjectID, orgID); err != nil {
+		return "", err
+	}
+	return orgID, nil
+}
+
+// isDuplicateOrgErr returns true when the store returns a primary-key
+// conflict for organizations. Different drivers surface this
+// differently, so we string-match the common shapes.
+func isDuplicateOrgErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") ||
+		strings.Contains(msg, "duplicate key value") ||
+		strings.Contains(msg, "already exists")
 }
 
 // HandleGetOrganization returns the current org info for the auth

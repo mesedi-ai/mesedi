@@ -632,6 +632,13 @@ type Store interface {
 	// but tenant_id is NULL (legacy rows that escaped the
 	// migration 013 backfill).
 	GetProjectTenantID(ctx context.Context, projectID string) (*string, error)
+	// SetProjectTenantID updates projects.tenant_id for one project.
+	// Used by (a) the signup handler to link a freshly created project
+	// to its auto-created org, and (b) resolveAdminContext's self-heal
+	// path for projects that escaped the 013 backfill (created in the
+	// brief window between deploy and migration, or projects that pre-
+	// dated 013 without an owner_user_id).
+	SetProjectTenantID(ctx context.Context, projectID, tenantID string) error
 	// ListProjectsByTenant returns every project whose tenant_id
 	// matches. Replaces ListProjectsByOwner in the #259 rollup +
 	// #252 budget-ceiling code paths after they're retrofitted.

@@ -176,6 +176,18 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3a. Bootstrap the project's organization (#263). Every project
+	//     belongs to exactly one org; the project's owner is the org's
+	//     admin. Until session auth ships, we use the email as user_id
+	//     so the admin row is stable across signup -> first sign-in.
+	//     If bootstrap fails the project still exists, and the
+	//     /me/organization endpoint's self-heal will retry on first
+	//     dashboard load -- so this is best-effort.
+	if _, err := h.bootstrapOrgForProject(r.Context(), project); err != nil {
+		h.Logger.Warn("signup: bootstrap org failed (will self-heal on first /me/organization call)",
+			"project_id", projectID, "error", err.Error())
+	}
+
 	// 4. Mint the first API key for this project.
 	rawKey, hash, prefix, err := MintAPIKey()
 	if err != nil {
