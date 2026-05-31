@@ -919,11 +919,12 @@ func (s *SQLiteStore) CreateProjectWebhook(ctx context.Context, wh *ProjectWebho
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO project_webhooks (
 			webhook_id, project_id, name, url, secret,
-			enabled_classes, enabled, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			enabled_classes, enabled, created_at, severity_filter
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		wh.WebhookID, wh.ProjectID, wh.Name, wh.URL, wh.Secret,
 		classesJSON, enabled, wh.CreatedAt.UTC().Format(time.RFC3339),
+		wh.SeverityFilter,
 	)
 	if err != nil {
 		return fmt.Errorf("insert project_webhook: %w", err)
@@ -940,7 +941,7 @@ func (s *SQLiteStore) ListProjectWebhooksForProject(
 ) ([]*ProjectWebhook, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT webhook_id, project_id, name, url,
-		       enabled_classes, enabled, created_at
+		       enabled_classes, enabled, created_at, severity_filter
 		FROM project_webhooks
 		WHERE project_id = ?
 		ORDER BY created_at DESC
@@ -958,7 +959,7 @@ func (s *SQLiteStore) ListProjectWebhooksForProject(
 		var enabled int
 		if err := rows.Scan(
 			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL,
-			&classesJSON, &enabled, &createdAt,
+			&classesJSON, &enabled, &createdAt, &wh.SeverityFilter,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_webhook: %w", err)
 		}
@@ -982,7 +983,7 @@ func (s *SQLiteStore) ListEnabledProjectWebhooks(
 ) ([]*ProjectWebhook, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT webhook_id, project_id, name, url, secret,
-		       enabled_classes, enabled, created_at
+		       enabled_classes, enabled, created_at, severity_filter
 		FROM project_webhooks
 		WHERE project_id = ? AND enabled = 1
 		ORDER BY created_at ASC
@@ -1000,7 +1001,7 @@ func (s *SQLiteStore) ListEnabledProjectWebhooks(
 		var enabled int
 		if err := rows.Scan(
 			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
-			&classesJSON, &enabled, &createdAt,
+			&classesJSON, &enabled, &createdAt, &wh.SeverityFilter,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_webhook: %w", err)
 		}
@@ -1052,12 +1053,12 @@ func (s *SQLiteStore) GetProjectWebhook(
 	var enabled int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT webhook_id, project_id, name, url, secret,
-		       enabled_classes, enabled, created_at
+		       enabled_classes, enabled, created_at, severity_filter
 		FROM project_webhooks
 		WHERE webhook_id = ? AND project_id = ?
 	`, webhookID, projectID).Scan(
 		&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
-		&classesJSON, &enabled, &createdAt,
+		&classesJSON, &enabled, &createdAt, &wh.SeverityFilter,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

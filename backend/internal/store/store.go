@@ -187,6 +187,12 @@ type ProjectWebhook struct {
 	EnabledClasses  []string  `json:"enabled_classes"`
 	Enabled         bool      `json:"enabled"`
 	CreatedAt       time.Time `json:"created_at"`
+	// SeverityFilter is the comma-separated subset of severities this
+	// webhook fires on (#261). Empty string = "fire on every severity"
+	// (backward compatible with pre-#261 webhooks). The dispatcher
+	// parses via severity.ParseFilter and skips delivery when the
+	// event severity is not in the filter.
+	SeverityFilter  string    `json:"severity_filter"`
 }
 
 // ProjectClassSeverity is the per-project override of the hardcoded

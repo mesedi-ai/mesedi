@@ -744,11 +744,12 @@ func (s *PostgresStore) CreateProjectWebhook(ctx context.Context, wh *ProjectWeb
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO project_webhooks (
 			webhook_id, project_id, name, url, secret,
-			enabled_classes, enabled, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			enabled_classes, enabled, created_at, severity_filter
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`,
 		wh.WebhookID, wh.ProjectID, wh.Name, wh.URL, wh.Secret,
 		classesJSON, wh.Enabled, wh.CreatedAt.UTC(),
+		wh.SeverityFilter,
 	)
 	if err != nil {
 		return fmt.Errorf("insert project_webhook: %w", err)
@@ -759,7 +760,7 @@ func (s *PostgresStore) CreateProjectWebhook(ctx context.Context, wh *ProjectWeb
 func (s *PostgresStore) ListProjectWebhooksForProject(ctx context.Context, projectID string) ([]*ProjectWebhook, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT webhook_id, project_id, name, url,
-		       enabled_classes, enabled, created_at
+		       enabled_classes, enabled, created_at, severity_filter
 		FROM project_webhooks
 		WHERE project_id = $1
 		ORDER BY created_at DESC
@@ -775,7 +776,7 @@ func (s *PostgresStore) ListProjectWebhooksForProject(ctx context.Context, proje
 		var classesJSON sql.NullString
 		if err := rows.Scan(
 			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL,
-			&classesJSON, &wh.Enabled, &wh.CreatedAt,
+			&classesJSON, &wh.Enabled, &wh.CreatedAt, &wh.SeverityFilter,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_webhook: %w", err)
 		}
@@ -788,7 +789,7 @@ func (s *PostgresStore) ListProjectWebhooksForProject(ctx context.Context, proje
 func (s *PostgresStore) ListEnabledProjectWebhooks(ctx context.Context, projectID string) ([]*ProjectWebhook, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT webhook_id, project_id, name, url, secret,
-		       enabled_classes, enabled, created_at
+		       enabled_classes, enabled, created_at, severity_filter
 		FROM project_webhooks
 		WHERE project_id = $1 AND enabled = TRUE
 		ORDER BY created_at ASC
@@ -804,7 +805,7 @@ func (s *PostgresStore) ListEnabledProjectWebhooks(ctx context.Context, projectI
 		var classesJSON sql.NullString
 		if err := rows.Scan(
 			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
-			&classesJSON, &wh.Enabled, &wh.CreatedAt,
+			&classesJSON, &wh.Enabled, &wh.CreatedAt, &wh.SeverityFilter,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_webhook: %w", err)
 		}
@@ -837,12 +838,12 @@ func (s *PostgresStore) GetProjectWebhook(ctx context.Context, webhookID, projec
 	var classesJSON sql.NullString
 	err := s.db.QueryRowContext(ctx, `
 		SELECT webhook_id, project_id, name, url, secret,
-		       enabled_classes, enabled, created_at
+		       enabled_classes, enabled, created_at, severity_filter
 		FROM project_webhooks
 		WHERE webhook_id = $1 AND project_id = $2
 	`, webhookID, projectID).Scan(
 		&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
-		&classesJSON, &wh.Enabled, &wh.CreatedAt,
+		&classesJSON, &wh.Enabled, &wh.CreatedAt, &wh.SeverityFilter,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

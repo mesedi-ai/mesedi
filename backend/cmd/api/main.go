@@ -348,6 +348,15 @@ func main() {
 	mux.Handle("POST /billing/checkout", privateHandler)
 	mux.Handle("POST /billing/portal", privateHandler)
 	mux.Handle("POST /billing/webhook", signupHandler)
+	// Task #259, tenant-wide org rollup.
+	mux.Handle("GET /me/rollup", privateHandler)
+	// Task #252, tenant monthly budget ceiling.
+	mux.Handle("GET /me/budget-ceiling", privateHandler)
+	mux.Handle("PUT /me/budget-ceiling", privateHandler)
+	// Task #261, per-project failure-class severity overrides.
+	mux.Handle("GET /me/class-severities", privateHandler)
+	mux.Handle("PUT /me/class-severities/{class}", privateHandler)
+	mux.Handle("DELETE /me/class-severities/{class}", privateHandler)
 	// Founder-side admin dashboard (#150). Token-gated; refuses every
 	// request when MESEDI_ADMIN_TOKEN is empty. CORS preflight OPTIONS
 	// is needed because the dashboard at mesedi.vercel.app calls
