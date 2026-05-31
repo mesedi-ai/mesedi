@@ -1399,6 +1399,17 @@ func (s *SQLiteStore) SaveEvents(ctx context.Context, batch []events.Event) erro
 // ErrNotFound is returned when a requested row does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrAlreadyAccepted is returned by MarkInviteAccepted when the
+// invite row's accepted_at column is already non-NULL. Single-use
+// invariant: each invite token can only be redeemed once (#263).
+var ErrAlreadyAccepted = errors.New("invite already accepted")
+
+// ErrExpired is returned by the invite-accept path when an invite's
+// expires_at has passed. Distinct from ErrNotFound (which means the
+// token never existed) so the handler can produce a more helpful
+// "this invite has expired, ask for a new one" message.
+var ErrExpired = errors.New("expired")
+
 func nullString(s string) any {
 	if s == "" {
 		return nil

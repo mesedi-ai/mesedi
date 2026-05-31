@@ -216,6 +216,57 @@ type ProjectRetention struct {
 	RetentionDays int    `json:"retention_days"`
 }
 
+// Organization is the multi-seat tenant unit (#263). One org has one
+// or more organization_members; one project is owned by exactly one
+// org via projects.tenant_id. Replaces the implicit owner_user_id
+// tenant model used by #259 and #252.
+type Organization struct {
+	OrgID            string    `json:"org_id"`
+	Name             string    `json:"name"`
+	CreatedByUserID  string    `json:"created_by_user_id"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// OrganizationMember is the (org, user, role) join row. Role is one
+// of "admin", "write", "read"; backend handlers consult the role to
+// authorize sensitive actions (admin-only: invite, remove member,
+// billing changes; write or admin: create webhooks, set retention;
+// any role: read).
+//
+// Email is captured at member-add time so the dashboard members
+// list can render meaningfully BEFORE the invited user has signed
+// in for the first time. Refreshed to the user's current email
+// whenever they next authenticate.
+type OrganizationMember struct {
+	OrgID           string    `json:"org_id"`
+	UserID          string    `json:"user_id"`
+	Role            string    `json:"role"`
+	Email           string    `json:"email,omitempty"`
+	AddedByUserID   string    `json:"added_by_user_id,omitempty"`
+	AddedAt         time.Time `json:"added_at"`
+}
+
+// OrganizationInvite is one outstanding invitation. Token-based; the
+// invitee receives a link in their email that carries the token, the
+// public /invites/accept/{token} endpoint consumes it.
+//
+// Single-use: AcceptedAt + AcceptedByUserID flip from nil to set
+// values on first successful accept. Subsequent accept attempts on
+// the same token fail with ErrAlreadyAccepted.
+type OrganizationInvite struct {
+	InviteID           string     `json:"invite_id"`
+	OrgID              string     `json:"org_id"`
+	Email              string     `json:"email"`
+	Role               string     `json:"role"`
+	Token              string     `json:"token,omitempty"` // not returned in list responses, only on create
+	InvitedByUserID    string     `json:"invited_by_user_id"`
+	CreatedAt          time.Time  `json:"created_at"`
+	ExpiresAt          time.Time  `json:"expires_at"`
+	AcceptedAt         *time.Time `json:"accepted_at,omitempty"`
+	AcceptedByUserID   string     `json:"accepted_by_user_id,omitempty"`
+}
+
 // WebhookDelivery is one attempted POST to a registered webhook URL.
 // One row per attempt (including retries); a single failure-group
 // escalation may produce up to 3 rows under the default retry policy.
@@ -511,6 +562,80 @@ type Store interface {
 	// the given project. The dashboard settings page uses this to
 	// render which classes have been customized vs left at default.
 	ListProjectClassSeverityOverrides(ctx context.Context, projectID string) ([]*ProjectClassSeverity, error)
+
+	// =================================================================
+	// Team / multi-seat (#263): organizations, members, invites.
+	// =================================================================
+
+	// CreateOrganization inserts a fresh row. Caller has already
+	// generated org_id; this method sets created_at + updated_at to
+	// now and validates required fields.
+	CreateOrganization(ctx context.Context, org *Organization) error
+	// GetOrganization returns the row or ErrNotFound.
+	GetOrganization(ctx context.Context, orgID string) (*Organization, error)
+	// UpdateOrganizationName changes the human-readable name and
+	// bumps updated_at. Admin-only on the handler side.
+	UpdateOrganizationName(ctx context.Context, orgID, name string) error
+	// ListOrganizationsForUser returns every org the user is a member
+	// of, regardless of role. Used to populate the dashboard org
+	// switcher. Sorted by name ASC for stable rendering.
+	ListOrganizationsForUser(ctx context.Context, userID string) ([]*Organization, error)
+
+	// AddOrganizationMember inserts a (org_id, user_id, role) row.
+	// Caller validates role; store enforces role CHECK constraint
+	// at the SQL layer as a defense-in-depth.
+	AddOrganizationMember(ctx context.Context, member *OrganizationMember) error
+	// GetOrganizationMember returns one row or ErrNotFound. Used by
+	// the role-check middleware on every protected endpoint to
+	// confirm "is this user a member of this org and what's their role".
+	GetOrganizationMember(ctx context.Context, orgID, userID string) (*OrganizationMember, error)
+	// ListOrganizationMembers returns every member of an org, sorted
+	// by added_at ASC (oldest first). Includes pending-but-not-yet-
+	// signed-in members whose email was captured at invite time.
+	ListOrganizationMembers(ctx context.Context, orgID string) ([]*OrganizationMember, error)
+	// UpdateOrganizationMemberRole changes the role of an existing
+	// member. Admin-only on the handler side; here the constraint is
+	// just the CHECK on role values.
+	UpdateOrganizationMemberRole(ctx context.Context, orgID, userID, newRole string) error
+	// RemoveOrganizationMember deletes the row. Admin-only on the
+	// handler side. Does NOT cascade-delete the user's session;
+	// callers should also clear any session cookies. Returns
+	// ErrNotFound if the row didn't exist.
+	RemoveOrganizationMember(ctx context.Context, orgID, userID string) error
+
+	// CreateOrganizationInvite inserts a pending invite. Caller has
+	// generated invite_id + token + expires_at; store sets created_at.
+	CreateOrganizationInvite(ctx context.Context, invite *OrganizationInvite) error
+	// GetOrganizationInviteByToken is the lookup used by the public
+	// accept endpoint. Returns ErrNotFound for unknown / expired /
+	// already-accepted tokens (caller checks AcceptedAt + ExpiresAt
+	// after fetch and returns appropriate user-facing errors).
+	GetOrganizationInviteByToken(ctx context.Context, token string) (*OrganizationInvite, error)
+	// ListOrganizationInvites returns invites for an org. When
+	// pendingOnly = true, filters to invites with accepted_at IS NULL
+	// AND expires_at > now (the live invite set).
+	ListOrganizationInvites(ctx context.Context, orgID string, pendingOnly bool) ([]*OrganizationInvite, error)
+	// MarkInviteAccepted atomically transitions an invite from
+	// pending to accepted. Returns ErrAlreadyAccepted if accepted_at
+	// is already set (race-safe single-use guarantee).
+	MarkInviteAccepted(ctx context.Context, inviteID, acceptedByUserID string) error
+	// RevokeOrganizationInvite deletes a pending invite. Admin-only
+	// on the handler side. Idempotent: deleting a non-existent or
+	// already-accepted invite returns ErrNotFound, callers can treat
+	// as success.
+	RevokeOrganizationInvite(ctx context.Context, inviteID, orgID string) error
+
+	// GetProjectTenantID returns the tenant_id (org_id) for a
+	// project. Used by the role-check middleware to map an inbound
+	// project-scoped request to its owning org. ErrNotFound when
+	// the project doesn't exist; (nil, nil) when the project exists
+	// but tenant_id is NULL (legacy rows that escaped the
+	// migration 013 backfill).
+	GetProjectTenantID(ctx context.Context, projectID string) (*string, error)
+	// ListProjectsByTenant returns every project whose tenant_id
+	// matches. Replaces ListProjectsByOwner in the #259 rollup +
+	// #252 budget-ceiling code paths after they're retrofitted.
+	ListProjectsByTenant(ctx context.Context, tenantID string) ([]*Project, error)
 
 	// Events (batch ingest path is the hot one; single-event ingest is for tests).
 	SaveEvents(ctx context.Context, batch []events.Event) error
