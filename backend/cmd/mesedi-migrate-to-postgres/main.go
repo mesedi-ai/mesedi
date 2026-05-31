@@ -78,7 +78,7 @@ func main() {
 	flag.BoolVar(&dryRun, "dry-run", false, "show row counts only, no writes")
 	flag.Parse()
 
-	fmt.Println(phase1Notice)
+	fmt.Print(phase1Notice)
 	if sqlitePath == "" || pgURL == "" {
 		// Print the notice and exit 0; the operator gets the message.
 		return

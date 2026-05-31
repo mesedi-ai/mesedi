@@ -134,7 +134,7 @@ func authMiddleware(s store.Store, detector *AbuseDetector) func(http.Handler) h
 			if suspended {
 				msg := "project suspended"
 				if reason != "" {
-					msg = msg + " (" + reason + "). Contact mesediai@gmail.com to appeal."
+					msg = msg + " (" + reason + "). Contact hello@mesedi.ai to appeal."
 				}
 				writeError(w, http.StatusForbidden, msg)
 				return

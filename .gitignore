@@ -50,3 +50,9 @@ ROADMAP.md
 NOTES.md
 PRICING.md
 INTERNAL_*.md
+
+# Sibling Mesedi-org repos nested for local workspace organization.
+# Each has its own .git and own GitHub remote, not tracked by this repo.
+/web-extract/
+/internal-extract/
+/status/

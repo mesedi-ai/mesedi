@@ -12,7 +12,7 @@
   "bugs": {
     "url": "https://github.com/mesedi-ai/mesedi/issues"
   },
-  "author": "Robert J. Canario <mesediai@gmail.com>",
+  "author": "Robert J. Canario <hello@mesedi.ai>",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
