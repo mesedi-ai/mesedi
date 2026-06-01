@@ -471,6 +471,24 @@ func (s *SQLiteStore) DeleteProject(ctx context.Context, projectID string) error
 	return nil
 }
 
+// DeleteFailureGroupsByProject wipes every failure_group row owned by
+// projectID. Returns the number of rows deleted. Non-failing on zero
+// (caller may reset an already-empty project). See the interface
+// definition in store.go for the use case (admin demo reset, #270).
+func (s *SQLiteStore) DeleteFailureGroupsByProject(ctx context.Context, projectID string) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM failure_groups WHERE project_id = ?
+	`, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("delete failure_groups by project: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected: %w", err)
+	}
+	return n, nil
+}
+
 // ListAllProjects returns every project plus activity aggregates from
 // the executions table. Used only by the founder-side admin dashboard
 // (#150); the customer-facing API has no equivalent endpoint.

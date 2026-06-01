@@ -385,6 +385,22 @@ func (s *PostgresStore) DeleteProject(ctx context.Context, projectID string) err
 	return nil
 }
 
+// DeleteFailureGroupsByProject wipes every failure_group for a single
+// project and returns the number of rows deleted. It is non-failing
+// when the count is zero (caller may wipe an already-empty project).
+// Used by the admin reset endpoint, see store.go interface docs.
+func (s *PostgresStore) DeleteFailureGroupsByProject(ctx context.Context, projectID string) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM failure_groups WHERE project_id = $1`, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("delete failure_groups by project (postgres): %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected: %w", err)
+	}
+	return n, nil
+}
+
 func (s *PostgresStore) ListAllProjects(ctx context.Context) ([]*AdminProjectRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT

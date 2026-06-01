@@ -418,6 +418,8 @@ func main() {
 	mux.Handle("GET /admin/projects/{id}/export", adminHandler)
 	mux.Handle("OPTIONS /admin/projects/{id}/export", adminHandler)
 	mux.Handle("DELETE /admin/projects/{id}", adminHandler)
+	mux.Handle("DELETE /admin/projects/{id}/failure-groups", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}/failure-groups", adminHandler)
 	mux.Handle("GET /admin/storage", adminHandler)
 	mux.Handle("OPTIONS /admin/storage", adminHandler)
 	mux.Handle("GET /admin/abuse", adminHandler)

@@ -375,6 +375,14 @@ type Store interface {
 	// has no Stripe-awareness and will happily wipe a paying
 	// customer.
 	DeleteProject(ctx context.Context, projectID string) error
+	// DeleteFailureGroupsByProject removes every failure_group row
+	// owned by projectID and returns the number of rows deleted. Used
+	// by the admin "reset demo project" endpoint (#270) so the next
+	// detector pass re-creates each group as isNew=true and the
+	// webhook dispatcher fires fresh failure_group.created events.
+	// Executions and events are NOT touched; only the grouping
+	// summary rows are wiped.
+	DeleteFailureGroupsByProject(ctx context.Context, projectID string) (int64, error)
 	// ListAllProjects returns every project in the database with
 	// aggregate activity stats (last execution time, total execution
 	// count) joined in. Used by the founder-side admin dashboard

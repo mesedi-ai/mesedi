@@ -86,6 +86,7 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/projects/{id}/grant", h.HandleAdminGrantExecutions)
 	mux.HandleFunc("GET /admin/projects/{id}/export", h.HandleAdminExportProject)
 	mux.HandleFunc("DELETE /admin/projects/{id}", h.HandleAdminDeleteProject)
+	mux.HandleFunc("DELETE /admin/projects/{id}/failure-groups", h.HandleAdminResetFailureGroups)
 	mux.HandleFunc("GET /admin/storage", h.HandleAdminStorage)
 	mux.HandleFunc("GET /admin/abuse", h.HandleAdminListAbuseSignals)
 	mux.HandleFunc("POST /admin/abuse/{id}/resolve", h.HandleAdminResolveAbuseSignal)
@@ -407,6 +408,69 @@ func (h *Handlers) HandleAdminDeleteProject(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
 		"project_id": projectID,
+	})
+}
+
+// HandleAdminResetFailureGroups wipes every failure_group row for a
+// single project so the next detector pass re-creates each one with
+// isNew=true, which in turn triggers the webhook dispatcher to fire
+// fresh failure_group.created events to any configured receivers
+// (Discord, Slack, etc.). Used to reset a demo project between
+// recording sessions or after a long-running synthetic-org build has
+// already populated all the canonical signatures.
+//
+// Executions, events, and webhook_deliveries are NOT touched, only
+// the grouping summary rows. The action is therefore reversible in
+// the sense that the underlying execution history remains intact,
+// the next round of detectors will regenerate identical groups.
+//
+// Required confirmation: ?confirm=<project_name> must exactly match
+// the project's name, same idiom as HandleAdminDeleteProject. This
+// is destructive enough (a paying customer loses their alert history
+// summary view) that a typed confirmation is appropriate.
+func (h *Handlers) HandleAdminResetFailureGroups(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "missing project id")
+		return
+	}
+	ctx := r.Context()
+
+	p, err := h.Store.GetProject(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load project: "+err.Error())
+		return
+	}
+
+	confirm := r.URL.Query().Get("confirm")
+	if confirm == "" || confirm != p.Name {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"confirmation mismatch, pass ?confirm=<exact project name>",
+		)
+		return
+	}
+
+	deleted, err := h.Store.DeleteFailureGroupsByProject(ctx, projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "reset failure_groups: "+err.Error())
+		return
+	}
+	h.Logger.Info("admin: failure_groups reset",
+		"project_id", projectID,
+		"project_name", p.Name,
+		"deleted", deleted,
+	)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"project_id":   projectID,
+		"project_name": p.Name,
+		"deleted":      deleted,
 	})
 }
 
