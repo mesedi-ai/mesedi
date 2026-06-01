@@ -135,6 +135,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// same user (v0.1 tenant model = owner_user_id). Resolves the
 	// authenticated project's owner, sums burn across sibling projects.
 	mux.HandleFunc("GET /me/rollup", h.HandleOrgRollup)
+	mux.HandleFunc("GET /me/savings", h.HandleSavings)
 	// Task #252, tenant monthly budget ceiling. GET fetches the
 	// configured ceiling (ErrNotFound -> 404 so the UI can render
 	// the "set up a ceiling" empty state). PUT upserts.

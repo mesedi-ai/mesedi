@@ -376,6 +376,7 @@ func main() {
 	mux.Handle("POST /billing/webhook", signupHandler)
 	// Task #259, tenant-wide org rollup.
 	mux.Handle("GET /me/rollup", privateHandler)
+	mux.Handle("GET /me/savings", privateHandler)
 	// Task #252, tenant monthly budget ceiling.
 	mux.Handle("GET /me/budget-ceiling", privateHandler)
 	mux.Handle("PUT /me/budget-ceiling", privateHandler)
