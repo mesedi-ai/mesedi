@@ -257,14 +257,24 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 // goroutine with a bounded context. Errors are logged, never surfaced
 // to the signing-up user; a Resend outage must not block a successful
 // signup.
+//
+// URL split: the dashboard lives on app.mesedi.ai (h.DashboardURL),
+// but the docs are on the marketing apex (mesedi.ai/docs/quickstart)
+// per the middleware host-split rules. Naively concatenating
+// h.DashboardURL + "/docs/quickstart" yields app.mesedi.ai/docs/...,
+// which the middleware then 308's back to mesedi.ai. Worse, the
+// legacy default was "https://mesedi.vercel.app", which still works
+// as a redirect but renders ugly in the welcome email body. So:
+// derive the marketing origin from the dashboard origin by stripping
+// the "app." subdomain prefix.
 func (h *Handlers) sendWelcomeEmail(toEmail, projectName, keyPrefix string) {
 	dashboardURL := h.DashboardURL
 	if dashboardURL == "" {
-		dashboardURL = "https://mesedi.vercel.app"
+		dashboardURL = "https://app.mesedi.ai"
 	}
 	docsURL := h.DocsURL
 	if docsURL == "" {
-		docsURL = dashboardURL + "/docs/quickstart"
+		docsURL = marketingOrigin(dashboardURL) + "/docs/quickstart"
 	}
 
 	in := mail.WelcomeInput{
@@ -285,4 +295,22 @@ func (h *Handlers) sendWelcomeEmail(toEmail, projectName, keyPrefix string) {
 			)
 		}
 	}()
+}
+
+// marketingOrigin maps the dashboard origin to its marketing-apex
+// counterpart. Examples:
+//
+//	https://app.mesedi.ai  -> https://mesedi.ai
+//	https://app.mesedi.ai/ -> https://mesedi.ai (trailing slash trimmed)
+//	https://mesedi.ai      -> https://mesedi.ai (no-op)
+//	http://localhost:3000  -> http://localhost:3000 (no-op for dev)
+//
+// The "app." prefix strip is intentionally textual rather than parsed
+// because the alternative (net/url + host munging) is much more code
+// for the same one-line transformation, and the only callers feed in
+// a controlled value from MESEDI_DASHBOARD_URL.
+func marketingOrigin(dashboardURL string) string {
+	u := strings.TrimRight(dashboardURL, "/")
+	u = strings.Replace(u, "://app.", "://", 1)
+	return u
 }
