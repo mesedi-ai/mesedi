@@ -90,7 +90,7 @@ const (
 // WebhookSecret: the signing secret for the configured webhook
 // endpoint. Begins with "whsec_". Set via MESEDI_STRIPE_WEBHOOK_SECRET.
 //
-// ProPriceID: the Stripe Price ID for the $29/mo Pro plan. Begins
+// ProPriceID: the Stripe Price ID for the $49/mo Pro plan. Begins
 // with "price_". Set via MESEDI_STRIPE_PRO_PRICE_ID.
 //
 // If any of the three is empty the billing endpoints respond with

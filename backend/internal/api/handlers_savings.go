@@ -96,7 +96,7 @@ const (
 	// subscriptionCostProMonthly is what a Pro customer pays per
 	// month. Keep this in sync with the pricing page; when pricing
 	// changes, update this constant.
-	subscriptionCostProMonthly float64 = 29
+	subscriptionCostProMonthly float64 = 49
 
 	// subscriptionCostEnterpriseMonthly is what an Enterprise
 	// customer pays per month. $25k/year / 12 ≈ $2,083.
