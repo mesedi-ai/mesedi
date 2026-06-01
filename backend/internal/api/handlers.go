@@ -124,6 +124,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /executions", h.HandleCreateExecution)
 	// #118 Slice 1, read-side project surface for the dashboard.
 	mux.HandleFunc("GET /project", h.HandleGetProject)
+	mux.HandleFunc("GET /me", h.HandleGetMe)
 	mux.HandleFunc("PATCH /executions/{id}", h.HandleUpdateExecution)
 	mux.HandleFunc("POST /events", h.HandleIngestEvents)
 	// Phase 3b, read-side execution surface for the dashboard.
@@ -2441,5 +2442,71 @@ func (h *Handlers) HandleGetProject(w http.ResponseWriter, r *http.Request) {
 		"name":        project.Name,
 		"owner_email": project.OwnerEmail,
 		"created_at":  project.CreatedAt,
+	})
+}
+
+// HandleGetMe returns the calling user's identity + role for the
+// dashboard. Used by the topbar / overview to show "Signed in as X"
+// with the correct member email (not the project owner), and by every
+// page to grey out mutation buttons when the role doesn't permit
+// them. Without this endpoint, the dashboard renders mutation
+// affordances unconditionally and the user only learns they lack
+// permission after clicking.
+//
+// Response shape:
+//
+//	{
+//	  "user_id":     "rob.j.canario@gmail.com",  // who is calling
+//	  "email":       "rob.j.canario@gmail.com",  // same in v1 (email-as-user-id)
+//	  "role":        "read",                     // read | write | admin
+//	  "project_id":  "proj_...",
+//	  "project_name":"Stripe Live Test",
+//	  "owner_email": "rjc0207@gmail.com"         // project creator, for context
+//	}
+//
+// Legacy keys (no user_id) and projects without a tenant_id resolve
+// to role=admin via the same fallback resolveCallerRole uses, so the
+// founder's own integrations don't show "Signed in as null."
+func (h *Handlers) HandleGetMe(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	project, err := h.Store.GetProject(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get project: "+err.Error())
+		return
+	}
+
+	// Resolve the caller's user_id from the API key (post-014 keys
+	// carry it). Falls back to the project owner so legacy keys still
+	// render meaningfully.
+	userID, _ := UserIDFromContext(r.Context())
+	if userID == "" {
+		userID = project.OwnerUserID
+		if userID == "" {
+			userID = project.OwnerEmail
+		}
+	}
+
+	role, err := h.resolveCallerRole(r)
+	if err != nil {
+		h.Logger.Warn("me: resolve role failed (defaulting to read)",
+			"error", err.Error())
+		role = "read"
+	}
+	if role == "" {
+		role = "read"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"user_id":      userID,
+		"email":        userID,
+		"role":         role,
+		"project_id":   project.ProjectID,
+		"project_name": project.Name,
+		"owner_email":  project.OwnerEmail,
 	})
 }
