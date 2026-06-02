@@ -25,7 +25,7 @@ import {
   executionStartPayload,
 } from "./events.js";
 
-export const DEFAULT_BASE_URL = "http://localhost:8080";
+export const DEFAULT_BASE_URL = "https://api.mesedi.ai";
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const SCHEMA_VERSION = "1";
 
@@ -38,7 +38,7 @@ export interface ConfigureOptions {
   apiKey?: string;
   /**
    * Backend URL. Defaults to `MESEDI_BASE_URL` env var, then to
-   * "http://localhost:8080" for local dev.
+   * "https://api.mesedi.ai" (production). Override to localhost for local dev.
    */
   baseUrl?: string;
   /** Per-request timeout in milliseconds. Default 10s. */

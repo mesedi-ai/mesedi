@@ -36,7 +36,7 @@ import httpx
 from mesedi._shipper import EventShipper
 from mesedi.events import Event, Execution
 
-DEFAULT_BASE_URL = "http://localhost:8080"
+DEFAULT_BASE_URL = "https://api.mesedi.ai"
 DEFAULT_TIMEOUT = 10.0
 SCHEMA_VERSION = "1"
 
@@ -176,7 +176,7 @@ def configure(
 
     Environment-variable fallbacks:
       - api_key  ← MESEDI_API_KEY
-      - base_url ← MESEDI_BASE_URL (defaults to ``http://localhost:8080``)
+      - base_url ← MESEDI_BASE_URL (defaults to ``https://api.mesedi.ai``)
 
     Calling configure() again replaces the previous default client; the
     previous client's shipper is shut down (with flush) before
