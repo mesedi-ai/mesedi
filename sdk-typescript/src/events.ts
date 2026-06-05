@@ -77,6 +77,13 @@ export interface Execution {
   sdk_language: "typescript";
   sdk_version: string;
   crash_signature?: string;
+  /**
+   * Mesedi #5: optional per-execution tenant identifier from the
+   * host SaaS application. When set, surfaces in the cost-by-tenant
+   * report; absent means "not supplied" and the run rolls up under
+   * the "(unattributed)" bucket on the dashboard.
+   */
+  tenant_id?: string;
 }
 
 /**
@@ -99,13 +106,15 @@ export interface Event {
  * execution start.
  */
 export function executionStartPayload(e: Execution): Record<string, unknown> {
-  return {
+  const out: Record<string, unknown> = {
     execution_id: e.execution_id,
     status: e.status,
     started_at: e.started_at,
     sdk_language: e.sdk_language,
     sdk_version: e.sdk_version,
   };
+  if (e.tenant_id !== undefined) out["tenant_id"] = e.tenant_id;
+  return out;
 }
 
 /**

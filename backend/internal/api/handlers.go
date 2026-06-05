@@ -163,6 +163,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Phase 3a, read-side failure_group surface for the dashboard.
 	mux.HandleFunc("GET /failure-groups", h.HandleListFailureGroups)
 	mux.HandleFunc("GET /failure-groups/{id}", h.HandleGetFailureGroup)
+	// Mesedi #5, cost broken down by tenant_id over a time window.
+	mux.HandleFunc("GET /reports/cost-by-tenant", h.HandleReportCostByTenant)
 	// Phase 3b sub-slice 9, executions inside a failure_group.
 	mux.HandleFunc("GET /failure-groups/{id}/executions", h.HandleListExecutionsInFailureGroup)
 	// Phase 3b sub-slice 18, API key management surface.
@@ -1112,6 +1114,79 @@ func (h *Handlers) HandleListExecutionsInFailureGroup(w http.ResponseWriter, r *
 		"offset":     offset,
 		"group_id":   groupID,
 	})
+}
+
+// HandleReportCostByTenant returns the calling project's cost
+// aggregated by tenant_id over a time window. Query parameters:
+//
+//   - since   RFC3339 lower bound on executions.started_at (optional)
+//   - until   RFC3339 upper bound on executions.started_at (optional)
+//   - limit   max rows returned, 1-200, default 25
+//
+// Executions with NULL tenant_id collapse into a single row with
+// tenant_id="" so the dashboard renders "unattributed" cost
+// separately rather than silently dropping it. Rows are ordered by
+// total cost descending.
+//
+// Mesedi #5: bridges the gap between project-scoped cost_velocity
+// alerts ("something is expensive") and the SaaS host's customer
+// granularity ("Customer X drove $Y of that spend"). The host
+// application sets tenant_id on POST /executions; this endpoint reads
+// it back.
+func (h *Handlers) HandleReportCostByTenant(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	since, err := parseRFC3339Query(r, "since")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid since: "+err.Error())
+		return
+	}
+	until, err := parseRFC3339Query(r, "until")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid until: "+err.Error())
+		return
+	}
+	limit := parseIntQuery(r, "limit", 25, 1, 200)
+
+	rows, err := h.Store.GetCostByTenant(r.Context(), authProjectID, since, until, limit)
+	if err != nil {
+		h.Logger.Error("get cost by tenant failed",
+			"project_id", authProjectID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, "report failed: "+err.Error())
+		return
+	}
+
+	resp := map[string]any{
+		"ok":    true,
+		"rows":  rows,
+		"count": len(rows),
+		"limit": limit,
+	}
+	if !since.IsZero() {
+		resp["since"] = since.UTC().Format(time.RFC3339)
+	}
+	if !until.IsZero() {
+		resp["until"] = until.UTC().Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// parseRFC3339Query parses an optional RFC3339 timestamp from the
+// named query parameter. Returns the zero time.Time when the param
+// is absent or empty (which the store layer treats as "no bound").
+// Invalid timestamps return an error so callers can 400 cleanly.
+func parseRFC3339Query(r *http.Request, name string) (time.Time, error) {
+	v := r.URL.Query().Get(name)
+	if v == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, v)
 }
 
 // HandleStats returns top-line stat-card numbers for the dashboard:

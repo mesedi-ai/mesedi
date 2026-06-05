@@ -1040,14 +1040,14 @@ func (s *PostgresStore) CreateExecution(ctx context.Context, e *events.Execution
 			started_at, ended_at, duration_ms,
 			total_tokens_in, total_tokens_out, estimated_cost_usd,
 			input_summary, output_summary, crash_signature,
-			sdk_version, sdk_language
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			sdk_version, sdk_language, tenant_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 	`,
 		e.ExecutionID, e.ProjectID, nullStringPtr(e.ParentExecutionID), e.Status,
 		e.StartedAt, nullTime(e.EndedAt), nullInt64(e.DurationMs),
 		nullInt(e.TotalTokensIn), nullInt(e.TotalTokensOut), nullFloat(e.EstimatedCostUSD),
 		nullString(e.InputSummary), nullString(e.OutputSummary), nullString(e.CrashSignature),
-		nullString(e.SDKVersion), nullString(e.SDKLanguage),
+		nullString(e.SDKVersion), nullString(e.SDKLanguage), nullStringPtr(e.TenantID),
 	)
 	if err != nil {
 		return fmt.Errorf("insert execution: %w", err)
@@ -1085,7 +1085,7 @@ func (s *PostgresStore) UpdateExecution(ctx context.Context, e *events.Execution
 
 func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*events.Execution, error) {
 	e := &events.Execution{}
-	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang, failureGroupID sql.NullString
+	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang, failureGroupID, tenantID sql.NullString
 	var endedAt sql.NullTime
 	var durationMs, tokensIn, tokensOut sql.NullInt64
 	var costUSD sql.NullFloat64
@@ -1095,14 +1095,14 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 			started_at, ended_at, duration_ms,
 			total_tokens_in, total_tokens_out, estimated_cost_usd,
 			input_summary, output_summary, crash_signature,
-			sdk_version, sdk_language, failure_group_id
+			sdk_version, sdk_language, failure_group_id, tenant_id
 		FROM executions WHERE execution_id = $1
 	`, executionID).Scan(
 		&e.ExecutionID, &e.ProjectID, &parent, &e.Status,
 		&e.StartedAt, &endedAt, &durationMs,
 		&tokensIn, &tokensOut, &costUSD,
 		&inputSum, &outputSum, &crashSig,
-		&sdkVer, &sdkLang, &failureGroupID,
+		&sdkVer, &sdkLang, &failureGroupID, &tenantID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1148,6 +1148,10 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 	if failureGroupID.Valid {
 		v := failureGroupID.String
 		e.FailureGroupID = &v
+	}
+	if tenantID.Valid {
+		v := tenantID.String
+		e.TenantID = &v
 	}
 	return e, nil
 }
@@ -1393,6 +1397,75 @@ func (s *PostgresStore) SumExecutionCostByProjectSince(
 		return 0, 0, fmt.Errorf("sum execution cost: %w", err)
 	}
 	return cost, count, nil
+}
+
+// GetCostByTenant is the Postgres counterpart to
+// SQLiteStore.GetCostByTenant. See that method's doc comment for the
+// contract. Uses $N placeholder syntax for parameters; the placeholder
+// indices are assembled dynamically because the time-window bounds
+// are optional.
+func (s *PostgresStore) GetCostByTenant(
+	ctx context.Context,
+	projectID string,
+	since time.Time,
+	until time.Time,
+	limit int,
+) ([]TenantCostRow, error) {
+	query := `
+		SELECT
+			COALESCE(tenant_id, '') AS tenant_id,
+			COALESCE(SUM(estimated_cost_usd), 0) AS total_cost_usd,
+			COUNT(*) AS execution_count,
+			COALESCE(SUM(total_tokens_in), 0) AS total_tokens_in,
+			COALESCE(SUM(total_tokens_out), 0) AS total_tokens_out
+		FROM executions
+		WHERE project_id = $1
+	`
+	args := []any{projectID}
+	next := 2
+	if !since.IsZero() {
+		query += fmt.Sprintf(" AND started_at >= $%d", next)
+		args = append(args, since.UTC())
+		next++
+	}
+	if !until.IsZero() {
+		query += fmt.Sprintf(" AND started_at < $%d", next)
+		args = append(args, until.UTC())
+		next++
+	}
+	query += `
+		GROUP BY COALESCE(tenant_id, '')
+		ORDER BY total_cost_usd DESC, execution_count DESC
+	`
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", next)
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get cost by tenant: %w", err)
+	}
+	defer rows.Close()
+
+	out := []TenantCostRow{}
+	for rows.Next() {
+		var r TenantCostRow
+		if err := rows.Scan(
+			&r.TenantID,
+			&r.TotalCostUSD,
+			&r.ExecutionCount,
+			&r.TotalTokensIn,
+			&r.TotalTokensOut,
+		); err != nil {
+			return nil, fmt.Errorf("scan tenant cost row: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenant cost rows: %w", err)
+	}
+	return out, nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────

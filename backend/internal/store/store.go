@@ -361,6 +361,21 @@ type FailureGroup struct {
 	SampleExecutionID  string    `json:"sample_execution_id,omitempty"`
 }
 
+// TenantCostRow is one row of the cost-by-tenant report (Mesedi #5):
+// a single tenant's aggregated cost + execution count within the
+// requested time window. Executions without a tenant_id are reported
+// as a single row with TenantID="" so dashboards can distinguish
+// "no tenant ever supplied" from "tenant supplied as empty string"
+// (callers can suppress this row if they only want explicitly
+// attributed cost).
+type TenantCostRow struct {
+	TenantID         string  `json:"tenant_id"`
+	TotalCostUSD     float64 `json:"total_cost_usd"`
+	ExecutionCount   int     `json:"execution_count"`
+	TotalTokensIn    int64   `json:"total_tokens_in"`
+	TotalTokensOut   int64   `json:"total_tokens_out"`
+}
+
 // Store is the abstract persistence interface. Phase 1.5 minimal surface;
 // will grow as later phases add read-side queries (list executions,
 // failure groups, aggregations, etc.).
@@ -750,6 +765,19 @@ type Store interface {
 	// failure_class=infrastructure_throttled and the caller-supplied
 	// signature. Returns isNew=true on first occurrence.
 	GroupInfrastructureThrottled(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// GetCostByTenant aggregates SUM(estimated_cost_usd) and COUNT(*)
+	// per tenant_id within the requested time window, ordered by
+	// total cost descending. Executions with NULL tenant_id collapse
+	// into a single row with TenantID="" so dashboards can render
+	// unattributed cost separately. limit caps the number of rows
+	// returned (0 = unlimited).
+	GetCostByTenant(
+		ctx context.Context,
+		projectID string,
+		since time.Time,
+		until time.Time,
+		limit int,
+	) ([]TenantCostRow, error)
 	// FindFirstFailedValidator returns the name of the first
 	// validator_result event with payload.passed=false in this
 	// execution, or empty string if no validators failed. The "agent

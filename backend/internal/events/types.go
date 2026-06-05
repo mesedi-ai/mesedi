@@ -80,6 +80,13 @@ type Execution struct {
 	// executions and for executions that haven't yet been processed by
 	// the detection pipeline.
 	FailureGroupID *string `json:"failure_group_id,omitempty"`
+	// TenantID is the caller-supplied end-user / customer identifier
+	// in the host SaaS application. Optional; absent for single-tenant
+	// projects. Used by the cost-by-tenant report (Mesedi #5) to break
+	// down a project's cost across the customers driving it. nil =
+	// "not supplied"; non-nil pointer to "" = "supplied as empty
+	// string" (treated as a deliberate, distinct value).
+	TenantID *string `json:"tenant_id,omitempty"`
 }
 
 // Event is the polymorphic envelope for every recorded step in an execution.

@@ -55,6 +55,7 @@ def wrap(
     func: Optional[F] = None,
     *,
     budget: Optional[Budget] = None,
+    tenant_id: Optional[str] = None,
 ) -> Any:
     """Decorate a function so each call is recorded as an agent execution.
 
@@ -70,6 +71,18 @@ def wrap(
             return answer
 
         run_my_agent("hello")  # → backend records 1 execution
+
+    Per-tenant cost attribution (Mesedi #5)::
+
+        @mesedi.wrap(tenant_id=current_customer_id())
+        def run_my_agent(query: str) -> str:
+            ...
+
+    The ``tenant_id`` is attached to every execution this decorated
+    function produces and surfaces in the ``GET /reports/cost-by-tenant``
+    rollup. SaaS hosts running one Mesedi project across N customers
+    should set this so the cost report breaks down per end-user instead
+    of collapsing into one project-wide total.
 
     Behavior:
       - On entry: enqueue POST /executions (status=started). Returns
@@ -91,17 +104,21 @@ def wrap(
     # need to return a decorator factory. Otherwise this IS the
     # decorator.
     if func is None:
-        # `@mesedi.wrap(budget=...)`, return a factory that takes
-        # the actual function on the next call.
+        # `@mesedi.wrap(budget=..., tenant_id=...)`, return a factory
+        # that takes the actual function on the next call.
         def factory(actual: F) -> F:
-            return wrap(actual, budget=budget)  # type: ignore[return-value]
+            return wrap(actual, budget=budget, tenant_id=tenant_id)  # type: ignore[return-value]
         return factory
 
     @functools.wraps(func)
     def inner(*args: Any, **kwargs: Any) -> Any:
         client = get_client()
         execution_id = f"exec-{uuid.uuid4().hex[:12]}"
-        execution = Execution(execution_id=execution_id)
+        # Pass tenant_id straight through to the Execution dataclass so
+        # start_payload() includes it in POST /executions. None (the
+        # default) means "not supplied" and the field is omitted from
+        # the wire body, matching the backend's omitempty contract.
+        execution = Execution(execution_id=execution_id, tenant_id=tenant_id)
 
         # Submit start AFTER constructing the Execution so the timer
         # captures only the user's function, not the SDK's own overhead.

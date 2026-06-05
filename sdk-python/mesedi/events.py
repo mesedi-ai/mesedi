@@ -85,16 +85,25 @@ class Execution:
     sdk_language: str = "python"
     sdk_version: str = "0.0.1"
     crash_signature: Optional[str] = None
+    # Mesedi #5: optional per-execution tenant identifier from the
+    # host SaaS application. When set, it surfaces in the
+    # cost-by-tenant report; absent (None) means "not supplied" and
+    # cost rolls up under the "(unattributed)" bucket on the
+    # dashboard.
+    tenant_id: Optional[str] = None
 
     def start_payload(self) -> Dict[str, Any]:
         """Body for POST /executions (only the fields valid at start)."""
-        return {
+        out: Dict[str, Any] = {
             "execution_id": self.execution_id,
             "status": self.status,
             "started_at": self.started_at,
             "sdk_language": self.sdk_language,
             "sdk_version": self.sdk_version,
         }
+        if self.tenant_id is not None:
+            out["tenant_id"] = self.tenant_id
+        return out
 
     def end_payload(self) -> Dict[str, Any]:
         """Body for PATCH /executions/{id} (only the fields set at end).

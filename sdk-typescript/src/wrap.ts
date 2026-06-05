@@ -65,7 +65,7 @@ export interface WrapOptions {
    * Optional per-execution budget. When set, the wrapped function
    * runs with halt-safe boundary checks at every `tool()` /
    * `checkpoint()` / Anthropic LLM-call entry point. If any limit is
-   * exceeded between calls, a MesediHalt is thrown internally , 
+   * exceeded between calls, a MesediHalt is thrown internally ,
    * wrap() catches it, marks the execution status=halted (with
    * crash_signature=`halt:<trigger>`), and returns undefined.
    *
@@ -74,6 +74,21 @@ export interface WrapOptions {
    * mid-LLM-call, so user resources release cleanly.
    */
   budget?: Budget;
+  /**
+   * Mesedi #5: optional per-execution tenant identifier from the
+   * host SaaS application (an end-user ID, customer ID, etc.). When
+   * set, every execution this wrap produces is attributed to that
+   * tenant and surfaces in `GET /reports/cost-by-tenant`. Omit on
+   * single-tenant projects.
+   *
+   * Typically captured from the request context at the call site:
+   *
+   *     export const handler = wrap(
+   *       { tenant_id: req.session.customerId },
+   *       async (input) => { ... },
+   *     );
+   */
+  tenant_id?: string;
 }
 
 /**
@@ -118,6 +133,9 @@ export function wrap<TArgs extends unknown[], TResult>(
       started_at: utcNowRfc3339(),
       sdk_language: "typescript",
       sdk_version: "0.0.4",
+      // Optional tenant_id flows through to the wire body via
+      // executionStartPayload's omitempty-style assignment.
+      ...(opts.tenant_id !== undefined ? { tenant_id: opts.tenant_id } : {}),
     };
 
     // Construct a budget tracker iff a budget was supplied. Stays
