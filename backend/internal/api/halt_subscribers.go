@@ -2,46 +2,46 @@
 //
 // Two HTTP endpoints + an in-memory subscriber registry:
 //
-//   GET  /executions/{id}/halt-stream: Server-Sent Events. Opens a
-//     long-lived text/event-stream connection. The Python/TS SDK
-//     subscribes here when an execution is wrapped with a budget; the
-//     handler holds the connection open, sending periodic keepalive
-//     comments (`: keepalive\n\n`) until either a halt is requested
-//     for this execution, the client disconnects, or the connection
-//     idles past a hard timeout.
+//	GET  /executions/{id}/halt-stream: Server-Sent Events. Opens a
+//	  long-lived text/event-stream connection. The Python/TS SDK
+//	  subscribes here when an execution is wrapped with a budget; the
+//	  handler holds the connection open, sending periodic keepalive
+//	  comments (`: keepalive\n\n`) until either a halt is requested
+//	  for this execution, the client disconnects, or the connection
+//	  idles past a hard timeout.
 //
-//   POST /executions/{id}/halt: admin/dashboard-triggered.
-//     Body: {"reason": "..."}. Looks up all active subscribers for
-//     this execution_id in the in-memory registry and pushes a single
-//     `event: halt\ndata: {"reason":"..."}\n\n` to each. Returns 200
-//     with the count of subscribers notified, 404 if there are no
-//     active subscribers (execution probably already completed, or
-//     the SDK never subscribed).
+//	POST /executions/{id}/halt: admin/dashboard-triggered.
+//	  Body: {"reason": "..."}. Looks up all active subscribers for
+//	  this execution_id in the in-memory registry and pushes a single
+//	  `event: halt\ndata: {"reason":"..."}\n\n` to each. Returns 200
+//	  with the count of subscribers notified, 404 if there are no
+//	  active subscribers (execution probably already completed, or
+//	  the SDK never subscribed).
 //
 // Cross-tenant isolation:
 //
-//   Both endpoints look up the execution via Store.GetExecution and
-//   verify execution.ProjectID == authProjectID before doing anything
-//   else. Cross-tenant attempts get a 404 (not 403), which prevents
-//   leaking which execution_ids exist on other projects.
+//	Both endpoints look up the execution via Store.GetExecution and
+//	verify execution.ProjectID == authProjectID before doing anything
+//	else. Cross-tenant attempts get a 404 (not 403), which prevents
+//	leaking which execution_ids exist on other projects.
 //
 // Subscriber registry:
 //
-//   In-memory map[execution_id]list-of-channels, guarded by an
-//   RWMutex. Each subscriber is a buffered Go channel that the SSE
-//   handler reads from in a loop. When a halt is pushed via POST, we
-//   send to every subscriber's channel (non-blocking; if any
-//   subscriber's channel is full somehow, we just drop the message
-//   for that subscriber, the alternative is blocking the POST
-//   handler, which is worse).
+//	In-memory map[execution_id]list-of-channels, guarded by an
+//	RWMutex. Each subscriber is a buffered Go channel that the SSE
+//	handler reads from in a loop. When a halt is pushed via POST, we
+//	send to every subscriber's channel (non-blocking; if any
+//	subscriber's channel is full somehow, we just drop the message
+//	for that subscriber, the alternative is blocking the POST
+//	handler, which is worse).
 //
-//   Registry is per-process. Multi-instance backends would need
-//   Redis-pubsub or similar; that's a future-slice problem.
+//	Registry is per-process. Multi-instance backends would need
+//	Redis-pubsub or similar; that's a future-slice problem.
 //
-//   When an SSE connection closes (client disconnect, halt sent,
-//   execution terminates), the handler MUST deregister itself from
-//   the registry. The defer pattern in HandleHaltStream guarantees
-//   this even on panic.
+//	When an SSE connection closes (client disconnect, halt sent,
+//	execution terminates), the handler MUST deregister itself from
+//	the registry. The defer pattern in HandleHaltStream guarantees
+//	this even on panic.
 package api
 
 import (

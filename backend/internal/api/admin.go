@@ -26,9 +26,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -37,22 +39,37 @@ import (
 	"mesedi/backend/internal/store"
 )
 
-// AdminAuth returns middleware that gates routes behind a static admin
-// bearer token. The middleware is created once at server startup (in
-// main.go) with the configured token; if the token is empty, the
-// middleware refuses every request (fail-closed posture).
+// AdminAuth returns middleware that gates routes behind admin
+// credentials. Two auth paths are accepted:
 //
-// Auth header shape: `Authorization: Bearer <token>`. Mismatched or
-// missing headers return 401 with an opaque message; we don't echo
-// the token or describe why it failed (timing-and-information leak
-// hygiene).
-func AdminAuth(adminToken string) func(http.Handler) http.Handler {
+//  1. Legacy static token: the bearer value matches MESEDI_ADMIN_TOKEN
+//     (constant-time compared). Retained for backward compatibility
+//     during the migration to scoped API keys (#150 follow-up). Will
+//     be removed in a follow-up once every operator has minted an
+//     admin-scope key for themselves.
+//
+//  2. Admin-scope API key: the bearer is a `mesedi_sk_...` token
+//     whose api_keys row has scope='admin' and is not past its
+//     expires_at. Looked up via store.GetAPIKeyByHash, same path as
+//     customer auth. Lets us mint / revoke / expire admin credentials
+//     without a redeploy + carries an audit identity (key_id, name).
+//
+// At least one of (adminToken != "", st != nil) must be set; if both
+// are zero values the middleware fails closed with 503 so an
+// accidentally-misconfigured deploy can't silently expose /admin/*.
+//
+// On success the request context is stamped with:
+//   - ctxKeyAdminAuthMethod: "legacy_token" or "api_key"
+//   - ctxKeyAdminKeyID:     key_id (api_key path only)
+//   - ctxKeyAdminKeyName:   name   (api_key path only)
+//
+// Auth header shape: `Authorization: Bearer <token>`. Failures return
+// 401 with an opaque message; we don't echo the token or describe
+// which path failed (timing-and-information leak hygiene).
+func AdminAuth(adminToken string, st store.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if adminToken == "" {
-				// Fail closed when no token is configured, refuses to
-				// expose admin endpoints on an accidentally-misconfigured
-				// deploy.
+			if adminToken == "" && st == nil {
 				writeError(w, http.StatusServiceUnavailable, "admin not configured")
 				return
 			}
@@ -63,16 +80,82 @@ func AdminAuth(adminToken string) func(http.Handler) http.Handler {
 				return
 			}
 			supplied := strings.TrimSpace(hdr[len(prefix):])
-			// Constant-time compare on equal-length slices. If lengths
-			// differ, ConstantTimeCompare returns 0 in O(min(len)) time
-			// without leaking which prefix matched.
-			if subtle.ConstantTimeCompare([]byte(supplied), []byte(adminToken)) != 1 {
+
+			// Path 1: legacy static token. Only attempted when the
+			// supplied bearer does NOT look like a mesedi_sk_ key, so
+			// we don't burn a (constant-time) comparison against the
+			// legacy token on every customer-flavored request. The
+			// prefix check is itself non-secret.
+			if adminToken != "" && !strings.HasPrefix(supplied, "mesedi_sk_") {
+				if subtle.ConstantTimeCompare([]byte(supplied), []byte(adminToken)) == 1 {
+					ctx := context.WithValue(r.Context(), ctxKeyAdminAuthMethod, AdminAuthMethodLegacyToken)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
 				writeError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
-			next.ServeHTTP(w, r)
+
+			// Path 2: admin-scope API key. Hash the bearer, look up
+			// the row, verify scope and expiry. Refuses identically
+			// for missing key, wrong scope, or expired key so an
+			// attacker can't distinguish the three failure modes.
+			if st == nil {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			hash := HashAPIKey(supplied)
+			key, err := st.GetAPIKeyByHash(r.Context(), hash)
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					writeError(w, http.StatusUnauthorized, "unauthorized")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "auth lookup failed")
+				return
+			}
+			if key.Scope != store.APIKeyScopeAdmin {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			if !adminKeyExpiryOK(key.ExpiresAt) {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+
+			// Touch last_used_at asynchronously, fire-and-forget so a
+			// slow DB write doesn't add latency. Same pattern as the
+			// customer authMiddleware.
+			go func(keyID string) {
+				_ = st.TouchAPIKey(context.Background(), keyID)
+			}(key.KeyID)
+
+			ctx := context.WithValue(r.Context(), ctxKeyAdminAuthMethod, AdminAuthMethodAPIKey)
+			ctx = context.WithValue(ctx, ctxKeyAdminKeyID, key.KeyID)
+			ctx = context.WithValue(ctx, ctxKeyAdminKeyName, key.Name)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// adminKeyExpiryOK returns true if the supplied expires_at column is
+// empty (never expires) or parses to a time in the future. Any parse
+// failure is treated as expired (fail closed) so a malformed value
+// can't accidentally extend a credential's lifetime.
+func adminKeyExpiryOK(expiresAt string) bool {
+	expiresAt = strings.TrimSpace(expiresAt)
+	if expiresAt == "" {
+		return true
+	}
+	t, err := time.Parse(time.RFC3339Nano, expiresAt)
+	if err != nil {
+		// Try RFC3339 without sub-second precision before giving up.
+		t, err = time.Parse(time.RFC3339, expiresAt)
+		if err != nil {
+			return false
+		}
+	}
+	return time.Now().UTC().Before(t)
 }
 
 // RegisterAdminRoutes attaches the founder-side admin endpoints to the
@@ -90,6 +173,11 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/storage", h.HandleAdminStorage)
 	mux.HandleFunc("GET /admin/abuse", h.HandleAdminListAbuseSignals)
 	mux.HandleFunc("POST /admin/abuse/{id}/resolve", h.HandleAdminResolveAbuseSignal)
+	// API keys management (migration 015).
+	mux.HandleFunc("GET /admin/api-keys", h.HandleAdminListAPIKeys)
+	mux.HandleFunc("POST /admin/api-keys", h.HandleAdminCreateAPIKey)
+	mux.HandleFunc("DELETE /admin/api-keys/{id}", h.HandleAdminRevokeAPIKey)
+	mux.HandleFunc("GET /admin/whoami", h.HandleAdminWhoami)
 }
 
 // AdminProjectDetail bundles everything the founder dashboard's
@@ -98,11 +186,11 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 // API key prefixes (never the hash). Keeps the dashboard's network
 // surface small (one fetch on page mount, not four).
 type AdminProjectDetail struct {
-	Project         *store.AdminProjectRow `json:"project"`
-	RecentExecutions []*events.Execution    `json:"recent_executions"`
-	RecentFailureGroups []*store.FailureGroup `json:"recent_failure_groups"`
-	Webhooks        []*store.ProjectWebhook `json:"webhooks"`
-	APIKeys         []*store.APIKey         `json:"api_keys"`
+	Project             *store.AdminProjectRow  `json:"project"`
+	RecentExecutions    []*events.Execution     `json:"recent_executions"`
+	RecentFailureGroups []*store.FailureGroup   `json:"recent_failure_groups"`
+	Webhooks            []*store.ProjectWebhook `json:"webhooks"`
+	APIKeys             []*store.APIKey         `json:"api_keys"`
 }
 
 // HandleAdminGetProjectDetail returns the bundled drill-down payload
@@ -180,14 +268,14 @@ func (h *Handlers) HandleAdminGetProjectDetail(w http.ResponseWriter, r *http.Re
 // Policy get this exact JSON. Schema-version field lets future
 // consumers detect format changes without guessing.
 type AdminProjectExport struct {
-	SchemaVersion int                       `json:"schema_version"`
-	ExportedAt    time.Time                 `json:"exported_at"`
-	Project       *store.AdminProjectRow    `json:"project"`
-	APIKeys       []*store.APIKey           `json:"api_keys"`
-	Executions    []*ExportedExecution      `json:"executions"`
-	FailureGroups []*store.FailureGroup     `json:"failure_groups"`
-	Webhooks      []*store.ProjectWebhook   `json:"webhooks"`
-	Deliveries    []*store.WebhookDelivery  `json:"webhook_deliveries"`
+	SchemaVersion int                      `json:"schema_version"`
+	ExportedAt    time.Time                `json:"exported_at"`
+	Project       *store.AdminProjectRow   `json:"project"`
+	APIKeys       []*store.APIKey          `json:"api_keys"`
+	Executions    []*ExportedExecution     `json:"executions"`
+	FailureGroups []*store.FailureGroup    `json:"failure_groups"`
+	Webhooks      []*store.ProjectWebhook  `json:"webhooks"`
+	Deliveries    []*store.WebhookDelivery `json:"webhook_deliveries"`
 }
 
 // ExportedExecution is one execution with its events inlined. Saves
@@ -527,7 +615,7 @@ func (h *Handlers) HandleAdminSetTier(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "update tier: "+err.Error())
 		return
 	}
-	// The admin audit trail is just structured log lines today , 
+	// The admin audit trail is just structured log lines today ,
 	// rotate to a real audit_events table when traffic justifies it.
 	h.Logger.Info("admin: tier set",
 		"project_id", projectID,
@@ -711,4 +799,276 @@ func (h *Handlers) HandleAdminListProjects(w http.ResponseWriter, r *http.Reques
 		"projects": rows,
 		"count":    len(rows),
 	})
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Admin API key management (migration 015).
+//
+// The /admin/api-keys surface lets an admin-authenticated operator
+// mint, list, and revoke any API key in the system. Two key scopes:
+//
+//   - customer: project-scoped, identical to keys minted from the
+//     customer-facing /api-keys page. The operator picks which project
+//     the key belongs to. Useful for support-side reissuing a key on
+//     behalf of a project.
+//
+//   - admin: privileged, scope='admin', project_id='_admin'. Bearer
+//     value passes AdminAuth and reaches /admin/*. Operators mint
+//     these for themselves to replace the legacy MESEDI_ADMIN_TOKEN
+//     Fly secret.
+//
+// Mint flow returns the raw secret ONCE in the response; subsequent
+// list calls only ever see the prefix. Revoke is a hard delete.
+// ─────────────────────────────────────────────────────────────────────────
+
+// adminCreateKeyRequest is the POST body for /admin/api-keys.
+// Mirrors Verdifax's shape (see Verdifax orchestrator's createKeyRequest)
+// so the dashboard JS can be written once with one mental model.
+type adminCreateKeyRequest struct {
+	// Name is the human-chosen label. Required, max 200 chars.
+	// For customer-scope keys the handler does NOT add the
+	// "customer:" prefix Verdifax uses; Mesedi separates scope into a
+	// dedicated column so a marker prefix in the name is redundant.
+	Name string `json:"name"`
+	// Scope: "customer" (default, project-scoped) or "admin"
+	// (privileged). Empty / missing defaults to "customer" so an old
+	// client cannot silently escalate.
+	Scope string `json:"scope,omitempty"`
+	// ConfirmAdminScope MUST be true when Scope=="admin". A typo in
+	// the scope field is not enough to mint a privileged credential;
+	// the dashboard explicitly opts in via a confirmation checkbox.
+	ConfirmAdminScope bool `json:"confirm_admin_scope,omitempty"`
+	// ProjectID is required when Scope=="customer" (the project the
+	// new key authenticates as). Ignored when Scope=="admin"; the
+	// handler always assigns admin keys to store.APIKeyAdminProjectID.
+	ProjectID string `json:"project_id,omitempty"`
+	// ExpiresAt is optional. Accepts either RFC3339Nano
+	// ("2026-12-31T23:59:59Z") or YYYY-MM-DD (parsed as end-of-day
+	// UTC). Empty == never expires. Past timestamps are rejected.
+	ExpiresAt string `json:"expires_at,omitempty"`
+}
+
+// HandleAdminCreateAPIKey mints a new API key. See adminCreateKeyRequest.
+// Returns the raw secret ONCE; the operator stores it immediately or
+// has to revoke + remint.
+func (h *Handlers) HandleAdminCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	var req adminCreateKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name required")
+		return
+	}
+	if len(name) > 200 {
+		writeError(w, http.StatusBadRequest, "name too long (max 200 chars)")
+		return
+	}
+	scope := strings.ToLower(strings.TrimSpace(req.Scope))
+	if scope == "" {
+		scope = store.APIKeyScopeCustomer
+	}
+	if scope != store.APIKeyScopeCustomer && scope != store.APIKeyScopeAdmin {
+		writeError(w, http.StatusBadRequest, `scope must be "customer" or "admin"`)
+		return
+	}
+	if scope == store.APIKeyScopeAdmin && !req.ConfirmAdminScope {
+		writeError(w, http.StatusBadRequest,
+			"admin scope requires confirm_admin_scope:true")
+		return
+	}
+
+	// Resolve project_id by scope.
+	var projectID string
+	if scope == store.APIKeyScopeAdmin {
+		projectID = store.APIKeyAdminProjectID
+	} else {
+		projectID = strings.TrimSpace(req.ProjectID)
+		if projectID == "" {
+			writeError(w, http.StatusBadRequest, "project_id required for customer-scope keys")
+			return
+		}
+		if projectID == store.APIKeyAdminProjectID {
+			writeError(w, http.StatusBadRequest,
+				`project_id "_admin" is reserved for admin-scope keys`)
+			return
+		}
+		// Verify the project exists so we fail at 400 (operator typo)
+		// rather than 500 (FK constraint violation deep in store.go).
+		if _, err := h.Store.GetProject(r.Context(), projectID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "project not found: "+projectID)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "project lookup failed: "+err.Error())
+			return
+		}
+	}
+
+	expiresAt, err := parseAdminKeyExpiresAt(req.ExpiresAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "expires_at: "+err.Error())
+		return
+	}
+
+	rawKey, hash, prefix, err := MintAPIKey()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "mint key: "+err.Error())
+		return
+	}
+	now := time.Now().UTC()
+	keyID := "key-" + prefix[len("mesedi_sk_"):] + "-" + strconv.FormatInt(now.UnixNano(), 10)
+
+	k := &store.APIKey{
+		KeyID:     keyID,
+		ProjectID: projectID,
+		KeyHash:   hash,
+		KeyPrefix: prefix,
+		Name:      name,
+		CreatedAt: now,
+		Scope:     scope,
+		ExpiresAt: expiresAt,
+	}
+	if err := h.Store.CreateAPIKey(r.Context(), k); err != nil {
+		writeError(w, http.StatusInternalServerError, "create key: "+err.Error())
+		return
+	}
+
+	resp := map[string]any{
+		"ok":         true,
+		"key_id":     keyID,
+		"project_id": projectID,
+		"name":       name,
+		"scope":      scope,
+		"key_prefix": prefix,
+		"secret":     rawKey,
+		"warning":    "Store this secret now. It will never be shown again.",
+		"created_at": now.Format(time.RFC3339Nano),
+	}
+	if expiresAt != "" {
+		resp["expires_at"] = expiresAt
+	}
+	// Attribution log line (the audit trail until we add a proper table).
+	method, _ := AdminAuthMethodFromContext(r.Context())
+	actorKeyID, _ := AdminKeyIDFromContext(r.Context())
+	h.Logger.Info("admin: api key minted",
+		"key_id", keyID,
+		"scope", scope,
+		"project_id", projectID,
+		"actor_method", method,
+		"actor_key_id", actorKeyID,
+	)
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// HandleAdminListAPIKeys returns every API key in the system, NEWEST
+// first. key_hash is never serialized. Admin-only.
+func (h *Handlers) HandleAdminListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	keys, err := h.Store.ListAllAPIKeys(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list api keys: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"api_keys": keys,
+		"count":    len(keys),
+	})
+}
+
+// HandleAdminRevokeAPIKey hard-deletes any API key by key_id. Admin-
+// only. The dashboard layers an admin-key-paste confirmation on top
+// of this for admin-scope deletions (Verdifax pattern, task #2).
+func (h *Handlers) HandleAdminRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
+	keyID := r.PathValue("id")
+	if keyID == "" {
+		writeError(w, http.StatusBadRequest, "missing key id")
+		return
+	}
+	// Self-revoke guard: if this revoke target is the same key the
+	// operator is currently authenticated with, refuse so the operator
+	// can't accidentally lock themselves out. The dashboard already
+	// warns about this; this is the server-side fail-safe.
+	if actorKeyID, ok := AdminKeyIDFromContext(r.Context()); ok && actorKeyID == keyID {
+		writeError(w, http.StatusBadRequest,
+			"refusing to revoke the key authenticating this request; "+
+				"mint a replacement admin key first, then revoke this one with the new key")
+		return
+	}
+	if err := h.Store.DeleteAPIKeyByID(r.Context(), keyID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "key not found: "+keyID)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "revoke key: "+err.Error())
+		return
+	}
+	method, _ := AdminAuthMethodFromContext(r.Context())
+	actorKeyID, _ := AdminKeyIDFromContext(r.Context())
+	h.Logger.Info("admin: api key revoked",
+		"key_id", keyID,
+		"actor_method", method,
+		"actor_key_id", actorKeyID,
+	)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"key_id": keyID,
+	})
+}
+
+// HandleAdminWhoami returns the identity the request authenticated as.
+// Used by the dashboard to (a) confirm admin auth succeeded and (b)
+// show "you are revoking the key you are currently using" warnings.
+func (h *Handlers) HandleAdminWhoami(w http.ResponseWriter, r *http.Request) {
+	method, _ := AdminAuthMethodFromContext(r.Context())
+	resp := map[string]any{
+		"auth_method": method,
+		"is_admin":    true,
+	}
+	if keyID, ok := AdminKeyIDFromContext(r.Context()); ok {
+		resp["key_id"] = keyID
+	}
+	if name, ok := AdminKeyNameFromContext(r.Context()); ok && name != "" {
+		resp["name"] = name
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// parseAdminKeyExpiresAt accepts either RFC3339Nano / RFC3339 or
+// YYYY-MM-DD and returns the canonical RFC3339Nano UTC string that
+// gets stored in api_keys.expires_at. Empty input is allowed and
+// returns "" (never expires).
+//
+// Date-only inputs are interpreted as end-of-day UTC (23:59:59.999...)
+// so "expires today" works as the operator's intuition expects.
+// Past timestamps are rejected; minting an already-dead credential is
+// never what the operator meant.
+func parseAdminKeyExpiresAt(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	// Try date-only first since that's the common case from a
+	// <input type="date"> picker.
+	if t, err := time.ParseInLocation("2006-01-02", s, time.UTC); err == nil {
+		t = t.Add(24*time.Hour - time.Nanosecond)
+		if !time.Now().UTC().Before(t) {
+			return "", fmt.Errorf("date is in the past")
+		}
+		return t.Format(time.RFC3339Nano), nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		if !time.Now().UTC().Before(t) {
+			return "", fmt.Errorf("timestamp is in the past")
+		}
+		return t.UTC().Format(time.RFC3339Nano), nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		if !time.Now().UTC().Before(t) {
+			return "", fmt.Errorf("timestamp is in the past")
+		}
+		return t.UTC().Format(time.RFC3339Nano), nil
+	}
+	return "", fmt.Errorf("expected YYYY-MM-DD or RFC3339")
 }

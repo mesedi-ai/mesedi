@@ -72,6 +72,13 @@ type Execution struct {
 	CrashSignature    string          `json:"crash_signature,omitempty"`
 	SDKVersion        string          `json:"sdk_version,omitempty"`
 	SDKLanguage       string          `json:"sdk_language,omitempty"` // "python" | "typescript"
+	// FailureGroupID is populated when this execution was clustered into
+	// a failure_group by the detection pipeline. The dashboard uses this
+	// to render a "Flagged by [class] / [signature]" banner on the
+	// execution detail page and link back to the group. nil for clean
+	// executions and for executions that haven't yet been processed by
+	// the detection pipeline.
+	FailureGroupID *string `json:"failure_group_id,omitempty"`
 }
 
 // Event is the polymorphic envelope for every recorded step in an execution.
@@ -101,16 +108,16 @@ type Event struct {
 // LLMCallPayload is the recorded shape of a single foundation-model API
 // call made by the agent (Anthropic, OpenAI, Cursor, etc.).
 type LLMCallPayload struct {
-	Provider     string `json:"provider"`                // "anthropic" | "openai" | ...
-	Model        string `json:"model"`                   // e.g., "claude-opus-4-6"
-	SystemPrompt string `json:"system_prompt,omitempty"` // SHA-256 acceptable for redaction mode
-	UserPrompt   string `json:"user_prompt,omitempty"`
-	Response     string `json:"response,omitempty"`
-	InputTokens  int    `json:"input_tokens,omitempty"`
-	OutputTokens int    `json:"output_tokens,omitempty"`
-	LatencyMs    int64  `json:"latency_ms,omitempty"`
-	CostUSD      float64 `json:"cost_usd,omitempty"`
-	FinishReason string `json:"finish_reason,omitempty"` // "stop" | "length" | "tool_use" | ...
+	Provider     string   `json:"provider"`                // "anthropic" | "openai" | ...
+	Model        string   `json:"model"`                   // e.g., "claude-opus-4-6"
+	SystemPrompt string   `json:"system_prompt,omitempty"` // SHA-256 acceptable for redaction mode
+	UserPrompt   string   `json:"user_prompt,omitempty"`
+	Response     string   `json:"response,omitempty"`
+	InputTokens  int      `json:"input_tokens,omitempty"`
+	OutputTokens int      `json:"output_tokens,omitempty"`
+	LatencyMs    int64    `json:"latency_ms,omitempty"`
+	CostUSD      float64  `json:"cost_usd,omitempty"`
+	FinishReason string   `json:"finish_reason,omitempty"` // "stop" | "length" | "tool_use" | ...
 	Temperature  *float64 `json:"temperature,omitempty"`
 }
 
@@ -128,18 +135,18 @@ type ToolCallPayload struct {
 // Emitted automatically at each LLM-call boundary, or manually via
 // argusly.checkpoint() / mesedi.checkpoint() in the SDK.
 type CheckpointPayload struct {
-	State         json.RawMessage `json:"state"`
-	StepNumber    int             `json:"step_number"`
-	Note          string          `json:"note,omitempty"`
+	State      json.RawMessage `json:"state"`
+	StepNumber int             `json:"step_number"`
+	Note       string          `json:"note,omitempty"`
 }
 
 // ExceptionPayload is the recorded crash that propagated out of the agent
 // entry point.
 type ExceptionPayload struct {
-	ExceptionType    string `json:"exception_type"`
-	Message          string `json:"message"`
-	StackTrace       string `json:"stack_trace"`
-	StackSignature   string `json:"stack_signature,omitempty"` // first-5-frames hash for grouping
+	ExceptionType  string `json:"exception_type"`
+	Message        string `json:"message"`
+	StackTrace     string `json:"stack_trace"`
+	StackSignature string `json:"stack_signature,omitempty"` // first-5-frames hash for grouping
 }
 
 // ValidatorResultPayload is the outcome of one developer-defined output
@@ -155,13 +162,13 @@ type ValidatorResultPayload struct {
 // periodically (at step boundaries or on judge-invocation cadence) when
 // the composite drift score crosses configured thresholds.
 type DriftSignalPayload struct {
-	CompositeScore        float64 `json:"composite_score"` // 0..1
-	SemanticDistance      float64 `json:"semantic_distance,omitempty"`
-	PathwayEditDistance   int     `json:"pathway_edit_distance,omitempty"`
-	ToolSequenceDistance  int     `json:"tool_sequence_distance,omitempty"`
-	JudgeStatus           string  `json:"judge_status,omitempty"` // "on_track" | "drifting"
-	JudgeReason           string  `json:"judge_reason,omitempty"`
-	Confidence            float64 `json:"confidence,omitempty"` // 0..1
+	CompositeScore       float64 `json:"composite_score"` // 0..1
+	SemanticDistance     float64 `json:"semantic_distance,omitempty"`
+	PathwayEditDistance  int     `json:"pathway_edit_distance,omitempty"`
+	ToolSequenceDistance int     `json:"tool_sequence_distance,omitempty"`
+	JudgeStatus          string  `json:"judge_status,omitempty"` // "on_track" | "drifting"
+	JudgeReason          string  `json:"judge_reason,omitempty"`
+	Confidence           float64 `json:"confidence,omitempty"` // 0..1
 }
 
 // InjectionAlertPayload is the outcome of one prompt-injection / boundary-
@@ -172,6 +179,6 @@ type InjectionAlertPayload struct {
 	SignatureMatch  string  `json:"signature_match,omitempty"`
 	ClassifierScore float64 `json:"classifier_score,omitempty"`
 	Confidence      float64 `json:"confidence"`
-	Action          string  `json:"action"` // "alerted" | "stripped" | "wrapped" | "halted"
+	Action          string  `json:"action"`            // "alerted" | "stripped" | "wrapped" | "halted"
 	Excerpt         string  `json:"excerpt,omitempty"` // redacted/truncated content
 }

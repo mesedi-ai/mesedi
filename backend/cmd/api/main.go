@@ -61,11 +61,11 @@ const (
 )
 
 type runtimeConfig struct {
-	Port            int
-	LogLevel        string
-	DBURL           string
-	DBURLPostgres   string
-	DashboardURL    string
+	Port          int
+	LogLevel      string
+	DBURL         string
+	DBURLPostgres string
+	DashboardURL  string
 	// Stripe billing config (#120). Any of these may be empty in
 	// local dev, the billing endpoints respond 503 when missing.
 	StripeSecretKey     string
@@ -122,6 +122,32 @@ func bootstrapDevProject(ctx context.Context, st store.Store, logger *slog.Logge
 		return fmt.Errorf("create dev api key: %w", err)
 	}
 	logger.Info("dev project bootstrapped", "project_id", devProjectID, "key_id", devKeyID)
+	return nil
+}
+
+// bootstrapAdminProject ensures the synthetic project that holds
+// admin-scope API keys exists. Idempotent: a no-op once the row is
+// present. Unlike bootstrapDevProject, this runs in production too
+// because the project is required for the new admin-keys surface to
+// function (admin keys carry project_id=store.APIKeyAdminProjectID
+// so they participate in the api_keys.project_id FK constraint).
+//
+// The project carries no API keys at startup; admin keys are minted
+// later via POST /admin/api-keys (either by the legacy
+// MESEDI_ADMIN_TOKEN holder during transition, or by an existing
+// admin-scope key once one has been minted).
+func bootstrapAdminProject(ctx context.Context, st store.Store, logger *slog.Logger) error {
+	if _, err := st.GetProject(ctx, store.APIKeyAdminProjectID); err == nil {
+		logger.Debug("admin project already exists", "project_id", store.APIKeyAdminProjectID)
+		return nil
+	}
+	if err := st.CreateProject(ctx, &store.Project{
+		ProjectID: store.APIKeyAdminProjectID,
+		Name:      "Mesedi Admin (system)",
+	}); err != nil {
+		return fmt.Errorf("create admin project: %w", err)
+	}
+	logger.Info("admin project bootstrapped", "project_id", store.APIKeyAdminProjectID)
 	return nil
 }
 
@@ -211,6 +237,15 @@ func main() {
 		logger.Info("bootstrap dev project skipped (production, FLY_APP_NAME set)")
 	} else if err := bootstrapDevProject(context.Background(), st, logger); err != nil {
 		logger.Warn("bootstrap dev project failed (continuing)", "error", err.Error())
+	}
+
+	// Bootstrap the synthetic _admin project that holds admin-scope API
+	// keys (migration 015). Runs in production as well as dev because
+	// the row is required for the /admin/api-keys surface to mint
+	// anything; it carries no keys until an operator explicitly mints
+	// one. Idempotent across restarts.
+	if err := bootstrapAdminProject(context.Background(), st, logger); err != nil {
+		logger.Warn("bootstrap admin project failed (continuing)", "error", err.Error())
 	}
 
 	// Build the routing tree in three layers:
@@ -323,14 +358,20 @@ func main() {
 	handlers.RegisterPublicRoutes(signupMux)
 	signupHandler := api.CORSMiddleware()(signupMux)
 
-	// Founder-side admin dashboard (#150). Gated by MESEDI_ADMIN_TOKEN
-	// bearer; refuses every request when the env var is empty so an
-	// accidentally-misconfigured deploy can't leak project listings.
-	// CORS so the dashboard at mesedi.vercel.app can call cross-origin.
+	// Founder-side admin dashboard (#150). Two auth paths accepted by
+	// AdminAuth (see internal/api/admin.go):
+	//   1. Legacy: bearer matches MESEDI_ADMIN_TOKEN (Fly secret).
+	//   2. Scoped: bearer is a mesedi_sk_ key with scope='admin'
+	//      (migration 015), looked up via the store.
+	// Fails closed with 503 when neither is configured. CORS so the
+	// dashboard at mesedi.vercel.app can call cross-origin.
 	adminMux := http.NewServeMux()
 	handlers.RegisterAdminRoutes(adminMux)
-	adminHandler := api.CORSMiddleware()(api.AdminAuth(cfg.AdminToken)(adminMux))
-	logger.Info("admin endpoints configured", "configured", cfg.AdminToken != "")
+	adminHandler := api.CORSMiddleware()(api.AdminAuth(cfg.AdminToken, st)(adminMux))
+	logger.Info("admin endpoints configured",
+		"legacy_token", cfg.AdminToken != "",
+		"scoped_keys", true,
+	)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /health", publicMux)
@@ -426,9 +467,21 @@ func main() {
 	mux.Handle("OPTIONS /admin/abuse", adminHandler)
 	mux.Handle("POST /admin/abuse/{id}/resolve", adminHandler)
 	mux.Handle("OPTIONS /admin/abuse/{id}/resolve", adminHandler)
+	// API key management (migration 015).
+	mux.Handle("GET /admin/api-keys", adminHandler)
+	mux.Handle("POST /admin/api-keys", adminHandler)
+	mux.Handle("OPTIONS /admin/api-keys", adminHandler)
+	mux.Handle("DELETE /admin/api-keys/{id}", adminHandler)
+	mux.Handle("OPTIONS /admin/api-keys/{id}", adminHandler)
+	mux.Handle("GET /admin/whoami", adminHandler)
+	mux.Handle("OPTIONS /admin/whoami", adminHandler)
 
-	// Top-level middleware: recover from panics, log every request.
-	root := api.NewTopChain(logger)(mux)
+	// Top-level middleware chain. SecurityHeaders is outermost so its
+	// four hardening headers (HSTS, X-Content-Type-Options,
+	// X-Frame-Options, Referrer-Policy) stamp every response —
+	// including unauthenticated 401s and 404s that pre-date the auth
+	// chain. NewTopChain handles panic recovery and request logging.
+	root := api.SecurityHeaders(api.NewTopChain(logger)(mux))
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),

@@ -512,9 +512,10 @@ func (s *SQLiteStore) ListAllProjects(ctx context.Context) ([]*AdminProjectRow, 
 			COUNT(e.execution_id) AS total_executions
 		FROM projects p
 		LEFT JOIN executions e ON e.project_id = p.project_id
+		WHERE p.project_id != ?
 		GROUP BY p.project_id
 		ORDER BY p.created_at DESC
-	`)
+	`, APIKeyAdminProjectID)
 	if err != nil {
 		return nil, fmt.Errorf("query all projects: %w", err)
 	}
@@ -527,7 +528,14 @@ func (s *SQLiteStore) ListAllProjects(ctx context.Context) ([]*AdminProjectRow, 
 			email, stripeCust, stripeSub sql.NullString
 			periodStart, periodEnd       sql.NullInt64
 			grantExpires, tierExpires    sql.NullInt64
-			lastActivity                 sql.NullTime
+			// last_activity_at comes from MAX(e.started_at). The driver
+			// returns it as a string because executions.started_at is
+			// stored as TEXT (RFC3339Nano) in SQLite. Scanning into
+			// sql.NullTime fails with "unsupported Scan, storing
+			// driver.Value type string into type *time.Time"; use the
+			// NullString + parseFlexTime pattern that the rest of the
+			// store layer uses for TEXT timestamps.
+			lastActivity sql.NullString
 		)
 		if err := rows.Scan(
 			&row.ProjectID, &row.Name, &email, &row.CreatedAt,
@@ -556,9 +564,12 @@ func (s *SQLiteStore) ListAllProjects(ctx context.Context) ([]*AdminProjectRow, 
 			t := time.Unix(periodEnd.Int64, 0).UTC()
 			row.CurrentPeriodEnd = &t
 		}
-		if lastActivity.Valid {
-			t := lastActivity.Time.UTC()
-			row.LastActivityAt = &t
+		if lastActivity.Valid && lastActivity.String != "" {
+			t := parseFlexTime(lastActivity.String)
+			if !t.IsZero() {
+				t = t.UTC()
+				row.LastActivityAt = &t
+			}
 		}
 		out = append(out, &row)
 	}
@@ -776,10 +787,14 @@ func (s *SQLiteStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 	if k.CreatedAt.IsZero() {
 		k.CreatedAt = time.Now().UTC()
 	}
+	scope := k.Scope
+	if scope == "" {
+		scope = APIKeyScopeCustomer
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID))
+		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
 	}
@@ -791,9 +806,9 @@ func (s *SQLiteStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*API
 	var name, userID sql.NullString
 	var lastUsed sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id
+		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at
 		FROM api_keys WHERE key_hash = ?
-	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID)
+	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -831,7 +846,7 @@ func (s *SQLiteStore) ListAPIKeysForProject(
 	projectID string,
 ) ([]*APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at
 		FROM api_keys
 		WHERE project_id = ?
 		ORDER BY created_at DESC
@@ -840,7 +855,31 @@ func (s *SQLiteStore) ListAPIKeysForProject(
 		return nil, fmt.Errorf("query api_keys: %w", err)
 	}
 	defer rows.Close()
+	return scanAPIKeyList(rows)
+}
 
+// ListAllAPIKeys returns every API key in the system, NEWEST first.
+// Admin-only: used by the /admin/api-keys page to surface keys across
+// every project (including the synthetic _admin project that holds
+// admin-scope keys). key_hash is intentionally not selected.
+func (s *SQLiteStore) ListAllAPIKeys(ctx context.Context) ([]*APIKey, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at
+		FROM api_keys
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query api_keys (all): %w", err)
+	}
+	defer rows.Close()
+	return scanAPIKeyList(rows)
+}
+
+// scanAPIKeyList consumes a *sql.Rows produced by one of the
+// list-api_keys queries and returns the materialized slice. Centralized
+// so list-by-project and list-all share identical scan semantics
+// (column order MUST match the SELECT lists above).
+func scanAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 	var out []*APIKey
 	for rows.Next() {
 		var (
@@ -851,7 +890,7 @@ func (s *SQLiteStore) ListAPIKeysForProject(
 		)
 		if err := rows.Scan(
 			&k.KeyID, &k.ProjectID, &k.KeyPrefix,
-			&name, &createdAt, &lastUsedAt,
+			&name, &createdAt, &lastUsedAt, &k.Scope, &k.ExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -868,6 +907,29 @@ func (s *SQLiteStore) ListAPIKeysForProject(
 		out = append(out, &k)
 	}
 	return out, rows.Err()
+}
+
+// DeleteAPIKeyByID hard-deletes any API key by its key_id, with no
+// project_id guard. Admin-only. Used by the /admin/api-keys page to
+// revoke keys across every project (including admin-scope keys in
+// project _admin). Returns ErrNotFound if the key does not exist.
+func (s *SQLiteStore) DeleteAPIKeyByID(ctx context.Context, keyID string) error {
+	res, err := s.db.ExecContext(
+		ctx,
+		`DELETE FROM api_keys WHERE key_id = ?`,
+		keyID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete api_key: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // DeleteAPIKey hard-deletes an API key, but ONLY if the key belongs
@@ -955,7 +1017,7 @@ func (s *SQLiteStore) CreateProjectWebhook(ctx context.Context, wh *ProjectWebho
 
 // ListProjectWebhooksForProject returns every webhook for a project,
 // sorted newest first. The Secret field is intentionally NOT populated
-//, it's only ever surfaced once at creation time, never on list.
+// , it's only ever surfaced once at creation time, never on list.
 func (s *SQLiteStore) ListProjectWebhooksForProject(
 	ctx context.Context,
 	projectID string,
@@ -1305,7 +1367,7 @@ func (s *SQLiteStore) UpdateExecution(ctx context.Context, e *events.Execution) 
 
 func (s *SQLiteStore) GetExecution(ctx context.Context, executionID string) (*events.Execution, error) {
 	e := &events.Execution{}
-	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang sql.NullString
+	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang, failureGroupID sql.NullString
 	var endedAt sql.NullTime
 	var durationMs, tokensIn, tokensOut sql.NullInt64
 	var costUSD sql.NullFloat64
@@ -1315,14 +1377,14 @@ func (s *SQLiteStore) GetExecution(ctx context.Context, executionID string) (*ev
 			started_at, ended_at, duration_ms,
 			total_tokens_in, total_tokens_out, estimated_cost_usd,
 			input_summary, output_summary, crash_signature,
-			sdk_version, sdk_language
+			sdk_version, sdk_language, failure_group_id
 		FROM executions WHERE execution_id = ?
 	`, executionID).Scan(
 		&e.ExecutionID, &e.ProjectID, &parent, &e.Status,
 		&e.StartedAt, &endedAt, &durationMs,
 		&tokensIn, &tokensOut, &costUSD,
 		&inputSum, &outputSum, &crashSig,
-		&sdkVer, &sdkLang,
+		&sdkVer, &sdkLang, &failureGroupID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1364,6 +1426,10 @@ func (s *SQLiteStore) GetExecution(ctx context.Context, executionID string) (*ev
 	}
 	if sdkLang.Valid {
 		e.SDKLanguage = sdkLang.String
+	}
+	if failureGroupID.Valid {
+		v := failureGroupID.String
+		e.FailureGroupID = &v
 	}
 	return e, nil
 }

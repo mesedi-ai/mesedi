@@ -34,7 +34,7 @@ type InjectionPattern struct {
 // "[INST]" or "<<SYS>>" in user input, it's almost certainly an attack
 // trying to spoof a chat-template control token.
 //
-// Tier 2 (named jailbreak / mode phrases): "DAN", "developer mode" , 
+// Tier 2 (named jailbreak / mode phrases): "DAN", "developer mode" ,
 // well-known persona overrides.
 //
 // Tier 3 (semantic role override): "you are now", "from now on you".

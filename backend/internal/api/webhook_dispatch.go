@@ -255,4 +255,3 @@ func (h *Handlers) maybeFireWebhook(
 	}
 	h.dispatchFailureGroupCreated(projectID, failureClass, signature, h.resolveDashboardBase(r))
 }
-

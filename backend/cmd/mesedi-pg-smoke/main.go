@@ -2,16 +2,16 @@
 // Postgres backend (#128 Phase 1).
 //
 // What it does, in order:
-//   1. Reads the Postgres DSN from --db-url or MESEDI_DB_URL_POSTGRES.
-//   2. Opens the connection via the pgx driver.
-//   3. Runs every embedded Postgres migration (migrations-postgres/*.sql).
-//   4. INSERTs a test project with a deterministic id.
-//   5. SELECTs the test project back, verifies field round-trips.
-//   6. DELETEs the test project so the run is idempotent.
-//   7. Prints "smoke: PASS" and exits 0 on success.
+//  1. Reads the Postgres DSN from --db-url or MESEDI_DB_URL_POSTGRES.
+//  2. Opens the connection via the pgx driver.
+//  3. Runs every embedded Postgres migration (migrations-postgres/*.sql).
+//  4. INSERTs a test project with a deterministic id.
+//  5. SELECTs the test project back, verifies field round-trips.
+//  6. DELETEs the test project so the run is idempotent.
+//  7. Prints "smoke: PASS" and exits 0 on success.
 //
 // What it does NOT do:
-//   * It does not exercise the executions/events/failure_groups path.
+//   - It does not exercise the executions/events/failure_groups path.
 //     Those tables are validated structurally by the migration runner
 //     (they get created), but no row-level testing happens. Phase 2's
 //     batch ports will add their own smoke tests as they land.

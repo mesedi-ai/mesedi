@@ -1,35 +1,35 @@
 // Stripe billing endpoints. This file implements the four backend
 // surfaces #120 needs:
 //
-//   POST /billing/checkout: auth-required. Creates a Stripe
-//                              Checkout session for the calling
-//                              project to upgrade Hobby → Pro;
-//                              returns the hosted-Checkout URL.
+//	POST /billing/checkout: auth-required. Creates a Stripe
+//	                           Checkout session for the calling
+//	                           project to upgrade Hobby → Pro;
+//	                           returns the hosted-Checkout URL.
 //
-//   POST /billing/portal: auth-required. Creates a Stripe
-//                              Customer Portal session so an
-//                              already-paying project can update
-//                              card, see invoices, or cancel.
+//	POST /billing/portal: auth-required. Creates a Stripe
+//	                           Customer Portal session so an
+//	                           already-paying project can update
+//	                           card, see invoices, or cancel.
 //
-//   GET  /billing: auth-required. Returns the calling
-//                              project's tier, current-period
-//                              executions used, period bounds, and
-//                              tier-defined limits. Drives the
-//                              dashboard /app/billing page.
+//	GET  /billing: auth-required. Returns the calling
+//	                           project's tier, current-period
+//	                           executions used, period bounds, and
+//	                           tier-defined limits. Drives the
+//	                           dashboard /app/billing page.
 //
-//   GET  /billing/usage: auth-required. Returns daily
-//                              execution counts for the last 30
-//                              days. Drives the usage chart on the
-//                              billing page.
+//	GET  /billing/usage: auth-required. Returns daily
+//	                           execution counts for the last 30
+//	                           days. Drives the usage chart on the
+//	                           billing page.
 //
-//   POST /billing/webhook: PUBLIC (no bearer). Receives Stripe
-//                              events. Authenticity is verified via
-//                              the Stripe-Signature header and the
-//                              shared webhook secret. Dispatches
-//                              checkout.session.completed,
-//                              customer.subscription.updated,
-//                              customer.subscription.deleted, and
-//                              invoice.paid.
+//	POST /billing/webhook: PUBLIC (no bearer). Receives Stripe
+//	                           events. Authenticity is verified via
+//	                           the Stripe-Signature header and the
+//	                           shared webhook secret. Dispatches
+//	                           checkout.session.completed,
+//	                           customer.subscription.updated,
+//	                           customer.subscription.deleted, and
+//	                           invoice.paid.
 //
 // Enforcement (Hobby silent-drop, Pro overage usage records) is
 // deliberately not wired in this slice, the counter increments on
@@ -145,11 +145,11 @@ func billingNotConfigured(w http.ResponseWriter) {
 // ── response payloads ──────────────────────────────────────────
 
 type BillingStatusResponse struct {
-	OK                       bool       `json:"ok"`
-	ProjectID                string     `json:"project_id"`
-	Tier                     string     `json:"tier"`
-	ExecutionsThisPeriod     int64      `json:"executions_this_period"`
-	IncludedExecutions       int64      `json:"included_executions"`
+	OK                   bool   `json:"ok"`
+	ProjectID            string `json:"project_id"`
+	Tier                 string `json:"tier"`
+	ExecutionsThisPeriod int64  `json:"executions_this_period"`
+	IncludedExecutions   int64  `json:"included_executions"`
 	// GrantedExecutions surfaces the raw admin-granted bonus so the
 	// dashboard can render it as marketing social proof on the tier
 	// card ("5,000 included · +100,000 admin granted"). Zero means
@@ -191,10 +191,10 @@ type PortalResponse struct {
 }
 
 type UsageResponse struct {
-	OK     bool                        `json:"ok"`
-	Days   []store.DailyExecutionCount `json:"days"`
-	Since  time.Time                   `json:"since"`
-	Until  time.Time                   `json:"until"`
+	OK    bool                        `json:"ok"`
+	Days  []store.DailyExecutionCount `json:"days"`
+	Since time.Time                   `json:"since"`
+	Until time.Time                   `json:"until"`
 }
 
 // ── handlers ───────────────────────────────────────────────────

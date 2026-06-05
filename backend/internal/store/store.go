@@ -86,15 +86,15 @@ type Project struct {
 // email + one webhook per breach event, not one every 5 minutes for
 // the rest of the month.
 type TenantBudgetCeiling struct {
-	OwnerUserID        string     `json:"owner_user_id"`
-	MonthlyCeilingUSD  float64    `json:"monthly_ceiling_usd"`
-	BreachAction       string     `json:"breach_action"`              // "warn" | "halt"
-	NotifyEmail        string     `json:"notify_email,omitempty"`     // optional override; falls back to project owner_email
-	NotifyWebhookURL   string     `json:"notify_webhook_url,omitempty"` // optional; if set, dispatcher posts a JSON payload
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	LastEvaluatedAt    *time.Time `json:"last_evaluated_at,omitempty"`
-	BreachedAt         *time.Time `json:"breached_at,omitempty"`
+	OwnerUserID       string     `json:"owner_user_id"`
+	MonthlyCeilingUSD float64    `json:"monthly_ceiling_usd"`
+	BreachAction      string     `json:"breach_action"`                // "warn" | "halt"
+	NotifyEmail       string     `json:"notify_email,omitempty"`       // optional override; falls back to project owner_email
+	NotifyWebhookURL  string     `json:"notify_webhook_url,omitempty"` // optional; if set, dispatcher posts a JSON payload
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	LastEvaluatedAt   *time.Time `json:"last_evaluated_at,omitempty"`
+	BreachedAt        *time.Time `json:"breached_at,omitempty"`
 }
 
 // AdminProjectRow is one row in the founder-side admin dashboard's
@@ -104,15 +104,15 @@ type TenantBudgetCeiling struct {
 // /admin/projects endpoint; never reachable from the customer dashboard.
 type AdminProjectRow struct {
 	// Core project identity (same fields as Project).
-	ProjectID            string     `json:"project_id"`
-	Name                 string     `json:"name"`
-	OwnerEmail           string     `json:"owner_email,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	Tier                 string     `json:"tier"`
-	StripeCustomerID     string     `json:"stripe_customer_id,omitempty"`
-	StripeSubscriptionID string     `json:"stripe_subscription_id,omitempty"`
-	CurrentPeriodStart   *time.Time `json:"current_period_start,omitempty"`
-	CurrentPeriodEnd     *time.Time `json:"current_period_end,omitempty"`
+	ProjectID                  string     `json:"project_id"`
+	Name                       string     `json:"name"`
+	OwnerEmail                 string     `json:"owner_email,omitempty"`
+	CreatedAt                  time.Time  `json:"created_at"`
+	Tier                       string     `json:"tier"`
+	StripeCustomerID           string     `json:"stripe_customer_id,omitempty"`
+	StripeSubscriptionID       string     `json:"stripe_subscription_id,omitempty"`
+	CurrentPeriodStart         *time.Time `json:"current_period_start,omitempty"`
+	CurrentPeriodEnd           *time.Time `json:"current_period_end,omitempty"`
 	ExecutionsThisPeriod       int64      `json:"executions_this_period"`
 	GrantedExecutions          int64      `json:"granted_executions"`
 	GrantedExecutionsExpiresAt *time.Time `json:"granted_executions_expires_at,omitempty"`
@@ -167,7 +167,31 @@ type APIKey struct {
 	// middleware falls back to project.owner_user_id when UserID is
 	// empty so existing customer integrations don't break overnight.
 	UserID string `json:"user_id,omitempty"`
+	// Scope is either "customer" (default, project-scoped) or
+	// "admin" (privileged, gates the /admin/* surface). Added by
+	// migration 015. Admin keys carry project_id=APIKeyAdminProjectID
+	// ("_admin") so they participate in the same FK constraint as
+	// customer keys without needing a separate table.
+	Scope string `json:"scope,omitempty"`
+	// ExpiresAt is the optional cutoff. Empty == never expires.
+	// Non-empty values are RFC3339Nano UTC. The auth middleware
+	// rejects an arriving request past ExpiresAt identically to a
+	// revoked / missing key.
+	ExpiresAt string `json:"expires_at,omitempty"`
 }
+
+// APIKeyScopeCustomer / APIKeyScopeAdmin are the only legal values of
+// APIKey.Scope. The auth middleware compares against these constants
+// to decide whether a request can reach the /admin/* surface.
+const (
+	APIKeyScopeCustomer = "customer"
+	APIKeyScopeAdmin    = "admin"
+)
+
+// APIKeyAdminProjectID is the project_id all admin-scope keys share.
+// Auto-bootstrapped at startup so the projects FK on api_keys still
+// holds for admin keys without needing to relax the constraint.
+const APIKeyAdminProjectID = "_admin"
 
 // ProjectWebhook is a per-project webhook configuration for failure-class
 // escalation. When a failure_group fires (slice 2 dispatcher), Mesedi
@@ -185,20 +209,20 @@ type APIKey struct {
 // supplied class names match the FailureClass* constants happens at
 // the handler layer.
 type ProjectWebhook struct {
-	WebhookID       string    `json:"webhook_id"`
-	ProjectID       string    `json:"project_id"`
-	Name            string    `json:"name,omitempty"`
-	URL             string    `json:"url"`
-	Secret          string    `json:"-"` // never returned in list responses
-	EnabledClasses  []string  `json:"enabled_classes"`
-	Enabled         bool      `json:"enabled"`
-	CreatedAt       time.Time `json:"created_at"`
+	WebhookID      string    `json:"webhook_id"`
+	ProjectID      string    `json:"project_id"`
+	Name           string    `json:"name,omitempty"`
+	URL            string    `json:"url"`
+	Secret         string    `json:"-"` // never returned in list responses
+	EnabledClasses []string  `json:"enabled_classes"`
+	Enabled        bool      `json:"enabled"`
+	CreatedAt      time.Time `json:"created_at"`
 	// SeverityFilter is the comma-separated subset of severities this
 	// webhook fires on (#261). Empty string = "fire on every severity"
 	// (backward compatible with pre-#261 webhooks). The dispatcher
 	// parses via severity.ParseFilter and skips delivery when the
 	// event severity is not in the filter.
-	SeverityFilter  string    `json:"severity_filter"`
+	SeverityFilter string `json:"severity_filter"`
 }
 
 // ProjectClassSeverity is the per-project override of the hardcoded
@@ -227,11 +251,11 @@ type ProjectRetention struct {
 // org via projects.tenant_id. Replaces the implicit owner_user_id
 // tenant model used by #259 and #252.
 type Organization struct {
-	OrgID            string    `json:"org_id"`
-	Name             string    `json:"name"`
-	CreatedByUserID  string    `json:"created_by_user_id"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	OrgID           string    `json:"org_id"`
+	Name            string    `json:"name"`
+	CreatedByUserID string    `json:"created_by_user_id"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // OrganizationMember is the (org, user, role) join row. Role is one
@@ -245,12 +269,12 @@ type Organization struct {
 // in for the first time. Refreshed to the user's current email
 // whenever they next authenticate.
 type OrganizationMember struct {
-	OrgID           string    `json:"org_id"`
-	UserID          string    `json:"user_id"`
-	Role            string    `json:"role"`
-	Email           string    `json:"email,omitempty"`
-	AddedByUserID   string    `json:"added_by_user_id,omitempty"`
-	AddedAt         time.Time `json:"added_at"`
+	OrgID         string    `json:"org_id"`
+	UserID        string    `json:"user_id"`
+	Role          string    `json:"role"`
+	Email         string    `json:"email,omitempty"`
+	AddedByUserID string    `json:"added_by_user_id,omitempty"`
+	AddedAt       time.Time `json:"added_at"`
 }
 
 // OrganizationInvite is one outstanding invitation. Token-based; the
@@ -261,16 +285,16 @@ type OrganizationMember struct {
 // values on first successful accept. Subsequent accept attempts on
 // the same token fail with ErrAlreadyAccepted.
 type OrganizationInvite struct {
-	InviteID           string     `json:"invite_id"`
-	OrgID              string     `json:"org_id"`
-	Email              string     `json:"email"`
-	Role               string     `json:"role"`
-	Token              string     `json:"token,omitempty"` // not returned in list responses, only on create
-	InvitedByUserID    string     `json:"invited_by_user_id"`
-	CreatedAt          time.Time  `json:"created_at"`
-	ExpiresAt          time.Time  `json:"expires_at"`
-	AcceptedAt         *time.Time `json:"accepted_at,omitempty"`
-	AcceptedByUserID   string     `json:"accepted_by_user_id,omitempty"`
+	InviteID         string     `json:"invite_id"`
+	OrgID            string     `json:"org_id"`
+	Email            string     `json:"email"`
+	Role             string     `json:"role"`
+	Token            string     `json:"token,omitempty"` // not returned in list responses, only on create
+	InvitedByUserID  string     `json:"invited_by_user_id"`
+	CreatedAt        time.Time  `json:"created_at"`
+	ExpiresAt        time.Time  `json:"expires_at"`
+	AcceptedAt       *time.Time `json:"accepted_at,omitempty"`
+	AcceptedByUserID string     `json:"accepted_by_user_id,omitempty"`
 }
 
 // WebhookDelivery is one attempted POST to a registered webhook URL.
@@ -279,19 +303,19 @@ type OrganizationInvite struct {
 //
 // Status values: "pending" | "delivered" | "failed".
 type WebhookDelivery struct {
-	DeliveryID    string    `json:"delivery_id"`
-	WebhookID     string    `json:"webhook_id"`
-	ProjectID     string    `json:"project_id"`
-	FailureClass  string    `json:"failure_class,omitempty"`
-	Signature     string    `json:"signature,omitempty"`
-	GroupID       string    `json:"group_id,omitempty"`
-	Attempt       int       `json:"attempt"`
-	Status        string    `json:"status"`
-	HTTPStatus    *int      `json:"http_status,omitempty"`
-	Error         string    `json:"error,omitempty"`
-	ResponseBody  string    `json:"response_body,omitempty"`
-	DurationMs    int64     `json:"duration_ms"`
-	CreatedAt     time.Time `json:"created_at"`
+	DeliveryID   string    `json:"delivery_id"`
+	WebhookID    string    `json:"webhook_id"`
+	ProjectID    string    `json:"project_id"`
+	FailureClass string    `json:"failure_class,omitempty"`
+	Signature    string    `json:"signature,omitempty"`
+	GroupID      string    `json:"group_id,omitempty"`
+	Attempt      int       `json:"attempt"`
+	Status       string    `json:"status"`
+	HTTPStatus   *int      `json:"http_status,omitempty"`
+	Error        string    `json:"error,omitempty"`
+	ResponseBody string    `json:"response_body,omitempty"`
+	DurationMs   int64     `json:"duration_ms"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // Failure-class constants. One value per detector that produces a
@@ -318,16 +342,16 @@ const (
 // signature), so the same signature always maps to the same group_id
 // across runs and restarts, no UUID coordination required.
 type FailureGroup struct {
-	GroupID            string     `json:"group_id"`
-	ProjectID          string     `json:"project_id"`
-	FailureClass       string     `json:"failure_class"`
-	Signature          string     `json:"signature"`
-	FirstSeen          time.Time  `json:"first_seen"`
-	LastSeen           time.Time  `json:"last_seen"`
-	EventCount         int        `json:"event_count"`
-	AffectedExecutions int        `json:"affected_executions"`
-	CostWastedUSD      *float64   `json:"cost_wasted_usd,omitempty"`
-	SampleExecutionID  string     `json:"sample_execution_id,omitempty"`
+	GroupID            string    `json:"group_id"`
+	ProjectID          string    `json:"project_id"`
+	FailureClass       string    `json:"failure_class"`
+	Signature          string    `json:"signature"`
+	FirstSeen          time.Time `json:"first_seen"`
+	LastSeen           time.Time `json:"last_seen"`
+	EventCount         int       `json:"event_count"`
+	AffectedExecutions int       `json:"affected_executions"`
+	CostWastedUSD      *float64  `json:"cost_wasted_usd,omitempty"`
+	SampleExecutionID  string    `json:"sample_execution_id,omitempty"`
 }
 
 // Store is the abstract persistence interface. Phase 1.5 minimal surface;
@@ -436,11 +460,21 @@ type Store interface {
 	// project, sorted by created_at DESC. Used by the dashboard's
 	// settings → API keys page.
 	ListAPIKeysForProject(ctx context.Context, projectID string) ([]*APIKey, error)
+	// ListAllAPIKeys returns every API key in the system (minus the
+	// hash), sorted by created_at DESC. Admin-only: used by the
+	// /admin/api-keys page to surface keys across all projects
+	// (including the synthetic _admin project that holds admin-scope
+	// keys).
+	ListAllAPIKeys(ctx context.Context) ([]*APIKey, error)
 	// DeleteAPIKey revokes (hard-deletes) an API key by id, but ONLY
 	// if it belongs to the given project. Returns ErrNotFound if the
 	// key doesn't exist or belongs to a different project, protects
 	// against cross-tenant deletion via id-guessing.
 	DeleteAPIKey(ctx context.Context, keyID, projectID string) error
+	// DeleteAPIKeyByID hard-deletes any API key with no project_id
+	// guard. Admin-only: used by /admin/api-keys to revoke any key
+	// (admin or customer scope, any project).
+	DeleteAPIKeyByID(ctx context.Context, keyID string) error
 
 	// Project webhooks (failure-class escalation, task #83).
 	// CreateProjectWebhook persists a new webhook configuration. The

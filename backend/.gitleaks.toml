@@ -1,0 +1,48 @@
+# gitleaks configuration for the Mesedi backend.
+#
+# Mirrors the Verdifax orchestrator pattern: extend the default rule set,
+# allowlist documented dev-only credentials and their hashes. Real
+# production secrets (`mesedi_sk_<random>` minted via the dashboard or
+# the new /admin/api-keys endpoints) remain detectable; the local dev
+# key is the only allowed exception.
+#
+# Re-run via the stress-test harness after editing:
+#     ~/stress-test/stress-test.sh ~/mesedi/backend
+
+title = "Mesedi backend gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Paths and patterns that are documented dev-only, not real credentials."
+
+# Path patterns (regex matched against the file's repo-relative path).
+paths = [
+    '''(?i)/testdata/''',                           # test fixtures
+    '''(?i)/_test\.go$''',                          # Go test files
+    '''(?i)_test\.go$''',                           # Go test files (rooted)
+    '''(?i)/test/''',                               # generic test trees
+    '''(?i)/sandbox/''',                            # SDK sandbox demos
+    '''^backend/README\.md$''',                     # backend docs (curl examples)
+    '''(?i)^sdk-python/sandbox/''',                 # Python SDK sandbox demos
+    '''(?i)^sdk-typescript/sandbox/''',             # TS SDK sandbox demos
+    '''^docs/''',                                   # documentation
+    '''mocks?\.go$''',                              # mock adapters
+]
+
+# Regex patterns matched against the captured secret value.
+regexes = [
+    # The well-known local-dev key. Documented in README + emitted by
+    # the dev project bootstrap (cmd/api/main.go), which itself is
+    # production-gated behind FLY_APP_NAME being unset.
+    '''mesedi_sk_dev_local_only''',
+    # SHA-256 of the dev key above. Stored in main.go's devKeyHash
+    # constant so the bootstrap can compare a fixed hash against any
+    # incoming bearer in local development.
+    '''63aee0bafbf5a68577021746b028842f70d922c2809776e1a1de0ecf6fc7fb33''',
+]
+
+# Specific commits we know are not leaks (none right now; keep block
+# for future use).
+commits = []

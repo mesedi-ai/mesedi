@@ -14,34 +14,36 @@
 //
 // Matching strategy:
 //
-//   Failure-class signatures fall into two categories, stable
-//   (one playbook covers every variant) and per-instance (each
-//   value needs its own playbook).
+//	Failure-class signatures fall into two categories, stable
+//	(one playbook covers every variant) and per-instance (each
+//	value needs its own playbook).
 //
-//   - loops/identical_call_<hash>, loops/similar_call_<hash>,
-//     loops/time_budget_<bucket>, loops/step_count_<bucket>,
-//     cost_velocity/cost_<bucket>, drift/new_model:<name>,
-//     drift/lexical_drift_<bucket>, STABLE. One playbook per
-//     sub-detector regardless of hash/bucket/model.
+//	- loops/identical_call_<hash>, loops/similar_call_<hash>,
+//	  loops/time_budget_<bucket>, loops/step_count_<bucket>,
+//	  cost_velocity/cost_<bucket>, drift/new_model:<name>,
+//	  drift/lexical_drift_<bucket>, STABLE. One playbook per
+//	  sub-detector regardless of hash/bucket/model.
 //
-//   - tool_failures/<tool_name>, validator_failures/<validator_name>
-//: STABLE today, default per-class playbook explains the
-//     general pattern. Future commits can author per-tool /
-//     per-validator overrides where the customer's tools or
-//     validators have well-known remediation patterns.
+//	- tool_failures/<tool_name>, validator_failures/<validator_name>
 //
-//   - prompt_injection/<pattern_name>, PER-INSTANCE. One
-//     playbook per detection pattern emitted by
-//     detectors/injection.go: instruction_tag,
-//     system_prompt_inject, jailbreak_dan, developer_mode,
-//     role_override, ignore_instructions.
+// : STABLE today, default per-class playbook explains the
 //
-//   - crashes/<hash>, NO PLAYBOOK. Crash signatures are SHA-256
-//     hashes of exception class + stack; we can't enumerate them
-//     ahead of time. Crashes need actual debugging, not a generic
-//     playbook (per the repair-tier roadmap, crashes is
-//     recommendation-only at best, and recommendations require
-//     more context than a static playbook can provide).
+//	  general pattern. Future commits can author per-tool /
+//	  per-validator overrides where the customer's tools or
+//	  validators have well-known remediation patterns.
+//
+//	- prompt_injection/<pattern_name>, PER-INSTANCE. One
+//	  playbook per detection pattern emitted by
+//	  detectors/injection.go: instruction_tag,
+//	  system_prompt_inject, jailbreak_dan, developer_mode,
+//	  role_override, ignore_instructions.
+//
+//	- crashes/<hash>, NO PLAYBOOK. Crash signatures are SHA-256
+//	  hashes of exception class + stack; we can't enumerate them
+//	  ahead of time. Crashes need actual debugging, not a generic
+//	  playbook (per the repair-tier roadmap, crashes is
+//	  recommendation-only at best, and recommendations require
+//	  more context than a static playbook can provide).
 //
 // Lookup is O(N) over the patterns table for N ≈ 20 entries. Not
 // worth indexing. Re-evaluate if the table grows past 200.

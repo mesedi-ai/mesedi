@@ -74,6 +74,146 @@
       border-radius: 5px;
     }
     .nav-link:hover { color: var(--text); background: var(--surface-2); }
+    .nav-link.admin {
+      color: var(--accent);
+      border: 0.5px solid var(--border-2);
+    }
+    .nav-link.admin:hover {
+      background: rgba(201, 166, 70, 0.12);
+      color: var(--accent);
+    }
+
+    /* /app/admin landing — tiles */
+    .admin-tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .admin-tile {
+      padding: 20px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 80ms ease, border-color 120ms ease;
+    }
+    .admin-tile:hover {
+      transform: translateY(-1px);
+      border-color: var(--accent);
+    }
+    .admin-tile .tile-eyebrow {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+    .admin-tile .tile-title {
+      font-size: 18px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .admin-tile .tile-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .admin-tile .tile-meta {
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    /* /app/admin/api-keys — scope picker + DANGER ZONE for admin revoke */
+    .scope-picker {
+      display: flex;
+      gap: 18px;
+      margin: 12px 0;
+      font-size: 13px;
+    }
+    .scope-picker label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .scope-picker input[type="radio"] { cursor: pointer; }
+    .admin-confirm {
+      margin: 8px 0 12px;
+      padding: 10px 12px;
+      background: var(--danger-bg);
+      border: 0.5px solid var(--danger-border);
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--danger);
+      display: none;
+    }
+    .admin-confirm.active { display: block; }
+    .admin-confirm label {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .scope-badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .scope-badge.customer {
+      background: var(--info-bg);
+      color: var(--info);
+      border: 0.5px solid var(--info-border);
+    }
+    .scope-badge.admin {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 0.5px solid var(--danger-border);
+    }
+    .danger-zone {
+      margin-top: 12px;
+      padding: 14px;
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      border-radius: 8px;
+    }
+    .danger-zone-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--danger);
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    /* Active-key indicator on /app/admin */
+    .active-key-card {
+      margin-top: 20px;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 0.5px solid var(--border-2);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .active-key-card .ak-label {
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .active-key-card .ak-value {
+      font-family: monospace;
+      font-size: 12px;
+      color: var(--text);
+    }
 
     /* Settings page-specific bits */
     .key-revealed {
@@ -676,6 +816,8 @@
       <a class="nav-link" onclick="showOverview()">Overview</a>
       <a class="nav-link" onclick="showWebhooks()">Webhooks</a>
       <a class="nav-link" onclick="showSettings()">Settings</a>
+      <a class="nav-link admin" id="admin-nav" onclick="showAdmin()" style="display: none;">Admin</a>
+      <a class="nav-link" id="admin-signin" onclick="promptAdminKey()">Sign in as admin</a>
       <span class="dev-badge">DEV ONLY · LOCALHOST</span>
     </div>
   </header>
@@ -686,10 +828,39 @@
 
   <script>
     const DEV_KEY = "mesedi_sk_dev_local_only";
-    const HEADERS = {
-      "Authorization": "Bearer " + DEV_KEY,
-      "X-Mesedi-Schema-Version": "1",
-    };
+    const ADMIN_KEY_STORAGE = "mesedi_admin_key";
+
+    // currentKey returns the bearer the dashboard sends on every request.
+    // Resolution order: localStorage(mesedi_admin_key), else the
+    // hardcoded DEV_KEY for local dev. The admin-key entry from
+    // promptAdminKey() persists across reloads so an operator who
+    // signs in once stays in the admin view.
+    function currentKey() {
+      try {
+        const k = localStorage.getItem(ADMIN_KEY_STORAGE);
+        if (k && k.trim()) return k.trim();
+      } catch (_) { /* localStorage unavailable -> fall through */ }
+      return DEV_KEY;
+    }
+    function headers(extra) {
+      return Object.assign({
+        "Authorization": "Bearer " + currentKey(),
+        "X-Mesedi-Schema-Version": "1",
+      }, extra || {});
+    }
+    // HEADERS kept as a live getter so legacy call sites that read it
+    // synchronously still see the active key.
+    const HEADERS = new Proxy({}, {
+      get(_, prop) {
+        if (prop === "Authorization") return "Bearer " + currentKey();
+        if (prop === "X-Mesedi-Schema-Version") return "1";
+        return undefined;
+      },
+      ownKeys() { return ["Authorization", "X-Mesedi-Schema-Version"]; },
+      getOwnPropertyDescriptor() {
+        return { enumerable: true, configurable: true };
+      },
+    });
 
     // ── helpers ────────────────────────────────────────────────────────
     function fmtNum(n) { return new Intl.NumberFormat("en-US").format(n); }
@@ -1808,6 +1979,371 @@
 
     // ── BOOT ───────────────────────────────────────────────────────────
     showOverview();
+
+    // ── ADMIN: sign-in flow ────────────────────────────────────────────
+    // The dashboard sends whichever key currentKey() resolves. On page
+    // load we hit /admin/whoami; if it succeeds (admin path), the
+    // Admin nav link appears. The "Sign in as admin" link prompts for
+    // a key and re-checks.
+
+    function promptAdminKey() {
+      const cur = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
+      const v = prompt(
+        "Paste your admin API key (mesedi_sk_...).\n\n" +
+        "Stored in localStorage and sent as Authorization: Bearer <key>.\n" +
+        "Leave blank to clear the saved key and use the local dev key.",
+        cur
+      );
+      if (v === null) return;
+      const trimmed = v.trim();
+      try {
+        if (trimmed === "") {
+          localStorage.removeItem(ADMIN_KEY_STORAGE);
+        } else {
+          localStorage.setItem(ADMIN_KEY_STORAGE, trimmed);
+        }
+      } catch (_) { /* ignore storage failures */ }
+      detectAdminScope();
+    }
+
+    function signOutAdmin() {
+      try { localStorage.removeItem(ADMIN_KEY_STORAGE); } catch (_) {}
+      detectAdminScope();
+      showOverview();
+    }
+
+    // detectAdminScope calls /admin/whoami with the active key. On 2xx
+    // we surface the Admin nav link and hide the sign-in link; on
+    // anything else we hide Admin and surface sign-in.
+    async function detectAdminScope() {
+      const adminNav = document.getElementById("admin-nav");
+      const signinNav = document.getElementById("admin-signin");
+      try {
+        const r = await fetch("/admin/whoami", { headers: headers() });
+        if (r.ok) {
+          const who = await r.json();
+          window.__mesediAdminWhoami = who;
+          if (adminNav) adminNav.style.display = "";
+          if (signinNav) signinNav.style.display = "none";
+          return who;
+        }
+      } catch (_) { /* network error → treat as not-admin */ }
+      window.__mesediAdminWhoami = null;
+      if (adminNav) adminNav.style.display = "none";
+      if (signinNav) signinNav.style.display = "";
+      return null;
+    }
+
+    // ── /app/admin LANDING (tiles) ─────────────────────────────────────
+
+    async function showAdmin() {
+      const who = await detectAdminScope();
+      if (!who) {
+        const main = document.getElementById("main");
+        main.innerHTML = `
+          <div class="page-head">
+            <div>
+              <h1>Admin</h1>
+              <div class="subtitle">Admin sign-in required.</div>
+            </div>
+          </div>
+          <div class="empty" style="margin-top: 20px;">
+            <strong>The active key does not have admin scope.</strong><br>
+            <a class="nav-link" onclick="promptAdminKey()" style="display: inline-block; margin-top: 10px;">
+              Sign in as admin
+            </a>
+          </div>
+        `;
+        return;
+      }
+      const main = document.getElementById("main");
+      const method = who.auth_method === "legacy_token"
+        ? "Legacy MESEDI_ADMIN_TOKEN (static Fly secret)"
+        : "Admin-scope API key";
+      const keyDisplay = who.key_id
+        ? escapeHtml(who.name || "(unnamed)") + ' · <span class="ak-value">' + escapeHtml(who.key_id) + '</span>'
+        : "—";
+      const signOutLink = who.auth_method === "api_key"
+        ? '<a class="nav-link" onclick="signOutAdmin()" style="margin-left: 10px;">Sign out</a>'
+        : '';
+      main.innerHTML = `
+        <div class="page-head">
+          <div>
+            <h1>Admin</h1>
+            <div class="subtitle">Founder-side dashboard for managing projects, abuse signals, and credentials.</div>
+          </div>
+          <button class="reload-btn" onclick="showAdmin()">↻ Reload</button>
+        </div>
+        <div class="admin-tiles">
+          <div class="admin-tile" onclick="showAdminAPIKeys()">
+            <div class="tile-eyebrow">Credentials</div>
+            <div class="tile-title">API Keys</div>
+            <div class="tile-desc">
+              Mint, list, and revoke admin-scope and customer-scope keys across every project.
+              Includes optional expiration dates and DANGER ZONE confirmation on admin-key revoke.
+            </div>
+            <div class="tile-meta">GET /admin/api-keys</div>
+          </div>
+          <div class="admin-tile" onclick="alert('Projects view: GET /admin/projects (existing endpoint, dashboard view TBD)')">
+            <div class="tile-eyebrow">Tenants</div>
+            <div class="tile-title">Projects</div>
+            <div class="tile-desc">
+              Every project's activity aggregates, tier, granted executions, and per-project failure-group resets.
+            </div>
+            <div class="tile-meta">GET /admin/projects</div>
+          </div>
+          <div class="admin-tile" onclick="alert('Abuse signals view: GET /admin/abuse (existing endpoint, dashboard view TBD)')">
+            <div class="tile-eyebrow">Safety</div>
+            <div class="tile-title">Abuse signals</div>
+            <div class="tile-desc">
+              Key-leak detector and suspension queue. Resolve open signals after manual review.
+            </div>
+            <div class="tile-meta">GET /admin/abuse</div>
+          </div>
+          <div class="admin-tile" onclick="alert('Storage view: GET /admin/storage (existing endpoint, dashboard view TBD)')">
+            <div class="tile-eyebrow">Capacity</div>
+            <div class="tile-title">Storage</div>
+            <div class="tile-desc">
+              Per-table byte counts, row counts, and retention configuration across every project.
+            </div>
+            <div class="tile-meta">GET /admin/storage</div>
+          </div>
+        </div>
+        <div class="active-key-card">
+          <div class="ak-label">Authenticated as</div>
+          <div>${escapeHtml(method)}</div>
+          <div style="margin-top: 6px;">${keyDisplay}${signOutLink}</div>
+        </div>
+      `;
+    }
+
+    // ── /app/admin/api-keys ────────────────────────────────────────────
+
+    async function showAdminAPIKeys() {
+      const who = await detectAdminScope();
+      if (!who) {
+        showAdmin();
+        return;
+      }
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <a class="back-link" onclick="showAdmin()">← Admin</a>
+        <div class="page-head">
+          <div>
+            <h1>Admin · API keys</h1>
+            <div class="subtitle">
+              Mint admin-scope and customer-scope keys across every project.
+              The raw secret is shown ONCE on mint.
+            </div>
+          </div>
+          <button class="reload-btn" onclick="showAdminAPIKeys()">↻ Reload</button>
+        </div>
+        <div id="admin-mint-revealed"></div>
+        <div class="mint-form" style="display: block;">
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <input type="text" id="admin-mint-name" placeholder="Name (e.g. 'founder-laptop', 'cs-support-jane')" style="flex: 2; min-width: 240px;" />
+            <input type="text" id="admin-mint-project" placeholder="project_id (customer scope only)" style="flex: 1; min-width: 220px;" />
+            <input type="date" id="admin-mint-expires" title="Optional expiry (UTC end-of-day)" />
+          </div>
+          <div class="scope-picker">
+            <label><input type="radio" name="admin-scope" value="customer" checked onchange="onAdminScopeChange()"> Customer scope (project key)</label>
+            <label><input type="radio" name="admin-scope" value="admin" onchange="onAdminScopeChange()"> Admin scope (privileged)</label>
+          </div>
+          <div class="admin-confirm" id="admin-confirm-block">
+            <label>
+              <input type="checkbox" id="admin-confirm-check">
+              <span>
+                <strong>I understand this mints an admin-scope key.</strong>
+                Holder of this key can read every project's data, revoke any other key, and reach every /admin/* endpoint.
+              </span>
+            </label>
+          </div>
+          <button onclick="mintAdminApiKey()" style="margin-top: 6px;">+ Mint key</button>
+        </div>
+        <div id="admin-keys-content"><div class="empty">Loading…</div></div>
+      `;
+      await refreshAdminKeys();
+    }
+
+    // Clear the green "key minted" reveal panel once the operator has
+    // copied the secret. Triggered by the × in the top-right corner of
+    // the .key-revealed box.
+    function dismissAdminMintRevealed() {
+      const el = document.getElementById("admin-mint-revealed");
+      if (el) el.innerHTML = "";
+    }
+
+    function onAdminScopeChange() {
+      const adminSelected = document.querySelector('input[name="admin-scope"]:checked').value === "admin";
+      const confirmBlock = document.getElementById("admin-confirm-block");
+      const projInput = document.getElementById("admin-mint-project");
+      if (confirmBlock) confirmBlock.classList.toggle("active", adminSelected);
+      if (projInput) {
+        projInput.disabled = adminSelected;
+        projInput.placeholder = adminSelected
+          ? "(ignored; admin keys go to _admin)"
+          : "project_id (customer scope only)";
+      }
+    }
+
+    async function refreshAdminKeys() {
+      const c = document.getElementById("admin-keys-content");
+      try {
+        const data = await fetch("/admin/api-keys", { headers: headers() });
+        if (!data.ok) {
+          const t = await data.text();
+          throw new Error("HTTP " + data.status + ": " + t);
+        }
+        const j = await data.json();
+        const keys = j.api_keys || [];
+        if (keys.length === 0) {
+          c.innerHTML = '<div class="empty"><strong>No API keys in the system.</strong><br>Mint one above.</div>';
+          return;
+        }
+        const whoKeyID = (window.__mesediAdminWhoami || {}).key_id || "";
+        const rows = keys.map(k => {
+          const scope = k.scope || "customer";
+          const scopeBadge = '<span class="scope-badge ' + scope + '">' + escapeHtml(scope) + '</span>';
+          const isSelf = whoKeyID && k.key_id === whoKeyID;
+          const selfTag = isSelf ? ' <span style="color: var(--accent); font-size: 11px;">(this key)</span>' : '';
+          const expires = k.expires_at && k.expires_at !== ''
+            ? fmtDateExact(k.expires_at)
+            : 'never';
+          const revokeBtn = isSelf
+            ? '<button class="revoke-btn" disabled title="Cannot revoke the key authenticating this session">Self</button>'
+            : '<button class="revoke-btn" onclick="revokeAdminKey(\'' + escapeHtml(k.key_id) + '\', \'' + escapeHtml(k.key_prefix) + '\', \'' + escapeHtml(scope) + '\')">Revoke</button>';
+          return '<tr>' +
+            '<td>' + scopeBadge + selfTag + '</td>' +
+            '<td class="mono">' + escapeHtml(k.key_prefix) + '…</td>' +
+            '<td>' + escapeHtml(k.name || "—") + '</td>' +
+            '<td class="mono">' + escapeHtml(k.project_id) + '</td>' +
+            '<td>' + fmtDate(k.created_at) + '</td>' +
+            '<td>' + (k.last_used_at ? fmtDate(k.last_used_at) : "never") + '</td>' +
+            '<td>' + escapeHtml(expires) + '</td>' +
+            '<td>' + revokeBtn + '</td>' +
+            '</tr>';
+        }).join("");
+        c.innerHTML = '<table><thead><tr>' +
+          '<th>Scope</th><th>Prefix</th><th>Name</th><th>Project</th><th>Created</th><th>Last used</th><th>Expires</th><th></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      } catch (e) {
+        c.innerHTML = '<div class="error">Fetch failed: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function mintAdminApiKey() {
+      const name = document.getElementById("admin-mint-name").value.trim();
+      const scope = document.querySelector('input[name="admin-scope"]:checked').value;
+      const projectID = document.getElementById("admin-mint-project").value.trim();
+      const expiresAt = document.getElementById("admin-mint-expires").value.trim();
+      const confirmAdmin = document.getElementById("admin-confirm-check").checked;
+
+      if (!name) {
+        alert("Name required.");
+        return;
+      }
+      if (scope === "admin" && !confirmAdmin) {
+        alert("Tick the confirmation checkbox to mint an admin-scope key.");
+        return;
+      }
+      if (scope === "customer" && !projectID) {
+        alert("project_id required for customer-scope keys.");
+        return;
+      }
+
+      const body = { name, scope };
+      if (scope === "admin") body.confirm_admin_scope = true;
+      if (scope === "customer") body.project_id = projectID;
+      if (expiresAt) body.expires_at = expiresAt;
+
+      try {
+        const r = await fetch("/admin/api-keys", {
+          method: "POST",
+          headers: headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        const data = await r.json();
+        document.getElementById("admin-mint-revealed").innerHTML = `
+          <div class="key-revealed" style="position: relative;">
+            <button
+              onclick="dismissAdminMintRevealed()"
+              title="Dismiss"
+              style="
+                position: absolute; top: 8px; right: 10px;
+                background: transparent; border: 0.5px solid var(--success-border);
+                color: var(--success); border-radius: 4px;
+                width: 24px; height: 24px; line-height: 18px;
+                font-size: 16px; cursor: pointer; padding: 0;
+              ">×</button>
+            <div class="label">${escapeHtml(scope.toUpperCase())} key minted — copy this NOW</div>
+            <div class="value">${escapeHtml(data.secret)}</div>
+            <div class="warn">⚠ ${escapeHtml(data.warning || "Store this secret now. It will never be shown again.")}</div>
+          </div>
+        `;
+        document.getElementById("admin-mint-name").value = "";
+        document.getElementById("admin-mint-project").value = "";
+        document.getElementById("admin-mint-expires").value = "";
+        document.getElementById("admin-confirm-check").checked = false;
+        document.querySelector('input[name="admin-scope"][value="customer"]').checked = true;
+        onAdminScopeChange();
+        await refreshAdminKeys();
+      } catch (e) {
+        document.getElementById("admin-mint-revealed").innerHTML =
+          '<div class="error">Mint failed: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function revokeAdminKey(keyID, prefix, scope) {
+      // Customer-scope: a plain confirm() is enough; same posture as the
+      // project-side /api-keys page.
+      if (scope === "customer") {
+        if (!confirm('Revoke customer key ' + prefix + '…? Any clients still using it will start getting 401.')) {
+          return;
+        }
+      } else {
+        // Admin-scope: DANGER ZONE confirmation. Require the operator
+        // to paste the FULL key_id of the row they're revoking.
+        // Mirrors Verdifax task #2: "type/paste the key id" guards
+        // against muscle-memory revocation of the wrong row.
+        const typed = prompt(
+          'DANGER ZONE: revoking an ADMIN-scope key.\n\n' +
+          'Holder of this key has full /admin/* access.\n\n' +
+          'To confirm, paste the full key_id below:\n' +
+          '  ' + keyID,
+          ''
+        );
+        if (typed === null) return;
+        if (typed.trim() !== keyID) {
+          alert('key_id mismatch. Revoke cancelled.');
+          return;
+        }
+      }
+      try {
+        const r = await fetch("/admin/api-keys/" + encodeURIComponent(keyID), {
+          method: "DELETE",
+          headers: headers(),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        await refreshAdminKeys();
+      } catch (e) {
+        alert("Revoke failed: " + e.message);
+      }
+    }
+
+    // ── page-load init ─────────────────────────────────────────────────
+    // Probe /admin/whoami on first paint so the Admin nav link surfaces
+    // automatically when the loaded key has scope='admin'. Failures are
+    // silent — Overview rendering is independent of admin detection.
+    document.addEventListener("DOMContentLoaded", () => {
+      detectAdminScope();
+    });
   </script>
 </body>
 </html>

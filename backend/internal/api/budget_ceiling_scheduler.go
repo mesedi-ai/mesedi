@@ -243,14 +243,14 @@ func (s *BudgetCeilingScheduler) fireBreachNotifications(
 	// Webhook
 	if c.NotifyWebhookURL != "" && s.WebhookHTTP != nil {
 		payload := map[string]any{
-			"event":            "tenant_budget_ceiling.breached",
-			"owner_user_id":    c.OwnerUserID,
-			"burn_usd":         totalBurn,
-			"ceiling_usd":      c.MonthlyCeilingUSD,
-			"action":           c.BreachAction,
-			"project_count":    len(projects),
-			"breached_at":      time.Now().UTC().Format(time.RFC3339),
-			"dashboard_url":    s.DashboardURL + "/app/org",
+			"event":         "tenant_budget_ceiling.breached",
+			"owner_user_id": c.OwnerUserID,
+			"burn_usd":      totalBurn,
+			"ceiling_usd":   c.MonthlyCeilingUSD,
+			"action":        c.BreachAction,
+			"project_count": len(projects),
+			"breached_at":   time.Now().UTC().Format(time.RFC3339),
+			"dashboard_url": s.DashboardURL + "/app/org",
 		}
 		buf, err := json.Marshal(payload)
 		if err != nil {

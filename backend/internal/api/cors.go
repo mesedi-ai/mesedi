@@ -60,13 +60,13 @@ func CORSMiddleware() Middleware {
 				w.Header().Set("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				// Include PUT because three dashboard endpoints use it:
-			// PUT /me/retention (#262), PUT /me/class-severities/{class}
-			// (#261), and PUT /me/budget-ceiling (#252). Without PUT in
-			// this list, the browser preflight rejects those calls with
-			// a generic "Failed to fetch" -- the bug user spotted 2026-
-			// 05-31 that masked the underlying 403 role-required.
-			w.Header().Set("Access-Control-Allow-Methods",
-				"GET, POST, PUT, PATCH, DELETE, OPTIONS")
+				// PUT /me/retention (#262), PUT /me/class-severities/{class}
+				// (#261), and PUT /me/budget-ceiling (#252). Without PUT in
+				// this list, the browser preflight rejects those calls with
+				// a generic "Failed to fetch" -- the bug user spotted 2026-
+				// 05-31 that masked the underlying 403 role-required.
+				w.Header().Set("Access-Control-Allow-Methods",
+					"GET, POST, PUT, PATCH, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers",
 					"Authorization, Content-Type, X-Mesedi-Schema-Version")
 				w.Header().Set("Access-Control-Max-Age", "86400")

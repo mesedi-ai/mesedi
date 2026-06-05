@@ -9,14 +9,14 @@
 // migrator stays in sync with what PostgresStore writes.
 //
 // Why a custom tool instead of pg_loader or `pg_dump` + sed?
-//   * SQLite stores booleans as INTEGER 0/1; Postgres uses real BOOLEAN.
+//   - SQLite stores booleans as INTEGER 0/1; Postgres uses real BOOLEAN.
 //     pg_loader handles this but only with explicit casts that are
 //     easy to miss.
-//   * Several timestamp columns are TEXT in SQLite (RFC3339) and
+//   - Several timestamp columns are TEXT in SQLite (RFC3339) and
 //     TIMESTAMPTZ in Postgres; we want to parse + re-emit in transit.
-//   * Some columns are INTEGER epochs in SQLite and BIGINT epochs in
+//   - Some columns are INTEGER epochs in SQLite and BIGINT epochs in
 //     Postgres, which copies cleanly. We can keep semantics identical.
-//   * Doing it in Go means we share the time-parsing + null-handling
+//   - Doing it in Go means we share the time-parsing + null-handling
 //     helpers used by the Store implementations themselves, no
 //     dialect drift across the migration.
 //

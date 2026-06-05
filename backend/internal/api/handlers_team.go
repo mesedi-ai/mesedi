@@ -239,9 +239,9 @@ func (h *Handlers) HandleGetOrganization(w http.ResponseWriter, r *http.Request)
 	members, _ := h.Store.ListOrganizationMembers(r.Context(), orgID)
 	pendingInvites, _ := h.Store.ListOrganizationInvites(r.Context(), orgID, true)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":             true,
-		"organization":   org,
-		"member_count":   len(members),
+		"ok":                   true,
+		"organization":         org,
+		"member_count":         len(members),
 		"pending_invite_count": len(pendingInvites),
 	})
 }
@@ -511,13 +511,13 @@ func (h *Handlers) HandleGetInviteByToken(w http.ResponseWriter, r *http.Request
 		orgName = org.Name
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":          true,
-		"email":       inv.Email,
-		"role":        inv.Role,
-		"org_id":      inv.OrgID,
-		"org_name":    orgName,
-		"invited_by":  inv.InvitedByUserID,
-		"expires_at":  inv.ExpiresAt.Format(time.RFC3339),
+		"ok":         true,
+		"email":      inv.Email,
+		"role":       inv.Role,
+		"org_id":     inv.OrgID,
+		"org_name":   orgName,
+		"invited_by": inv.InvitedByUserID,
+		"expires_at": inv.ExpiresAt.Format(time.RFC3339),
 	})
 }
 
@@ -578,11 +578,11 @@ func (h *Handlers) HandleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	// Add the member first; if email-as-user-id matches an existing
 	// member, ON CONFLICT updates the role to the invited value.
 	if err := h.Store.AddOrganizationMember(r.Context(), &store.OrganizationMember{
-		OrgID:           inv.OrgID,
-		UserID:          userID,
-		Role:            inv.Role,
-		Email:           body.Email,
-		AddedByUserID:   inv.InvitedByUserID,
+		OrgID:         inv.OrgID,
+		UserID:        userID,
+		Role:          inv.Role,
+		Email:         body.Email,
+		AddedByUserID: inv.InvitedByUserID,
 	}); err != nil {
 		h.Logger.Error("accept invite: add member failed",
 			"invite_id", inv.InviteID, "error", err.Error())
@@ -678,5 +678,3 @@ func (h *Handlers) HandleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
-
-

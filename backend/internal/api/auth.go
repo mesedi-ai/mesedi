@@ -36,7 +36,50 @@ const (
 	ctxKeyProjectID ctxKey = iota + 1
 	ctxKeyAPIKeyID
 	ctxKeyUserID
+	// ctxKeyAdminAuthMethod records how the request reached an /admin/*
+	// handler: either "legacy_token" (MESEDI_ADMIN_TOKEN env, deprecated)
+	// or "api_key" (a row in api_keys with scope='admin'). Surfaced by
+	// /admin/whoami so the operator can see which credential they're
+	// holding.
+	ctxKeyAdminAuthMethod
+	// ctxKeyAdminKeyID is the api_keys.key_id of the admin-scope key
+	// that authenticated this request. Empty when the request used the
+	// legacy MESEDI_ADMIN_TOKEN path.
+	ctxKeyAdminKeyID
+	// ctxKeyAdminKeyName mirrors the human-chosen name on the admin
+	// key (e.g. "founder-laptop-2026-06"). Empty for the legacy-token
+	// path.
+	ctxKeyAdminKeyName
 )
+
+// Admin auth method constants surfaced via /admin/whoami.
+const (
+	AdminAuthMethodLegacyToken = "legacy_token"
+	AdminAuthMethodAPIKey      = "api_key"
+)
+
+// AdminAuthMethodFromContext returns the auth method that gated this
+// request through AdminAuth. Empty + false when the handler is not
+// behind AdminAuth (e.g. unit test calling the handler directly).
+func AdminAuthMethodFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(ctxKeyAdminAuthMethod).(string)
+	return v, ok
+}
+
+// AdminKeyIDFromContext returns the api_keys.key_id of the admin-scope
+// key behind this request, or empty + false if the request used the
+// legacy MESEDI_ADMIN_TOKEN path.
+func AdminKeyIDFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(ctxKeyAdminKeyID).(string)
+	return v, ok
+}
+
+// AdminKeyNameFromContext mirrors AdminKeyIDFromContext for the
+// human-chosen name on the admin key.
+func AdminKeyNameFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(ctxKeyAdminKeyName).(string)
+	return v, ok
+}
 
 // ProjectIDFromContext returns the authenticated project ID associated
 // with the request, or empty + false if no project ID was attached

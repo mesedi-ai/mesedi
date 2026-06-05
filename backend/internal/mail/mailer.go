@@ -47,12 +47,12 @@ type OrgInviteInput struct {
 // month-to-date burn crosses its configured ceiling. One send per
 // breach per calendar month.
 type BudgetCeilingBreachInput struct {
-	ToEmail        string
-	BurnUSD        float64
-	CeilingUSD     float64
-	BreachAction   string // "warn" | "halt"
-	ProjectCount   int
-	DashboardURL   string
+	ToEmail      string
+	BurnUSD      float64
+	CeilingUSD   float64
+	BreachAction string // "warn" | "halt"
+	ProjectCount int
+	DashboardURL string
 }
 
 // SuspensionWarningInput is everything the suspension-warning

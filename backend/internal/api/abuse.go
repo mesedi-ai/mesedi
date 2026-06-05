@@ -255,9 +255,9 @@ func (d *AbuseDetector) RecordSignupFromIP(ctx context.Context, ip, newProjectID
 	}
 
 	detail, _ := json.Marshal(map[string]any{
-		"ip":          ip,
-		"count":       count,
-		"window_mins": int(abuseWindow.Minutes()),
+		"ip":           ip,
+		"count":        count,
+		"window_mins":  int(abuseWindow.Minutes()),
 		"latest_email": email,
 	})
 	d.fire(ctx, store.AbuseSignal{

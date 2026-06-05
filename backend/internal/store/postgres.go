@@ -413,13 +413,14 @@ func (s *PostgresStore) ListAllProjects(ctx context.Context) ([]*AdminProjectRow
 			COUNT(e.execution_id) AS total_executions
 		FROM projects p
 		LEFT JOIN executions e ON e.project_id = p.project_id
+		WHERE p.project_id != $1
 		GROUP BY p.project_id, p.name, p.owner_email, p.created_at,
 		         p.tier, p.stripe_customer_id, p.stripe_subscription_id,
 		         p.current_period_start, p.current_period_end,
 		         p.executions_this_period, p.granted_executions,
 		         p.granted_executions_expires_at, p.tier_expires_at
 		ORDER BY p.created_at DESC
-	`)
+	`, APIKeyAdminProjectID)
 	if err != nil {
 		return nil, fmt.Errorf("query all projects: %w", err)
 	}
@@ -630,10 +631,14 @@ func (s *PostgresStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 	if k.CreatedAt.IsZero() {
 		k.CreatedAt = time.Now().UTC()
 	}
+	scope := k.Scope
+	if scope == "" {
+		scope = APIKeyScopeCustomer
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID))
+		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
 	}
@@ -645,9 +650,9 @@ func (s *PostgresStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*A
 	var name, userID sql.NullString
 	var lastUsed sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id
+		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at
 		FROM api_keys WHERE key_hash = $1
-	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID)
+	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -677,7 +682,7 @@ func (s *PostgresStore) TouchAPIKey(ctx context.Context, keyID string) error {
 
 func (s *PostgresStore) ListAPIKeysForProject(ctx context.Context, projectID string) ([]*APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at
 		FROM api_keys
 		WHERE project_id = $1
 		ORDER BY created_at DESC
@@ -686,7 +691,28 @@ func (s *PostgresStore) ListAPIKeysForProject(ctx context.Context, projectID str
 		return nil, fmt.Errorf("query api_keys: %w", err)
 	}
 	defer rows.Close()
+	return scanPostgresAPIKeyList(rows)
+}
 
+// ListAllAPIKeys returns every API key in the system, NEWEST first.
+// Admin-only. See sqlite.go counterpart for full docs.
+func (s *PostgresStore) ListAllAPIKeys(ctx context.Context) ([]*APIKey, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at
+		FROM api_keys
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query api_keys (all): %w", err)
+	}
+	defer rows.Close()
+	return scanPostgresAPIKeyList(rows)
+}
+
+// scanPostgresAPIKeyList is the postgres-side counterpart of
+// scanAPIKeyList in sqlite.go. Centralized so list-by-project and
+// list-all share identical scan semantics.
+func scanPostgresAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 	var out []*APIKey
 	for rows.Next() {
 		var (
@@ -696,7 +722,7 @@ func (s *PostgresStore) ListAPIKeysForProject(ctx context.Context, projectID str
 		)
 		if err := rows.Scan(
 			&k.KeyID, &k.ProjectID, &k.KeyPrefix,
-			&name, &k.CreatedAt, &lastUsedAt,
+			&name, &k.CreatedAt, &lastUsedAt, &k.Scope, &k.ExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -716,6 +742,26 @@ func (s *PostgresStore) DeleteAPIKey(ctx context.Context, keyID, projectID strin
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM api_keys WHERE key_id = $1 AND project_id = $2`,
 		keyID, projectID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete api_key: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteAPIKeyByID hard-deletes any API key with no project_id guard.
+// Admin-only. See sqlite.go counterpart for full docs.
+func (s *PostgresStore) DeleteAPIKeyByID(ctx context.Context, keyID string) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM api_keys WHERE key_id = $1`,
+		keyID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete api_key: %w", err)
@@ -1039,7 +1085,7 @@ func (s *PostgresStore) UpdateExecution(ctx context.Context, e *events.Execution
 
 func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*events.Execution, error) {
 	e := &events.Execution{}
-	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang sql.NullString
+	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang, failureGroupID sql.NullString
 	var endedAt sql.NullTime
 	var durationMs, tokensIn, tokensOut sql.NullInt64
 	var costUSD sql.NullFloat64
@@ -1049,14 +1095,14 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 			started_at, ended_at, duration_ms,
 			total_tokens_in, total_tokens_out, estimated_cost_usd,
 			input_summary, output_summary, crash_signature,
-			sdk_version, sdk_language
+			sdk_version, sdk_language, failure_group_id
 		FROM executions WHERE execution_id = $1
 	`, executionID).Scan(
 		&e.ExecutionID, &e.ProjectID, &parent, &e.Status,
 		&e.StartedAt, &endedAt, &durationMs,
 		&tokensIn, &tokensOut, &costUSD,
 		&inputSum, &outputSum, &crashSig,
-		&sdkVer, &sdkLang,
+		&sdkVer, &sdkLang, &failureGroupID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1098,6 +1144,10 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 	}
 	if sdkLang.Valid {
 		e.SDKLanguage = sdkLang.String
+	}
+	if failureGroupID.Valid {
+		v := failureGroupID.String
+		e.FailureGroupID = &v
 	}
 	return e, nil
 }

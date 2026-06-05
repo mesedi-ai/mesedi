@@ -304,8 +304,9 @@ func (h *Handlers) HandleSavings(w http.ResponseWriter, r *http.Request) {
 	// ─────────────────────────────────────────────────────────────
 	// Bucket: hard halt — v1 stub
 	// ─────────────────────────────────────────────────────────────
-	// TODO when status='halted' lands on executions, sum the saved
-	// = (avg_completed_cost - actual_halted_cost) × halted_count.
+	// Future enhancement: once status='halted' lands on executions,
+	// sum the saved = (avg_completed_cost - actual_halted_cost) ×
+	// halted_count. For v1 this bucket reports zero.
 	hardHaltUSD := 0.0
 	hardHaltCount := 0
 

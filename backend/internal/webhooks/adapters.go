@@ -3,7 +3,7 @@
 // Mesedi's canonical Payload is a generic, versioned JSON envelope
 // designed for customer-side parsers (their own services consuming
 // the webhook). For first-party chat receivers (Discord today; Slack
-// is the obvious next adapter), that generic shape doesn't render , 
+// is the obvious next adapter), that generic shape doesn't render ,
 // Discord requires a {content, embeds, file} body or it returns 400.
 //
 // Rather than ask customers to stand up a transformer, the dispatcher

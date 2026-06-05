@@ -59,13 +59,13 @@ const (
 // for FailureClass/Signature/SampleExecutionID; real deliveries
 // (slice 3) set Test=false and populate from the live failure_group.
 type Payload struct {
-	Version           string    `json:"version"`
-	Event             string    `json:"event"`
-	Test              bool      `json:"test,omitempty"`
-	ProjectID         string    `json:"project_id"`
-	WebhookID         string    `json:"webhook_id"`
-	GroupID           string    `json:"group_id,omitempty"`
-	FailureClass      string    `json:"failure_class"`
+	Version      string `json:"version"`
+	Event        string `json:"event"`
+	Test         bool   `json:"test,omitempty"`
+	ProjectID    string `json:"project_id"`
+	WebhookID    string `json:"webhook_id"`
+	GroupID      string `json:"group_id,omitempty"`
+	FailureClass string `json:"failure_class"`
 	// Severity is the resolved severity for this event (#261), one of
 	// "critical", "warning", or "info". Sourced from the customer's
 	// per-class override if one exists, otherwise severity.Default
@@ -100,7 +100,7 @@ func BuildTestPayload(webhook *store.ProjectWebhook, dashboardBaseURL, deliveryI
 		WebhookID:    webhook.WebhookID,
 		FailureClass: "crashes",
 		Signature:    "test_signature",
-		// SampleExecutionID intentionally empty for test deliveries , 
+		// SampleExecutionID intentionally empty for test deliveries ,
 		// avoids putting "exec-test" (a 404 link) into Discord/Slack.
 		DashboardURL: dashboardBaseURL,
 		PlaybookURL:  "",

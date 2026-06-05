@@ -411,11 +411,11 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			}
 		}
 
-		// Drift v2 (lexical) moved to the tail of the detector chain , 
+		// Drift v2 (lexical) moved to the tail of the detector chain ,
 		// see the cost_velocity block below.
 	}
 
-	// Phase 3a: link crashed executions to their failure_group. Best-effort , 
+	// Phase 3a: link crashed executions to their failure_group. Best-effort ,
 	// a grouping failure doesn't fail the PATCH because the execution itself
 	// is already correctly recorded. Runs AFTER drift, if drift already
 	// claimed this execution, GroupCrashedExecution's idempotency check
@@ -535,7 +535,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 
 	// Phase 3b sub-slices 12 + 15: events-driven post-processing. Both
 	// cost computation and prompt-injection detection walk the same
-	// event list, so fetch ONCE and feed both. Best-effort throughout , 
+	// event list, so fetch ONCE and feed both. Best-effort throughout ,
 	// failures here never fail the PATCH.
 	if isTerminalStatus(patch.Status) {
 		evts, err := h.Store.ListEventsForExecution(r.Context(), executionID)
@@ -618,7 +618,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// hitting the same attack pattern cluster together.
 			//
 			// PRIORITY NOTE: injection runs BEFORE cost-velocity (just
-			// below) because a prompt-injection is a security event , 
+			// below) because a prompt-injection is a security event ,
 			// "this execution was attacked" is a more important
 			// classification than "this execution was expensive."
 			// The failure_group_id idempotency short-circuit means an
@@ -798,7 +798,7 @@ func (h *Handlers) HandleGetFailureGroup(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, group)
 }
 
-// HandleIngestEvents accepts a batch of Events. Batching is required , 
+// HandleIngestEvents accepts a batch of Events. Batching is required ,
 // the SDK buffers events client-side and flushes in groups of ~100, so
 // the ingest path is array-shaped from day one. A single-event POST is
 // accepted as a 1-element array; rejecting non-array bodies catches
@@ -995,16 +995,41 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 		exec.TotalTokensOut = sumOut
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	// If this execution was clustered into a failure_group by the
+	// detection pipeline, also fetch the group so the dashboard can
+	// render a "Flagged by [class] / [signature]" banner with the
+	// underlying reason + a deep-link back to the group's detail page.
+	// Failure to load the group is non-fatal (the page still renders;
+	// the banner just doesn't), so any store error is logged and the
+	// response continues without the failure_group field.
+	var failureGroup *store.FailureGroup
+	if exec.FailureGroupID != nil && *exec.FailureGroupID != "" {
+		fg, err := h.Store.GetFailureGroup(r.Context(), *exec.FailureGroupID)
+		if err != nil {
+			h.Logger.Warn("get failure_group failed (rendering execution without banner)",
+				"execution_id", executionID,
+				"group_id", *exec.FailureGroupID,
+				"error", err.Error(),
+			)
+		} else {
+			failureGroup = fg
+		}
+	}
+
+	resp := map[string]any{
 		"ok":        true,
 		"execution": exec,
 		"events":    evts,
-	})
+	}
+	if failureGroup != nil {
+		resp["failure_group"] = failureGroup
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleListExecutionsInFailureGroup returns the executions that belong
 // to a given failure_group. Verifies cross-tenant access by first
-// fetching the group and confirming group.project_id == auth project , 
+// fetching the group and confirming group.project_id == auth project ,
 // 404 if it doesn't match (don't leak group_id existence).
 func (h *Handlers) HandleListExecutionsInFailureGroup(w http.ResponseWriter, r *http.Request) {
 	groupID := r.PathValue("id")
@@ -1093,11 +1118,11 @@ func (h *Handlers) HandleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":                  true,
-		"total_executions":    totalExecutions,
+		"ok":                   true,
+		"total_executions":     totalExecutions,
 		"completed_executions": completedAllTime,
-		"crashed_24h":         crashed24h,
-		"open_failure_groups": len(groups),
+		"crashed_24h":          crashed24h,
+		"open_failure_groups":  len(groups),
 	})
 }
 
@@ -1570,8 +1595,8 @@ func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
 // (#261). The map includes EVERY known failure class with its current
 // value, sourced from:
 //
-//   1. project_class_severities row, if one exists for that class
-//   2. severity.Default(class), otherwise
+//  1. project_class_severities row, if one exists for that class
+//  2. severity.Default(class), otherwise
 //
 // The response also carries an `is_override` flag per class so the UI
 // can render "(default)" vs "(custom)" badges next to each value.
@@ -1888,12 +1913,12 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	// Return the raw key in this ONE response. The hash never leaves.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":       true,
-		"key_id":   keyID,
-		"raw_key":  rawKey,
-		"prefix":   prefix,
-		"name":     body.Name,
-		"warning":  "Store this raw_key now, it will never be shown again.",
+		"ok":      true,
+		"key_id":  keyID,
+		"raw_key": rawKey,
+		"prefix":  prefix,
+		"name":    body.Name,
+		"warning": "Store this raw_key now, it will never be shown again.",
 	})
 }
 
@@ -2080,14 +2105,14 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rec := &store.ProjectWebhook{
-		WebhookID:       webhookID,
-		ProjectID:       authProjectID,
-		Name:            body.Name,
-		URL:             body.URL,
-		Secret:          secret,
-		EnabledClasses:  body.EnabledClasses,
-		Enabled:         enabled,
-		SeverityFilter:  body.SeverityFilter,
+		WebhookID:      webhookID,
+		ProjectID:      authProjectID,
+		Name:           body.Name,
+		URL:            body.URL,
+		Secret:         secret,
+		EnabledClasses: body.EnabledClasses,
+		Enabled:        enabled,
+		SeverityFilter: body.SeverityFilter,
 	}
 	if err := h.Store.CreateProjectWebhook(r.Context(), rec); err != nil {
 		writeError(w, http.StatusInternalServerError, "persist webhook: "+err.Error())

@@ -12,7 +12,7 @@ The pattern's success rate against frontier models is now extremely low, it's be
 
 The phrase "ignore the above" appears legitimately in technical writing, coding context, email replies, customer support conversations, and any domain where the user is correcting their own prior input. Some real false-positive examples:
 
-- A user pasting code with a comment that says "// ignore previous TODO."
+- A user pasting code with a comment that says "// ignore the previous to-do item."
 - A customer support agent typing "ignore my previous message, the correct order number is X."
 - A document review task where the prompt itself says "ignore the previous draft and focus on the revised version."
 
