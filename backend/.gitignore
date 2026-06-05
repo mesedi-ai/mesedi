@@ -38,3 +38,4 @@ Thumbs.db
 # Local config / secrets
 config.local.*
 secrets.local.*
+mesedi-dev.db

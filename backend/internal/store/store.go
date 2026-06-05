@@ -324,13 +324,20 @@ type WebhookDelivery struct {
 // Phase-3+ detectors land. Keep this list in sync with the SDK side
 // (mesedi-python events.EventType) when adding new classes.
 const (
-	FailureClassCrashes      = "crashes"
-	FailureClassLoops        = "loops"
-	FailureClassToolFailures = "tool_failures"
-	FailureClassValidator    = "validator_failures"
-	FailureClassDrift        = "drift"
-	FailureClassCostVelocity = "cost_velocity"
-	FailureClassInjection    = "prompt_injection"
+	FailureClassCrashes        = "crashes"
+	FailureClassLoops          = "loops"
+	FailureClassToolFailures   = "tool_failures"
+	FailureClassValidator      = "validator_failures"
+	FailureClassDrift          = "drift"
+	FailureClassCostVelocity   = "cost_velocity"
+	FailureClassInjection      = "prompt_injection"
+	// FailureClassInfraThrottled groups executions whose underlying
+	// provider transport hit a rate-limit, quota exhaustion, or local
+	// circuit-breaker trip. Distinct from cost_velocity (different
+	// fix: raise quota vs reduce calls) and from tool_failures (the
+	// failure is in the transport plane, not the developer's tool).
+	// Signature pieces are assembled by ThrottlingSignature.
+	FailureClassInfraThrottled = "infrastructure_throttled"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same
@@ -732,6 +739,17 @@ type Store interface {
 	// failure_class=tool_failures and signature=toolName. Returns
 	// isNew=true on first occurrence.
 	GroupToolFailure(ctx context.Context, executionID, projectID, toolName string) (bool, error)
+	// FindFirstThrottlingSignal returns the pre-assembled cluster
+	// signature for the first infrastructure_event row on this
+	// execution, or empty string if none exist. The signature is
+	// produced by ThrottlingSignature from the payload's reason +
+	// provider + dimension + circuit_state fields. Used by the
+	// infrastructure_throttled detector.
+	FindFirstThrottlingSignal(ctx context.Context, executionID string) (string, error)
+	// GroupInfrastructureThrottled upserts a failure_group with
+	// failure_class=infrastructure_throttled and the caller-supplied
+	// signature. Returns isNew=true on first occurrence.
+	GroupInfrastructureThrottled(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// FindFirstFailedValidator returns the name of the first
 	// validator_result event with payload.passed=false in this
 	// execution, or empty string if no validators failed. The "agent

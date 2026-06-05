@@ -28,7 +28,7 @@ def utcnow_rfc3339() -> str:
 
 
 class EventType:
-    """Seven event types the backend understands today.
+    """Event types the backend understands today.
 
     Match exactly the EventType constants in
     ``backend/internal/events/types.go``. Phase 3+ detectors are keyed on
@@ -36,13 +36,17 @@ class EventType:
     in lockstep.
     """
 
-    LLM_CALL:         ClassVar[str] = "llm_call"
-    TOOL_CALL:        ClassVar[str] = "tool_call"
-    CHECKPOINT:       ClassVar[str] = "checkpoint"
-    EXCEPTION:        ClassVar[str] = "exception"
-    VALIDATOR_RESULT: ClassVar[str] = "validator_result"
-    DRIFT_SIGNAL:     ClassVar[str] = "drift_signal"
-    INJECTION_ALERT:  ClassVar[str] = "injection_alert"
+    LLM_CALL:             ClassVar[str] = "llm_call"
+    TOOL_CALL:            ClassVar[str] = "tool_call"
+    CHECKPOINT:           ClassVar[str] = "checkpoint"
+    EXCEPTION:            ClassVar[str] = "exception"
+    VALIDATOR_RESULT:     ClassVar[str] = "validator_result"
+    DRIFT_SIGNAL:         ClassVar[str] = "drift_signal"
+    INJECTION_ALERT:      ClassVar[str] = "injection_alert"
+    # Mesedi #2: transport-plane backpressure (HTTP 429, circuit
+    # breaker trip, hard quota exhaustion). Consumed by the
+    # infrastructure_throttled detector on the backend.
+    INFRASTRUCTURE_EVENT: ClassVar[str] = "infrastructure_event"
 
 
 class Status:

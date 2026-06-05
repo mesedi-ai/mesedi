@@ -1554,6 +1554,46 @@ func (s *PostgresStore) GroupToolFailure(ctx context.Context, executionID, proje
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassToolFailures, toolName)
 }
 
+// FindFirstThrottlingSignal is the Postgres twin of the SQLite method
+// of the same name. Pulls the four signature pieces from the first
+// infrastructure_event row's payload and hands them to
+// ThrottlingSignature for assembly. Returns "" with nil error when no
+// such event exists.
+func (s *PostgresStore) FindFirstThrottlingSignal(ctx context.Context, executionID string) (string, error) {
+	var reason, provider, dimension, circuitState sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			(payload::jsonb->>'event_type'),
+			(payload::jsonb->>'provider'),
+			(payload::jsonb->>'quota_dimension'),
+			(payload::jsonb->>'circuit_state')
+		FROM events
+		WHERE execution_id = $1
+		  AND event_type = 'infrastructure_event'
+		ORDER BY sequence ASC
+		LIMIT 1
+	`, executionID).Scan(&reason, &provider, &dimension, &circuitState)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find first throttling signal: %w", err)
+	}
+	if !reason.Valid || reason.String == "" {
+		return "", nil
+	}
+	return ThrottlingSignature(reason.String, provider.String, dimension.String, circuitState.String), nil
+}
+
+// GroupInfrastructureThrottled is the Postgres twin of the SQLite
+// method of the same name.
+func (s *PostgresStore) GroupInfrastructureThrottled(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassInfraThrottled, signature)
+}
+
 // FindFirstFailedValidator compares the jsonb-extracted 'passed' field
 // to the literal text 'false'. In SQLite the same comparison was
 // against integer 0 because SQLite's JSON1 returns 0 for false; in

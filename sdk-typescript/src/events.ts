@@ -40,6 +40,10 @@ export const EventType = {
   VALIDATOR_RESULT: "validator_result",
   DRIFT_SIGNAL: "drift_signal",
   INJECTION_ALERT: "injection_alert",
+  // Mesedi #2: transport-plane backpressure (HTTP 429, circuit breaker
+  // trip, hard quota exhaustion). Consumed by the
+  // infrastructure_throttled detector on the backend.
+  INFRASTRUCTURE_EVENT: "infrastructure_event",
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

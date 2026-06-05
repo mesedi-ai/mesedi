@@ -36,8 +36,14 @@ export { wrap } from "./wrap.js";
 export type { WrapOptions } from "./wrap.js";
 export { tool } from "./tool.js";
 export type { ToolOptions } from "./tool.js";
-export { checkpoint, validatorResult } from "./observe.js";
+export {
+  checkpoint,
+  emitInfrastructureEvent,
+  validatorResult,
+} from "./observe.js";
 export type {
+  InfrastructureEventOptions,
+  InfrastructureReason,
   ValidatorResultOptions,
   ValidatorSeverity,
 } from "./observe.js";

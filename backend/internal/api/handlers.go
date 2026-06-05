@@ -507,6 +507,39 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Mesedi #2 — infrastructure_throttled detector. If any
+	// infrastructure_event was recorded for this execution, classify
+	// it as infrastructure_throttled with a signature derived from
+	// (reason, provider, dimension). Distinguishes "your provider is
+	// rate-limiting you" / "your circuit breaker tripped" / "you hit
+	// your monthly quota" from generic tool_failures, so SREs get a
+	// distinct alert chain with a distinct playbook (raise quota vs
+	// debug code).
+	//
+	// Runs after tool_failures so an execution that experienced both
+	// a tool failure AND a transport throttling event surfaces under
+	// the throttling group (which actionably points at the underlying
+	// cause; the tool failure was just the symptom).
+	if isTerminalStatus(patch.Status) {
+		throttleSig, err := h.Store.FindFirstThrottlingSignal(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("find throttling signal for detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if throttleSig != "" {
+			isNew, gErr := h.Store.GroupInfrastructureThrottled(r.Context(), executionID, authProjectID, throttleSig)
+			if gErr != nil {
+				h.Logger.Warn("infrastructure-throttled grouping failed (continuing)",
+					"execution_id", executionID,
+					"signature", throttleSig,
+					"error", gErr.Error(),
+				)
+			}
+			h.maybeFireWebhook(r, authProjectID, store.FailureClassInfraThrottled, throttleSig, isNew, gErr)
+		}
+	}
+
 	// Phase 3b sub-slice 14: validator-failures detector. If any
 	// validator_result event in the execution had payload.passed=false,
 	// classify the execution as validator_failures with

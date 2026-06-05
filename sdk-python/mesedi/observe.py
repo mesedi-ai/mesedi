@@ -245,3 +245,135 @@ def emit_llm_call(
         duration_ms=duration_ms,
         payload=payload,
     ))
+
+
+# Reasons recognized by ThrottlingSignature on the backend. Keep in
+# sync with backend/internal/store/sqlite.go::ThrottlingSignature.
+_INFRA_REASONS = frozenset({"rate_limit", "circuit_breaker", "quota_exhausted"})
+
+
+def emit_infrastructure_event(
+    reason: str,
+    provider: str = "",
+    endpoint: str = "",
+    status_code: int = 0,
+    retry_after_ms: int = 0,
+    quota_remaining: int = 0,
+    quota_limit: int = 0,
+    quota_dimension: str = "",
+    backoff_applied_ms: int = 0,
+    circuit_state: str = "",
+) -> None:
+    """Emit an ``infrastructure_event`` for transport-plane backpressure.
+
+    Used when the SDK observes an HTTP 429, hits a provider quota
+    header, trips a local circuit breaker, or otherwise gets a signal
+    from the network plane that the agent's logic is fine but the
+    underlying infrastructure is pushing back. The Mesedi backend's
+    ``infrastructure_throttled`` detector consumes these events and
+    clusters them by (reason, provider, quota_dimension) so SRE teams
+    get a single page per affected provider instead of one page per
+    request.
+
+    Typical caller pattern (synchronous retry-loop):
+
+        try:
+            resp = httpx.post(endpoint, json=body, timeout=30)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429:
+                retry_after = int(
+                    exc.response.headers.get("retry-after-ms", 0)
+                )
+                mesedi.emit_infrastructure_event(
+                    reason="rate_limit",
+                    provider="anthropic",
+                    endpoint="/v1/messages",
+                    status_code=429,
+                    retry_after_ms=retry_after,
+                    quota_dimension="tokens_per_minute",
+                    quota_remaining=int(
+                        exc.response.headers.get("x-ratelimit-remaining", 0)
+                    ),
+                )
+                raise
+
+    Halt-safe: the budget check runs before the event is emitted, so a
+    halt request issued mid-throttling still fires immediately. The
+    SDK does NOT automatically retry on its own; emitting this event
+    is purely observational. The caller's retry policy (httpx, openai
+    SDK, langchain, etc.) is the source of truth for whether to wait
+    and try again.
+
+    Outside @wrap: no-op. Mirrors the fail-open pattern of every other
+    observe-layer primitive.
+
+    Args:
+        reason: One of "rate_limit", "circuit_breaker",
+            "quota_exhausted". Unknown values are passed through to the
+            backend, which clusters them as "<reason>:<provider>" so
+            you still get useful grouping for SDK-side reasons the
+            detector doesn't yet know about.
+        provider: Short provider identifier ("anthropic", "openai",
+            "google", etc.). Used as the primary signature dimension.
+            Empty string is allowed but degrades grouping to
+            "rate_limit:unknown" style.
+        endpoint: The provider URL path that triggered the event.
+            Captured for the expanded payload view but not used in the
+            signature (so per-endpoint variations cluster together).
+        status_code: HTTP status returned (429, 503, etc.). Captured
+            for the expanded view.
+        retry_after_ms: Server-suggested backoff window in
+            milliseconds, parsed from the Retry-After header.
+        quota_remaining: Calls / tokens still available on this quota,
+            from x-ratelimit-remaining or similar.
+        quota_limit: Maximum on this quota, from x-ratelimit-limit or
+            similar.
+        quota_dimension: Which quota dimension breached. Use stable
+            string identifiers ("tokens_per_minute",
+            "requests_per_second", "tokens_per_day", etc.) so signature
+            grouping stays consistent.
+        backoff_applied_ms: How long the caller actually waited before
+            retrying. Useful for sizing future quota requests.
+        circuit_state: When reason="circuit_breaker", one of
+            "open" (request blocked), "half_open" (probe in flight),
+            "closed" (recovered). Empty defaults to "open" on the
+            backend signature side.
+    """
+    ctx = current_execution_context()
+    if ctx is None:
+        return
+
+    ctx.check_budget()
+    if ctx.budget_tracker is not None:
+        ctx.budget_tracker.increment_steps()
+
+    payload: Dict[str, Any] = {"event_type": reason}
+    if provider:
+        payload["provider"] = provider
+    if endpoint:
+        payload["endpoint"] = endpoint
+    if status_code:
+        payload["status_code"] = int(status_code)
+    if retry_after_ms:
+        payload["retry_after_ms"] = int(retry_after_ms)
+    if quota_remaining:
+        payload["quota_remaining"] = int(quota_remaining)
+    if quota_limit:
+        payload["quota_limit"] = int(quota_limit)
+    if quota_dimension:
+        payload["quota_dimension"] = quota_dimension
+    if backoff_applied_ms:
+        payload["backoff_applied_ms"] = int(backoff_applied_ms)
+    if circuit_state:
+        payload["circuit_state"] = circuit_state
+
+    client = get_client()
+    client.submit_event(Event(
+        event_id=f"evt-{uuid.uuid4().hex[:12]}",
+        execution_id=ctx.execution_id,
+        event_type=EventType.INFRASTRUCTURE_EVENT,
+        sequence=ctx.next_sequence(),
+        timestamp=utcnow_rfc3339(),
+        payload=payload,
+    ))

@@ -27,13 +27,14 @@ import (
 type EventType string
 
 const (
-	EventTypeLLMCall         EventType = "llm_call"
-	EventTypeToolCall        EventType = "tool_call"
-	EventTypeCheckpoint      EventType = "checkpoint"
-	EventTypeException       EventType = "exception"
-	EventTypeValidatorResult EventType = "validator_result"
-	EventTypeDriftSignal     EventType = "drift_signal"
-	EventTypeInjectionAlert  EventType = "injection_alert"
+	EventTypeLLMCall            EventType = "llm_call"
+	EventTypeToolCall           EventType = "tool_call"
+	EventTypeCheckpoint         EventType = "checkpoint"
+	EventTypeException          EventType = "exception"
+	EventTypeValidatorResult    EventType = "validator_result"
+	EventTypeDriftSignal        EventType = "drift_signal"
+	EventTypeInjectionAlert     EventType = "injection_alert"
+	EventTypeInfrastructure     EventType = "infrastructure_event"
 )
 
 // ExecutionStatus is the lifecycle state of an Execution. Exactly one
@@ -169,6 +170,40 @@ type DriftSignalPayload struct {
 	JudgeStatus          string  `json:"judge_status,omitempty"` // "on_track" | "drifting"
 	JudgeReason          string  `json:"judge_reason,omitempty"`
 	Confidence           float64 `json:"confidence,omitempty"` // 0..1
+}
+
+// InfrastructureEventPayload is the recorded shape of one
+// infrastructure-layer backpressure signal: a provider rate-limit
+// (HTTP 429), a token-bucket exhaustion, or a local circuit-breaker
+// trip. Distinct from tool_call.error because the failure isn't in
+// the agent's logic or the developer's tool, it's in the underlying
+// transport / quota plane. The infrastructure_throttled detector
+// consumes these events to differentiate "your agent is buggy" from
+// "your quota is undersized."
+//
+// EventType discriminates between the three sub-cases:
+//
+//   - "rate_limit"     a provider returned HTTP 429 or signalled
+//                      x-ratelimit-remaining=0 in headers
+//   - "circuit_breaker" the SDK's local circuit-breaker tripped open
+//                      and stopped sending requests to a provider
+//   - "quota_exhausted" the upstream provider returned a hard quota
+//                      error (different from 429: hard means you've
+//                      consumed your monthly cap, not your per-minute)
+//
+// Signature pieces for clustering live in (Provider, Endpoint, Reason);
+// see store.ThrottlingSignature for the canonical assembly.
+type InfrastructureEventPayload struct {
+	EventType       string `json:"event_type"`                 // "rate_limit" | "circuit_breaker" | "quota_exhausted"
+	Provider        string `json:"provider,omitempty"`         // "anthropic" | "openai" | ...
+	Endpoint        string `json:"endpoint,omitempty"`         // e.g. "/v1/messages"
+	StatusCode      int    `json:"status_code,omitempty"`      // HTTP status (429 etc.)
+	RetryAfterMs    int64  `json:"retry_after_ms,omitempty"`   // server-suggested backoff
+	QuotaRemaining  int    `json:"quota_remaining,omitempty"`  // from x-ratelimit-remaining
+	QuotaLimit      int    `json:"quota_limit,omitempty"`      // from x-ratelimit-limit
+	QuotaDimension  string `json:"quota_dimension,omitempty"`  // "tokens_per_minute" | "requests_per_second" | ...
+	BackoffAppliedMs int64 `json:"backoff_applied_ms,omitempty"` // how long the SDK actually waited
+	CircuitState    string `json:"circuit_state,omitempty"`    // "open" | "half_open" | "closed"
 }
 
 // InjectionAlertPayload is the outcome of one prompt-injection / boundary-

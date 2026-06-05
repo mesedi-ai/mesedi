@@ -117,3 +117,121 @@ export function validatorResult(
   };
   client.submitEvent(event);
 }
+
+/**
+ * Options for emitInfrastructureEvent. Mirrors the Go
+ * InfrastructureEventPayload struct in
+ * backend/internal/events/types.go field-for-field, omitting `reason`
+ * which is the positional first arg of the emitter.
+ */
+export interface InfrastructureEventOptions {
+  /** Short provider identifier ("anthropic", "openai", "google"...). */
+  provider?: string;
+  /** Provider URL path that triggered the event. */
+  endpoint?: string;
+  /** HTTP status returned (429, 503...). */
+  statusCode?: number;
+  /** Server-suggested backoff window in ms (from Retry-After). */
+  retryAfterMs?: number;
+  /** Calls / tokens still available, from x-ratelimit-remaining. */
+  quotaRemaining?: number;
+  /** Maximum on this quota, from x-ratelimit-limit. */
+  quotaLimit?: number;
+  /**
+   * Stable string identifier for the quota dimension that breached
+   * ("tokens_per_minute", "requests_per_second", etc.). Used as a
+   * signature dimension by the backend's infrastructure_throttled
+   * detector.
+   */
+  quotaDimension?: string;
+  /** How long the caller actually waited before retrying. */
+  backoffAppliedMs?: number;
+  /**
+   * When reason="circuit_breaker", one of "open" / "half_open" /
+   * "closed". Empty defaults to "open" in the backend signature
+   * assembly.
+   */
+  circuitState?: string;
+}
+
+/**
+ * Reason codes recognized by ThrottlingSignature on the backend.
+ * Other strings are accepted (they cluster as "<reason>:<provider>")
+ * so SDKs can emit forward-compatible reasons before the detector
+ * adds explicit support.
+ */
+export type InfrastructureReason =
+  | "rate_limit"
+  | "circuit_breaker"
+  | "quota_exhausted"
+  | (string & {});
+
+/**
+ * Emit an `infrastructure_event` for transport-plane backpressure.
+ *
+ * Used when the SDK or caller observes an HTTP 429, hits a provider
+ * quota header, trips a local circuit breaker, or otherwise gets a
+ * signal from the network plane that the agent's logic is fine but
+ * the underlying infrastructure is pushing back. The Mesedi backend's
+ * `infrastructure_throttled` detector consumes these events and
+ * clusters them by (reason, provider, quota_dimension) so SRE teams
+ * get a single page per affected provider instead of one page per
+ * request.
+ *
+ * Typical caller pattern (Vercel AI SDK / OpenAI / Anthropic):
+ *
+ *     try {
+ *       const res = await fetch(endpoint, { method: "POST", body });
+ *       if (res.status === 429) {
+ *         emitInfrastructureEvent("rate_limit", {
+ *           provider: "anthropic",
+ *           endpoint: "/v1/messages",
+ *           statusCode: 429,
+ *           retryAfterMs: Number(
+ *             res.headers.get("retry-after-ms") ?? 0,
+ *           ),
+ *           quotaDimension: "tokens_per_minute",
+ *           quotaRemaining: Number(
+ *             res.headers.get("x-ratelimit-remaining") ?? 0,
+ *           ),
+ *         });
+ *       }
+ *     } catch (err) {
+ *       // ...
+ *     }
+ *
+ * Outside `wrap()`: silent no-op. Mirrors the fail-open pattern of
+ * every other observe-layer primitive. The SDK does NOT retry on
+ * its own; emitting this event is purely observational.
+ */
+export function emitInfrastructureEvent(
+  reason: InfrastructureReason,
+  opts: InfrastructureEventOptions = {},
+): void {
+  const ctx = currentExecutionContext();
+  if (!ctx) return;
+
+  const payload: Record<string, unknown> = { event_type: reason };
+  if (opts.provider) payload["provider"] = opts.provider;
+  if (opts.endpoint) payload["endpoint"] = opts.endpoint;
+  if (opts.statusCode) payload["status_code"] = Math.trunc(opts.statusCode);
+  if (opts.retryAfterMs) payload["retry_after_ms"] = Math.trunc(opts.retryAfterMs);
+  if (opts.quotaRemaining)
+    payload["quota_remaining"] = Math.trunc(opts.quotaRemaining);
+  if (opts.quotaLimit) payload["quota_limit"] = Math.trunc(opts.quotaLimit);
+  if (opts.quotaDimension) payload["quota_dimension"] = opts.quotaDimension;
+  if (opts.backoffAppliedMs)
+    payload["backoff_applied_ms"] = Math.trunc(opts.backoffAppliedMs);
+  if (opts.circuitState) payload["circuit_state"] = opts.circuitState;
+
+  const client = getClient();
+  const event: Event = {
+    event_id: newEventId(),
+    execution_id: ctx.executionId,
+    event_type: EventType.INFRASTRUCTURE_EVENT,
+    sequence: ctx.nextSequence(),
+    timestamp: utcNowRfc3339(),
+    payload,
+  };
+  client.submitEvent(event);
+}

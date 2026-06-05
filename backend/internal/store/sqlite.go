@@ -1981,6 +1981,50 @@ func StepCountSignature(count int) string {
 	}
 }
 
+// ThrottlingSignature builds the cluster signature for an
+// infrastructure_throttled grouping from the (provider, dimension,
+// circuit-state) tuple captured on an InfrastructureEventPayload.
+// Signatures intentionally collapse:
+//
+//   - All "rate_limit" events for the same (provider, quota_dimension)
+//     into one group. SREs care about "Anthropic is rate-limiting our
+//     tokens_per_minute," not about which exact agent's call hit it.
+//
+//   - "circuit_breaker" trips by (provider, circuit_state) so the
+//     "half_open re-test failed" pattern stays distinct from the
+//     "open trip" pattern.
+//
+//   - "quota_exhausted" by provider only (these are hard caps that
+//     don't care about dimension).
+//
+// Format: "<reason>:<provider>" or "<reason>:<provider>:<dim>".
+// Unknown providers fall back to "unknown" so the signature is still
+// stable. The handler filters out events with empty Provider before
+// reaching this function.
+func ThrottlingSignature(reason, provider, dimension, circuitState string) string {
+	if provider == "" {
+		provider = "unknown"
+	}
+	switch reason {
+	case "rate_limit":
+		if dimension == "" {
+			return "rate_limit:" + provider
+		}
+		return "rate_limit:" + provider + ":" + dimension
+	case "circuit_breaker":
+		if circuitState == "" {
+			circuitState = "open"
+		}
+		return "circuit_breaker:" + provider + ":" + circuitState
+	case "quota_exhausted":
+		return "quota_exhausted:" + provider
+	default:
+		// Future-proof: unknown reasons cluster by provider so they're
+		// at least groupable, not exploded one-per-execution.
+		return reason + ":" + provider
+	}
+}
+
 // GroupStepCountExceedance upserts a failure_group with
 // failure_class=loops and an event-count-bucketed signature. Same
 // idempotency contract as the other groupers, runs in the handler
@@ -2086,6 +2130,61 @@ func (s *SQLiteStore) GroupToolFailure(
 		return false, fmt.Errorf("toolName required")
 	}
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassToolFailures, toolName)
+}
+
+// FindFirstThrottlingSignal returns the cluster signature derived
+// from the first (lowest-sequence) infrastructure_event row for the
+// given execution. Returns "" with nil error when no such event
+// exists or when the row's payload is missing required fields.
+//
+// Calls ThrottlingSignature internally to assemble the signature
+// from the payload fields, so the handler only needs to pass the
+// result to GroupInfrastructureThrottled. This keeps the signature
+// assembly logic in one place rather than duplicating field-name
+// knowledge in the handler.
+func (s *SQLiteStore) FindFirstThrottlingSignal(
+	ctx context.Context,
+	executionID string,
+) (string, error) {
+	var reason, provider, dimension, circuitState sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			json_extract(payload, '$.event_type'),
+			json_extract(payload, '$.provider'),
+			json_extract(payload, '$.quota_dimension'),
+			json_extract(payload, '$.circuit_state')
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'infrastructure_event'
+		ORDER BY sequence ASC
+		LIMIT 1
+	`, executionID).Scan(&reason, &provider, &dimension, &circuitState)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find first throttling signal: %w", err)
+	}
+	if !reason.Valid || reason.String == "" {
+		return "", nil
+	}
+	return ThrottlingSignature(reason.String, provider.String, dimension.String, circuitState.String), nil
+}
+
+// GroupInfrastructureThrottled upserts a failure_group with
+// failure_class=infrastructure_throttled and the caller-supplied
+// signature (built by ThrottlingSignature). Same idempotency
+// contract as the other groupers: if the execution is already linked
+// to a higher-priority group (crash, time-budget, step-count), this
+// is a no-op.
+func (s *SQLiteStore) GroupInfrastructureThrottled(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassInfraThrottled, signature)
 }
 
 // FindFirstFailedValidator returns the validator name from the first
