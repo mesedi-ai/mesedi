@@ -502,6 +502,53 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Mesedi #3 + #4 — context_overflow and token_waste detectors.
+	// Both consume the execution's llm_call events so we query
+	// them once and feed both detectors from the result. They run
+	// AFTER loops/step_count (which catch coarser patterns) and
+	// BEFORE semantic_loop / tool_schema_drift (which catch finer
+	// downstream patterns). context_overflow fires on cumulative
+	// input_tokens vs configured model window; token_waste fires on
+	// repeating user_prompt prefixes.
+	if isTerminalStatus(patch.Status) {
+		llmPayloads, err := h.Store.ListLLMCallPayloads(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("list llm_call payloads for detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if len(llmPayloads) > 0 {
+			rawPayloads := make([]json.RawMessage, len(llmPayloads))
+			for i, p := range llmPayloads {
+				rawPayloads[i] = json.RawMessage(p)
+			}
+			// context_overflow first; fail-level overrides
+			// token_waste claim if both fired on the same exec.
+			if sig, fired := detectors.DetectContextOverflow(rawPayloads); fired {
+				isNew, gErr := h.Store.GroupContextOverflow(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("context-overflow grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassContextOverflow, sig, isNew, gErr)
+			}
+			if sig, fired := detectors.DetectTokenWaste(rawPayloads); fired {
+				isNew, gErr := h.Store.GroupTokenWaste(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("token-waste grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassTokenWaste, sig, isNew, gErr)
+			}
+		}
+	}
+
 	// Mesedi #6 — semantic_loop detector. Hashes the canonical
 	// state across all checkpoint events on the execution; if any
 	// hash recurs 3+ times the execution is clustered as

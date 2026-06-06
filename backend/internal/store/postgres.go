@@ -1825,6 +1825,49 @@ func (s *PostgresStore) GroupToolSchemaDrift(ctx context.Context, executionID, p
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassToolSchemaDrift, signature)
 }
 
+// ListLLMCallPayloads is the Postgres twin of the SQLite method of
+// the same name.
+func (s *PostgresStore) ListLLMCallPayloads(ctx context.Context, executionID string) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE execution_id = $1
+		  AND event_type = 'llm_call'
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list llm_call payloads: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan llm_call payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GroupContextOverflow is the Postgres twin of the SQLite method of
+// the same name.
+func (s *PostgresStore) GroupContextOverflow(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassContextOverflow, signature)
+}
+
+// GroupTokenWaste is the Postgres twin of the SQLite method of the
+// same name.
+func (s *PostgresStore) GroupTokenWaste(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassTokenWaste, signature)
+}
+
 // FindFirstFailedValidator compares the jsonb-extracted 'passed' field
 // to the literal text 'false'. In SQLite the same comparison was
 // against integer 0 because SQLite's JSON1 returns 0 for false; in

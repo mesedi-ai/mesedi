@@ -2452,6 +2452,60 @@ func (s *SQLiteStore) GroupToolSchemaDrift(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassToolSchemaDrift, signature)
 }
 
+// ListLLMCallPayloads returns every llm_call payload on the
+// execution in sequence order. Shared by context_overflow (#3) and
+// token_waste (#4); kept as one query so the handler only hits the
+// DB once per execution-terminal update for both detectors.
+func (s *SQLiteStore) ListLLMCallPayloads(
+	ctx context.Context,
+	executionID string,
+) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'llm_call'
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list llm_call payloads: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan llm_call payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GroupContextOverflow upserts a failure_group with
+// failure_class=context_overflow and the caller-supplied signature.
+func (s *SQLiteStore) GroupContextOverflow(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassContextOverflow, signature)
+}
+
+// GroupTokenWaste upserts a failure_group with
+// failure_class=token_waste and the caller-supplied signature.
+func (s *SQLiteStore) GroupTokenWaste(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassTokenWaste, signature)
+}
+
 // FindFirstFailedValidator returns the validator name from the first
 // (lowest-sequence) validator_result event with payload.passed = false
 // for the given execution. JSON1 boolean comparison: SQLite stores

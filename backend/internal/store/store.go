@@ -360,6 +360,18 @@ const (
 	// single alert when a tool rolls over to a new shape, not one
 	// alert per agent run after the rollover.
 	FailureClassToolSchemaDrift = "tool_schema_drift"
+	// FailureClassContextOverflow groups executions where an
+	// llm_call's input_tokens crossed 90% (warn) or 100% (fail) of
+	// the configured model's context window. Signature is
+	// "context_overflow:<level>:<model>" so the dashboard surfaces
+	// (model, severity) pairs distinctly.
+	FailureClassContextOverflow = "context_overflow"
+	// FailureClassTokenWaste groups executions whose user_prompts
+	// share a leading-prefix hash that repeats 3+ times. Catches
+	// the context-accumulation loop described in the marketing
+	// page's $500/mo → $847k/mo case. Signature is
+	// "token_waste:<hex8>".
+	FailureClassTokenWaste = "token_waste"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same
@@ -824,6 +836,17 @@ type Store interface {
 	// failure_class=tool_schema_drift and the detector-supplied
 	// signature.
 	GroupToolSchemaDrift(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// ListLLMCallPayloads returns the payloads of all llm_call events
+	// on the given execution in sequence order. Shared by the
+	// context_overflow (#3) and token_waste (#4) detectors.
+	ListLLMCallPayloads(ctx context.Context, executionID string) ([][]byte, error)
+	// GroupContextOverflow upserts a failure_group with
+	// failure_class=context_overflow and the detector-supplied
+	// signature.
+	GroupContextOverflow(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// GroupTokenWaste upserts a failure_group with
+	// failure_class=token_waste and the detector-supplied signature.
+	GroupTokenWaste(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// GetCostByTenant aggregates SUM(estimated_cost_usd) and COUNT(*)
 	// per tenant_id within the requested time window, ordered by
 	// total cost descending. Executions with NULL tenant_id collapse
