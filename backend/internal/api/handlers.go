@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"mesedi/backend/internal/detectors"
+	"mesedi/backend/internal/dlp"
 	"mesedi/backend/internal/events"
 	"mesedi/backend/internal/mail"
 	"mesedi/backend/internal/playbooks"
@@ -68,6 +69,13 @@ type Handlers struct {
 	// ingest middleware (oversized payload), and signup handler all
 	// share the same in-memory rolling counters.
 	Abuse *AbuseDetector
+	// DLPScanner is the compiled regex set used by HandleIngestEvents
+	// to scan outbound llm_call / tool_call payloads for credentials,
+	// signed tokens, and PII (Mesedi #1 + #24). Constructed once at
+	// startup with the built-in rule baseline; nil disables the scan
+	// entirely (useful for local dev where you do NOT want your
+	// real API keys in test payloads to flag).
+	DLPScanner *dlp.Scanner
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
@@ -85,6 +93,19 @@ func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg Stri
 	if mailer == nil {
 		mailer = mail.NoopMailer{Logger: logger}
 	}
+	// Compile the DLP scanner once at startup against the built-in
+	// rule baseline. A compilation failure here is fatal-by-design,
+	// it indicates a malformed rule in code that should NEVER ship.
+	// We log and continue with a nil scanner so the rest of the API
+	// stays up, but the data_leakage detector goes dark until the
+	// next deploy. The nil-check in HandleIngestEvents skips the
+	// scan path cleanly.
+	scanner, err := dlp.NewScanner(nil)
+	if err != nil {
+		logger.Error("dlp scanner construction failed (data_leakage detector disabled)",
+			"error", err.Error())
+		scanner = nil
+	}
 	return &Handlers{
 		Logger:        logger,
 		Store:         s,
@@ -94,6 +115,7 @@ func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg Stri
 		Stripe:        stripeCfg,
 		Mailer:        mailer,
 		Abuse:         NewAbuseDetector(logger, s),
+		DLPScanner:    scanner,
 	}
 }
 
@@ -542,6 +564,35 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Mesedi #1 — data_leakage detector. If any dlp_scan_result
+	// event for this execution recorded critical/high hits, cluster
+	// the execution under data_leakage with the matched rule_id as
+	// the signature. Runs after infrastructure_throttled so an
+	// execution that experienced both transport throttling AND a
+	// credential leak surfaces under the leak (which is a security
+	// incident; throttling is operational); the lower-priority
+	// classifier is a no-op once a higher one has claimed the
+	// execution.
+	if isTerminalStatus(patch.Status) {
+		dlpSig, err := h.Store.FindFirstDLPSignal(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("find dlp signal for detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if dlpSig != "" {
+			isNew, gErr := h.Store.GroupDataLeakage(r.Context(), executionID, authProjectID, dlpSig)
+			if gErr != nil {
+				h.Logger.Warn("data-leakage grouping failed (continuing)",
+					"execution_id", executionID,
+					"rule_id", dlpSig,
+					"error", gErr.Error(),
+				)
+			}
+			h.maybeFireWebhook(r, authProjectID, store.FailureClassDataLeakage, dlpSig, isNew, gErr)
+		}
+	}
+
 	// Phase 3b sub-slice 14: validator-failures detector. If any
 	// validator_result event in the execution had payload.passed=false,
 	// classify the execution as validator_failures with
@@ -871,6 +922,14 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		accepted = append(accepted, *evt)
 	}
+
+	// Mesedi #1 + #24: scan + redact outbound LLM / tool payloads
+	// against the DLP rule registry before persistence. Matched
+	// secrets are replaced with `[REDACTED:rule_id]` tokens; high /
+	// critical hits also generate a sibling dlp_scan_result event
+	// that the data_leakage detector consumes downstream. Nil
+	// scanner (local dev) leaves the batch unchanged.
+	accepted = h.applyDLPToBatch(accepted)
 
 	if err := h.Store.SaveEvents(r.Context(), accepted); err != nil {
 		h.Logger.Error("save events failed", "error", err.Error(), "batch_size", len(accepted))

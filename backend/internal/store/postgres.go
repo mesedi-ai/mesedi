@@ -1667,6 +1667,46 @@ func (s *PostgresStore) GroupInfrastructureThrottled(ctx context.Context, execut
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassInfraThrottled, signature)
 }
 
+// FindFirstDLPSignal is the Postgres twin of the SQLite method of
+// the same name. Uses jsonb operators instead of json1.
+func (s *PostgresStore) FindFirstDLPSignal(ctx context.Context, executionID string) (string, error) {
+	var ruleID sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT (payload::jsonb #>> '{hits,0,rule_id}')
+		FROM events
+		WHERE execution_id = $1
+		  AND event_type = 'dlp_scan_result'
+		  AND (payload::jsonb->>'highest_severity') IN ('critical', 'high')
+		ORDER BY
+			CASE (payload::jsonb->>'highest_severity')
+				WHEN 'critical' THEN 0
+				WHEN 'high'     THEN 1
+				ELSE 2
+			END ASC,
+			sequence ASC
+		LIMIT 1
+	`, executionID).Scan(&ruleID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find first dlp signal: %w", err)
+	}
+	if !ruleID.Valid {
+		return "", nil
+	}
+	return ruleID.String, nil
+}
+
+// GroupDataLeakage is the Postgres twin of the SQLite method of the
+// same name.
+func (s *PostgresStore) GroupDataLeakage(ctx context.Context, executionID, projectID, ruleID string) (isNew bool, err error) {
+	if ruleID == "" {
+		return false, fmt.Errorf("ruleID required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassDataLeakage, ruleID)
+}
+
 // FindFirstFailedValidator compares the jsonb-extracted 'passed' field
 // to the literal text 'false'. In SQLite the same comparison was
 // against integer 0 because SQLite's JSON1 returns 0 for false; in

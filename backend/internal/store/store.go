@@ -338,6 +338,14 @@ const (
 	// failure is in the transport plane, not the developer's tool).
 	// Signature pieces are assembled by ThrottlingSignature.
 	FailureClassInfraThrottled = "infrastructure_throttled"
+	// FailureClassDataLeakage groups executions whose outbound LLM
+	// prompts or tool-call arguments contained credentials, signed
+	// tokens, or PII matched by a DLP rule. Signature is the rule_id
+	// (e.g. "aws_access_key" or "stripe_live_secret_key"), one
+	// failure_group per detected secret type per project so SecOps
+	// can see "we have 12 runs leaking AWS keys" vs "47 runs leaking
+	// Stripe keys" without alert flood.
+	FailureClassDataLeakage = "data_leakage"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same
@@ -765,6 +773,15 @@ type Store interface {
 	// failure_class=infrastructure_throttled and the caller-supplied
 	// signature. Returns isNew=true on first occurrence.
 	GroupInfrastructureThrottled(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// FindFirstDLPSignal returns the rule_id of the highest-priority
+	// dlp_scan_result on this execution, or empty string when none
+	// fired. medium-severity hits never cluster and are filtered
+	// out at the query level.
+	FindFirstDLPSignal(ctx context.Context, executionID string) (string, error)
+	// GroupDataLeakage upserts a failure_group with
+	// failure_class=data_leakage and signature=ruleID. One group per
+	// rule per project so SecOps sees per-secret-type aggregation.
+	GroupDataLeakage(ctx context.Context, executionID, projectID, ruleID string) (bool, error)
 	// GetCostByTenant aggregates SUM(estimated_cost_usd) and COUNT(*)
 	// per tenant_id within the requested time window, ordered by
 	// total cost descending. Executions with NULL tenant_id collapse

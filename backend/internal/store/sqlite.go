@@ -2259,6 +2259,68 @@ func (s *SQLiteStore) GroupInfrastructureThrottled(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassInfraThrottled, signature)
 }
 
+// FindFirstDLPSignal returns the rule_id of the highest-priority
+// dlp_scan_result hit recorded against this execution, or empty
+// string if no DLP events fired. "Highest priority" means: prefer
+// the first critical-severity hit by sequence; if none exist, fall
+// back to the first high-severity hit. medium-severity hits never
+// cluster and are filtered out here.
+//
+// The returned rule_id is the data_leakage cluster signature
+// (e.g. "aws_access_key"), one failure_group per rule per project.
+func (s *SQLiteStore) FindFirstDLPSignal(
+	ctx context.Context,
+	executionID string,
+) (string, error) {
+	var ruleID sql.NullString
+	// JSON1 path: payload.highest_severity tells us at the event
+	// level whether to even consider it. payload.hits is a sorted
+	// array; the first element's rule_id is the canonical signature
+	// (Summarize() sorts alphabetically so reads are deterministic).
+	// We CASE on severity so a single SQL pass returns the
+	// best-priority signal across all DLP events on this execution.
+	err := s.db.QueryRowContext(ctx, `
+		SELECT json_extract(payload, '$.hits[0].rule_id')
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'dlp_scan_result'
+		  AND json_extract(payload, '$.highest_severity') IN ('critical', 'high')
+		ORDER BY
+			CASE json_extract(payload, '$.highest_severity')
+				WHEN 'critical' THEN 0
+				WHEN 'high'     THEN 1
+				ELSE 2
+			END ASC,
+			sequence ASC
+		LIMIT 1
+	`, executionID).Scan(&ruleID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find first dlp signal: %w", err)
+	}
+	if !ruleID.Valid {
+		return "", nil
+	}
+	return ruleID.String, nil
+}
+
+// GroupDataLeakage upserts a failure_group with
+// failure_class=data_leakage and signature=ruleID (e.g.
+// "aws_access_key"). One group per rule per project. Idempotent: if
+// the execution is already linked to a higher-priority group, this
+// is a no-op.
+func (s *SQLiteStore) GroupDataLeakage(
+	ctx context.Context,
+	executionID, projectID, ruleID string,
+) (isNew bool, err error) {
+	if ruleID == "" {
+		return false, fmt.Errorf("ruleID required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassDataLeakage, ruleID)
+}
+
 // FindFirstFailedValidator returns the validator name from the first
 // (lowest-sequence) validator_result event with payload.passed = false
 // for the given execution. JSON1 boolean comparison: SQLite stores

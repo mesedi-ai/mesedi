@@ -35,6 +35,7 @@ const (
 	EventTypeDriftSignal        EventType = "drift_signal"
 	EventTypeInjectionAlert     EventType = "injection_alert"
 	EventTypeInfrastructure     EventType = "infrastructure_event"
+	EventTypeDLPScanResult      EventType = "dlp_scan_result"
 )
 
 // ExecutionStatus is the lifecycle state of an Execution. Exactly one
@@ -211,6 +212,38 @@ type InfrastructureEventPayload struct {
 	QuotaDimension  string `json:"quota_dimension,omitempty"`  // "tokens_per_minute" | "requests_per_second" | ...
 	BackoffAppliedMs int64 `json:"backoff_applied_ms,omitempty"` // how long the SDK actually waited
 	CircuitState    string `json:"circuit_state,omitempty"`    // "open" | "half_open" | "closed"
+}
+
+// DLPScanResultHit is one rule's roll-up inside DLPScanResultPayload.
+// Mirrors dlp.HitSummary exactly so the package can JSON-marshal the
+// slice straight into the payload field.
+type DLPScanResultHit struct {
+	RuleID   string `json:"rule_id"`
+	Label    string `json:"label"`
+	Severity string `json:"severity"` // "critical" | "high" | "medium"
+	Count    int    `json:"count"`
+}
+
+// DLPScanResultPayload is the recorded outcome of one Data Loss
+// Prevention scan against an outbound payload (LLM prompt or tool
+// arguments). Mirrors prompt_injection's structure but on the
+// outbound side: the scan layer indicates which event field was
+// matched ("llm_prompt" | "tool_arguments"), the parent_event_id
+// links back to the redacted event the scan was triggered by, and
+// Hits is the per-rule rollup of matches.
+//
+// The data_leakage detector consumes these events: every hit with
+// SeverityCritical fires the cluster, every hit with SeverityHigh
+// records a warning-tier cluster, and SeverityMedium hits record but
+// don't fire (under threshold).
+type DLPScanResultPayload struct {
+	ScanLayer       string             `json:"scan_layer"`                 // "llm_prompt" | "tool_arguments" | "tool_return"
+	ParentEventID   string             `json:"parent_event_id,omitempty"`  // the redacted event this scan was derived from
+	ParentEventType string             `json:"parent_event_type,omitempty"` // "llm_call" | "tool_call"
+	HighestSeverity string             `json:"highest_severity"`           // for fast filtering
+	HitCount        int                `json:"hit_count"`                  // sum of Count across Hits
+	Hits            []DLPScanResultHit `json:"hits"`                       // per-rule rollup
+	Action          string             `json:"action"`                     // "redacted" | "alerted" (medium-only)
 }
 
 // InjectionAlertPayload is the outcome of one prompt-injection / boundary-
