@@ -47,6 +47,7 @@ import (
 	"mesedi/backend/internal/api"
 	"mesedi/backend/internal/dashboard"
 	"mesedi/backend/internal/mail"
+	meseditel "mesedi/backend/internal/otel"
 	"mesedi/backend/internal/store"
 )
 
@@ -312,6 +313,34 @@ func main() {
 	}
 
 	handlers := api.New(logger, st, cfg.DashboardURL, stripeCfg, mailer)
+
+	// Mesedi #22 — OpenTelemetry parallel emission. Initialize the
+	// global emitter from env (OTEL_EXPORTER_OTLP_ENDPOINT etc.).
+	// When the endpoint is unset, Init returns a disabled emitter
+	// that no-ops on every Emit call, so the wiring is safe to
+	// leave in always-on. A construction failure is logged but
+	// non-fatal: the rest of the API continues to serve without
+	// OTel.
+	otelEmitter, otelErr := meseditel.Init(context.Background(), logger)
+	if otelErr != nil {
+		logger.Warn("otel: emitter init failed (continuing without OTel emission)",
+			"error", otelErr.Error(),
+		)
+	} else {
+		handlers.OTel = otelEmitter
+		// Flush pending spans on graceful shutdown. fly.io's
+		// SIGTERM gives us ~30s before SIGKILL; a 5s shutdown
+		// budget leaves headroom for the rest of the runtime to
+		// drain cleanly.
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := otelEmitter.Shutdown(ctx); err != nil {
+				logger.Warn("otel: shutdown returned error", "error", err.Error())
+			}
+		}()
+	}
+
 	handlers.RegisterRoutes(privateMux)
 	privateHandler := api.NewAuthChain(logger, st, handlers.Abuse)(privateMux)
 

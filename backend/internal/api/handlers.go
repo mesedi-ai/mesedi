@@ -29,6 +29,7 @@ import (
 	"mesedi/backend/internal/dlp"
 	"mesedi/backend/internal/events"
 	"mesedi/backend/internal/mail"
+	meseditel "mesedi/backend/internal/otel"
 	"mesedi/backend/internal/playbooks"
 	"mesedi/backend/internal/pricing"
 	"mesedi/backend/internal/severity"
@@ -76,6 +77,12 @@ type Handlers struct {
 	// entirely (useful for local dev where you do NOT want your
 	// real API keys in test payloads to flag).
 	DLPScanner *dlp.Scanner
+	// OTel is the OpenTelemetry parallel emitter (Mesedi #22). Set
+	// at startup from main.go when OTEL_EXPORTER_OTLP_ENDPOINT is
+	// configured; nil (or .Enabled()==false) disables emission so
+	// the entire feature can ship behind an env var. All Emit
+	// calls are nil-safe at the method receiver.
+	OTel *meseditel.Emitter //nolint:revive // local alias to avoid name collision with OTel SDK
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
@@ -1365,6 +1372,42 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		"estimated_cost_usd", patch.EstimatedCostUSD,
 		"crash_signature", patch.CrashSignature,
 	)
+
+	// Mesedi #22 — OpenTelemetry parallel emission. After the
+	// terminal-status write + detector chain have both committed,
+	// fire-and-forget a goroutine that translates this execution
+	// (plus its events) into an OTel trace and ships it via OTLP
+	// to the customer-configured collector. Best-effort: emission
+	// failures are logged inside the emitter and never surface to
+	// the customer. Reads the full event list once, separate from
+	// the earlier post-PATCH loop that did per-event cost +
+	// injection scanning, because the OTel write should reflect
+	// the FINAL execution state (with any post-detector writes
+	// already persisted, including failure_group_id set by
+	// detectors above).
+	if h.OTel.Enabled() && isTerminalStatus(patch.Status) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			finalExec, gErr := h.Store.GetExecution(ctx, executionID)
+			if gErr != nil {
+				h.Logger.Warn("otel: load execution for emission failed",
+					"execution_id", executionID,
+					"error", gErr.Error(),
+				)
+				return
+			}
+			evts, eErr := h.Store.ListEventsForExecution(ctx, executionID)
+			if eErr != nil {
+				h.Logger.Warn("otel: load events for emission failed",
+					"execution_id", executionID,
+					"error", eErr.Error(),
+				)
+				return
+			}
+			h.OTel.Emit(ctx, finalExec, evts)
+		}()
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
