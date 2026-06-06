@@ -392,6 +392,8 @@ func main() {
 	mux.Handle("GET /failure-groups", privateHandler)
 	mux.Handle("GET /failure-groups/{id}", privateHandler)
 	mux.Handle("GET /failure-groups/{id}/executions", privateHandler)
+	// Mesedi #5, cost-by-tenant attribution report (auth-required).
+	mux.Handle("GET /reports/cost-by-tenant", privateHandler)
 	// Phase 3b sub-slice 18, API key management (auth-required).
 	mux.Handle("GET /api-keys", privateHandler)
 	mux.Handle("POST /api-keys", privateHandler)
