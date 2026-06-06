@@ -502,6 +502,112 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Mesedi #6 — semantic_loop detector. Hashes the canonical
+	// state across all checkpoint events on the execution; if any
+	// hash recurs 3+ times the execution is clustered as
+	// semantic_loop. Catches the "agent revisits the same logical
+	// state via different surface text" pattern that step_count and
+	// identical_call_loops cannot see. Runs AFTER the loops family
+	// so simpler patterns (exact-call repeat, time-budget breach)
+	// claim first; this detector picks up only the residue.
+	if isTerminalStatus(patch.Status) {
+		checkpoints, err := h.Store.ListCheckpointPayloads(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("list checkpoint payloads for detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if len(checkpoints) > 0 {
+			payloads := make([]json.RawMessage, len(checkpoints))
+			for i, p := range checkpoints {
+				payloads[i] = json.RawMessage(p)
+			}
+			if sig, fired := detectors.DetectSemanticLoop(payloads); fired {
+				isNew, gErr := h.Store.GroupSemanticLoop(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("semantic-loop grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassSemanticLoop, sig, isNew, gErr)
+			}
+		}
+	}
+
+	// Mesedi #8 — tool_schema_drift detector. For each tool the
+	// execution invoked successfully, compare the LAST successful
+	// return_value's shape on this execution against the project's
+	// historical roll-up for the same tool. Fires when a previously-
+	// stable tool returns a new shape, catching silent third-party
+	// API version bumps.
+	//
+	// Runs AFTER semantic_loop because:
+	//   - loop-class errors are about the AGENT's behavior; schema
+	//     drift is about the WORLD's behavior; resolving the loop
+	//     first lets SREs see the simpler root cause if both exist.
+	//   - if multiple drift signals fire across multiple tools, only
+	//     the first-found one claims the execution (deterministic
+	//     iteration order via ListToolNamesInExecution's distinct
+	//     scan).
+	if isTerminalStatus(patch.Status) {
+		toolNames, err := h.Store.ListToolNamesInExecution(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("list tool names for schema-drift failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else {
+			for _, toolName := range toolNames {
+				// Current-execution shape: query the most recent
+				// successful tool_call for this tool on THIS
+				// execution. The detector compares it against the
+				// project's historical roll-up.
+				currentReturns, err := h.Store.ListSuccessfulToolReturns(r.Context(), authProjectID, toolName, "", 1)
+				if err != nil || len(currentReturns) == 0 {
+					// "" excludes nothing, gets the most recent
+					// project-wide which includes the current
+					// execution. If it returns nothing, skip.
+					continue
+				}
+				currentShape := detectors.ReturnShapeHash(json.RawMessage(currentReturns[0]))
+				if currentShape == "" {
+					continue
+				}
+				history, err := h.Store.ListSuccessfulToolReturns(r.Context(), authProjectID, toolName, executionID, 100)
+				if err != nil {
+					h.Logger.Warn("list tool-return history failed",
+						"execution_id", executionID,
+						"tool_name", toolName,
+						"error", err.Error(),
+					)
+					continue
+				}
+				shapeCounts := map[string]int{}
+				for _, raw := range history {
+					shape := detectors.ReturnShapeHash(json.RawMessage(raw))
+					if shape == "" {
+						continue
+					}
+					shapeCounts[shape]++
+				}
+				if sig, fired := detectors.DetectSchemaDrift(toolName, currentShape, shapeCounts); fired {
+					isNew, gErr := h.Store.GroupToolSchemaDrift(r.Context(), executionID, authProjectID, sig)
+					if gErr != nil {
+						h.Logger.Warn("tool-schema-drift grouping failed (continuing)",
+							"execution_id", executionID,
+							"signature", sig,
+							"error", gErr.Error(),
+						)
+					}
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassToolSchemaDrift, sig, isNew, gErr)
+					break // one drift signal per execution is enough
+				}
+			}
+		}
+	}
+
 	// Phase 3b sub-slice 13: tool-failures detector. If any tool_call
 	// event in the execution had payload.status="failed", classify the
 	// execution as tool_failures with signature=tool_name. Different

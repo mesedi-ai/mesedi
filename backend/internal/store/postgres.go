@@ -1438,7 +1438,11 @@ func (s *PostgresStore) GetCostByTenant(
 		ORDER BY total_cost_usd DESC, execution_count DESC
 	`
 	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT $%d", next)
+		// G202 false positive: $%d expands to a Postgres parameter
+		// PLACEHOLDER index (e.g. "$4"), not the actual value. The
+		// real `limit` int is bound through args below, the standard
+		// safe-parameterized-query pattern.
+		query += fmt.Sprintf(" LIMIT $%d", next) //nolint:gosec // G202: $N is a placeholder index, value is parameterized
 		args = append(args, limit)
 	}
 
@@ -1705,6 +1709,120 @@ func (s *PostgresStore) GroupDataLeakage(ctx context.Context, executionID, proje
 		return false, fmt.Errorf("ruleID required")
 	}
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassDataLeakage, ruleID)
+}
+
+// ListCheckpointPayloads is the Postgres twin of the SQLite method
+// of the same name.
+func (s *PostgresStore) ListCheckpointPayloads(ctx context.Context, executionID string) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE execution_id = $1
+		  AND event_type = 'checkpoint'
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list checkpoint payloads: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan checkpoint payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate checkpoint payloads: %w", err)
+	}
+	return out, nil
+}
+
+// GroupSemanticLoop is the Postgres twin of the SQLite method of the
+// same name.
+func (s *PostgresStore) GroupSemanticLoop(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassSemanticLoop, signature)
+}
+
+// ListSuccessfulToolReturns is the Postgres twin of the SQLite
+// method of the same name.
+func (s *PostgresStore) ListSuccessfulToolReturns(
+	ctx context.Context,
+	projectID, toolName, excludeExecutionID string,
+	limit int,
+) ([][]byte, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT (ev.payload::jsonb->>'return_value')
+		FROM events ev
+		JOIN executions ex ON ex.execution_id = ev.execution_id
+		WHERE ex.project_id = $1
+		  AND ev.event_type = 'tool_call'
+		  AND (ev.payload::jsonb->>'tool_name') = $2
+		  AND COALESCE(ev.payload::jsonb->>'status', 'ok') != 'failed'
+		  AND ev.execution_id != $3
+		ORDER BY ev.timestamp DESC
+		LIMIT $4
+	`, projectID, toolName, excludeExecutionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list successful tool returns: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p sql.NullString
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan tool return: %w", err)
+		}
+		if !p.Valid || p.String == "" {
+			continue
+		}
+		out = append(out, []byte(p.String))
+	}
+	return out, rows.Err()
+}
+
+// ListToolNamesInExecution is the Postgres twin of the SQLite method
+// of the same name.
+func (s *PostgresStore) ListToolNamesInExecution(ctx context.Context, executionID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT (payload::jsonb->>'tool_name')
+		FROM events
+		WHERE execution_id = $1
+		  AND event_type = 'tool_call'
+		  AND COALESCE(payload::jsonb->>'status', 'ok') != 'failed'
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list tool names: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var n sql.NullString
+		if err := rows.Scan(&n); err != nil {
+			return nil, fmt.Errorf("scan tool name: %w", err)
+		}
+		if !n.Valid || n.String == "" {
+			continue
+		}
+		out = append(out, n.String)
+	}
+	return out, rows.Err()
+}
+
+// GroupToolSchemaDrift is the Postgres twin of the SQLite method of
+// the same name.
+func (s *PostgresStore) GroupToolSchemaDrift(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassToolSchemaDrift, signature)
 }
 
 // FindFirstFailedValidator compares the jsonb-extracted 'passed' field

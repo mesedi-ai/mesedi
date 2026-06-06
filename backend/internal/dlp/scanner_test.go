@@ -35,16 +35,16 @@ func Test_Scanner_PositiveExamples(t *testing.T) {
 	// test starts failing, double-check that the runtime joined
 	// value still matches the rule pattern.
 	const (
-		awsAKIA       = "AKIA"
-		awsASIA       = "ASIA"
-		skPrefix      = "sk-"
-		skProjPrefix  = "sk-proj-"
-		ghpPrefix     = "ghp_"
-		ghoPrefix     = "gho_"
-		xoxbPrefix    = "xoxb-"
-		stripeSkLive  = "sk_live_"
-		stripePkLive  = "pk_live_"
-		stripeRkLive  = "rk_live_"
+		awsAKIA      = "AKIA"
+		awsASIA      = "ASIA"
+		skPrefix     = "sk-"
+		skProjPrefix = "sk-proj-"
+		ghpPrefix    = "ghp_"
+		ghoPrefix    = "gho_"
+		xoxbPrefix   = "xoxb-"
+		stripeSkLive = "sk_live_"
+		stripePkLive = "pk_live_"
+		stripeRkLive = "rk_live_"
 	)
 
 	cases := []struct {
@@ -107,7 +107,7 @@ func Test_Scanner_NegativeExamples(t *testing.T) {
 		input string
 	}{
 		{"short AWS-prefix-looking string", "AKIA1234"}, // < 20 chars total
-		{"random base64 segment", "eyJabc"},              // missing the 3-segment JWT shape
+		{"random base64 segment", "eyJabc"},             // missing the 3-segment JWT shape
 		{"phone-shaped digits", "Call me at 1-800-555-1234 today"},
 		{"random hex string", "abc123def456abc123def456abc123def456abc1"},
 		{"sk- prefix in URL path", "https://example.com/sk-products/widget"}, // sk- but trailing pattern doesn't match

@@ -27,15 +27,17 @@ import (
 type EventType string
 
 const (
-	EventTypeLLMCall            EventType = "llm_call"
-	EventTypeToolCall           EventType = "tool_call"
-	EventTypeCheckpoint         EventType = "checkpoint"
-	EventTypeException          EventType = "exception"
-	EventTypeValidatorResult    EventType = "validator_result"
-	EventTypeDriftSignal        EventType = "drift_signal"
-	EventTypeInjectionAlert     EventType = "injection_alert"
-	EventTypeInfrastructure     EventType = "infrastructure_event"
-	EventTypeDLPScanResult      EventType = "dlp_scan_result"
+	EventTypeLLMCall         EventType = "llm_call"
+	EventTypeToolCall        EventType = "tool_call"
+	EventTypeCheckpoint      EventType = "checkpoint"
+	EventTypeException       EventType = "exception"
+	EventTypeValidatorResult EventType = "validator_result"
+	EventTypeDriftSignal     EventType = "drift_signal"
+	EventTypeInjectionAlert  EventType = "injection_alert"
+	EventTypeInfrastructure  EventType = "infrastructure_event"
+	EventTypeDLPScanResult   EventType = "dlp_scan_result"
+	EventTypeMCPCall         EventType = "mcp_call"
+	EventTypeEvalScore       EventType = "eval_score"
 )
 
 // ExecutionStatus is the lifecycle state of an Execution. Exactly one
@@ -130,6 +132,67 @@ type LLMCallPayload struct {
 	Temperature  *float64 `json:"temperature,omitempty"`
 }
 
+// EvalScorePayload is one external evaluator's verdict on an
+// execution's output. Mesedi does not run the evaluation itself;
+// customers compute scores via Ragas, Promptfoo, Vectara HHEM, an
+// LLM-judge, or their own custom evaluator and emit this event with
+// the result. Mesedi #14 (grounding_failure, Tier 3) aggregates
+// these events over time windows to fire alerts when scores trend
+// below threshold.
+//
+// First-pass design notes:
+//
+//  1. The event is purely ingestion-only at v1. There is no detector
+//     that fires on a single eval_score event. Downstream detectors
+//     subscribe to aggregations (mean score over N runs for a given
+//     evaluator_id) which is where the actual signal lives.
+//
+//  2. metric_type is intentionally an open string. We ship a list of
+//     well-known values ("faithfulness", "relevance",
+//     "hallucination_rate", "answer_correctness") in the SDK docs,
+//     but the backend doesn't enforce them. Customers running custom
+//     evaluators can pick their own names without coordinating with
+//     us.
+//
+//  3. score is a float in [0, 1]. Higher = better when applicable
+//     (faithfulness, relevance); for inverse metrics like
+//     hallucination_rate, lower = better. The threshold field lets
+//     evaluators communicate which direction "pass" is.
+type EvalScorePayload struct {
+	EvaluatorID    string  `json:"evaluator_id"`         // stable id, e.g. "ragas/faithfulness" | "vectara-hhem/v1" | "custom:my-judge"
+	MetricType     string  `json:"metric_type"`          // "faithfulness" | "relevance" | "hallucination_rate" | "answer_correctness" | ...
+	Score          float64 `json:"score"`                // numeric value the evaluator produced
+	Passed         bool    `json:"passed"`               // evaluator's pass/fail verdict per its own threshold
+	Threshold      float64 `json:"threshold,omitempty"`  // optional, the cutoff the evaluator used
+	HigherIsBetter bool    `json:"higher_is_better"`     // true for faithfulness; false for hallucination_rate
+	Reason         string  `json:"reason,omitempty"`     // optional, the evaluator's explanation
+	Confidence     float64 `json:"confidence,omitempty"` // 0..1 if the evaluator reports its own confidence
+}
+
+// MCPCallPayload is one invocation of a Model Context Protocol
+// server's method. Distinct from ToolCallPayload because MCP routes
+// through a separate server identity (e.g. an Anthropic-provided
+// `filesystem` server, a customer's internal `crm-mcp` server),
+// which matters for cost attribution and provider-incident
+// correlation. The dashboard renders the server identity prominently
+// so SREs can see "we spent $X on Anthropic MCP servers vs $Y on
+// third-party servers" without inspecting tool args.
+//
+// Per-call structure mirrors ToolCallPayload so the existing
+// tool_failures detector can pick up failed MCP calls without code
+// changes: ServerName + "." + Method is the cluster signature when
+// Error / ErrorClass is set.
+type MCPCallPayload struct {
+	ServerName  string          `json:"server_name"`          // e.g. "filesystem", "github", "crm-mcp"
+	ServerURL   string          `json:"server_url,omitempty"` // e.g. "stdio:./filesystem-mcp" or "https://mcp.example.com"
+	Method      string          `json:"method"`               // e.g. "read_file", "list_resources"
+	Arguments   json.RawMessage `json:"arguments,omitempty"`
+	ReturnValue json.RawMessage `json:"return_value,omitempty"`
+	LatencyMs   int64           `json:"latency_ms,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	ErrorClass  string          `json:"error_class,omitempty"` // "hard_error" | "soft_error" | "timeout" | "server_unreachable" | "method_not_found"
+}
+
 // ToolCallPayload is one invocation of a developer-registered tool.
 type ToolCallPayload struct {
 	ToolName    string          `json:"tool_name"`
@@ -192,26 +255,26 @@ type DriftSignalPayload struct {
 // EventType discriminates between the three sub-cases:
 //
 //   - "rate_limit"     a provider returned HTTP 429 or signalled
-//                      x-ratelimit-remaining=0 in headers
+//     x-ratelimit-remaining=0 in headers
 //   - "circuit_breaker" the SDK's local circuit-breaker tripped open
-//                      and stopped sending requests to a provider
+//     and stopped sending requests to a provider
 //   - "quota_exhausted" the upstream provider returned a hard quota
-//                      error (different from 429: hard means you've
-//                      consumed your monthly cap, not your per-minute)
+//     error (different from 429: hard means you've
+//     consumed your monthly cap, not your per-minute)
 //
 // Signature pieces for clustering live in (Provider, Endpoint, Reason);
 // see store.ThrottlingSignature for the canonical assembly.
 type InfrastructureEventPayload struct {
-	EventType       string `json:"event_type"`                 // "rate_limit" | "circuit_breaker" | "quota_exhausted"
-	Provider        string `json:"provider,omitempty"`         // "anthropic" | "openai" | ...
-	Endpoint        string `json:"endpoint,omitempty"`         // e.g. "/v1/messages"
-	StatusCode      int    `json:"status_code,omitempty"`      // HTTP status (429 etc.)
-	RetryAfterMs    int64  `json:"retry_after_ms,omitempty"`   // server-suggested backoff
-	QuotaRemaining  int    `json:"quota_remaining,omitempty"`  // from x-ratelimit-remaining
-	QuotaLimit      int    `json:"quota_limit,omitempty"`      // from x-ratelimit-limit
-	QuotaDimension  string `json:"quota_dimension,omitempty"`  // "tokens_per_minute" | "requests_per_second" | ...
-	BackoffAppliedMs int64 `json:"backoff_applied_ms,omitempty"` // how long the SDK actually waited
-	CircuitState    string `json:"circuit_state,omitempty"`    // "open" | "half_open" | "closed"
+	EventType        string `json:"event_type"`                   // "rate_limit" | "circuit_breaker" | "quota_exhausted"
+	Provider         string `json:"provider,omitempty"`           // "anthropic" | "openai" | ...
+	Endpoint         string `json:"endpoint,omitempty"`           // e.g. "/v1/messages"
+	StatusCode       int    `json:"status_code,omitempty"`        // HTTP status (429 etc.)
+	RetryAfterMs     int64  `json:"retry_after_ms,omitempty"`     // server-suggested backoff
+	QuotaRemaining   int    `json:"quota_remaining,omitempty"`    // from x-ratelimit-remaining
+	QuotaLimit       int    `json:"quota_limit,omitempty"`        // from x-ratelimit-limit
+	QuotaDimension   string `json:"quota_dimension,omitempty"`    // "tokens_per_minute" | "requests_per_second" | ...
+	BackoffAppliedMs int64  `json:"backoff_applied_ms,omitempty"` // how long the SDK actually waited
+	CircuitState     string `json:"circuit_state,omitempty"`      // "open" | "half_open" | "closed"
 }
 
 // DLPScanResultHit is one rule's roll-up inside DLPScanResultPayload.
@@ -237,13 +300,13 @@ type DLPScanResultHit struct {
 // records a warning-tier cluster, and SeverityMedium hits record but
 // don't fire (under threshold).
 type DLPScanResultPayload struct {
-	ScanLayer       string             `json:"scan_layer"`                 // "llm_prompt" | "tool_arguments" | "tool_return"
-	ParentEventID   string             `json:"parent_event_id,omitempty"`  // the redacted event this scan was derived from
+	ScanLayer       string             `json:"scan_layer"`                  // "llm_prompt" | "tool_arguments" | "tool_return"
+	ParentEventID   string             `json:"parent_event_id,omitempty"`   // the redacted event this scan was derived from
 	ParentEventType string             `json:"parent_event_type,omitempty"` // "llm_call" | "tool_call"
-	HighestSeverity string             `json:"highest_severity"`           // for fast filtering
-	HitCount        int                `json:"hit_count"`                  // sum of Count across Hits
-	Hits            []DLPScanResultHit `json:"hits"`                       // per-rule rollup
-	Action          string             `json:"action"`                     // "redacted" | "alerted" (medium-only)
+	HighestSeverity string             `json:"highest_severity"`            // for fast filtering
+	HitCount        int                `json:"hit_count"`                   // sum of Count across Hits
+	Hits            []DLPScanResultHit `json:"hits"`                        // per-rule rollup
+	Action          string             `json:"action"`                      // "redacted" | "alerted" (medium-only)
 }
 
 // InjectionAlertPayload is the outcome of one prompt-injection / boundary-

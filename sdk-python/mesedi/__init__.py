@@ -55,8 +55,10 @@ from mesedi.events import (
 from mesedi.halt import Budget, MesediHalt
 from mesedi.observe import (
     checkpoint,
+    emit_eval_score,
     emit_infrastructure_event,
     emit_llm_call,
+    emit_mcp_call,
     validator_result,
 )
 from mesedi.tool import tool
@@ -74,8 +76,10 @@ __all__ = [
     "Status",
     "checkpoint",
     "configure",
+    "emit_eval_score",
     "emit_infrastructure_event",
     "emit_llm_call",
+    "emit_mcp_call",
     "flush",
     "get_client",
     "instrument_anthropic",

@@ -324,13 +324,13 @@ type WebhookDelivery struct {
 // Phase-3+ detectors land. Keep this list in sync with the SDK side
 // (mesedi-python events.EventType) when adding new classes.
 const (
-	FailureClassCrashes        = "crashes"
-	FailureClassLoops          = "loops"
-	FailureClassToolFailures   = "tool_failures"
-	FailureClassValidator      = "validator_failures"
-	FailureClassDrift          = "drift"
-	FailureClassCostVelocity   = "cost_velocity"
-	FailureClassInjection      = "prompt_injection"
+	FailureClassCrashes      = "crashes"
+	FailureClassLoops        = "loops"
+	FailureClassToolFailures = "tool_failures"
+	FailureClassValidator    = "validator_failures"
+	FailureClassDrift        = "drift"
+	FailureClassCostVelocity = "cost_velocity"
+	FailureClassInjection    = "prompt_injection"
 	// FailureClassInfraThrottled groups executions whose underlying
 	// provider transport hit a rate-limit, quota exhaustion, or local
 	// circuit-breaker trip. Distinct from cost_velocity (different
@@ -346,6 +346,20 @@ const (
 	// can see "we have 12 runs leaking AWS keys" vs "47 runs leaking
 	// Stripe keys" without alert flood.
 	FailureClassDataLeakage = "data_leakage"
+	// FailureClassSemanticLoop groups executions where an agent's
+	// canonical-state hash repeated 3+ times across checkpoints.
+	// Captures the "different surface text, same logical state"
+	// loop pattern that the existing step_count / identical_call
+	// detectors miss. Signature is "semantic_loop:<hex8>", a stable
+	// fingerprint of the looping state.
+	FailureClassSemanticLoop = "semantic_loop"
+	// FailureClassToolSchemaDrift groups executions where a tool's
+	// return-value SHAPE changed vs the project's stable historical
+	// baseline. Signature is "<tool_name>:<hex8>" of the new shape
+	// so each (tool, new shape) gets its own group: SREs see a
+	// single alert when a tool rolls over to a new shape, not one
+	// alert per agent run after the rollover.
+	FailureClassToolSchemaDrift = "tool_schema_drift"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same
@@ -377,11 +391,11 @@ type FailureGroup struct {
 // (callers can suppress this row if they only want explicitly
 // attributed cost).
 type TenantCostRow struct {
-	TenantID         string  `json:"tenant_id"`
-	TotalCostUSD     float64 `json:"total_cost_usd"`
-	ExecutionCount   int     `json:"execution_count"`
-	TotalTokensIn    int64   `json:"total_tokens_in"`
-	TotalTokensOut   int64   `json:"total_tokens_out"`
+	TenantID       string  `json:"tenant_id"`
+	TotalCostUSD   float64 `json:"total_cost_usd"`
+	ExecutionCount int     `json:"execution_count"`
+	TotalTokensIn  int64   `json:"total_tokens_in"`
+	TotalTokensOut int64   `json:"total_tokens_out"`
 }
 
 // Store is the abstract persistence interface. Phase 1.5 minimal surface;
@@ -782,6 +796,34 @@ type Store interface {
 	// failure_class=data_leakage and signature=ruleID. One group per
 	// rule per project so SecOps sees per-secret-type aggregation.
 	GroupDataLeakage(ctx context.Context, executionID, projectID, ruleID string) (bool, error)
+	// ListCheckpointPayloads returns the payloads of all checkpoint
+	// events on the given execution in sequence order. Used by the
+	// semantic_loop detector to feed its canonical-state hash chain.
+	// The returned slice's index order matches the events' sequence.
+	ListCheckpointPayloads(ctx context.Context, executionID string) ([][]byte, error)
+	// GroupSemanticLoop upserts a failure_group with
+	// failure_class=semantic_loop and the detector-supplied signature
+	// (semantic_loop:<hex8>). Returns isNew=true on first occurrence.
+	GroupSemanticLoop(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// ListSuccessfulToolReturns returns up to `limit` recent
+	// return_value payloads from successful tool_call events for the
+	// (project, tool) pair, ordered newest-first. Used by the
+	// tool_schema_drift detector to build the historical shape
+	// rollup. Excludes the calling execution so the detector compares
+	// against PRIOR runs, not its own.
+	ListSuccessfulToolReturns(
+		ctx context.Context,
+		projectID, toolName, excludeExecutionID string,
+		limit int,
+	) ([][]byte, error)
+	// ListToolNamesInExecution returns the distinct tool_names
+	// invoked successfully in the execution. The schema-drift
+	// detector walks this list and queries history per tool.
+	ListToolNamesInExecution(ctx context.Context, executionID string) ([]string, error)
+	// GroupToolSchemaDrift upserts a failure_group with
+	// failure_class=tool_schema_drift and the detector-supplied
+	// signature.
+	GroupToolSchemaDrift(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// GetCostByTenant aggregates SUM(estimated_cost_usd) and COUNT(*)
 	// per tenant_id within the requested time window, ordered by
 	// total cost descending. Executions with NULL tenant_id collapse

@@ -2321,6 +2321,137 @@ func (s *SQLiteStore) GroupDataLeakage(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassDataLeakage, ruleID)
 }
 
+// ListCheckpointPayloads returns the payloads of all checkpoint
+// events on the given execution in sequence order. Returns an empty
+// slice (not nil) when no checkpoints exist, so the semantic_loop
+// detector can range over the result unconditionally.
+func (s *SQLiteStore) ListCheckpointPayloads(
+	ctx context.Context,
+	executionID string,
+) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'checkpoint'
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list checkpoint payloads: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan checkpoint payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate checkpoint payloads: %w", err)
+	}
+	return out, nil
+}
+
+// GroupSemanticLoop upserts a failure_group with
+// failure_class=semantic_loop and the caller-supplied signature.
+func (s *SQLiteStore) GroupSemanticLoop(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassSemanticLoop, signature)
+}
+
+// ListSuccessfulToolReturns returns recent return_value payloads
+// from successful tool_call events for a (project, tool). Used by
+// the schema-drift detector to build the historical baseline.
+// Excludes the calling execution so we compare against PRIOR runs.
+func (s *SQLiteStore) ListSuccessfulToolReturns(
+	ctx context.Context,
+	projectID, toolName, excludeExecutionID string,
+	limit int,
+) ([][]byte, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT json_extract(ev.payload, '$.return_value')
+		FROM events ev
+		JOIN executions ex ON ex.execution_id = ev.execution_id
+		WHERE ex.project_id = ?
+		  AND ev.event_type = 'tool_call'
+		  AND json_extract(ev.payload, '$.tool_name') = ?
+		  AND COALESCE(json_extract(ev.payload, '$.status'), 'ok') != 'failed'
+		  AND ev.execution_id != ?
+		ORDER BY ev.timestamp DESC
+		LIMIT ?
+	`, projectID, toolName, excludeExecutionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list successful tool returns: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p sql.NullString
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan tool return: %w", err)
+		}
+		if !p.Valid || p.String == "" {
+			continue
+		}
+		out = append(out, []byte(p.String))
+	}
+	return out, rows.Err()
+}
+
+// ListToolNamesInExecution returns the distinct tool_names invoked
+// successfully in the execution. Used by the schema-drift detector
+// to enumerate tools to query history for.
+func (s *SQLiteStore) ListToolNamesInExecution(
+	ctx context.Context,
+	executionID string,
+) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT json_extract(payload, '$.tool_name')
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'tool_call'
+		  AND COALESCE(json_extract(payload, '$.status'), 'ok') != 'failed'
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list tool names: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var n sql.NullString
+		if err := rows.Scan(&n); err != nil {
+			return nil, fmt.Errorf("scan tool name: %w", err)
+		}
+		if !n.Valid || n.String == "" {
+			continue
+		}
+		out = append(out, n.String)
+	}
+	return out, rows.Err()
+}
+
+// GroupToolSchemaDrift upserts a failure_group with
+// failure_class=tool_schema_drift and the caller-supplied signature.
+func (s *SQLiteStore) GroupToolSchemaDrift(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassToolSchemaDrift, signature)
+}
+
 // FindFirstFailedValidator returns the validator name from the first
 // (lowest-sequence) validator_result event with payload.passed = false
 // for the given execution. JSON1 boolean comparison: SQLite stores

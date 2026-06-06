@@ -96,8 +96,8 @@ var builtinRules = []Rule{
 		Severity: SeverityCritical,
 	},
 	{
-		ID:       "credit_card_pan",
-		Label:    "Credit card primary account number",
+		ID:    "credit_card_pan",
+		Label: "Credit card primary account number",
 		// 13-19 digits with optional separators. Tuned for VISA / MC
 		// / AMEX / Discover prefixes; the upstream consumer should
 		// Luhn-validate to suppress false positives on coincidental
@@ -107,8 +107,8 @@ var builtinRules = []Rule{
 		Severity: SeverityHigh,
 	},
 	{
-		ID:       "gcp_service_account_json",
-		Label:    "GCP service-account JSON key fragment",
+		ID:    "gcp_service_account_json",
+		Label: "GCP service-account JSON key fragment",
 		// Look for the unmistakeable header that prefixes every
 		// downloaded GCP service-account JSON key body. Other forms
 		// of GCP credentials (OAuth refresh tokens, etc.) need
@@ -117,8 +117,8 @@ var builtinRules = []Rule{
 		Severity: SeverityCritical,
 	},
 	{
-		ID:       "github_personal_token",
-		Label:    "GitHub personal access token (classic / fine-grained)",
+		ID:    "github_personal_token",
+		Label: "GitHub personal access token (classic / fine-grained)",
 		// Covers ghp_ (classic) and github_pat_ (fine-grained). PEM
 		// quotes the prefix list because both variants are present
 		// in production today.
@@ -132,8 +132,8 @@ var builtinRules = []Rule{
 		Severity: SeverityCritical,
 	},
 	{
-		ID:       "jwt",
-		Label:    "JSON Web Token (JWT)",
+		ID:    "jwt",
+		Label: "JSON Web Token (JWT)",
 		// Three base64url segments separated by dots. The first
 		// segment must start with "eyJ" (base64 of {"). This
 		// constraint cuts the false-positive rate dramatically vs
@@ -142,16 +142,16 @@ var builtinRules = []Rule{
 		Severity: SeverityCritical,
 	},
 	{
-		ID:       "openai_api_key",
-		Label:    "OpenAI API key",
+		ID:    "openai_api_key",
+		Label: "OpenAI API key",
 		// Covers the legacy sk- form and the newer project-scoped
 		// sk-proj- form.
 		Pattern:  `\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b`,
 		Severity: SeverityCritical,
 	},
 	{
-		ID:       "private_key_pem",
-		Label:    "Private key (PEM header)",
+		ID:    "private_key_pem",
+		Label: "Private key (PEM header)",
 		// Catches any flavor of -----BEGIN ... PRIVATE KEY-----.
 		Pattern:  `-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----`,
 		Severity: SeverityCritical,
@@ -163,8 +163,8 @@ var builtinRules = []Rule{
 		Severity: SeverityCritical,
 	},
 	{
-		ID:       "ssn_us",
-		Label:    "US Social Security Number",
+		ID:    "ssn_us",
+		Label: "US Social Security Number",
 		// Conservative: requires the canonical XXX-XX-XXXX format
 		// with hyphens. False-positive risk on long phone numbers
 		// is non-zero, so we ship as High not Critical.

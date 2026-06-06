@@ -377,3 +377,188 @@ def emit_infrastructure_event(
         timestamp=utcnow_rfc3339(),
         payload=payload,
     ))
+
+
+def emit_mcp_call(
+    server_name: str,
+    method: str,
+    server_url: str = "",
+    arguments: Any = None,
+    return_value: Any = None,
+    latency_ms: int = 0,
+    error: str = "",
+    error_class: str = "",
+) -> None:
+    """Emit an ``mcp_call`` event for one Model Context Protocol
+    server invocation.
+
+    Use this when your agent talks to an MCP server (Anthropic's
+    filesystem / github servers, a customer-hosted MCP server, etc.).
+    The dashboard renders MCP calls in a distinct chip so cost
+    attribution can break down by server identity, and the existing
+    tool_failures detector picks up failed MCP calls when ``error``
+    or ``error_class`` is non-empty.
+
+    Typical caller pattern::
+
+        start = time.perf_counter()
+        try:
+            result = mcp_client.invoke(server, method, args)
+            mesedi.emit_mcp_call(
+                server_name=server,
+                method=method,
+                arguments=args,
+                return_value=result,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
+            return result
+        except mcp.MCPError as exc:
+            mesedi.emit_mcp_call(
+                server_name=server,
+                method=method,
+                arguments=args,
+                error=str(exc),
+                error_class="hard_error",
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
+            raise
+
+    Outside @wrap: no-op. Halt-safe (budget check runs first).
+
+    Args:
+        server_name: Stable identifier for the MCP server
+            ("filesystem", "github", "crm-mcp"). Used as the primary
+            grouping dimension on the dashboard.
+        method: The MCP method invoked ("read_file", "list_resources",
+            etc.). Combined with server_name to form a per-method
+            cluster signature on failure.
+        server_url: Optional. The MCP server's URL or stdio target,
+            captured for the expanded payload view. Useful when
+            multiple instances of the same server name run with
+            different configs.
+        arguments: The method arguments (any JSON-serializable value).
+        return_value: The successful return value. Omit on error.
+        latency_ms: Wall-clock duration in milliseconds.
+        error: Error message when the call failed.
+        error_class: Classifier for the failure ("hard_error",
+            "soft_error", "timeout", "server_unreachable",
+            "method_not_found").
+    """
+    ctx = current_execution_context()
+    if ctx is None:
+        return
+
+    ctx.check_budget()
+    if ctx.budget_tracker is not None:
+        ctx.budget_tracker.increment_steps()
+
+    payload: Dict[str, Any] = {
+        "server_name": server_name,
+        "method": method,
+    }
+    if server_url:
+        payload["server_url"] = server_url
+    if arguments is not None:
+        payload["arguments"] = arguments
+    if return_value is not None:
+        payload["return_value"] = return_value
+    if latency_ms:
+        payload["latency_ms"] = int(latency_ms)
+    if error:
+        payload["error"] = error
+    if error_class:
+        payload["error_class"] = error_class
+
+    client = get_client()
+    client.submit_event(Event(
+        event_id=f"evt-{uuid.uuid4().hex[:12]}",
+        execution_id=ctx.execution_id,
+        event_type=EventType.MCP_CALL,
+        sequence=ctx.next_sequence(),
+        timestamp=utcnow_rfc3339(),
+        duration_ms=latency_ms,
+        payload=payload,
+    ))
+
+
+def emit_eval_score(
+    evaluator_id: str,
+    metric_type: str,
+    score: float,
+    passed: bool,
+    threshold: float = 0.0,
+    higher_is_better: bool = True,
+    reason: str = "",
+    confidence: float = 0.0,
+) -> None:
+    """Emit an ``eval_score`` event recording one external evaluator
+    verdict.
+
+    Use this when you run Ragas, Promptfoo, Vectara HHEM, a custom
+    LLM-judge, or any other evaluator against an execution's output
+    and want Mesedi to track the score over time. Mesedi #14
+    (grounding_failure, Tier 3) aggregates these events across
+    executions to fire alerts when scores trend below threshold.
+
+    Typical caller pattern (Ragas faithfulness)::
+
+        from ragas.metrics import faithfulness
+        score = faithfulness.score(question, answer, contexts)
+        mesedi.emit_eval_score(
+            evaluator_id="ragas/faithfulness",
+            metric_type="faithfulness",
+            score=score,
+            passed=score >= 0.7,
+            threshold=0.7,
+            higher_is_better=True,
+        )
+
+    Outside @wrap: no-op.
+
+    Args:
+        evaluator_id: Stable identifier for the evaluator
+            ("ragas/faithfulness", "vectara-hhem/v1", "custom:my-judge").
+            Used as the primary aggregation key.
+        metric_type: What the score measures ("faithfulness",
+            "relevance", "hallucination_rate", "answer_correctness", ...).
+            Free-form; the dashboard groups by it.
+        score: The numeric score the evaluator produced.
+        passed: The evaluator's own pass/fail verdict.
+        threshold: Optional cutoff value the evaluator used.
+        higher_is_better: True for faithfulness/relevance/correctness;
+            False for inverse metrics like hallucination_rate.
+        reason: Optional explanation the evaluator returned.
+        confidence: Optional [0, 1] self-confidence the evaluator
+            reports about its score.
+    """
+    ctx = current_execution_context()
+    if ctx is None:
+        return
+
+    ctx.check_budget()
+    if ctx.budget_tracker is not None:
+        ctx.budget_tracker.increment_steps()
+
+    payload: Dict[str, Any] = {
+        "evaluator_id": evaluator_id,
+        "metric_type": metric_type,
+        "score": float(score),
+        "passed": bool(passed),
+        "higher_is_better": bool(higher_is_better),
+    }
+    if threshold:
+        payload["threshold"] = float(threshold)
+    if reason:
+        payload["reason"] = reason
+    if confidence:
+        payload["confidence"] = float(confidence)
+
+    client = get_client()
+    client.submit_event(Event(
+        event_id=f"evt-{uuid.uuid4().hex[:12]}",
+        execution_id=ctx.execution_id,
+        event_type=EventType.EVAL_SCORE,
+        sequence=ctx.next_sequence(),
+        timestamp=utcnow_rfc3339(),
+        payload=payload,
+    ))

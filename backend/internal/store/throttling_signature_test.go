@@ -20,10 +20,10 @@ import "testing"
 
 func Test_ThrottlingSignature_RateLimit(t *testing.T) {
 	cases := []struct {
-		name              string
-		provider          string
-		dimension         string
-		want              string
+		name      string
+		provider  string
+		dimension string
+		want      string
 	}{
 		{
 			name:      "with dimension",

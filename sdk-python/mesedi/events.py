@@ -47,6 +47,14 @@ class EventType:
     # breaker trip, hard quota exhaustion). Consumed by the
     # infrastructure_throttled detector on the backend.
     INFRASTRUCTURE_EVENT: ClassVar[str] = "infrastructure_event"
+    # Mesedi #7: peer to TOOL_CALL for Model Context Protocol server
+    # invocations. Captures server identity + method separately so
+    # cost / failure attribution can break down by MCP server.
+    MCP_CALL:             ClassVar[str] = "mcp_call"
+    # Mesedi #9: external evaluator score (Ragas / Promptfoo / HHEM
+    # / custom judge). Ingestion-only at v1; Mesedi #14 aggregates
+    # these into grounding_failure clusters in Tier 3.
+    EVAL_SCORE:           ClassVar[str] = "eval_score"
 
 
 class Status:

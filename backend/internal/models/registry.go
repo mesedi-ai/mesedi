@@ -92,18 +92,18 @@ func IsKnown(modelID string) bool {
 // sync.
 var windowByModel = map[string]int{
 	// ── Anthropic ─────────────────────────────────────────────────
-	"claude-opus-4-6":             200_000,
-	"claude-sonnet-4-6":           200_000,
-	"claude-haiku-4-5":            200_000,
-	"claude-haiku-4-5-20251001":   200_000,
-	"claude-3-7-sonnet":           200_000,
-	"claude-3-5-sonnet":           200_000,
-	"claude-3-5-haiku":            200_000,
-	"claude-3-opus":               200_000,
-	"claude-3-sonnet":             200_000,
-	"claude-3-haiku":              200_000,
-	"claude-2.1":                  200_000,
-	"claude-2":                    100_000,
+	"claude-opus-4-6":           200_000,
+	"claude-sonnet-4-6":         200_000,
+	"claude-haiku-4-5":          200_000,
+	"claude-haiku-4-5-20251001": 200_000,
+	"claude-3-7-sonnet":         200_000,
+	"claude-3-5-sonnet":         200_000,
+	"claude-3-5-haiku":          200_000,
+	"claude-3-opus":             200_000,
+	"claude-3-sonnet":           200_000,
+	"claude-3-haiku":            200_000,
+	"claude-2.1":                200_000,
+	"claude-2":                  100_000,
 
 	// ── OpenAI ────────────────────────────────────────────────────
 	"gpt-5":         400_000,
@@ -131,21 +131,21 @@ var windowByModel = map[string]int{
 	"gemini-1.5-flash": 1_000_000,
 
 	// ── Meta / Llama ──────────────────────────────────────────────
-	"llama-4-scout":   10_000_000,
+	"llama-4-scout":    10_000_000,
 	"llama-4-maverick": 1_000_000,
-	"llama-3.3-70b":   128_000,
-	"llama-3.2-90b":   128_000,
-	"llama-3.1-405b":  128_000,
-	"llama-3.1-70b":   128_000,
-	"llama-3.1-8b":    128_000,
+	"llama-3.3-70b":    128_000,
+	"llama-3.2-90b":    128_000,
+	"llama-3.1-405b":   128_000,
+	"llama-3.1-70b":    128_000,
+	"llama-3.1-8b":     128_000,
 
 	// ── Mistral ───────────────────────────────────────────────────
-	"mistral-large-2":     128_000,
-	"mistral-large-2407":  128_000,
-	"mistral-medium":      32_000,
-	"mistral-small-3":     32_000,
-	"mistral-nemo":        128_000,
-	"codestral":           256_000,
+	"mistral-large-2":    128_000,
+	"mistral-large-2407": 128_000,
+	"mistral-medium":     32_000,
+	"mistral-small-3":    32_000,
+	"mistral-nemo":       128_000,
+	"codestral":          256_000,
 }
 
 // providerByModel groups each model under its vendor for cross-tenant

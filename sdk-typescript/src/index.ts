@@ -38,12 +38,16 @@ export { tool } from "./tool.js";
 export type { ToolOptions } from "./tool.js";
 export {
   checkpoint,
+  emitEvalScore,
   emitInfrastructureEvent,
+  emitMcpCall,
   validatorResult,
 } from "./observe.js";
 export type {
+  EvalScoreOptions,
   InfrastructureEventOptions,
   InfrastructureReason,
+  McpCallOptions,
   ValidatorResultOptions,
   ValidatorSeverity,
 } from "./observe.js";
