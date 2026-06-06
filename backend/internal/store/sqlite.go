@@ -2825,7 +2825,7 @@ func (s *SQLiteStore) GetExecutionTopology(
 			SELECT e.execution_id, e.parent_execution_id, e.status, e.started_at, e.ended_at, e.duration_ms, e.sdk_language, e.failure_group_id, a.depth - 1
 			FROM executions e
 			JOIN ancestors a ON e.execution_id = a.parent_execution_id
-			WHERE e.project_id = ? AND a.depth > -?
+			WHERE e.project_id = ? AND a.depth > ?
 		),
 		descendants(execution_id, parent_execution_id, status, started_at, ended_at, duration_ms, sdk_language, failure_group_id, depth) AS (
 			SELECT execution_id, parent_execution_id, status, started_at, ended_at, duration_ms, sdk_language, failure_group_id, 0
@@ -2842,9 +2842,14 @@ func (s *SQLiteStore) GetExecutionTopology(
 		SELECT execution_id, parent_execution_id, status, started_at, ended_at, duration_ms, sdk_language, failure_group_id, depth FROM descendants
 		ORDER BY depth ASC, started_at ASC
 	`
+	// Parameter 4 is the depth FLOOR for the ancestors CTE (a
+	// negative value); parameter 8 is the depth CEILING for the
+	// descendants CTE (positive). Negation happens in Go so the
+	// query stays portable between SQLite and Postgres (Postgres
+	// can't infer the type of a unary-minus on a placeholder).
 	rows, err := s.db.QueryContext(ctx, query,
 		executionID, projectID,
-		projectID, maxDepth,
+		projectID, -maxDepth,
 		executionID, projectID,
 		projectID, maxDepth,
 	)

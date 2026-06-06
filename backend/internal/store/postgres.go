@@ -2139,7 +2139,7 @@ func (s *PostgresStore) GetExecutionTopology(
 			SELECT e.execution_id, e.parent_execution_id, e.status, e.started_at, e.ended_at, e.duration_ms, e.sdk_language, e.failure_group_id, a.depth - 1
 			FROM executions e
 			JOIN ancestors a ON e.execution_id = a.parent_execution_id
-			WHERE e.project_id = $3 AND a.depth > -$4
+			WHERE e.project_id = $3 AND a.depth > $4
 		),
 		descendants(execution_id, parent_execution_id, status, started_at, ended_at, duration_ms, sdk_language, failure_group_id, depth) AS (
 			SELECT execution_id, parent_execution_id, status, started_at, ended_at, duration_ms, sdk_language, failure_group_id, 0
@@ -2156,9 +2156,15 @@ func (s *PostgresStore) GetExecutionTopology(
 		SELECT execution_id, parent_execution_id, status, started_at, ended_at, duration_ms, sdk_language, failure_group_id, depth FROM descendants
 		ORDER BY depth ASC, started_at ASC
 	`
+	// $4 is the depth floor for the ancestors CTE (negative); $8 is
+	// the depth ceiling for the descendants CTE (positive). We
+	// precompute the negation in Go so Postgres can resolve the
+	// parameter type without needing a unary-minus operator (which
+	// triggers "operator is not unique: - unknown" against an
+	// unparameterized integer).
 	rows, err := s.db.QueryContext(ctx, query,
 		executionID, projectID,
-		projectID, maxDepth,
+		projectID, -maxDepth,
 		executionID, projectID,
 		projectID, maxDepth,
 	)
