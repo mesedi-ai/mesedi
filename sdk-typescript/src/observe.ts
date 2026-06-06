@@ -502,6 +502,12 @@ export async function pauseForHuman(): Promise<void> {
   const ctx = currentExecutionContext();
   if (!ctx) return;
   const client = getClient();
+  // Drain pending shipper traffic first so the POST /executions
+  // that opened this wrap() has landed on the backend. Without
+  // this, the synchronous PATCH races the async POST and
+  // returns 404 when pause is called immediately after the
+  // agent starts.
+  await client.flush(5_000);
   const res = await fetch(`${client.baseUrl}/executions/${ctx.executionId}`, {
     method: "PATCH",
     headers: {
@@ -606,6 +612,11 @@ export async function requestHumanIntervention(
   const client = getClient();
   const requestId = `hitl-${cryptoRandomId()}`;
   const requestedAt = utcNowRfc3339();
+  // Drain pending shipper traffic so the POST /executions for
+  // this wrap() has landed. Without this, calling
+  // requestHumanIntervention immediately after the agent starts
+  // races the async POST and returns 404.
+  await client.flush(5_000);
   const res = await fetch(`${client.baseUrl}/executions/${ctx.executionId}`, {
     method: "PATCH",
     headers: {

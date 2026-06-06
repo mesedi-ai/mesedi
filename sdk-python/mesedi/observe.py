@@ -733,6 +733,11 @@ def pause_for_human() -> None:
     if ctx is None:
         return
     client = get_client()
+    # Drain pending shipper traffic first so the POST /executions
+    # that opened this @wrap has landed on the backend. Without
+    # this, the synchronous PATCH races the async POST and returns
+    # 404 when pause is called immediately after the agent starts.
+    client.flush(timeout=5.0)
     r = client._http.patch(  # noqa: SLF001
         f"/executions/{ctx.execution_id}",
         json={"status": "awaiting_human"},
@@ -928,6 +933,11 @@ def request_human_intervention(
     # Pause the execution lifecycle first; the handle exists only
     # after the lifecycle transition lands.
     client = get_client()
+    # Drain pending shipper traffic so the POST /executions for
+    # this @wrap has landed. Without this, calling
+    # request_human_intervention immediately after the agent
+    # starts races the async POST and returns 404.
+    client.flush(timeout=5.0)
     r = client._http.patch(  # noqa: SLF001
         f"/executions/{ctx.execution_id}",
         json={"status": "awaiting_human"},
