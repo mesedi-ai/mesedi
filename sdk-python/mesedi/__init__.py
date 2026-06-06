@@ -59,6 +59,7 @@ from mesedi.observe import (
     emit_infrastructure_event,
     emit_llm_call,
     emit_mcp_call,
+    emit_memory_operation,
     validator_result,
 )
 from mesedi.tool import tool
@@ -80,6 +81,7 @@ __all__ = [
     "emit_infrastructure_event",
     "emit_llm_call",
     "emit_mcp_call",
+    "emit_memory_operation",
     "flush",
     "get_client",
     "instrument_anthropic",

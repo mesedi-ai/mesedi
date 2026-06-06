@@ -1868,6 +1868,74 @@ func (s *PostgresStore) GroupTokenWaste(ctx context.Context, executionID, projec
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassTokenWaste, signature)
 }
 
+// ListAllToolCallPayloads is the Postgres twin of the SQLite method
+// of the same name.
+func (s *PostgresStore) ListAllToolCallPayloads(ctx context.Context, executionID string) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE execution_id = $1
+		  AND event_type = 'tool_call'
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list all tool_call payloads: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan tool_call payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GroupSandboxEscape is the Postgres twin of the SQLite method of
+// the same name.
+func (s *PostgresStore) GroupSandboxEscape(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassSandboxEscape, signature)
+}
+
+// ListEvalScorePayloads is the Postgres twin of the SQLite method
+// of the same name.
+func (s *PostgresStore) ListEvalScorePayloads(ctx context.Context, executionID string) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE execution_id = $1
+		  AND event_type = 'eval_score'
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list eval_score payloads: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan eval_score payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GroupGroundingFailure is the Postgres twin of the SQLite method
+// of the same name.
+func (s *PostgresStore) GroupGroundingFailure(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassGroundingFailure, signature)
+}
+
 // FindFirstFailedValidator compares the jsonb-extracted 'passed' field
 // to the literal text 'false'. In SQLite the same comparison was
 // against integer 0 because SQLite's JSON1 returns 0 for false; in

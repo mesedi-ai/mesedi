@@ -562,3 +562,69 @@ def emit_eval_score(
         timestamp=utcnow_rfc3339(),
         payload=payload,
     ))
+
+
+def emit_memory_operation(
+    operation: str,
+    store_type: str = "",
+    store_name: str = "",
+    query: str = "",
+    document_count: int = 0,
+    token_count: int = 0,
+    top_score: float = 0.0,
+    latency_ms: int = 0,
+    cache_hit: bool = False,
+    error: str = "",
+    error_class: str = "",
+) -> None:
+    """Emit a ``memory_operation`` event for one external memory
+    store read / write / search.
+
+    Use this when your agent reads from or writes to a vector
+    database (Pinecone, Weaviate, pgvector, Qdrant), a key-value
+    cache, or any other backing store that holds agent state outside
+    the model context. The dashboard renders memory ops in a distinct
+    chip so cost / latency attribution can break down per store.
+
+    Outside @wrap: no-op.
+    """
+    ctx = current_execution_context()
+    if ctx is None:
+        return
+
+    ctx.check_budget()
+    if ctx.budget_tracker is not None:
+        ctx.budget_tracker.increment_steps()
+
+    payload: Dict[str, Any] = {"operation": operation}
+    if store_type:
+        payload["store_type"] = store_type
+    if store_name:
+        payload["store_name"] = store_name
+    if query:
+        payload["query"] = query[:1000]
+    if document_count:
+        payload["document_count"] = int(document_count)
+    if token_count:
+        payload["token_count"] = int(token_count)
+    if top_score:
+        payload["top_score"] = float(top_score)
+    if latency_ms:
+        payload["latency_ms"] = int(latency_ms)
+    if cache_hit:
+        payload["cache_hit"] = True
+    if error:
+        payload["error"] = error
+    if error_class:
+        payload["error_class"] = error_class
+
+    client = get_client()
+    client.submit_event(Event(
+        event_id=f"evt-{uuid.uuid4().hex[:12]}",
+        execution_id=ctx.execution_id,
+        event_type=EventType.MEMORY_OPERATION,
+        sequence=ctx.next_sequence(),
+        timestamp=utcnow_rfc3339(),
+        duration_ms=latency_ms,
+        payload=payload,
+    ))

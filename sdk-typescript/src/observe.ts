@@ -359,3 +359,53 @@ export function emitEvalScore(
   };
   client.submitEvent(event);
 }
+
+/** Options for emitMemoryOperation. */
+export interface MemoryOperationOptions {
+  storeType?: string;
+  storeName?: string;
+  query?: string;
+  documentCount?: number;
+  tokenCount?: number;
+  topScore?: number;
+  latencyMs?: number;
+  cacheHit?: boolean;
+  error?: string;
+  errorClass?: string;
+}
+
+/**
+ * Emit a `memory_operation` event for one external memory store
+ * read / write / search.
+ */
+export function emitMemoryOperation(
+  operation: "read" | "write" | "search" | "delete" | (string & {}),
+  opts: MemoryOperationOptions = {},
+): void {
+  const ctx = currentExecutionContext();
+  if (!ctx) return;
+
+  const payload: Record<string, unknown> = { operation };
+  if (opts.storeType) payload["store_type"] = opts.storeType;
+  if (opts.storeName) payload["store_name"] = opts.storeName;
+  if (opts.query) payload["query"] = opts.query.slice(0, 1000);
+  if (opts.documentCount) payload["document_count"] = Math.trunc(opts.documentCount);
+  if (opts.tokenCount) payload["token_count"] = Math.trunc(opts.tokenCount);
+  if (opts.topScore) payload["top_score"] = opts.topScore;
+  if (opts.latencyMs) payload["latency_ms"] = Math.trunc(opts.latencyMs);
+  if (opts.cacheHit) payload["cache_hit"] = true;
+  if (opts.error) payload["error"] = opts.error;
+  if (opts.errorClass) payload["error_class"] = opts.errorClass;
+
+  const client = getClient();
+  const event: Event = {
+    event_id: newEventId(),
+    execution_id: ctx.executionId,
+    event_type: EventType.MEMORY_OPERATION,
+    sequence: ctx.nextSequence(),
+    timestamp: utcNowRfc3339(),
+    duration_ms: opts.latencyMs,
+    payload,
+  };
+  client.submitEvent(event);
+}

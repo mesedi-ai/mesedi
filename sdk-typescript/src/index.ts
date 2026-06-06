@@ -41,6 +41,7 @@ export {
   emitEvalScore,
   emitInfrastructureEvent,
   emitMcpCall,
+  emitMemoryOperation,
   validatorResult,
 } from "./observe.js";
 export type {
@@ -48,6 +49,7 @@ export type {
   InfrastructureEventOptions,
   InfrastructureReason,
   McpCallOptions,
+  MemoryOperationOptions,
   ValidatorResultOptions,
   ValidatorSeverity,
 } from "./observe.js";

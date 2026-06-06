@@ -717,6 +717,38 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Mesedi #17 — sandbox_escape detector. Scans every tool_call
+	// payload for known sandbox-escape patterns (os.system, raw
+	// sockets, /proc/self, instance-metadata endpoints, secret
+	// file paths). Runs at the security tier alongside
+	// data_leakage; both fire same-priority and the dashboard
+	// renders both red.
+	if isTerminalStatus(patch.Status) {
+		toolPayloads, err := h.Store.ListAllToolCallPayloads(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("list tool_call payloads for sandbox-escape failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if len(toolPayloads) > 0 {
+			rawPayloads := make([]json.RawMessage, len(toolPayloads))
+			for i, p := range toolPayloads {
+				rawPayloads[i] = json.RawMessage(p)
+			}
+			if sig, fired := detectors.DetectSandboxEscape(rawPayloads); fired {
+				isNew, gErr := h.Store.GroupSandboxEscape(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("sandbox-escape grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassSandboxEscape, sig, isNew, gErr)
+			}
+		}
+	}
+
 	// Mesedi #1 — data_leakage detector. If any dlp_scan_result
 	// event for this execution recorded critical/high hits, cluster
 	// the execution under data_leakage with the matched rule_id as
@@ -769,6 +801,40 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				)
 			}
 			h.maybeFireWebhook(r, authProjectID, store.FailureClassValidator, validatorName, isNew, gErr)
+		}
+	}
+
+	// Mesedi #14 — grounding_failure detector. Aggregates the
+	// eval_score events ingested via emit_eval_score (#9). Fires
+	// when any external evaluator returned passed=false, or when
+	// mean score across higher_is_better evaluators fell below 0.5.
+	// Runs after validator_failures because:
+	//   - validator_result represents the agent's OWN self-check;
+	//     eval_score represents an EXTERNAL evaluator's verdict.
+	//     Both fire on quality issues but at different rigor levels.
+	if isTerminalStatus(patch.Status) {
+		evalPayloads, err := h.Store.ListEvalScorePayloads(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("list eval_score payloads for grounding detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if len(evalPayloads) > 0 {
+			rawPayloads := make([]json.RawMessage, len(evalPayloads))
+			for i, p := range evalPayloads {
+				rawPayloads[i] = json.RawMessage(p)
+			}
+			if sig, fired := detectors.DetectGroundingFailure(rawPayloads); fired {
+				isNew, gErr := h.Store.GroupGroundingFailure(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("grounding-failure grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassGroundingFailure, sig, isNew, gErr)
+			}
 		}
 	}
 

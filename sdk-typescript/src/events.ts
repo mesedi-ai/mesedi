@@ -52,6 +52,8 @@ export const EventType = {
   // / custom). Ingestion-only at v1; Mesedi #14 aggregates these
   // in Tier 3.
   EVAL_SCORE: "eval_score",
+  // Mesedi #15: external memory store read/write/search.
+  MEMORY_OPERATION: "memory_operation",
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

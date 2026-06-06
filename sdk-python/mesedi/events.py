@@ -55,6 +55,8 @@ class EventType:
     # / custom judge). Ingestion-only at v1; Mesedi #14 aggregates
     # these into grounding_failure clusters in Tier 3.
     EVAL_SCORE:           ClassVar[str] = "eval_score"
+    # Mesedi #15: external memory store read/write/search.
+    MEMORY_OPERATION:     ClassVar[str] = "memory_operation"
 
 
 class Status:

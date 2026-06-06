@@ -2506,6 +2506,82 @@ func (s *SQLiteStore) GroupTokenWaste(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassTokenWaste, signature)
 }
 
+// ListAllToolCallPayloads returns every tool_call event payload on
+// the execution in sequence order, including failed calls. Used by
+// the sandbox_escape detector.
+func (s *SQLiteStore) ListAllToolCallPayloads(
+	ctx context.Context,
+	executionID string,
+) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'tool_call'
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list all tool_call payloads: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan tool_call payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GroupSandboxEscape upserts a failure_group with
+// failure_class=sandbox_escape and the caller-supplied signature.
+func (s *SQLiteStore) GroupSandboxEscape(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassSandboxEscape, signature)
+}
+
+// ListEvalScorePayloads returns every eval_score event payload on
+// the execution in sequence order. Used by the grounding_failure
+// detector.
+func (s *SQLiteStore) ListEvalScorePayloads(ctx context.Context, executionID string) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE execution_id = ?
+		  AND event_type = 'eval_score'
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list eval_score payloads: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan eval_score payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GroupGroundingFailure upserts a failure_group with
+// failure_class=grounding_failure and the caller-supplied signature.
+func (s *SQLiteStore) GroupGroundingFailure(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassGroundingFailure, signature)
+}
+
 // FindFirstFailedValidator returns the validator name from the first
 // (lowest-sequence) validator_result event with payload.passed = false
 // for the given execution. JSON1 boolean comparison: SQLite stores

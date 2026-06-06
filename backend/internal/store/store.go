@@ -372,6 +372,18 @@ const (
 	// page's $500/mo → $847k/mo case. Signature is
 	// "token_waste:<hex8>".
 	FailureClassTokenWaste = "token_waste"
+	// FailureClassSandboxEscape groups executions whose tool_call
+	// arguments or return_values matched a sandbox-escape pattern
+	// (os.system, raw socket, /proc/self, instance metadata
+	// endpoints, etc.). Signature is "sandbox_escape:<pattern_id>"
+	// so each escape vector clusters separately for security
+	// triage.
+	FailureClassSandboxEscape = "sandbox_escape"
+	// FailureClassGroundingFailure groups executions whose
+	// eval_score events showed the agent's output diverged from
+	// retrieved context. Signature is
+	// "grounding_failure:<evaluator_id>:<metric_type>".
+	FailureClassGroundingFailure = "grounding_failure"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same
@@ -847,6 +859,23 @@ type Store interface {
 	// GroupTokenWaste upserts a failure_group with
 	// failure_class=token_waste and the detector-supplied signature.
 	GroupTokenWaste(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// ListAllToolCallPayloads returns every tool_call payload on
+	// the execution in sequence order, including failed ones. Used
+	// by the sandbox_escape detector which scans args + returns for
+	// escape patterns regardless of success/failure status.
+	ListAllToolCallPayloads(ctx context.Context, executionID string) ([][]byte, error)
+	// GroupSandboxEscape upserts a failure_group with
+	// failure_class=sandbox_escape and the detector-supplied
+	// signature.
+	GroupSandboxEscape(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// ListEvalScorePayloads returns every eval_score event payload
+	// on the execution in sequence order. Used by the
+	// grounding_failure detector.
+	ListEvalScorePayloads(ctx context.Context, executionID string) ([][]byte, error)
+	// GroupGroundingFailure upserts a failure_group with
+	// failure_class=grounding_failure and the detector-supplied
+	// signature.
+	GroupGroundingFailure(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// GetCostByTenant aggregates SUM(estimated_cost_usd) and COUNT(*)
 	// per tenant_id within the requested time window, ordered by
 	// total cost descending. Executions with NULL tenant_id collapse

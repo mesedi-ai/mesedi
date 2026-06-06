@@ -38,6 +38,7 @@ const (
 	EventTypeDLPScanResult   EventType = "dlp_scan_result"
 	EventTypeMCPCall         EventType = "mcp_call"
 	EventTypeEvalScore       EventType = "eval_score"
+	EventTypeMemoryOperation EventType = "memory_operation"
 )
 
 // ExecutionStatus is the lifecycle state of an Execution. Exactly one
@@ -130,6 +131,30 @@ type LLMCallPayload struct {
 	CostUSD      float64  `json:"cost_usd,omitempty"`
 	FinishReason string   `json:"finish_reason,omitempty"` // "stop" | "length" | "tool_use" | ...
 	Temperature  *float64 `json:"temperature,omitempty"`
+}
+
+// MemoryOperationPayload is one read / write / search against an
+// external memory store (vector DB, key-value cache, document store
+// holding agent state). Captures enough to drive cost attribution
+// per store and to feed downstream detectors (grounding_failure
+// already reads eval_score; future versions may correlate retrieval
+// confidence here with output quality there).
+//
+// Operation values: "read" / "write" / "search" / "delete".
+// StoreType / StoreName let customers cost-attribute by backend
+// (Pinecone, Weaviate, pgvector, Mem0) and by named collection.
+type MemoryOperationPayload struct {
+	Operation     string  `json:"operation"`                // "read" | "write" | "search" | "delete"
+	StoreType     string  `json:"store_type,omitempty"`     // "pinecone" | "weaviate" | "pgvector" | "qdrant" | "mem0" | ...
+	StoreName     string  `json:"store_name,omitempty"`     // collection / index name
+	Query         string  `json:"query,omitempty"`          // semantic search query (truncated)
+	DocumentCount int     `json:"document_count,omitempty"` // for search: how many docs returned
+	TokenCount    int     `json:"token_count,omitempty"`    // total tokens in the retrieved/written payload
+	TopScore      float64 `json:"top_score,omitempty"`      // semantic confidence of the highest-scoring result
+	LatencyMs     int64   `json:"latency_ms,omitempty"`     // wall-clock duration of the operation
+	CacheHit      bool    `json:"cache_hit,omitempty"`      // true if the call was satisfied from a local cache
+	Error         string  `json:"error,omitempty"`          // when the operation failed
+	ErrorClass    string  `json:"error_class,omitempty"`    // "timeout" | "auth_error" | "rate_limited" | ...
 }
 
 // EvalScorePayload is one external evaluator's verdict on an
