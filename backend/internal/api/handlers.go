@@ -152,6 +152,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Phase 3b, read-side execution surface for the dashboard.
 	mux.HandleFunc("GET /executions", h.HandleListExecutions)
 	mux.HandleFunc("GET /executions/{id}", h.HandleGetExecution)
+	// Mesedi #10, multi-agent topology graph.
+	mux.HandleFunc("GET /executions/{id}/topology", h.HandleGetExecutionTopology)
 	mux.HandleFunc("GET /stats", h.HandleStats)
 	// Task #259, org-level rollup across all projects owned by the
 	// same user (v0.1 tenant model = owner_user_id). Resolves the
@@ -838,6 +840,147 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Mesedi #12 — cascading_failure detector. Joins this
+	// execution's agent_handoff events (#11) with the terminal
+	// status of each referenced child execution and fires when a
+	// handoff was followed by the child reaching a failure
+	// terminal state. Runs after grounding_failure because:
+	//   - grounding/eval signals are per-evaluator and orthogonal;
+	//   - cascading_failure is a CROSS-execution signal that
+	//     subsumes the child's own per-execution failure_group
+	//     into a "this run is part of a chain" cluster, which is
+	//     a more useful framing for the customer than the raw
+	//     two-separate-bugs view.
+	if isTerminalStatus(patch.Status) {
+		handoffs, err := h.Store.ListHandoffsWithChildStatus(r.Context(), executionID, authProjectID)
+		if err != nil {
+			h.Logger.Warn("list handoffs with child status for cascade detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if len(handoffs) > 0 {
+			if sig, fired := detectors.DetectCascadingFailure(handoffs); fired {
+				isNew, gErr := h.Store.GroupCascadingFailure(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("cascading-failure grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassCascadingFailure, sig, isNew, gErr)
+			}
+		}
+	}
+
+	// Mesedi #13 — coordination_deadlock detector. Walks the
+	// topology subtree rooted at this execution, collects every
+	// agent_handoff edge, and fires on the first 2-cycle in the
+	// agent-role graph (A→B AND B→A in the same subtree). Runs
+	// after cascading_failure so that a deadlock that ALSO
+	// produced a cascade gets attributed to the more specific
+	// "deadlock" class (timeout-without-progress is a more
+	// actionable framing than "child crashed").
+	if isTerminalStatus(patch.Status) {
+		edges, err := h.Store.ListHandoffEdgesInTopology(r.Context(), executionID, authProjectID, 0)
+		if err != nil {
+			h.Logger.Warn("list handoff edges for deadlock detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if len(edges) >= 2 {
+			if sig, fired := detectors.DetectCoordinationDeadlock(edges); fired {
+				isNew, gErr := h.Store.GroupCoordinationDeadlock(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("coordination-deadlock grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassCoordinationDeadlock, sig, isNew, gErr)
+			}
+		}
+	}
+
+	// Mesedi #16 — provider_incident detector. Scans this
+	// execution's llm_call payloads for provider errors, then
+	// asks the store how many DISTINCT tenants in the same
+	// project saw the same (provider, error_class) error in the
+	// recent window. Fires when the cross-tenant count meets
+	// MinTenantsForProviderIncident.
+	//
+	// Order rationale: runs last in the failure-detection chain
+	// because it is a cross-cutting signal (provider-side, not
+	// agent-side) and should not preempt the agent-level
+	// classes above. A provider_incident group does not preclude
+	// other groupings on the same execution; the dashboard
+	// surfaces all of them.
+	if isTerminalStatus(patch.Status) {
+		llmPayloads, err := h.Store.ListLLMCallPayloads(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("list llm_call payloads for provider-incident detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if len(llmPayloads) > 0 {
+			// Extract distinct (provider, error_class) pairs
+			// emitted by THIS execution. We only check the cross-
+			// tenant count for pairs we already saw locally; that
+			// keeps the query budget linear in this execution's
+			// own provider-error footprint, not in the project's
+			// total provider diversity.
+			seen := map[[2]string]struct{}{}
+			for _, raw := range llmPayloads {
+				var p struct {
+					Provider   string `json:"provider"`
+					ErrorClass string `json:"error_class"`
+				}
+				if jErr := json.Unmarshal(raw, &p); jErr != nil {
+					continue
+				}
+				if p.Provider == "" || p.ErrorClass == "" {
+					continue
+				}
+				seen[[2]string{p.Provider, p.ErrorClass}] = struct{}{}
+			}
+			// Look back 15 minutes — long enough to span a
+			// rolling provider blip, short enough to keep the
+			// signal current. The constant is intentionally not
+			// configurable at v1; a future iteration can promote
+			// it to a per-project setting.
+			since := time.Now().Add(-15 * time.Minute)
+			for pair := range seen {
+				provider, errClass := pair[0], pair[1]
+				count, cErr := h.Store.CountDistinctTenantsWithProviderError(
+					r.Context(), authProjectID, provider, errClass, since,
+				)
+				if cErr != nil {
+					h.Logger.Warn("count distinct tenants with provider error failed",
+						"execution_id", executionID,
+						"provider", provider,
+						"error_class", errClass,
+						"error", cErr.Error(),
+					)
+					continue
+				}
+				if sig, fired := detectors.DetectProviderIncident(
+					provider, errClass, count, detectors.MinTenantsForProviderIncident,
+				); fired {
+					isNew, gErr := h.Store.GroupProviderIncident(r.Context(), executionID, authProjectID, sig)
+					if gErr != nil {
+						h.Logger.Warn("provider-incident grouping failed (continuing)",
+							"execution_id", executionID,
+							"signature", sig,
+							"error", gErr.Error(),
+						)
+					}
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassProviderIncident, sig, isNew, gErr)
+				}
+			}
+		}
+	}
+
 	// Phase 3b sub-slices 12 + 15: events-driven post-processing. Both
 	// cost computation and prompt-injection detection walk the same
 	// event list, so fetch ONCE and feed both. Best-effort throughout ,
@@ -1338,6 +1481,50 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 		resp["failure_group"] = failureGroup
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandleGetExecutionTopology returns the parent + child tree of the
+// supplied execution within the calling project (Mesedi #10). The
+// response is a flat list of TopologyNode, ordered by depth ASC then
+// started_at ASC, so the dashboard can render the tree without
+// re-sorting. Cross-project edges are silently dropped at query
+// time; an execution that the caller is not authorized to see does
+// not appear in the response (and an attempt to seed the topology
+// at a foreign execution_id returns an empty array, matching the
+// 404-on-cross-tenant policy used by HandleGetExecution).
+//
+// Query param ?depth=N caps traversal in both directions (default
+// 8, max 32). The cap defends against pathological parent chains
+// and bounds the response size.
+func (h *Handlers) HandleGetExecutionTopology(w http.ResponseWriter, r *http.Request) {
+	executionID := r.PathValue("id")
+	if executionID == "" {
+		writeError(w, http.StatusBadRequest, "execution_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	depth := parseIntQuery(r, "depth", 8, 1, 32)
+	nodes, err := h.Store.GetExecutionTopology(r.Context(), authProjectID, executionID, depth)
+	if err != nil {
+		h.Logger.Error("get execution topology failed",
+			"execution_id", executionID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, "topology query failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"nodes":      nodes,
+		"count":      len(nodes),
+		"depth":      depth,
+		"seed_id":    executionID,
+		"project_id": authProjectID,
+	})
 }
 
 // HandleListExecutionsInFailureGroup returns the executions that belong

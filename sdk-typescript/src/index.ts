@@ -38,6 +38,7 @@ export { tool } from "./tool.js";
 export type { ToolOptions } from "./tool.js";
 export {
   checkpoint,
+  emitAgentHandoff,
   emitEvalScore,
   emitInfrastructureEvent,
   emitMcpCall,
@@ -45,6 +46,7 @@ export {
   validatorResult,
 } from "./observe.js";
 export type {
+  AgentHandoffOptions,
   EvalScoreOptions,
   InfrastructureEventOptions,
   InfrastructureReason,

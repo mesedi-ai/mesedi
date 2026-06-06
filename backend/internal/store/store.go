@@ -384,6 +384,35 @@ const (
 	// retrieved context. Signature is
 	// "grounding_failure:<evaluator_id>:<metric_type>".
 	FailureClassGroundingFailure = "grounding_failure"
+	// FailureClassCascadingFailure groups executions where an
+	// agent_handoff (#11) was followed by the child execution
+	// crashing within a short cascade window. The signature is
+	// "cascading_failure:<from_agent>:<to_agent>:<child_status>"
+	// so that repeated cascades along the same agent edge
+	// dedupe into one group regardless of the specific
+	// execution_id pair involved.
+	FailureClassCascadingFailure = "cascading_failure"
+	// FailureClassCoordinationDeadlock groups executions where a
+	// cycle was detected in the agent-handoff graph within the
+	// topology subtree. The signature is
+	// "coordination_deadlock:<agent_a>:<agent_b>" for the canonical
+	// 2-cycle case (alphabetized so A↔B and B↔A collapse to one
+	// group), and "coordination_deadlock:cycle:<sorted_agents>"
+	// for longer cycles. Maps to the "circular wait" Coffman
+	// condition; the rest of Coffman's conditions are implicit in
+	// the agent-handoff semantics (mutual exclusion = one agent at
+	// a time per role, hold and wait = synchronous handoff, no
+	// preemption = SDK does not unwind handoffs).
+	FailureClassCoordinationDeadlock = "coordination_deadlock"
+	// FailureClassProviderIncident groups executions that
+	// experienced an LLM-provider-side outage (Anthropic, OpenAI,
+	// Gemini, ...) detected by a cross-tenant signal: at least N
+	// distinct tenants in the project saw provider errors with
+	// the same provider name within the recent window. The
+	// signature is "provider_incident:<provider>:<error_class>"
+	// so a single outage produces one group per (provider,
+	// error_class) pair rather than one per affected tenant.
+	FailureClassProviderIncident = "provider_incident"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same
@@ -405,6 +434,65 @@ type FailureGroup struct {
 	AffectedExecutions int       `json:"affected_executions"`
 	CostWastedUSD      *float64  `json:"cost_wasted_usd,omitempty"`
 	SampleExecutionID  string    `json:"sample_execution_id,omitempty"`
+}
+
+// TopologyNode is one entry in a multi-agent execution topology
+// (Mesedi #10). The topology is a directed tree rooted at the
+// execution that has no parent in the project; every node carries
+// enough metadata to render the tree in the dashboard and to feed
+// downstream detectors (cascading_failure #12 + coordination_deadlock
+// #13).
+//
+// Depth=0 is the root; each subsequent depth level is a generation
+// of children. Nodes within a level are ordered by started_at ASC.
+// Cycles are impossible in the current schema (parent_execution_id
+// points BACKWARD in time only), but the traversal guard depth still
+// enforces a hard cap so a malformed self-pointing row can't loop.
+type TopologyNode struct {
+	ExecutionID       string     `json:"execution_id"`
+	ParentExecutionID *string    `json:"parent_execution_id,omitempty"`
+	Status            string     `json:"status"`
+	StartedAt         time.Time  `json:"started_at"`
+	EndedAt           *time.Time `json:"ended_at,omitempty"`
+	DurationMs        int64      `json:"duration_ms,omitempty"`
+	SDKLanguage       string     `json:"sdk_language,omitempty"`
+	// Depth is the number of edges from the root to this node;
+	// root nodes have depth=0.
+	Depth int `json:"depth"`
+	// FailureGroupID surfaces the existing executions.failure_group_id
+	// column so the dashboard can color-code nodes by their
+	// failure-class without a separate per-node lookup.
+	FailureGroupID *string `json:"failure_group_id,omitempty"`
+}
+
+// HandoffWithChildStatus is one row of the join used by the
+// cascading_failure detector (#12). It pairs an agent_handoff
+// event payload (parsed into its identifying fields) with the
+// terminal status of the child execution referenced by
+// child_execution_id. ChildExists is false when the SDK did not
+// resolve a child id, or when the referenced child belongs to a
+// different project (cross-project ids are dropped at query
+// time to preserve tenant isolation).
+type HandoffWithChildStatus struct {
+	FromAgent        string     `json:"from_agent"`
+	ToAgent          string     `json:"to_agent"`
+	HandoffKind      string     `json:"handoff_kind,omitempty"`
+	ChildExecutionID string     `json:"child_execution_id,omitempty"`
+	ChildExists      bool       `json:"child_exists"`
+	ChildStatus      string     `json:"child_status,omitempty"`
+	ChildEndedAt     *time.Time `json:"child_ended_at,omitempty"`
+	HandoffEmittedAt time.Time  `json:"handoff_emitted_at"`
+}
+
+// HandoffEdge is a directed (from_agent → to_agent) edge in the
+// agent-role graph, attributed to the execution that emitted it.
+// The coordination_deadlock detector (#13) builds the agent-role
+// graph from these edges and looks for cycles.
+type HandoffEdge struct {
+	EmittingExecutionID string    `json:"emitting_execution_id"`
+	FromAgent           string    `json:"from_agent"`
+	ToAgent             string    `json:"to_agent"`
+	EmittedAt           time.Time `json:"emitted_at"`
 }
 
 // TenantCostRow is one row of the cost-by-tenant report (Mesedi #5):
@@ -876,6 +964,66 @@ type Store interface {
 	// failure_class=grounding_failure and the detector-supplied
 	// signature.
 	GroupGroundingFailure(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// ListHandoffsWithChildStatus returns every agent_handoff event
+	// on the supplied parent execution joined with the terminal
+	// status of the referenced child execution (when the SDK
+	// populated child_execution_id and the child exists in the same
+	// project). Used by the cascading_failure detector (#12) which
+	// fires when a handoff is followed by the child crashing within
+	// the cascade window.
+	ListHandoffsWithChildStatus(
+		ctx context.Context,
+		parentExecutionID, projectID string,
+	) ([]HandoffWithChildStatus, error)
+	// GroupCascadingFailure upserts a failure_group with
+	// failure_class=cascading_failure and the detector-supplied
+	// signature.
+	GroupCascadingFailure(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// ListHandoffEdgesInTopology returns every agent_handoff edge
+	// emitted by the rootExecutionID's topology subtree (root +
+	// descendants reachable via parent_execution_id, capped at
+	// maxDepth). Cross-project edges are dropped at query time.
+	// Used by the coordination_deadlock detector (#13) to build
+	// the agent-role graph and look for cycles.
+	ListHandoffEdgesInTopology(
+		ctx context.Context,
+		rootExecutionID, projectID string,
+		maxDepth int,
+	) ([]HandoffEdge, error)
+	// GroupCoordinationDeadlock upserts a failure_group with
+	// failure_class=coordination_deadlock and the detector-supplied
+	// signature.
+	GroupCoordinationDeadlock(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// CountDistinctTenantsWithProviderError returns the number of
+	// distinct tenant_ids in the project that emitted at least one
+	// llm_call event with the given provider + error_class since
+	// the supplied time. NULL tenant_id collapses to a single
+	// "unattributed" bucket and counts as one tenant when present.
+	// Used by the provider_incident detector (#16) to fire only
+	// when an outage spans multiple tenants (and is therefore
+	// almost certainly provider-side rather than caller-side).
+	CountDistinctTenantsWithProviderError(
+		ctx context.Context,
+		projectID, provider, errorClass string,
+		since time.Time,
+	) (int, error)
+	// GroupProviderIncident upserts a failure_group with
+	// failure_class=provider_incident and the detector-supplied
+	// signature.
+	GroupProviderIncident(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// GetExecutionTopology returns the full ancestor + descendant
+	// tree for the given execution within the calling project. The
+	// returned slice is ordered by depth ASC then started_at ASC so
+	// callers can render the tree without re-sorting. maxDepth caps
+	// traversal (defends against a pathological parent_execution_id
+	// chain); 0 = use a server default. Cross-project edges are
+	// silently dropped at query time so the response only contains
+	// nodes the caller is authorized to see.
+	GetExecutionTopology(
+		ctx context.Context,
+		projectID, executionID string,
+		maxDepth int,
+	) ([]TopologyNode, error)
 	// GetCostByTenant aggregates SUM(estimated_cost_usd) and COUNT(*)
 	// per tenant_id within the requested time window, ordered by
 	// total cost descending. Executions with NULL tenant_id collapse

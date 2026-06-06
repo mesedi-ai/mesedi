@@ -39,6 +39,16 @@ const (
 	EventTypeMCPCall         EventType = "mcp_call"
 	EventTypeEvalScore       EventType = "eval_score"
 	EventTypeMemoryOperation EventType = "memory_operation"
+	// EventTypeAgentHandoff (Mesedi #11). Emitted when one agent
+	// delegates a task to another agent (sub-agent invocation,
+	// supervisor/worker handoff, plan/execute split). The payload
+	// carries the source agent identity, destination agent identity,
+	// the optional child execution_id (resolved when the SDK opens a
+	// nested @wrap for the handoff target), and a short task summary.
+	// Downstream detectors join handoff events back to the topology
+	// graph (#10) to surface cascading_failure (#12) and
+	// coordination_deadlock (#13).
+	EventTypeAgentHandoff EventType = "agent_handoff"
 )
 
 // ExecutionStatus is the lifecycle state of an Execution. Exactly one
@@ -192,6 +202,40 @@ type EvalScorePayload struct {
 	HigherIsBetter bool    `json:"higher_is_better"`     // true for faithfulness; false for hallucination_rate
 	Reason         string  `json:"reason,omitempty"`     // optional, the evaluator's explanation
 	Confidence     float64 `json:"confidence,omitempty"` // 0..1 if the evaluator reports its own confidence
+}
+
+// AgentHandoffPayload (Mesedi #11). Captures the moment one agent
+// delegates a task to another agent. The from/to identities are
+// stable agent role names ("planner", "researcher", "qa", or any
+// app-specific label). When the SDK opens a nested @wrap for the
+// handoff target, ChildExecutionID is populated so downstream
+// detectors can correlate the handoff edge with the topology
+// graph (#10). The handoff_kind discriminates the common shapes:
+//
+//   - "delegate"  one-shot, expects a return value
+//   - "spawn"     fire-and-forget background sub-agent
+//   - "transfer"  control transferred (no return)
+//   - "consult"   short Q&A, return text only
+//
+// Customers pick a value; we ship the four above as well-known
+// strings but do not enforce them at the backend, mirroring the
+// open-string posture of EvalScorePayload.metric_type.
+//
+// Latency is the wall-clock cost the SOURCE agent paid waiting on
+// the handoff to return (zero for "spawn" / "transfer"). The
+// detector for cascading_failure (#12) reads this alongside the
+// child execution's terminal status to fire alerts when a
+// handoff's child crashes within a short window after the
+// handoff event.
+type AgentHandoffPayload struct {
+	FromAgent        string `json:"from_agent"`                   // calling agent role/name
+	ToAgent          string `json:"to_agent"`                     // target agent role/name
+	HandoffKind      string `json:"handoff_kind,omitempty"`       // "delegate" | "spawn" | "transfer" | "consult"
+	TaskSummary      string `json:"task_summary,omitempty"`       // short description of the delegated task
+	ChildExecutionID string `json:"child_execution_id,omitempty"` // populated when the SDK resolved the nested execution id
+	LatencyMs        int64  `json:"latency_ms,omitempty"`         // wall-clock duration the source agent waited on the handoff
+	Error            string `json:"error,omitempty"`              // if the handoff itself failed (not the child's work)
+	ErrorClass       string `json:"error_class,omitempty"`        // "timeout" | "unreachable" | "rejected" | ...
 }
 
 // MCPCallPayload is one invocation of a Model Context Protocol

@@ -628,3 +628,77 @@ def emit_memory_operation(
         duration_ms=latency_ms,
         payload=payload,
     ))
+
+
+def emit_agent_handoff(
+    from_agent: str,
+    to_agent: str,
+    handoff_kind: str = "",
+    task_summary: str = "",
+    child_execution_id: str = "",
+    latency_ms: int = 0,
+    error: str = "",
+    error_class: str = "",
+) -> None:
+    """Emit an ``agent_handoff`` event marking that the current agent
+    delegated work to another agent.
+
+    Mesedi #11. Use this at the moment one agent invokes another:
+    a supervisor calling a worker, a planner calling an executor, a
+    role-based router dispatching to a sub-agent, or any other
+    inter-agent handoff. The dashboard joins this event back to the
+    topology graph (#10) so that the cascading_failure detector
+    (#12) can correlate a handoff with a child execution that
+    crashed shortly afterwards.
+
+    Common values for ``handoff_kind``:
+
+    * ``"delegate"`` — one-shot, expects a return value
+    * ``"spawn"`` — fire-and-forget background sub-agent
+    * ``"transfer"`` — control transferred (no return)
+    * ``"consult"`` — short Q&A, return text only
+
+    ``child_execution_id`` is optional at emit-time. If the SDK has
+    already opened the nested ``@wrap`` for the target agent, pass
+    its ``execution_id`` so the backend can join the handoff
+    directly. If not, the topology graph still links the two via
+    ``parent_execution_id``; the handoff event remains useful for
+    surfacing the cross-agent intent.
+
+    Outside @wrap: no-op.
+    """
+    ctx = current_execution_context()
+    if ctx is None:
+        return
+
+    ctx.check_budget()
+    if ctx.budget_tracker is not None:
+        ctx.budget_tracker.increment_steps()
+
+    payload: Dict[str, Any] = {
+        "from_agent": from_agent,
+        "to_agent": to_agent,
+    }
+    if handoff_kind:
+        payload["handoff_kind"] = handoff_kind
+    if task_summary:
+        payload["task_summary"] = task_summary[:1000]
+    if child_execution_id:
+        payload["child_execution_id"] = child_execution_id
+    if latency_ms:
+        payload["latency_ms"] = int(latency_ms)
+    if error:
+        payload["error"] = error
+    if error_class:
+        payload["error_class"] = error_class
+
+    client = get_client()
+    client.submit_event(Event(
+        event_id=f"evt-{uuid.uuid4().hex[:12]}",
+        execution_id=ctx.execution_id,
+        event_type=EventType.AGENT_HANDOFF,
+        sequence=ctx.next_sequence(),
+        timestamp=utcnow_rfc3339(),
+        duration_ms=latency_ms,
+        payload=payload,
+    ))

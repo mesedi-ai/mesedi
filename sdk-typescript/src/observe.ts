@@ -409,3 +409,67 @@ export function emitMemoryOperation(
   };
   client.submitEvent(event);
 }
+
+/**
+ * Options for {@link emitAgentHandoff}.
+ *
+ * Mesedi #11. Use this at the moment one agent invokes another
+ * (supervisor/worker, plan/execute, role-based router). The
+ * downstream cascading_failure detector (#12) joins this event
+ * back to the topology graph (#10) so that a handoff whose child
+ * execution crashes within a short window can be surfaced as
+ * one logical failure rather than two unrelated ones.
+ *
+ * Well-known handoffKind values:
+ *
+ *  - "delegate"  one-shot, expects a return value
+ *  - "spawn"     fire-and-forget background sub-agent
+ *  - "transfer"  control transferred (no return)
+ *  - "consult"   short Q&A, return text only
+ */
+export interface AgentHandoffOptions {
+  handoffKind?: "delegate" | "spawn" | "transfer" | "consult" | (string & {});
+  taskSummary?: string;
+  childExecutionId?: string;
+  latencyMs?: number;
+  error?: string;
+  errorClass?: string;
+}
+
+/**
+ * Emit an `agent_handoff` event marking that the current agent
+ * delegated work to another agent.
+ *
+ * Outside `@wrap` / `withExecution`: no-op.
+ */
+export function emitAgentHandoff(
+  fromAgent: string,
+  toAgent: string,
+  opts: AgentHandoffOptions = {},
+): void {
+  const ctx = currentExecutionContext();
+  if (!ctx) return;
+
+  const payload: Record<string, unknown> = {
+    from_agent: fromAgent,
+    to_agent: toAgent,
+  };
+  if (opts.handoffKind) payload["handoff_kind"] = opts.handoffKind;
+  if (opts.taskSummary) payload["task_summary"] = opts.taskSummary.slice(0, 1000);
+  if (opts.childExecutionId) payload["child_execution_id"] = opts.childExecutionId;
+  if (opts.latencyMs) payload["latency_ms"] = Math.trunc(opts.latencyMs);
+  if (opts.error) payload["error"] = opts.error;
+  if (opts.errorClass) payload["error_class"] = opts.errorClass;
+
+  const client = getClient();
+  const event: Event = {
+    event_id: newEventId(),
+    execution_id: ctx.executionId,
+    event_type: EventType.AGENT_HANDOFF,
+    sequence: ctx.nextSequence(),
+    timestamp: utcNowRfc3339(),
+    duration_ms: opts.latencyMs,
+    payload,
+  };
+  client.submitEvent(event);
+}

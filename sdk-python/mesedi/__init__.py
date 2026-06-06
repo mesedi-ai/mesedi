@@ -55,6 +55,7 @@ from mesedi.events import (
 from mesedi.halt import Budget, MesediHalt
 from mesedi.observe import (
     checkpoint,
+    emit_agent_handoff,
     emit_eval_score,
     emit_infrastructure_event,
     emit_llm_call,
@@ -77,6 +78,7 @@ __all__ = [
     "Status",
     "checkpoint",
     "configure",
+    "emit_agent_handoff",
     "emit_eval_score",
     "emit_infrastructure_event",
     "emit_llm_call",

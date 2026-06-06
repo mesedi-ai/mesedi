@@ -387,6 +387,8 @@ func main() {
 	// Phase 3b, read-side execution + stats surface for the dashboard.
 	mux.Handle("GET /executions", privateHandler)
 	mux.Handle("GET /executions/{id}", privateHandler)
+	// Mesedi #10, multi-agent topology graph (auth-required).
+	mux.Handle("GET /executions/{id}/topology", privateHandler)
 	mux.Handle("GET /stats", privateHandler)
 	// Phase 3a, failure_group read surface (auth-required).
 	mux.Handle("GET /failure-groups", privateHandler)

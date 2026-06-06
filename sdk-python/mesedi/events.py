@@ -57,6 +57,12 @@ class EventType:
     EVAL_SCORE:           ClassVar[str] = "eval_score"
     # Mesedi #15: external memory store read/write/search.
     MEMORY_OPERATION:     ClassVar[str] = "memory_operation"
+    # Mesedi #11: cross-agent task delegation. Emitted when one
+    # agent hands off work to another (supervisor/worker,
+    # plan/execute, role-based multi-agent). The downstream
+    # cascading_failure detector (#12) correlates the handoff with
+    # the resolved child execution via the topology graph (#10).
+    AGENT_HANDOFF:        ClassVar[str] = "agent_handoff"
 
 
 class Status:

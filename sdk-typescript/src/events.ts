@@ -54,6 +54,10 @@ export const EventType = {
   EVAL_SCORE: "eval_score",
   // Mesedi #15: external memory store read/write/search.
   MEMORY_OPERATION: "memory_operation",
+  // Mesedi #11: cross-agent task delegation. The downstream
+  // cascading_failure detector (#12) correlates the handoff with
+  // the resolved child execution via the topology graph (#10).
+  AGENT_HANDOFF: "agent_handoff",
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 
