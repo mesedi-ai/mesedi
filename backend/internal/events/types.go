@@ -49,6 +49,14 @@ const (
 	// graph (#10) to surface cascading_failure (#12) and
 	// coordination_deadlock (#13).
 	EventTypeAgentHandoff EventType = "agent_handoff"
+	// EventTypeHumanIntervention (Mesedi #19). Captures one full
+	// human-in-the-loop ask/answer cycle as a single event,
+	// emitted at the moment the human's response lands and the
+	// agent is about to be unblocked. The downstream HITL
+	// detectors (#20 hitl_timeout, #21 hitl_rejection_spike)
+	// aggregate these events to surface SLA breaches and
+	// quality regressions detected via human rejections.
+	EventTypeHumanIntervention EventType = "human_intervention"
 )
 
 // ExecutionStatus is the lifecycle state of an Execution. There are
@@ -261,6 +269,47 @@ type EvalScorePayload struct {
 	HigherIsBetter bool    `json:"higher_is_better"`     // true for faithfulness; false for hallucination_rate
 	Reason         string  `json:"reason,omitempty"`     // optional, the evaluator's explanation
 	Confidence     float64 `json:"confidence,omitempty"` // 0..1 if the evaluator reports its own confidence
+}
+
+// HumanInterventionPayload (Mesedi #19). One full HITL ask/answer
+// cycle: the agent paused with a question, a human eventually
+// responded, the agent resumed. Emitted at completion so the
+// event row contains both halves and downstream detectors can
+// query it as a single record.
+//
+// Well-known response_kind values:
+//
+//   - "approved"  human said yes, agent proceeds with original plan
+//   - "rejected"  human said no, agent must abandon or replan
+//   - "edited"    human modified the proposed output before approving
+//   - "timeout"   SLA expired before a human responded
+//   - "cancelled" operator killed the wait without a decision
+//
+// Customers may use other strings; the backend does not enforce
+// the enumeration (mirrors the open-string posture of
+// EvalScorePayload.metric_type). The five values above are the
+// ones #20 and #21 detectors recognize as well-known signals.
+//
+// request_id is a SDK-generated UUID that correlates the ask side
+// with the answer side in any host system that needs to plumb the
+// question through a queue, a database row, or a websocket. The
+// event itself is emitted once on completion; request_id is just
+// the customer-facing handle.
+//
+// wait_duration_ms is decided_at minus requested_at, computed by
+// the SDK and stored verbatim so the dashboard can render
+// "approved after 14 minutes" without redoing the arithmetic.
+type HumanInterventionPayload struct {
+	RequestID       string                 `json:"request_id"`
+	Question        string                 `json:"question"`
+	SLASeconds      int64                  `json:"sla_seconds,omitempty"`
+	RequestedAt     string                 `json:"requested_at"`
+	ResponseKind    string                 `json:"response_kind"`
+	ResponsePayload map[string]interface{} `json:"response_payload,omitempty"`
+	DecidedBy       string                 `json:"decided_by,omitempty"`
+	DecidedAt       string                 `json:"decided_at"`
+	WaitDurationMs  int64                  `json:"wait_duration_ms"`
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // AgentHandoffPayload (Mesedi #11). Captures the moment one agent

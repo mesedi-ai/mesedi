@@ -58,6 +58,10 @@ export const EventType = {
   // cascading_failure detector (#12) correlates the handoff with
   // the resolved child execution via the topology graph (#10).
   AGENT_HANDOFF: "agent_handoff",
+  // Mesedi #19: one full HITL ask/answer cycle. Emitted at the
+  // moment the human's decision lands. Aggregated by the
+  // hitl_timeout (#20) and hitl_rejection_spike (#21) detectors.
+  HUMAN_INTERVENTION: "human_intervention",
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

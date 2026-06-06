@@ -63,6 +63,11 @@ class EventType:
     # cascading_failure detector (#12) correlates the handoff with
     # the resolved child execution via the topology graph (#10).
     AGENT_HANDOFF:        ClassVar[str] = "agent_handoff"
+    # Mesedi #19: full HITL ask/answer cycle. Emitted at the moment
+    # the human's decision lands and the agent is about to be
+    # unblocked. The hitl_timeout (#20) and hitl_rejection_spike
+    # (#21) detectors aggregate these events.
+    HUMAN_INTERVENTION:   ClassVar[str] = "human_intervention"
 
 
 class Status:

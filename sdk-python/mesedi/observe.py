@@ -30,7 +30,8 @@ the function-call surface stays as the foundation either way.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 from mesedi._context import current_execution_context
 from mesedi.client import get_client
@@ -760,3 +761,183 @@ def resume_for_agent() -> None:
         json={"status": "started"},
     )
     r.raise_for_status()
+
+
+class HumanInterventionHandle:
+    """Handle to an in-flight HITL request (Mesedi #19).
+
+    Returned by :func:`request_human_intervention`. Stash this in
+    your host application (database row, queue payload, websocket
+    session, whatever) until the human responds. Then call
+    :meth:`complete` with the response payload.
+
+    The handle is JSON-serializable via the ``to_dict()`` /
+    ``from_dict()`` helpers so it can survive a round-trip through
+    Redis, Kafka, or a SQL row without losing the correlation data
+    needed to attribute the response back to the original ask.
+    """
+
+    def __init__(
+        self,
+        *,
+        execution_id: str,
+        request_id: str,
+        question: str,
+        sla_seconds: int,
+        requested_at: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.execution_id = execution_id
+        self.request_id = request_id
+        self.question = question
+        self.sla_seconds = sla_seconds
+        self.requested_at = requested_at
+        self.metadata = metadata or {}
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the handle so the host application can persist
+        it across the human-response wait. Pair with
+        ``from_dict()`` on the receiving side."""
+        return {
+            "execution_id": self.execution_id,
+            "request_id": self.request_id,
+            "question": self.question,
+            "sla_seconds": self.sla_seconds,
+            "requested_at": self.requested_at,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "HumanInterventionHandle":
+        return cls(
+            execution_id=data["execution_id"],
+            request_id=data["request_id"],
+            question=data["question"],
+            sla_seconds=int(data.get("sla_seconds", 0)),
+            requested_at=data["requested_at"],
+            metadata=data.get("metadata"),
+        )
+
+    def complete(
+        self,
+        response_kind: str,
+        response_payload: Optional[Dict[str, Any]] = None,
+        decided_by: str = "",
+    ) -> None:
+        """Mark the HITL request complete and resume the execution.
+
+        Emits the ``human_intervention`` event with the full
+        ask/answer payload, then synchronously transitions the
+        execution from ``awaiting_human`` back to ``started`` so
+        the agent code can continue.
+
+        Well-known ``response_kind`` values: ``"approved"``,
+        ``"rejected"``, ``"edited"``, ``"timeout"``,
+        ``"cancelled"``. Custom strings are accepted but downstream
+        HITL detectors (#20, #21) only recognize the five
+        well-known values.
+        """
+        decided_at_dt = datetime.now(timezone.utc)
+        decided_at = decided_at_dt.isoformat().replace("+00:00", "Z")
+        # Compute wait duration from requested_at -> decided_at.
+        # Parse requested_at; it should be an ISO8601 'Z' string
+        # this SDK produced earlier.
+        try:
+            requested_dt = datetime.fromisoformat(
+                self.requested_at.replace("Z", "+00:00")
+            )
+            wait_duration_ms = int(
+                (decided_at_dt - requested_dt).total_seconds() * 1000
+            )
+            if wait_duration_ms < 0:
+                wait_duration_ms = 0
+        except (ValueError, TypeError):
+            wait_duration_ms = 0
+
+        payload: Dict[str, Any] = {
+            "request_id": self.request_id,
+            "question": self.question,
+            "requested_at": self.requested_at,
+            "response_kind": response_kind,
+            "decided_at": decided_at,
+            "wait_duration_ms": wait_duration_ms,
+        }
+        if self.sla_seconds > 0:
+            payload["sla_seconds"] = int(self.sla_seconds)
+        if response_payload:
+            payload["response_payload"] = response_payload
+        if decided_by:
+            payload["decided_by"] = decided_by
+        if self.metadata:
+            payload["metadata"] = dict(self.metadata)
+
+        client = get_client()
+        # Emit the event via the synchronous send_events path so it
+        # lands BEFORE the resume PATCH. This is important so a
+        # subsequent flush-on-shutdown does not lose the
+        # intervention event if the resume succeeds but the shipper
+        # has not yet flushed.
+        client.send_events([Event(
+            event_id=f"evt-{uuid.uuid4().hex[:12]}",
+            execution_id=self.execution_id,
+            event_type=EventType.HUMAN_INTERVENTION,
+            sequence=0,  # ordering re-derived at the backend
+            timestamp=decided_at,
+            duration_ms=wait_duration_ms,
+            payload=payload,
+        )])
+        # Resume the execution. The PATCH only succeeds if the
+        # execution is currently awaiting_human; if a concurrent
+        # timeout already terminated the run, this raises an
+        # error the host application can catch.
+        r = client._http.patch(  # noqa: SLF001
+            f"/executions/{self.execution_id}",
+            json={"status": "started"},
+        )
+        r.raise_for_status()
+
+
+def request_human_intervention(
+    question: str,
+    sla_seconds: int = 0,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[HumanInterventionHandle]:
+    """Pause the current execution and return a handle (Mesedi #19).
+
+    Synchronously transitions the execution into ``awaiting_human``
+    and returns a :class:`HumanInterventionHandle` carrying the
+    correlation data needed to complete the cycle later. The host
+    application is responsible for actually waiting on the human
+    response (queue / websocket / DB poll) and then calling
+    ``handle.complete(response_kind, response_payload=...)`` when
+    the answer arrives.
+
+    Outside ``@wrap``: no-op, returns None.
+
+    ``sla_seconds`` is optional metadata describing the customer's
+    own SLA expectation. The hitl_timeout detector (#20) reads
+    this to fire when the actual wait exceeds the configured SLA.
+    Customers without an explicit SLA can omit it; #20 will then
+    use a project-level default.
+    """
+    ctx = current_execution_context()
+    if ctx is None:
+        return None
+    request_id = f"hitl-{uuid.uuid4().hex[:12]}"
+    requested_at = utcnow_rfc3339()
+    # Pause the execution lifecycle first; the handle exists only
+    # after the lifecycle transition lands.
+    client = get_client()
+    r = client._http.patch(  # noqa: SLF001
+        f"/executions/{ctx.execution_id}",
+        json={"status": "awaiting_human"},
+    )
+    r.raise_for_status()
+    return HumanInterventionHandle(
+        execution_id=ctx.execution_id,
+        request_id=request_id,
+        question=question,
+        sla_seconds=int(sla_seconds),
+        requested_at=requested_at,
+        metadata=metadata,
+    )

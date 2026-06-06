@@ -54,6 +54,7 @@ from mesedi.events import (
 )
 from mesedi.halt import Budget, MesediHalt
 from mesedi.observe import (
+    HumanInterventionHandle,
     checkpoint,
     emit_agent_handoff,
     emit_eval_score,
@@ -62,6 +63,7 @@ from mesedi.observe import (
     emit_mcp_call,
     emit_memory_operation,
     pause_for_human,
+    request_human_intervention,
     resume_for_agent,
     validator_result,
 )
@@ -88,8 +90,10 @@ __all__ = [
     "emit_memory_operation",
     "flush",
     "get_client",
+    "HumanInterventionHandle",
     "instrument_anthropic",
     "pause_for_human",
+    "request_human_intervention",
     "resume_for_agent",
     "tool",
     "utcnow_rfc3339",

@@ -545,3 +545,184 @@ export async function resumeForAgent(): Promise<void> {
     throw new Error(`resumeForAgent: PATCH ${res.status} ${body}`);
   }
 }
+
+/**
+ * Serializable handle to an in-flight HITL request (Mesedi #19).
+ *
+ * Returned by {@link requestHumanIntervention}. The shape is plain
+ * JSON so the host application can stash it in Redis, a database
+ * row, a websocket session, or a queue payload while waiting for
+ * the human response, then reconstruct a working handle from the
+ * stored data via {@link rehydrateHumanInterventionHandle}.
+ */
+export interface HumanInterventionHandleData {
+  executionId: string;
+  requestId: string;
+  question: string;
+  slaSeconds: number;
+  requestedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Options for completing a HITL request via
+ * {@link completeHumanIntervention}.
+ *
+ * Well-known {@link responseKind} values: `"approved"`, `"rejected"`,
+ * `"edited"`, `"timeout"`, `"cancelled"`. Custom strings are
+ * accepted but downstream HITL detectors (#20, #21) only recognize
+ * the five well-known values.
+ */
+export interface CompleteHumanInterventionOptions {
+  responseKind: string;
+  responsePayload?: Record<string, unknown>;
+  decidedBy?: string;
+}
+
+/**
+ * Pause the current execution and return a handle (Mesedi #19).
+ *
+ * Synchronously transitions the execution into `awaiting_human`
+ * and returns a {@link HumanInterventionHandleData} carrying the
+ * correlation data needed to complete the cycle later. The host
+ * application is responsible for actually waiting on the human
+ * response (queue, websocket, DB poll) and then calling
+ * {@link completeHumanIntervention} with the answer.
+ *
+ * Outside `wrap()`: no-op, returns `null`.
+ *
+ * `slaSeconds` is optional metadata describing the customer's own
+ * SLA expectation. The hitl_timeout detector (#20) reads this to
+ * fire when the actual wait exceeds the configured SLA. Customers
+ * without an explicit SLA can omit it and #20 will fall back to a
+ * project-level default.
+ */
+export async function requestHumanIntervention(
+  question: string,
+  options: { slaSeconds?: number; metadata?: Record<string, unknown> } = {},
+): Promise<HumanInterventionHandleData | null> {
+  const ctx = currentExecutionContext();
+  if (!ctx) return null;
+  const client = getClient();
+  const requestId = `hitl-${cryptoRandomId()}`;
+  const requestedAt = utcNowRfc3339();
+  const res = await fetch(`${client.baseUrl}/executions/${ctx.executionId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${client.apiKey}`,
+    },
+    body: JSON.stringify({ status: "awaiting_human" }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`requestHumanIntervention: PATCH ${res.status} ${body}`);
+  }
+  return {
+    executionId: ctx.executionId,
+    requestId,
+    question,
+    slaSeconds: options.slaSeconds ?? 0,
+    requestedAt,
+    metadata: options.metadata,
+  };
+}
+
+/**
+ * Complete a HITL request (Mesedi #19).
+ *
+ * Emits the `human_intervention` event with the full ask/answer
+ * payload, then synchronously transitions the execution from
+ * `awaiting_human` back to `started` so the agent code can
+ * continue. Idempotent only insofar as a re-call from `started`
+ * is a no-op resume (the backend rejects illegal transitions).
+ */
+export async function completeHumanIntervention(
+  handle: HumanInterventionHandleData,
+  opts: CompleteHumanInterventionOptions,
+): Promise<void> {
+  const client = getClient();
+  const decidedAtDate = new Date();
+  const decidedAt = decidedAtDate.toISOString();
+  let waitDurationMs = 0;
+  try {
+    const requestedAtDate = new Date(handle.requestedAt);
+    waitDurationMs = Math.max(0, decidedAtDate.getTime() - requestedAtDate.getTime());
+  } catch {
+    waitDurationMs = 0;
+  }
+
+  const payload: Record<string, unknown> = {
+    request_id: handle.requestId,
+    question: handle.question,
+    requested_at: handle.requestedAt,
+    response_kind: opts.responseKind,
+    decided_at: decidedAt,
+    wait_duration_ms: waitDurationMs,
+  };
+  if (handle.slaSeconds > 0) payload["sla_seconds"] = Math.trunc(handle.slaSeconds);
+  if (opts.responsePayload) payload["response_payload"] = opts.responsePayload;
+  if (opts.decidedBy) payload["decided_by"] = opts.decidedBy;
+  if (handle.metadata) payload["metadata"] = handle.metadata;
+
+  // Send the human_intervention event synchronously so it lands
+  // before (or at worst at the same time as) the resume PATCH.
+  // The async shipper would risk losing it if the process exits
+  // immediately after resume.
+  const event: Event = {
+    event_id: newEventId(),
+    execution_id: handle.executionId,
+    event_type: EventType.HUMAN_INTERVENTION,
+    sequence: 0,
+    timestamp: decidedAt,
+    duration_ms: waitDurationMs,
+    payload,
+  };
+  const eventsRes = await fetch(`${client.baseUrl}/events`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${client.apiKey}`,
+    },
+    body: JSON.stringify([event]),
+  });
+  if (!eventsRes.ok) {
+    const body = await eventsRes.text().catch(() => "");
+    throw new Error(`completeHumanIntervention event POST ${eventsRes.status} ${body}`);
+  }
+
+  // Resume the lifecycle.
+  const patchRes = await fetch(
+    `${client.baseUrl}/executions/${handle.executionId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${client.apiKey}`,
+      },
+      body: JSON.stringify({ status: "started" }),
+    },
+  );
+  if (!patchRes.ok) {
+    const body = await patchRes.text().catch(() => "");
+    throw new Error(`completeHumanIntervention PATCH ${patchRes.status} ${body}`);
+  }
+}
+
+function cryptoRandomId(): string {
+  // Small helper for generating a 12-char hex correlation id. Uses
+  // Node's webcrypto when available; falls back to Math.random for
+  // older runtimes (still good enough for correlation, NOT for
+  // anything security-sensitive). Typed loose because the SDK
+  // targets both browser and Node runtimes and the tsconfig
+  // doesn't pull in the DOM lib.
+  const c = (globalThis as {
+    crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array };
+  }).crypto;
+  if (c && typeof c.getRandomValues === "function") {
+    const arr = new Uint8Array(6);
+    c.getRandomValues(arr);
+    return Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return Math.random().toString(16).slice(2, 14).padEnd(12, "0");
+}

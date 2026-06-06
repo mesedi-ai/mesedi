@@ -38,18 +38,22 @@ export { tool } from "./tool.js";
 export type { ToolOptions } from "./tool.js";
 export {
   checkpoint,
+  completeHumanIntervention,
   emitAgentHandoff,
   emitEvalScore,
   emitInfrastructureEvent,
   emitMcpCall,
   emitMemoryOperation,
   pauseForHuman,
+  requestHumanIntervention,
   resumeForAgent,
   validatorResult,
 } from "./observe.js";
 export type {
   AgentHandoffOptions,
+  CompleteHumanInterventionOptions,
   EvalScoreOptions,
+  HumanInterventionHandleData,
   InfrastructureEventOptions,
   InfrastructureReason,
   McpCallOptions,
