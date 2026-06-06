@@ -1142,6 +1142,41 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				}
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassHITLTimeout, sig, isNew, gErr)
 			}
+
+			// Mesedi #21 — hitl_rejection_spike detector. Cross-
+			// execution signal: if a high fraction of recent HITL
+			// runs in this project came back rejected or edited,
+			// the agent's behavior likely regressed. We only run
+			// this when THIS execution itself recorded at least
+			// one human_intervention event (no point asking
+			// "did rejections spike" if we have no fresh HITL
+			// data anyway). The 1-hour window matches the
+			// provider_incident posture: recent enough to be
+			// actionable, wide enough to accumulate a meaningful
+			// sample.
+			since := time.Now().Add(-1 * time.Hour)
+			counts, sErr := h.Store.CountHITLOutcomesInWindow(r.Context(), authProjectID, since)
+			if sErr != nil {
+				h.Logger.Warn("count hitl outcomes in window failed",
+					"execution_id", executionID,
+					"error", sErr.Error(),
+				)
+			} else if sig, fired := detectors.DetectHITLRejectionSpike(
+				counts,
+				detectors.MinHITLSampleForRejectionSpike,
+				detectors.RejectionSpikeRateBp,
+				detectors.EditSpikeRateBp,
+			); fired {
+				isNew, gErr := h.Store.GroupHITLRejectionSpike(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("hitl-rejection-spike grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassHITLRejectionSpike, sig, isNew, gErr)
+			}
 		}
 	}
 

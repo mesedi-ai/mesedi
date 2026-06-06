@@ -424,6 +424,23 @@ const (
 	// Signature is "hitl_timeout:<reason>" where reason is
 	// "explicit" (case 1) or "sla_exceeded" (case 2).
 	FailureClassHITLTimeout = "hitl_timeout"
+	// FailureClassHITLRejectionSpike groups executions that
+	// participated in a project-wide spike in human rejections or
+	// edits over the recent window (Mesedi #21). This is a
+	// cross-execution signal that detects agent quality
+	// regressions: if many humans across the project independently
+	// said "no" or "edit this" to recent agent outputs, the agent's
+	// behavior likely regressed.
+	//
+	// Two firing variants, distinguished by signature:
+	//   "hitl_rejection_spike:rejected" - humans are saying NO
+	//      (response_kind="rejected"). Strong signal that the agent
+	//      is producing wrong / unsafe / unwanted outputs.
+	//   "hitl_rejection_spike:edited"   - humans are MODIFYING the
+	//      output before approving (response_kind="edited").
+	//      Signal that the agent's output is close but consistently
+	//      requires correction.
+	FailureClassHITLRejectionSpike = "hitl_rejection_spike"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same
@@ -493,6 +510,17 @@ type HandoffWithChildStatus struct {
 	ChildStatus      string     `json:"child_status,omitempty"`
 	ChildEndedAt     *time.Time `json:"child_ended_at,omitempty"`
 	HandoffEmittedAt time.Time  `json:"handoff_emitted_at"`
+}
+
+// HITLOutcomeCounts is the project-window aggregate consumed by
+// the hitl_rejection_spike detector (#21). All three counts are
+// over distinct executions (one execution that asked for human
+// input three times and got rejected each time still counts once
+// in ExecutionsWithRejection).
+type HITLOutcomeCounts struct {
+	TotalExecutionsWithHITL int `json:"total_executions_with_hitl"`
+	ExecutionsWithRejection int `json:"executions_with_rejection"`
+	ExecutionsWithEdit      int `json:"executions_with_edit"`
 }
 
 // HandoffEdge is a directed (from_agent → to_agent) edge in the
@@ -1048,6 +1076,20 @@ type Store interface {
 	// failure_class=hitl_timeout and the detector-supplied
 	// signature (Mesedi #20).
 	GroupHITLTimeout(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// CountHITLOutcomesInWindow aggregates human_intervention
+	// event verdicts across the project's recent executions
+	// (Mesedi #21). Returns counts of distinct executions that
+	// asked for human input in the window plus the subsets that
+	// got at least one "rejected" and "edited" response.
+	CountHITLOutcomesInWindow(
+		ctx context.Context,
+		projectID string,
+		since time.Time,
+	) (HITLOutcomeCounts, error)
+	// GroupHITLRejectionSpike upserts a failure_group with
+	// failure_class=hitl_rejection_spike and the detector-supplied
+	// signature (Mesedi #21).
+	GroupHITLRejectionSpike(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// GetExecutionTopology returns the full ancestor + descendant
 	// tree for the given execution within the calling project. The
 	// returned slice is ordered by depth ASC then started_at ASC so

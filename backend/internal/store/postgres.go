@@ -2238,6 +2238,50 @@ func (s *PostgresStore) GroupHITLTimeout(ctx context.Context, executionID, proje
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassHITLTimeout, signature)
 }
 
+// CountHITLOutcomesInWindow is the Postgres twin of the SQLite
+// method of the same name.
+func (s *PostgresStore) CountHITLOutcomesInWindow(
+	ctx context.Context,
+	projectID string,
+	since time.Time,
+) (HITLOutcomeCounts, error) {
+	var counts HITLOutcomeCounts
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(DISTINCT x.execution_id),
+			COUNT(DISTINCT CASE
+				WHEN (ev.payload::jsonb->>'response_kind') = 'rejected'
+				THEN x.execution_id
+			END),
+			COUNT(DISTINCT CASE
+				WHEN (ev.payload::jsonb->>'response_kind') = 'edited'
+				THEN x.execution_id
+			END)
+		FROM executions x
+		JOIN events ev ON ev.execution_id = x.execution_id
+		WHERE x.project_id   = $1
+		  AND ev.event_type  = 'human_intervention'
+		  AND x.started_at  >= $2
+	`, projectID, since).Scan(
+		&counts.TotalExecutionsWithHITL,
+		&counts.ExecutionsWithRejection,
+		&counts.ExecutionsWithEdit,
+	)
+	if err != nil {
+		return counts, fmt.Errorf("count hitl outcomes in window: %w", err)
+	}
+	return counts, nil
+}
+
+// GroupHITLRejectionSpike is the Postgres twin of the SQLite method
+// of the same name.
+func (s *PostgresStore) GroupHITLRejectionSpike(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassHITLRejectionSpike, signature)
+}
+
 // GetExecutionTopology is the Postgres twin of the SQLite method of
 // the same name. Uses standard SQL:1999 recursive CTE syntax which
 // Postgres supports natively (no quirks vs SQLite for the two-CTE

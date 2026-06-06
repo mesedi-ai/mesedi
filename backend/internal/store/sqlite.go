@@ -2949,6 +2949,54 @@ func (s *SQLiteStore) GroupHITLTimeout(ctx context.Context, executionID, project
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassHITLTimeout, signature)
 }
 
+// CountHITLOutcomesInWindow aggregates human_intervention
+// verdicts across the project's recent executions. Counts are
+// over distinct executions: an execution with multiple human
+// inputs still counts once per outcome category. Used by the
+// hitl_rejection_spike detector (#21).
+func (s *SQLiteStore) CountHITLOutcomesInWindow(
+	ctx context.Context,
+	projectID string,
+	since time.Time,
+) (HITLOutcomeCounts, error) {
+	var counts HITLOutcomeCounts
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(DISTINCT x.execution_id),
+			COUNT(DISTINCT CASE
+				WHEN json_extract(ev.payload, '$.response_kind') = 'rejected'
+				THEN x.execution_id
+			END),
+			COUNT(DISTINCT CASE
+				WHEN json_extract(ev.payload, '$.response_kind') = 'edited'
+				THEN x.execution_id
+			END)
+		FROM executions x
+		JOIN events ev ON ev.execution_id = x.execution_id
+		WHERE x.project_id   = ?
+		  AND ev.event_type  = 'human_intervention'
+		  AND x.started_at  >= ?
+	`, projectID, since).Scan(
+		&counts.TotalExecutionsWithHITL,
+		&counts.ExecutionsWithRejection,
+		&counts.ExecutionsWithEdit,
+	)
+	if err != nil {
+		return counts, fmt.Errorf("count hitl outcomes in window: %w", err)
+	}
+	return counts, nil
+}
+
+// GroupHITLRejectionSpike upserts a failure_group with
+// failure_class=hitl_rejection_spike and the detector-supplied
+// signature.
+func (s *SQLiteStore) GroupHITLRejectionSpike(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassHITLRejectionSpike, signature)
+}
+
 // GetExecutionTopology walks the parent_execution_id graph rooted at
 // the seed execution and returns every reachable node within the
 // project. The traversal goes UP (ancestors) and DOWN (descendants)
