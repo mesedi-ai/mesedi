@@ -413,6 +413,17 @@ const (
 	// so a single outage produces one group per (provider,
 	// error_class) pair rather than one per affected tenant.
 	FailureClassProviderIncident = "provider_incident"
+	// FailureClassHITLTimeout groups executions where a human
+	// intervention event indicated an SLA breach (Mesedi #20).
+	// Two firing conditions:
+	//   1. response_kind == "timeout" - the host application
+	//      gave up waiting before a human responded.
+	//   2. wait_duration_ms > sla_seconds * 1000 (when
+	//      sla_seconds is set) - a human responded but
+	//      missed the customer-declared SLA.
+	// Signature is "hitl_timeout:<reason>" where reason is
+	// "explicit" (case 1) or "sla_exceeded" (case 2).
+	FailureClassHITLTimeout = "hitl_timeout"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same
@@ -1028,6 +1039,15 @@ type Store interface {
 	// failure_class=provider_incident and the detector-supplied
 	// signature.
 	GroupProviderIncident(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// ListHumanInterventionPayloads returns every
+	// human_intervention event payload on the execution in
+	// sequence order (Mesedi #19/#20). Used by the hitl_timeout
+	// detector (#20) and the hitl_rejection_spike detector (#21).
+	ListHumanInterventionPayloads(ctx context.Context, executionID string) ([][]byte, error)
+	// GroupHITLTimeout upserts a failure_group with
+	// failure_class=hitl_timeout and the detector-supplied
+	// signature (Mesedi #20).
+	GroupHITLTimeout(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// GetExecutionTopology returns the full ancestor + descendant
 	// tree for the given execution within the calling project. The
 	// returned slice is ordered by depth ASC then started_at ASC so

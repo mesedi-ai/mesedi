@@ -2204,6 +2204,40 @@ func (s *PostgresStore) GroupProviderIncident(ctx context.Context, executionID, 
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassProviderIncident, signature)
 }
 
+// ListHumanInterventionPayloads is the Postgres twin of the
+// SQLite method of the same name.
+func (s *PostgresStore) ListHumanInterventionPayloads(ctx context.Context, executionID string) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE execution_id = $1
+		  AND event_type   = 'human_intervention'
+		ORDER BY sequence ASC
+	`, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("list human_intervention payloads: %w", err)
+	}
+	defer rows.Close()
+	out := [][]byte{}
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan human_intervention payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GroupHITLTimeout is the Postgres twin of the SQLite method
+// of the same name.
+func (s *PostgresStore) GroupHITLTimeout(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassHITLTimeout, signature)
+}
+
 // GetExecutionTopology is the Postgres twin of the SQLite method of
 // the same name. Uses standard SQL:1999 recursive CTE syntax which
 // Postgres supports natively (no quirks vs SQLite for the two-CTE

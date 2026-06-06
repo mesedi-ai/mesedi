@@ -1111,6 +1111,40 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Mesedi #20 — hitl_timeout detector. Aggregates the
+	// human_intervention events (#19) on this execution and fires
+	// when the customer's HITL SLA was breached. Two firing
+	// conditions: response_kind=="timeout" (explicit) OR
+	// wait_duration_ms > sla_seconds*1000 (sla_exceeded). Runs
+	// after provider_incident because HITL signals are scoped to
+	// THIS run; provider_incident is the cross-tenant signal
+	// that subsumes per-run causes when present.
+	if isTerminalStatus(patch.Status) {
+		hiPayloads, err := h.Store.ListHumanInterventionPayloads(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("list human_intervention payloads for hitl_timeout detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if len(hiPayloads) > 0 {
+			raw := make([]json.RawMessage, len(hiPayloads))
+			for i, p := range hiPayloads {
+				raw[i] = json.RawMessage(p)
+			}
+			if sig, fired := detectors.DetectHITLTimeout(raw); fired {
+				isNew, gErr := h.Store.GroupHITLTimeout(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("hitl-timeout grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassHITLTimeout, sig, isNew, gErr)
+			}
+		}
+	}
+
 	// Phase 3b sub-slices 12 + 15: events-driven post-processing. Both
 	// cost computation and prompt-injection detection walk the same
 	// event list, so fetch ONCE and feed both. Best-effort throughout ,
