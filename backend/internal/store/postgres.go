@@ -1055,6 +1055,80 @@ func (s *PostgresStore) CreateExecution(ctx context.Context, e *events.Execution
 	return nil
 }
 
+// PauseExecution is the Postgres twin of the SQLite method of the
+// same name. Mesedi #18.
+func (s *PostgresStore) PauseExecution(ctx context.Context, executionID, projectID string, pausedAt time.Time) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE executions SET
+			status      = 'awaiting_human',
+			paused_at   = $1,
+			pause_count = pause_count + 1
+		WHERE execution_id = $2
+		  AND project_id   = $3
+		  AND status       = 'started'
+	`, pausedAt, executionID, projectID)
+	if err != nil {
+		return fmt.Errorf("pause execution: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		var status sql.NullString
+		qErr := s.db.QueryRowContext(ctx, `
+			SELECT status FROM executions
+			WHERE execution_id = $1 AND project_id = $2
+		`, executionID, projectID).Scan(&status)
+		if errors.Is(qErr, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if qErr != nil {
+			return fmt.Errorf("pause execution status probe: %w", qErr)
+		}
+		return ErrInvalidLifecycleTransition
+	}
+	return nil
+}
+
+// ResumeExecution is the Postgres twin of the SQLite method of the
+// same name. Mesedi #18.
+func (s *PostgresStore) ResumeExecution(ctx context.Context, executionID, projectID string, resumedAt time.Time) error {
+	var pausedAt sql.NullTime
+	var status sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT paused_at, status FROM executions
+		WHERE execution_id = $1 AND project_id = $2
+	`, executionID, projectID).Scan(&pausedAt, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("resume execution status probe: %w", err)
+	}
+	if status.String != "awaiting_human" || !pausedAt.Valid {
+		return ErrInvalidLifecycleTransition
+	}
+	deltaMs := resumedAt.Sub(pausedAt.Time).Milliseconds()
+	if deltaMs < 0 {
+		deltaMs = 0
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE executions SET
+			status          = 'started',
+			paused_at       = NULL,
+			total_paused_ms = total_paused_ms + $1
+		WHERE execution_id = $2
+		  AND project_id   = $3
+		  AND status       = 'awaiting_human'
+	`, deltaMs, executionID, projectID)
+	if err != nil {
+		return fmt.Errorf("resume execution: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrInvalidLifecycleTransition
+	}
+	return nil
+}
+
 func (s *PostgresStore) UpdateExecution(ctx context.Context, e *events.Execution) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE executions SET
@@ -1086,8 +1160,9 @@ func (s *PostgresStore) UpdateExecution(ctx context.Context, e *events.Execution
 func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*events.Execution, error) {
 	e := &events.Execution{}
 	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang, failureGroupID, tenantID sql.NullString
-	var endedAt sql.NullTime
-	var durationMs, tokensIn, tokensOut sql.NullInt64
+	var endedAt, pausedAt sql.NullTime
+	var durationMs, tokensIn, tokensOut, totalPausedMs sql.NullInt64
+	var pauseCount sql.NullInt64
 	var costUSD sql.NullFloat64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
@@ -1095,7 +1170,8 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 			started_at, ended_at, duration_ms,
 			total_tokens_in, total_tokens_out, estimated_cost_usd,
 			input_summary, output_summary, crash_signature,
-			sdk_version, sdk_language, failure_group_id, tenant_id
+			sdk_version, sdk_language, failure_group_id, tenant_id,
+			paused_at, total_paused_ms, pause_count
 		FROM executions WHERE execution_id = $1
 	`, executionID).Scan(
 		&e.ExecutionID, &e.ProjectID, &parent, &e.Status,
@@ -1103,6 +1179,7 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 		&tokensIn, &tokensOut, &costUSD,
 		&inputSum, &outputSum, &crashSig,
 		&sdkVer, &sdkLang, &failureGroupID, &tenantID,
+		&pausedAt, &totalPausedMs, &pauseCount,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1152,6 +1229,16 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 	if tenantID.Valid {
 		v := tenantID.String
 		e.TenantID = &v
+	}
+	if pausedAt.Valid {
+		t := pausedAt.Time
+		e.PausedAt = &t
+	}
+	if totalPausedMs.Valid {
+		e.TotalPausedMs = totalPausedMs.Int64
+	}
+	if pauseCount.Valid {
+		e.PauseCount = int(pauseCount.Int64)
 	}
 	return e, nil
 }

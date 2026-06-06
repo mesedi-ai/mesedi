@@ -51,20 +51,62 @@ const (
 	EventTypeAgentHandoff EventType = "agent_handoff"
 )
 
-// ExecutionStatus is the lifecycle state of an Execution. Exactly one
-// terminal status (anything other than "started") is recorded per
-// execution; the SDK transitions an execution from "started" to its
-// terminal state on completion, crash, or halt.
+// ExecutionStatus is the lifecycle state of an Execution. There are
+// three categories:
+//
+//  1. Running: `started`. The agent is actively working.
+//  2. Paused: `awaiting_human` (Mesedi #18). The agent is suspended,
+//     typically because it called the HITL request helper, and is
+//     waiting on a human decision before it can continue. Paused
+//     executions are NOT terminal: detectors do not fire on them
+//     (a paused run is not a failed run), and wall-clock budget
+//     checks subtract accumulated paused time so a long HITL wait
+//     does not falsely trip a time_budget alert.
+//  3. Terminal: `completed`, `crashed`, `halted`, `timeout`,
+//     `validation_failed`. Exactly one terminal status is recorded
+//     per execution; the SDK transitions the execution from
+//     `started` (or `awaiting_human`) to its terminal state at the
+//     exit boundary.
+//
+// Valid state transitions:
+//
+//	started        ──pause──►  awaiting_human
+//	awaiting_human ──resume─►  started
+//	started        ──exit──►   <any terminal>
+//	awaiting_human ──exit──►   <any terminal>  (HITL timeout, halt)
 type ExecutionStatus string
 
 const (
 	StatusStarted          ExecutionStatus = "started"
+	StatusAwaitingHuman    ExecutionStatus = "awaiting_human"
 	StatusCompleted        ExecutionStatus = "completed"
 	StatusCrashed          ExecutionStatus = "crashed"
 	StatusHalted           ExecutionStatus = "halted"
 	StatusTimeout          ExecutionStatus = "timeout"
 	StatusValidationFailed ExecutionStatus = "validation_failed"
 )
+
+// IsTerminal reports whether the supplied status is a terminal
+// lifecycle state. `started` and `awaiting_human` are non-terminal;
+// every other status terminates the execution. Centralized here so
+// detectors and budget enforcers stay in sync as the lifecycle
+// grows (Mesedi #18 added `awaiting_human`).
+func (s ExecutionStatus) IsTerminal() bool {
+	switch s {
+	case StatusCompleted, StatusCrashed, StatusHalted, StatusTimeout, StatusValidationFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsPaused reports whether the supplied status represents a paused
+// (non-terminal) execution. Distinct from `started` because the
+// detector chain treats paused runs as "not in a position to be
+// evaluated yet" rather than "actively making progress" (Mesedi #18).
+func (s ExecutionStatus) IsPaused() bool {
+	return s == StatusAwaitingHuman
+}
 
 // Execution is the root record for one agent invocation. The SDK posts
 // an Execution to POST /executions at the agent's entry point and PATCHes
@@ -101,6 +143,23 @@ type Execution struct {
 	// "not supplied"; non-nil pointer to "" = "supplied as empty
 	// string" (treated as a deliberate, distinct value).
 	TenantID *string `json:"tenant_id,omitempty"`
+	// PausedAt is the timestamp at which the execution entered the
+	// currently-active human-in-the-loop pause cycle (Mesedi #18).
+	// nil when the execution is not paused. Cleared on resume.
+	PausedAt *time.Time `json:"paused_at,omitempty"`
+	// TotalPausedMs is the accumulated wall-clock duration the
+	// execution has spent paused, summed across every pause/resume
+	// cycle. Wall-clock budget enforcement subtracts this from the
+	// raw elapsed duration so a long HITL wait does not falsely
+	// trip a time_budget alert. The HITL SLA detectors (#20 and
+	// #21) read this to compute wait duration and pause-cycle
+	// frequency.
+	TotalPausedMs int64 `json:"total_paused_ms,omitempty"`
+	// PauseCount is the number of times the execution has paused.
+	// Cumulative; not reset on resume. Used by hitl_rejection_spike
+	// (#21) which fires when a single execution accumulates an
+	// abnormal number of human-intervention cycles within its run.
+	PauseCount int `json:"pause_count,omitempty"`
 }
 
 // Event is the polymorphic envelope for every recorded step in an execution.

@@ -43,6 +43,8 @@ export {
   emitInfrastructureEvent,
   emitMcpCall,
   emitMemoryOperation,
+  pauseForHuman,
+  resumeForAgent,
   validatorResult,
 } from "./observe.js";
 export type {

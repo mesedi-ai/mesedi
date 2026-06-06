@@ -473,3 +473,75 @@ export function emitAgentHandoff(
   };
   client.submitEvent(event);
 }
+
+/**
+ * Synchronously transition the current execution to
+ * `awaiting_human` (Mesedi #18).
+ *
+ * Call this from inside a `wrap()`-ed function at the moment the
+ * agent reaches a decision that requires a human in the loop. The
+ * backend records the pause timestamp, increments pause_count, and
+ * starts the HITL clock. A subsequent {@link resumeForAgent} call
+ * adds the elapsed time to total_paused_ms so a long HITL wait
+ * does not falsely trip the agent's time budget.
+ *
+ * The host application is responsible for actually blocking the
+ * agent until the human responds (typically the wrap()-ed function
+ * body itself awaits a queue / websocket / database row). This
+ * helper only updates Mesedi's lifecycle state; it does not block.
+ *
+ * Outside `wrap()`: no-op.
+ *
+ * Important: this is a SYNCHRONOUS PATCH (await) rather than the
+ * asynchronous shipper path that events take. The pause / resume
+ * transitions must be committed before the host application
+ * suspends the agent, so async-only delivery would race against
+ * the human responding.
+ */
+export async function pauseForHuman(): Promise<void> {
+  const ctx = currentExecutionContext();
+  if (!ctx) return;
+  const client = getClient();
+  const res = await fetch(`${client.baseUrl}/executions/${ctx.executionId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${client.apiKey}`,
+    },
+    body: JSON.stringify({ status: "awaiting_human" }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`pauseForHuman: PATCH ${res.status} ${body}`);
+  }
+}
+
+/**
+ * Synchronously transition the current execution from
+ * `awaiting_human` back to `started` (Mesedi #18).
+ *
+ * Call this from the host application's HITL response handler the
+ * moment the human's decision lands and the agent is about to be
+ * unblocked. The backend computes the wait duration and adds it
+ * to total_paused_ms so the time-budget detector reads only the
+ * agent's actual working time.
+ *
+ * Outside `wrap()`: no-op.
+ */
+export async function resumeForAgent(): Promise<void> {
+  const ctx = currentExecutionContext();
+  if (!ctx) return;
+  const client = getClient();
+  const res = await fetch(`${client.baseUrl}/executions/${ctx.executionId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${client.apiKey}`,
+    },
+    body: JSON.stringify({ status: "started" }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`resumeForAgent: PATCH ${res.status} ${body}`);
+  }
+}

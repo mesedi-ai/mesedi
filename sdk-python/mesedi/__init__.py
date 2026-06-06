@@ -61,6 +61,8 @@ from mesedi.observe import (
     emit_llm_call,
     emit_mcp_call,
     emit_memory_operation,
+    pause_for_human,
+    resume_for_agent,
     validator_result,
 )
 from mesedi.tool import tool
@@ -87,6 +89,8 @@ __all__ = [
     "flush",
     "get_client",
     "instrument_anthropic",
+    "pause_for_human",
+    "resume_for_agent",
     "tool",
     "utcnow_rfc3339",
     "validator_result",

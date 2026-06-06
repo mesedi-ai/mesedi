@@ -671,6 +671,23 @@ type Store interface {
 	CreateExecution(ctx context.Context, exec *events.Execution) error
 	UpdateExecution(ctx context.Context, exec *events.Execution) error
 	GetExecution(ctx context.Context, executionID string) (*events.Execution, error)
+	// PauseExecution transitions a started execution into the
+	// awaiting_human state (Mesedi #18). Atomically sets paused_at
+	// to the supplied timestamp, increments pause_count, and sets
+	// status='awaiting_human'. Returns ErrInvalidLifecycleTransition
+	// if the execution is not currently in `started` state (the only
+	// state from which a pause is legal). Returns ErrNotFound if
+	// the execution does not exist in the project.
+	PauseExecution(ctx context.Context, executionID, projectID string, pausedAt time.Time) error
+	// ResumeExecution transitions an awaiting_human execution back
+	// to the started state. Computes (resumedAt - paused_at) and
+	// adds it to total_paused_ms, clears paused_at, sets
+	// status='started'. Returns ErrInvalidLifecycleTransition if
+	// the execution is not currently paused. Used both for explicit
+	// resume calls AND as a pre-step when transitioning from
+	// awaiting_human directly to a terminal status, so the paused
+	// duration is flushed before the terminal write.
+	ResumeExecution(ctx context.Context, executionID, projectID string, resumedAt time.Time) error
 	// ListExecutions returns the project's executions sorted by
 	// started_at DESC (most recent first). Pagination via limit/offset.
 	ListExecutions(ctx context.Context, projectID string, limit, offset int) ([]*events.Execution, error)

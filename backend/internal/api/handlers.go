@@ -359,9 +359,130 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	}
 	patch.ExecutionID = executionID
 
+	// Mesedi #18: read the current state to drive the lifecycle
+	// state machine. Pause / resume transitions take a dedicated
+	// code path (Store.PauseExecution / Store.ResumeExecution),
+	// distinct from the normal terminal write through
+	// UpdateExecution. We need the prior status to decide which.
+	currentExec, err := h.Store.GetExecution(r.Context(), executionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "execution not found: "+executionID)
+			return
+		}
+		h.Logger.Error("get execution for lifecycle check failed",
+			"execution_id", executionID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, "lifecycle probe failed: "+err.Error())
+		return
+	}
+	if currentExec.ProjectID != authProjectID {
+		// Cross-tenant access returns 404 to avoid leaking that the
+		// id exists on a different project, same posture as
+		// HandleGetExecution.
+		writeError(w, http.StatusNotFound, "execution not found: "+executionID)
+		return
+	}
+	priorStatus := currentExec.Status
+
+	// Validate the transition. Rejecting illegal transitions early
+	// keeps the rest of the handler clean.
+	if !isValidLifecycleTransition(priorStatus, patch.Status) {
+		writeError(w, http.StatusConflict, fmt.Sprintf(
+			"invalid lifecycle transition: %s -> %s", priorStatus, patch.Status,
+		))
+		return
+	}
+
+	// Branch on the four meaningful transitions (Mesedi #18).
+	now := time.Now().UTC()
+	switch {
+	case priorStatus == events.StatusStarted && patch.Status == events.StatusAwaitingHuman:
+		// Pure pause. No ended_at, no detector chain (not terminal).
+		if err := h.Store.PauseExecution(r.Context(), executionID, authProjectID, now); err != nil {
+			h.Logger.Error("pause execution failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+			writeError(w, http.StatusInternalServerError, "pause failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":           true,
+			"execution_id": executionID,
+			"status":       events.StatusAwaitingHuman,
+		})
+		return
+
+	case priorStatus == events.StatusAwaitingHuman && patch.Status == events.StatusStarted:
+		// Pure resume. No ended_at, no detector chain.
+		if err := h.Store.ResumeExecution(r.Context(), executionID, authProjectID, now); err != nil {
+			h.Logger.Error("resume execution failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+			writeError(w, http.StatusInternalServerError, "resume failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":           true,
+			"execution_id": executionID,
+			"status":       events.StatusStarted,
+		})
+		return
+
+	case priorStatus == events.StatusAwaitingHuman && patch.Status.IsTerminal():
+		// Terminal from paused. Flush accumulated paused time first
+		// by resuming (which writes total_paused_ms + clears
+		// paused_at), then fall through to the normal terminal
+		// update path. The resume here is a synthetic internal
+		// transition; from the customer's perspective the
+		// execution went paused -> terminal in one PATCH.
+		if err := h.Store.ResumeExecution(r.Context(), executionID, authProjectID, now); err != nil {
+			h.Logger.Error("flush paused time before terminal failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+			writeError(w, http.StatusInternalServerError, "lifecycle flush failed: "+err.Error())
+			return
+		}
+		// Fall through to UpdateExecution below.
+	}
+
+	// Default to ended_at = now for the terminal path so legacy
+	// SDKs that don't supply it still get a sensible value.
+	// Non-terminal transitions return above before reaching here.
 	if patch.EndedAt == nil {
-		now := time.Now().UTC()
 		patch.EndedAt = &now
+	}
+
+	// Mesedi #18: compute the effective (working-time) duration by
+	// subtracting accumulated paused time from the wall-clock
+	// duration the SDK supplied. Detectors that gate on
+	// "the agent worked for too long" (currently only time_budget)
+	// must use effectiveDurationMs so a HITL wait does not falsely
+	// trip them.
+	//
+	// totalPausedMs reflects the FINAL accumulated paused time:
+	// every closed pause cycle plus, if we just flushed the
+	// terminal-from-paused branch above, the final cycle that the
+	// synthetic resume just wrote to the row. We do not re-read the
+	// execution from the store here; we reconstruct the same value
+	// the resume call would have produced.
+	totalPausedMs := currentExec.TotalPausedMs
+	if priorStatus == events.StatusAwaitingHuman && patch.Status.IsTerminal() && currentExec.PausedAt != nil {
+		flushMs := now.Sub(*currentExec.PausedAt).Milliseconds()
+		if flushMs > 0 {
+			totalPausedMs += flushMs
+		}
+	}
+	effectiveDurationMs := patch.DurationMs - totalPausedMs
+	if effectiveDurationMs < 0 {
+		// Defensive: SDK clock skew or pause arithmetic drift.
+		// Falling back to the raw wall-clock keeps the detector
+		// chain from getting confused by a negative duration.
+		effectiveDurationMs = patch.DurationMs
 	}
 
 	if err := h.Store.UpdateExecution(r.Context(), &patch); err != nil {
@@ -464,16 +585,25 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// classified as crashes (the idempotency check in the store short-
 	// circuits this call). The threshold is hardcoded at 1s for v0.0.1;
 	// production default will be 60s, configurable per-project later.
-	if isTerminalStatus(patch.Status) && patch.DurationMs > 1000 {
-		isNew, err := h.Store.GroupTimeBudgetExceedance(r.Context(), executionID, authProjectID, patch.DurationMs)
+	//
+	// Mesedi #18: subtract accumulated paused time so a HITL wait
+	// does not falsely trip the time budget. effectiveDurationMs
+	// reflects the agent's actual working time (wall-clock minus
+	// all paused intervals). The variable is initialized at the top
+	// of the handler so the value is consistent across every
+	// subsequent detector that needs duration-without-pauses.
+	if isTerminalStatus(patch.Status) && effectiveDurationMs > 1000 {
+		isNew, err := h.Store.GroupTimeBudgetExceedance(r.Context(), executionID, authProjectID, effectiveDurationMs)
 		if err != nil {
 			h.Logger.Warn("time-budget grouping failed (continuing)",
 				"execution_id", executionID,
-				"duration_ms", patch.DurationMs,
+				"effective_duration_ms", effectiveDurationMs,
+				"wall_clock_duration_ms", patch.DurationMs,
+				"total_paused_ms", totalPausedMs,
 				"error", err.Error(),
 			)
 		}
-		h.maybeFireWebhook(r, authProjectID, store.FailureClassLoops, store.TimeBudgetSignature(patch.DurationMs), isNew, err)
+		h.maybeFireWebhook(r, authProjectID, store.FailureClassLoops, store.TimeBudgetSignature(effectiveDurationMs), isNew, err)
 	}
 
 	// Phase 3b sub-slice 11: step-count detector. Any terminal execution
@@ -2977,15 +3107,39 @@ func scanForInjection(evts []*events.Event) (string, bool) {
 // "the agent run is over." Detection passes (time-budget, future
 // drift / cost-velocity) only fire on terminal statuses, running
 // executions don't have a final duration yet.
+// isTerminalStatus delegates to events.ExecutionStatus.IsTerminal so
+// `started` and `awaiting_human` (Mesedi #18) are both treated as
+// non-terminal. The handler keeps its own thin wrapper so the
+// detector-chain guard expressions stay readable at the call sites.
 func isTerminalStatus(s events.ExecutionStatus) bool {
-	switch s {
-	case events.StatusCompleted,
-		events.StatusCrashed,
-		events.StatusHalted,
-		events.StatusTimeout,
-		events.StatusValidationFailed:
-		return true
+	return s.IsTerminal()
+}
+
+// isValidLifecycleTransition reports whether the (prior, next)
+// transition is allowed by the Mesedi #18 state machine. The
+// matrix:
+//
+//	started        -> awaiting_human    (pause)
+//	started        -> <any terminal>    (normal exit)
+//	awaiting_human -> started           (resume)
+//	awaiting_human -> <any terminal>    (HITL timeout, halt)
+//	<terminal>     -> <same terminal>   (idempotent re-PATCH)
+//
+// All other transitions are rejected with HTTP 409 so an SDK bug
+// or an out-of-order PATCH does not silently corrupt the lifecycle.
+func isValidLifecycleTransition(prior, next events.ExecutionStatus) bool {
+	if prior == next {
+		return true // idempotent
+	}
+	switch prior {
+	case events.StatusStarted:
+		return next == events.StatusAwaitingHuman || next.IsTerminal()
+	case events.StatusAwaitingHuman:
+		return next == events.StatusStarted || next.IsTerminal()
 	default:
+		// Terminal states are immutable. The only legal "transition"
+		// from a terminal state is the idempotent prior == next
+		// case handled above.
 		return false
 	}
 }

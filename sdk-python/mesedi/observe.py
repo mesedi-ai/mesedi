@@ -702,3 +702,61 @@ def emit_agent_handoff(
         duration_ms=latency_ms,
         payload=payload,
     ))
+
+
+def pause_for_human() -> None:
+    """Synchronously transition the current execution to
+    ``awaiting_human`` (Mesedi #18).
+
+    Call this from inside a ``@wrap``'d function at the moment the
+    agent reaches a decision that requires a human in the loop. The
+    backend records the pause timestamp, increments pause_count, and
+    starts the HITL clock. Subsequent calls to ``resume_for_agent()``
+    add the elapsed time to total_paused_ms so a long HITL wait does
+    not falsely trip the agent's time budget.
+
+    The host application is responsible for actually blocking the
+    agent until the human responds (typically the @wrap'd function
+    body itself blocks on a queue / websocket / database row). This
+    helper only updates Mesedi's lifecycle state; it does not block.
+
+    Outside ``@wrap``: no-op.
+
+    Important: this is a SYNCHRONOUS HTTP call rather than the
+    asynchronous shipper path the events take. The pause/resume
+    transitions must be committed before the host application blocks
+    or releases the agent, so async-only delivery would race against
+    the human responding.
+    """
+    ctx = current_execution_context()
+    if ctx is None:
+        return
+    client = get_client()
+    r = client._http.patch(  # noqa: SLF001
+        f"/executions/{ctx.execution_id}",
+        json={"status": "awaiting_human"},
+    )
+    r.raise_for_status()
+
+
+def resume_for_agent() -> None:
+    """Synchronously transition the current execution from
+    ``awaiting_human`` back to ``started`` (Mesedi #18).
+
+    Call this from the host application's HITL response handler the
+    moment the human's decision lands and the agent is about to be
+    unblocked. The backend computes the wait duration and adds it to
+    total_paused_ms so the time-budget detector reads only the
+    agent's actual working time.
+
+    Outside ``@wrap``: no-op.
+    """
+    ctx = current_execution_context()
+    if ctx is None:
+        return
+    client = get_client()
+    r = client._http.patch(  # noqa: SLF001
+        f"/executions/{ctx.execution_id}",
+        json={"status": "started"},
+    )
+    r.raise_for_status()
