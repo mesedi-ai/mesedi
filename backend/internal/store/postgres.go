@@ -2580,13 +2580,15 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 			fg.first_seen, fg.last_seen,
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
-			fg.sample_execution_id
+			fg.sample_execution_id,
+			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.project_id = $1
 		GROUP BY fg.group_id, fg.project_id, fg.failure_class, fg.signature,
 		         fg.first_seen, fg.last_seen, fg.event_count,
-		         fg.affected_executions, fg.sample_execution_id
+		         fg.affected_executions, fg.sample_execution_id,
+		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
 		ORDER BY fg.last_seen DESC
 		LIMIT $2 OFFSET $3
 	`, projectID, limit, offset)
@@ -2613,13 +2615,15 @@ func (s *PostgresStore) GetFailureGroup(ctx context.Context, groupID string) (*F
 			fg.first_seen, fg.last_seen,
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
-			fg.sample_execution_id
+			fg.sample_execution_id,
+			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.group_id = $1
 		GROUP BY fg.group_id, fg.project_id, fg.failure_class, fg.signature,
 		         fg.first_seen, fg.last_seen, fg.event_count,
-		         fg.affected_executions, fg.sample_execution_id
+		         fg.affected_executions, fg.sample_execution_id,
+		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
 	`, groupID)
 	g, err := scanFailureGroup(row)
 	if err == sql.ErrNoRows {
@@ -2629,6 +2633,30 @@ func (s *PostgresStore) GetFailureGroup(ctx context.Context, groupID string) (*F
 		return nil, fmt.Errorf("query failure_group: %w", err)
 	}
 	return g, nil
+}
+
+// SaveFailureGroupAnalysis is the Postgres twin of the SQLite method
+// of the same name (Mesedi #27).
+func (s *PostgresStore) SaveFailureGroupAnalysis(
+	ctx context.Context,
+	groupID, analysisMarkdown, analysisModel string,
+	analyzedAt time.Time,
+) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE failure_groups
+		SET analysis_markdown = $1,
+		    analyzed_at       = $2,
+		    analysis_model    = $3
+		WHERE group_id = $4
+	`, analysisMarkdown, analyzedAt, analysisModel, groupID)
+	if err != nil {
+		return fmt.Errorf("save failure_group analysis: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *PostgresStore) GetFailureGroupByClassSignature(ctx context.Context, projectID, failureClass, signature string) (*FailureGroup, error) {

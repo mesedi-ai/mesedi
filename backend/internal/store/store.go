@@ -462,6 +462,20 @@ type FailureGroup struct {
 	AffectedExecutions int       `json:"affected_executions"`
 	CostWastedUSD      *float64  `json:"cost_wasted_usd,omitempty"`
 	SampleExecutionID  string    `json:"sample_execution_id,omitempty"`
+	// AnalysisMarkdown is the LLM-generated root-cause analysis
+	// (Mesedi #27). Nil when no analysis has been generated for
+	// this group yet. Rendered as Markdown on the dashboard.
+	AnalysisMarkdown *string `json:"analysis_markdown,omitempty"`
+	// AnalyzedAt is the timestamp the analysis was produced. Nil
+	// when no analysis exists. Used as a cache-invalidation key:
+	// the dashboard offers a "Regenerate" button when analyzed_at
+	// is older than 24 hours or new affected executions have
+	// landed since.
+	AnalyzedAt *time.Time `json:"analyzed_at,omitempty"`
+	// AnalysisModel is the model id that produced the analysis
+	// (e.g. "claude-haiku-4-5"). Lets the dashboard render
+	// provenance ("Analyzed by claude-haiku-4-5 14m ago").
+	AnalysisModel *string `json:"analysis_model,omitempty"`
 }
 
 // TopologyNode is one entry in a multi-agent execution topology
@@ -1179,6 +1193,16 @@ type Store interface {
 	// canonical sample_execution_id for the payload at
 	// first-occurrence time.
 	GetFailureGroupByClassSignature(ctx context.Context, projectID, failureClass, signature string) (*FailureGroup, error)
+	// SaveFailureGroupAnalysis stores the LLM-generated root-cause
+	// analysis on a failure_group (Mesedi #27). Sets
+	// analysis_markdown, analyzed_at, and analysis_model on the
+	// row. Idempotent: a subsequent call overwrites with the new
+	// analysis. Returns ErrNotFound when the group does not exist.
+	SaveFailureGroupAnalysis(
+		ctx context.Context,
+		groupID, analysisMarkdown, analysisModel string,
+		analyzedAt time.Time,
+	) error
 
 	// Abuse signals + project suspension (#172).
 	//

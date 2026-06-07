@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"mesedi/backend/internal/anthropic"
 	"mesedi/backend/internal/detectors"
 	"mesedi/backend/internal/dlp"
 	"mesedi/backend/internal/events"
@@ -83,6 +84,12 @@ type Handlers struct {
 	// the entire feature can ship behind an env var. All Emit
 	// calls are nil-safe at the method receiver.
 	OTel *meseditel.Emitter //nolint:revive // local alias to avoid name collision with OTel SDK
+	// Anthropic is the minimal Messages API client used by the
+	// AI root-cause analysis endpoint (Mesedi #27). nil or a
+	// client with no API key disables analysis; the handler
+	// then responds with a "not configured" message instead
+	// of crashing.
+	Anthropic *anthropic.Client
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
@@ -198,6 +205,10 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /reports/cost-by-tenant", h.HandleReportCostByTenant)
 	// Phase 3b sub-slice 9, executions inside a failure_group.
 	mux.HandleFunc("GET /failure-groups/{id}/executions", h.HandleListExecutionsInFailureGroup)
+	// Mesedi #27, LLM-assisted root-cause analysis. Cached on the
+	// failure_group row for 24h or until last_seen advances; force
+	// regenerate with ?regenerate=1.
+	mux.HandleFunc("POST /failure-groups/{id}/analyze", h.HandleAnalyzeFailureGroup)
 	// Phase 3b sub-slice 18, API key management surface.
 	mux.HandleFunc("GET /api-keys", h.HandleListAPIKeys)
 	mux.HandleFunc("POST /api-keys", h.HandleCreateAPIKey)
@@ -1486,6 +1497,168 @@ func (h *Handlers) HandleGetFailureGroup(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, group)
+}
+
+// HandleAnalyzeFailureGroup runs the LLM-assisted root-cause
+// analyzer over a failure_group and persists the resulting Markdown
+// on the row (Mesedi #27). Subsequent reads of the group surface
+// the analysis on the same response shape, so the dashboard does
+// not need a separate fetch.
+//
+// Rate posture for v1: no per-project rate limit beyond the cache.
+// Repeated calls within 24 hours short-circuit by returning the
+// cached analysis without re-calling the LLM, so the cost ceiling
+// is effectively one LLM call per failure_group per day no matter
+// how many times the dashboard re-renders the card.
+//
+// When ANTHROPIC_API_KEY is unset the handler returns 503 with a
+// "not configured" message rather than a 500, so the dashboard can
+// surface a friendly "AI analysis is not enabled on this
+// deployment" state.
+func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := r.PathValue("id")
+	if groupID == "" {
+		writeError(w, http.StatusBadRequest, "group_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	if h.Anthropic == nil || !h.Anthropic.Enabled() {
+		writeError(w, http.StatusServiceUnavailable,
+			"AI analysis is not configured for this deployment (ANTHROPIC_API_KEY unset)")
+		return
+	}
+
+	group, err := h.Store.GetFailureGroup(r.Context(), groupID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "failure group not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if group.ProjectID != authProjectID {
+		writeError(w, http.StatusNotFound, "failure group not found")
+		return
+	}
+
+	// Cache hit: return the existing analysis if it was generated
+	// within the last 24 hours AND no new affected executions have
+	// landed since (last_seen <= analyzed_at).
+	if group.AnalyzedAt != nil && group.AnalysisMarkdown != nil {
+		fresh := time.Since(*group.AnalyzedAt) < 24*time.Hour
+		stable := !group.LastSeen.After(*group.AnalyzedAt)
+		// The query param ?regenerate=1 forces a re-analysis even
+		// when the cache is warm. Lets the customer ask for a
+		// fresh take after deploying a fix.
+		forced := r.URL.Query().Get("regenerate") == "1"
+		if fresh && stable && !forced {
+			writeJSON(w, http.StatusOK, group)
+			return
+		}
+	}
+
+	// Pull a small, recent sample of affected executions to give
+	// the model concrete context. We cap deliberately small
+	// (3 executions) so the LLM-side input bill stays bounded.
+	sampleExecs, err := h.Store.ListExecutionsByFailureGroup(r.Context(), groupID, 3, 0)
+	if err != nil {
+		h.Logger.Warn("analyze: sample executions failed",
+			"group_id", groupID, "error", err.Error())
+	}
+
+	prompt := buildFailureGroupAnalysisPrompt(group, sampleExecs)
+
+	model := "claude-haiku-4-5"
+	res, err := h.Anthropic.Call(r.Context(), anthropic.CallOptions{
+		Model: model,
+		System: "You are Mesedi's senior on-call engineer for AI agent reliability. " +
+			"You read structured failure-group telemetry and write a concise root-cause " +
+			"analysis with two concrete remediation suggestions. Output is rendered as " +
+			"Markdown in a dashboard card. Be precise, opinionated, and honest about " +
+			"uncertainty. Never claim a specific fix will resolve the issue; frame " +
+			"recommendations as hypotheses the operator should test.",
+		User:        prompt,
+		MaxTokens:   1024,
+		Temperature: 0.2,
+	})
+	if err != nil {
+		h.Logger.Error("anthropic call failed",
+			"group_id", groupID, "error", err.Error())
+		writeError(w, http.StatusBadGateway, "AI analysis failed: "+err.Error())
+		return
+	}
+
+	if err := h.Store.SaveFailureGroupAnalysis(
+		r.Context(), groupID, res.Text, model, time.Now().UTC(),
+	); err != nil {
+		h.Logger.Error("save failure_group analysis failed",
+			"group_id", groupID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "persist failed: "+err.Error())
+		return
+	}
+
+	// Re-read so the response matches what a subsequent GET would
+	// return (with the freshly-persisted analysis populated).
+	refreshed, err := h.Store.GetFailureGroup(r.Context(), groupID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, refreshed)
+}
+
+// buildFailureGroupAnalysisPrompt assembles the structured prompt
+// sent to the LLM. Kept small so the input bill stays bounded and
+// the model's output stays focused.
+func buildFailureGroupAnalysisPrompt(
+	group *store.FailureGroup,
+	sampleExecs []*events.Execution,
+) string {
+	var sb strings.Builder
+	sb.WriteString("# Failure group context\n\n")
+	sb.WriteString(fmt.Sprintf("- **failure_class**: %s\n", group.FailureClass))
+	sb.WriteString(fmt.Sprintf("- **signature**: %s\n", group.Signature))
+	sb.WriteString(fmt.Sprintf("- **first_seen**: %s\n", group.FirstSeen.Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("- **last_seen**: %s\n", group.LastSeen.Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("- **affected_executions**: %d\n", group.AffectedExecutions))
+	sb.WriteString(fmt.Sprintf("- **event_count**: %d\n", group.EventCount))
+	if group.CostWastedUSD != nil {
+		sb.WriteString(fmt.Sprintf("- **estimated_cost_usd**: %.4f\n", *group.CostWastedUSD))
+	}
+	if group.SampleExecutionID != "" {
+		sb.WriteString(fmt.Sprintf("- **sample_execution_id**: %s\n", group.SampleExecutionID))
+	}
+	if len(sampleExecs) > 0 {
+		sb.WriteString("\n## Sample executions (most recent)\n\n")
+		for _, exec := range sampleExecs {
+			if exec == nil {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("### %s\n\n", exec.ExecutionID))
+			sb.WriteString(fmt.Sprintf("- status: %s\n", exec.Status))
+			sb.WriteString(fmt.Sprintf("- duration_ms: %d\n", exec.DurationMs))
+			if exec.CrashSignature != "" {
+				sb.WriteString(fmt.Sprintf("- crash_signature: %s\n", exec.CrashSignature))
+			}
+			if exec.SDKLanguage != "" {
+				sb.WriteString(fmt.Sprintf("- sdk_language: %s\n", exec.SDKLanguage))
+			}
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("\n## Task\n\n")
+	sb.WriteString("Write a short Markdown analysis with three sections:\n")
+	sb.WriteString("1. **Likely cause** — one paragraph naming the most plausible root cause given the signature and the sample executions.\n")
+	sb.WriteString("2. **Two remediation hypotheses** — two bullet items, each a concrete action the operator can test.\n")
+	sb.WriteString("3. **Confidence** — one line: how confident you are (low / medium / high) and the single biggest unknown.\n")
+	sb.WriteString("\nKeep the entire output under 250 words. Do not include a disclaimer about the analysis being non-authoritative; the dashboard already renders one.\n")
+	return sb.String()
 }
 
 // HandleIngestEvents accepts a batch of Events. Batching is required ,

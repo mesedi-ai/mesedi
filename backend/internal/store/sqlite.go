@@ -3432,7 +3432,8 @@ func (s *SQLiteStore) ListFailureGroups(
 			fg.first_seen, fg.last_seen,
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
-			fg.sample_execution_id
+			fg.sample_execution_id,
+			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.project_id = ?
@@ -3468,7 +3469,8 @@ func (s *SQLiteStore) GetFailureGroup(
 			fg.first_seen, fg.last_seen,
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
-			fg.sample_execution_id
+			fg.sample_execution_id,
+			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.group_id = ?
@@ -3504,11 +3506,14 @@ type rowScanner interface {
 
 func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 	var (
-		g          FailureGroup
-		firstSeen  string
-		lastSeen   string
-		costWasted sql.NullFloat64
-		sampleID   sql.NullString
+		g                FailureGroup
+		firstSeen        string
+		lastSeen         string
+		costWasted       sql.NullFloat64
+		sampleID         sql.NullString
+		analysisMarkdown sql.NullString
+		analyzedAt       sql.NullTime
+		analysisModel    sql.NullString
 	)
 	if err := r.Scan(
 		&g.GroupID,
@@ -3521,6 +3526,9 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		&g.AffectedExecutions,
 		&costWasted,
 		&sampleID,
+		&analysisMarkdown,
+		&analyzedAt,
+		&analysisModel,
 	); err != nil {
 		return nil, err
 	}
@@ -3537,7 +3545,45 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 	if sampleID.Valid {
 		g.SampleExecutionID = sampleID.String
 	}
+	if analysisMarkdown.Valid && analysisMarkdown.String != "" {
+		v := analysisMarkdown.String
+		g.AnalysisMarkdown = &v
+	}
+	if analyzedAt.Valid {
+		t := analyzedAt.Time
+		g.AnalyzedAt = &t
+	}
+	if analysisModel.Valid && analysisModel.String != "" {
+		v := analysisModel.String
+		g.AnalysisModel = &v
+	}
 	return &g, nil
+}
+
+// SaveFailureGroupAnalysis persists the LLM-generated root-cause
+// analysis on a failure_group row (Mesedi #27). Idempotent overwrite:
+// repeated calls replace the previous analysis. Returns ErrNotFound
+// when the group_id does not exist.
+func (s *SQLiteStore) SaveFailureGroupAnalysis(
+	ctx context.Context,
+	groupID, analysisMarkdown, analysisModel string,
+	analyzedAt time.Time,
+) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE failure_groups
+		SET analysis_markdown = ?,
+		    analyzed_at       = ?,
+		    analysis_model    = ?
+		WHERE group_id = ?
+	`, analysisMarkdown, analyzedAt, analysisModel, groupID)
+	if err != nil {
+		return fmt.Errorf("save failure_group analysis: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------

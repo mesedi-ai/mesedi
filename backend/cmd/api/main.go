@@ -44,6 +44,7 @@ import (
 	"syscall"
 	"time"
 
+	"mesedi/backend/internal/anthropic"
 	"mesedi/backend/internal/api"
 	"mesedi/backend/internal/dashboard"
 	"mesedi/backend/internal/mail"
@@ -341,6 +342,16 @@ func main() {
 		}()
 	}
 
+	// Mesedi #27 — LLM-assisted root-cause analysis. The client is
+	// disabled when ANTHROPIC_API_KEY is unset; the handler returns
+	// 503 in that case so the dashboard can render a "not configured"
+	// state rather than a 500. No retry/backoff: a single API failure
+	// surfaces to the customer; they can re-click Analyze.
+	anthropicClient := anthropic.New(os.Getenv("ANTHROPIC_API_KEY"), "", "")
+	handlers.Anthropic = anthropicClient
+	logger.Info("anthropic client configured",
+		"enabled", anthropicClient.Enabled())
+
 	handlers.RegisterRoutes(privateMux)
 	privateHandler := api.NewAuthChain(logger, st, handlers.Abuse)(privateMux)
 
@@ -423,6 +434,9 @@ func main() {
 	mux.Handle("GET /failure-groups", privateHandler)
 	mux.Handle("GET /failure-groups/{id}", privateHandler)
 	mux.Handle("GET /failure-groups/{id}/executions", privateHandler)
+	// Mesedi #27, LLM-assisted root-cause analysis (auth-required).
+	// Cached on the failure_group row; ?regenerate=1 forces a refresh.
+	mux.Handle("POST /failure-groups/{id}/analyze", privateHandler)
 	// Mesedi #5, cost-by-tenant attribution report (auth-required).
 	mux.Handle("GET /reports/cost-by-tenant", privateHandler)
 	// Phase 3b sub-slice 18, API key management (auth-required).
