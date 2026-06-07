@@ -60,6 +60,25 @@ import (
 // supplied (failure_class, signature) pair.
 var ErrNotFound = errors.New("playbook not found")
 
+// disclaimer is prepended to every playbook returned by Load. It
+// is intentionally short, blunt, and unambiguous so the customer
+// reading the playbook in the dashboard understands the document
+// is guidance based on Mesedi's pattern recognition, not a
+// guarantee of fitness for the customer's specific situation.
+//
+// The disclaimer is centralized here rather than authored into
+// each markdown file so:
+//
+//	(a) every existing and future playbook is covered without
+//	    edit drift, and
+//	(b) the wording can be updated in one place if counsel or
+//	    customer-feedback indicates a tweak.
+//
+// Rendered as a Markdown blockquote so the dashboard styles it
+// visually distinct from the body. The horizontal rule separates
+// it from the playbook content that follows.
+const disclaimer = "> **Guidance only.** This playbook describes a pattern Mesedi has observed across many agent deployments and a remediation that has often worked. It is not a guarantee that the recommended steps will resolve your specific situation, nor is it legal, compliance, financial, medical, or professional advice. You are responsible for evaluating, testing, and deploying any change to your production systems. Mesedi and its contributors disclaim liability for any outcome arising from following or not following this guidance. If you are unsure, consult a qualified engineer for your stack and a qualified professional for any regulated domain.\n\n---\n\n"
+
 // content holds the markdown content for every playbook, embedded at
 // compile time. The directory layout is content/<failure_class>/<name>.md
 // where <name> matches the contentPath suffix in the patterns table
@@ -119,6 +138,27 @@ var patterns = []pattern{
 	{"drift", "new_model:", "drift/new_model.md"},
 	{"drift", "lexical_drift_", "drift/lexical_drift.md"},
 
+	// ── Tier 1 commercial-value detectors (Mesedi #1-#5, #24, #25) ──
+	{"data_leakage", "", "data_leakage/_default.md"},
+	{"infrastructure_throttled", "", "infrastructure_throttled/_default.md"},
+	{"context_overflow", "", "context_overflow/_default.md"},
+	{"token_waste", "", "token_waste/_default.md"},
+
+	// ── Tier 2 failure-detection depth (Mesedi #6-#9) ──────────
+	{"semantic_loop", "", "semantic_loop/_default.md"},
+	{"tool_schema_drift", "", "tool_schema_drift/_default.md"},
+	{"grounding_failure", "", "grounding_failure/_default.md"},
+
+	// ── Tier 3 multi-agent + security (Mesedi #10-#17) ─────────
+	{"cascading_failure", "", "cascading_failure/_default.md"},
+	{"coordination_deadlock", "", "coordination_deadlock/_default.md"},
+	{"provider_incident", "", "provider_incident/_default.md"},
+	{"sandbox_escape", "", "sandbox_escape/_default.md"},
+
+	// ── Tier 4 HITL (Mesedi #18-#21) ───────────────────────────
+	{"hitl_timeout", "", "hitl_timeout/_default.md"},
+	{"hitl_rejection_spike", "", "hitl_rejection_spike/_default.md"},
+
 	// ── crashes, INTENTIONALLY NO ENTRIES ──────────────────────
 	// Crash signatures are exception-class + stack-trace hashes
 	// that can't be enumerated ahead of time. Crashes need actual
@@ -158,5 +198,8 @@ func Load(failureClass, signature string) (string, error) {
 		}
 		return "", err
 	}
-	return string(bytes), nil
+	// Prepend the guidance-only disclaimer so every rendered
+	// playbook opens with it. Centralized here so no individual
+	// playbook author can forget to include it.
+	return disclaimer + string(bytes), nil
 }
