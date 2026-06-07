@@ -28,6 +28,10 @@
     "./integrations/langgraph": {
       "types": "./dist/integrations/langgraph.d.ts",
       "import": "./dist/integrations/langgraph.js"
+    },
+    "./integrations/openai_agents": {
+      "types": "./dist/integrations/openai_agents.d.ts",
+      "import": "./dist/integrations/openai_agents.js"
     }
   },
   "peerDependencies": {
