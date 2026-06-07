@@ -50,18 +50,21 @@ func Valid(s string) bool {
 }
 
 // Default returns the hardcoded severity for a failure class. The
-// mapping below reflects "what most customers want by default":
+// mapping below reflects "what most customers want by default" and
+// is grouped by the harm shape:
 //
-//   - crashes / tool_failures / validator_failures / prompt_injection:
-//     critical. Each of these means the agent did something wrong in
-//     a way that produces incorrect output or destroys data. Page now.
+//   - Real-money or data harm reaching production -> critical.
+//     Crashes, tool failures, validator failures, prompt injection,
+//     data leakage, tool schema drift, grounding failure, cascading
+//     failure, coordination deadlock, sandbox escape.
 //
-//   - cost_velocity / time_budget / step_count: warning. Money or
-//     latency is sliding in the wrong direction. Not a crisis but
-//     needs human attention same-day.
+//   - Cost / latency / quality regression with bounded blast
+//     radius -> warning. Cost velocity, time budget, step count,
+//     infrastructure throttled, context overflow, token waste,
+//     provider incident, HITL timeout, HITL rejection spike.
 //
-//   - loops / drift: info. Subtle behavioral changes that benefit
-//     from weekly review but rarely require immediate action.
+//   - Behavioral signals worth reviewing later -> info. The loop
+//     family, drift, semantic loop.
 //
 // Unknown failure classes fall through to warning, the sensible
 // middle ground.
@@ -70,15 +73,28 @@ func Default(failureClass string) Severity {
 	case "crashes",
 		"tool_failures",
 		"validator_failures",
-		"prompt_injection":
+		"prompt_injection",
+		"data_leakage",
+		"tool_schema_drift",
+		"grounding_failure",
+		"cascading_failure",
+		"coordination_deadlock",
+		"sandbox_escape":
 		return Critical
 	case "cost_velocity",
 		"time_budget",
-		"step_count":
+		"step_count",
+		"infrastructure_throttled",
+		"context_overflow",
+		"token_waste",
+		"provider_incident",
+		"hitl_timeout",
+		"hitl_rejection_spike":
 		return Warning
 	case "loops",
 		"identical_call_loop",
 		"similar_call_loop",
+		"semantic_loop",
 		"drift":
 		return Info
 	default:

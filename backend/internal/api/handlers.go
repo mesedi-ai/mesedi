@@ -2653,16 +2653,39 @@ func (h *Handlers) HandleListClassSeverities(w http.ResponseWriter, r *http.Requ
 	// The canonical class list mirrors the failure-class registry. We
 	// avoid pulling it from a separate package to keep the surface
 	// small; the strings here match what the detectors emit.
+	//
+	// Ordering is opinionated: critical-by-default first (so the most
+	// dangerous classes anchor the top of the table on /app/settings),
+	// then warning-by-default cost/quality signals, then info-by-default
+	// behavioral signals. severity.Default() is the source of truth for
+	// the initial value; this slice only controls which classes the UI
+	// renders.
 	classes := []string{
+		// critical-by-default
 		"crashes",
 		"tool_failures",
 		"validator_failures",
 		"prompt_injection",
+		"data_leakage",
+		"tool_schema_drift",
+		"grounding_failure",
+		"cascading_failure",
+		"coordination_deadlock",
+		"sandbox_escape",
+		// warning-by-default
 		"cost_velocity",
 		"time_budget",
 		"step_count",
+		"infrastructure_throttled",
+		"context_overflow",
+		"token_waste",
+		"provider_incident",
+		"hitl_timeout",
+		"hitl_rejection_spike",
+		// info-by-default
 		"identical_call_loop",
 		"similar_call_loop",
+		"semantic_loop",
 		"drift",
 	}
 
