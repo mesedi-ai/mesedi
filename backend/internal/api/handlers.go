@@ -311,6 +311,33 @@ func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request)
 		exec.StartedAt = time.Now().UTC()
 	}
 
+	// Billing cap enforcement (Mesedi pricing alignment).
+	//
+	// Before persisting the execution, check whether the project's
+	// per-period paid-overage cost has already crossed billing_cap_usd.
+	// When it has, silent-drop the execution with 402 + a structured
+	// "billing cap reached" message so the SDK can surface it without
+	// retrying. Enterprise tier is exempt (no per-execution overage).
+	//
+	// The cap check uses the current row, so a request arriving while
+	// the meter is exactly at the cap will be accepted; the *next*
+	// request after the increment is the one that gets blocked. That's
+	// the desired behavior: the customer never pays past the cap,
+	// modulo a single-execution slop on the boundary.
+	if proj, err := h.Store.GetProject(r.Context(), authProjectID); err == nil && proj != nil {
+		if blocked, capUSD, costUSD := capExceeded(proj); blocked {
+			h.Logger.Info("ingest blocked: billing cap reached",
+				"project_id", authProjectID,
+				"tier", proj.Tier,
+				"cost_usd", costUSD,
+				"cap_usd", capUSD,
+			)
+			writeError(w, http.StatusPaymentRequired,
+				fmt.Sprintf("billing cap reached ($%.2f of $%.2f). New executions are paused until the next billing period or until the cap is raised.", costUSD, capUSD))
+			return
+		}
+	}
+
 	if err := h.Store.CreateExecution(r.Context(), &exec); err != nil {
 		h.Logger.Error("create execution failed",
 			"execution_id", exec.ExecutionID,
@@ -2417,14 +2444,18 @@ func (h *Handlers) HandleUpsertBudgetCeiling(w http.ResponseWriter, r *http.Requ
 // expected to flip to indefinite, which is what "audit history"
 // customers really want anyway.
 func tierRetentionCap(tier string) (maxDays int, allowIndefinite bool) {
-	switch strings.ToLower(tier) {
-	case "enterprise":
+	// normalizeTier maps legacy "pro" -> "team" so a stale row
+	// returning the old label still gets the same retention cap as
+	// the renamed tier. Hobby keeps the 30-day cap (was 7); aligns
+	// with the pricing page promise of "30-day data retention".
+	switch normalizeTier(strings.ToLower(tier)) {
+	case TierEnterprise:
 		return 3650, true
-	case "pro":
-		return 30, false
+	case TierTeam:
+		return 90, false
 	default:
 		// Hobby, empty, or unknown tier.
-		return 7, false
+		return 30, false
 	}
 }
 
@@ -2439,7 +2470,7 @@ func tierRetentionCap(tier string) (maxDays int, allowIndefinite bool) {
 //	  "ok": true,
 //	  "retention_days": 30,        // or null when indefinite
 //	  "is_indefinite": false,
-//	  "tier": "pro",
+//	  "tier": "team",
 //	  "max_days": 30,              // tier-specific cap
 //	  "allow_indefinite": false    // only true on enterprise
 //	}

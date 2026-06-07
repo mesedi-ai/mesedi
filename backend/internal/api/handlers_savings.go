@@ -93,13 +93,16 @@ const (
 	// case by showing absolute saved $ only.
 	subscriptionCostHobby float64 = 0
 
-	// subscriptionCostProMonthly is what a Pro customer pays per
+	// subscriptionCostTeamMonthly is what a Team customer pays per
 	// month. Keep this in sync with the pricing page; when pricing
 	// changes, update this constant.
-	subscriptionCostProMonthly float64 = 49
+	subscriptionCostTeamMonthly float64 = 99
 
-	// subscriptionCostEnterpriseMonthly is what an Enterprise
-	// customer pays per month. $25k/year / 12 ≈ $2,083.
+	// subscriptionCostEnterpriseMonthly is the placeholder monthly
+	// rate used in ROI math for Enterprise customers. Real Enterprise
+	// pricing is contract-driven; the savings card only uses this as
+	// a "what an Enterprise customer plausibly pays" baseline. Keep
+	// generous so ROI ratios stay meaningful.
 	subscriptionCostEnterpriseMonthly float64 = 25000.0 / 12.0
 )
 
@@ -368,10 +371,10 @@ func (h *Handlers) HandleSavings(w http.ResponseWriter, r *http.Request) {
 // cost in USD. Keep in sync with the pricing page; the constants at
 // the top of this file are the single source of truth.
 func subscriptionCostFor(tier string) float64 {
-	switch tier {
-	case "pro":
-		return subscriptionCostProMonthly
-	case "enterprise":
+	switch normalizeTier(tier) {
+	case TierTeam:
+		return subscriptionCostTeamMonthly
+	case TierEnterprise:
 		return subscriptionCostEnterpriseMonthly
 	default:
 		return subscriptionCostHobby

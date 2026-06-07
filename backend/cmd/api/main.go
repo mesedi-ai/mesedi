@@ -72,7 +72,12 @@ type runtimeConfig struct {
 	// local dev, the billing endpoints respond 503 when missing.
 	StripeSecretKey     string
 	StripeWebhookSecret string
-	StripeProPriceID    string
+	// StripeTeamPriceID is the Stripe Price ID for the $99/mo Team
+	// plan. Set via MESEDI_STRIPE_TEAM_PRICE_ID. The legacy
+	// MESEDI_STRIPE_PRO_PRICE_ID env var is also honored at startup
+	// as a fallback so an existing deploy doesn't lose billing
+	// across the pricing-rename slice.
+	StripeTeamPriceID string
 	// Admin dashboard bearer token (#150). When empty the /admin/*
 	// routes refuse every request with 503 (fail-closed posture).
 	AdminToken string
@@ -272,7 +277,7 @@ func main() {
 	stripeCfg := api.StripeConfig{
 		SecretKey:     cfg.StripeSecretKey,
 		WebhookSecret: cfg.StripeWebhookSecret,
-		ProPriceID:    cfg.StripeProPriceID,
+		TeamPriceID:   cfg.StripeTeamPriceID,
 	}
 	logger.Info("stripe billing configured", "configured", stripeCfg.Configured())
 
@@ -581,7 +586,12 @@ func loadConfig() runtimeConfig {
 		DashboardURL:        envString("MESEDI_DASHBOARD_URL", ""),
 		StripeSecretKey:     envString("MESEDI_STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret: envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),
-		StripeProPriceID:    envString("MESEDI_STRIPE_PRO_PRICE_ID", ""),
+		// Prefer the new TEAM env var; fall back to the legacy PRO one
+		// so an in-flight deploy with the old secret still works. Once
+		// every deployment has migrated to MESEDI_STRIPE_TEAM_PRICE_ID
+		// the legacy fallback can be removed.
+		StripeTeamPriceID: envString("MESEDI_STRIPE_TEAM_PRICE_ID",
+			envString("MESEDI_STRIPE_PRO_PRICE_ID", "")),
 		AdminToken:          envString("MESEDI_ADMIN_TOKEN", ""),
 		ResendAPIKey:        envString("RESEND_API_KEY", ""),
 		ResendFrom:          envString("MESEDI_MAIL_FROM", "Mesedi <onboarding@resend.dev>"),

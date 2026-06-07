@@ -196,13 +196,15 @@ func (s *PostgresStore) GetProject(ctx context.Context, projectID string) (*Proj
 		SELECT project_id, name, owner_user_id, owner_email, created_at,
 		       tier, stripe_customer_id, stripe_subscription_id,
 		       current_period_start, current_period_end, executions_this_period,
-		       granted_executions, granted_executions_expires_at, tier_expires_at
+		       granted_executions, granted_executions_expires_at, tier_expires_at,
+		       billing_cap_usd
 		FROM projects WHERE project_id = $1
 	`, projectID).Scan(
 		&p.ProjectID, &p.Name, &owner, &email, &p.CreatedAt,
 		&p.Tier, &stripeCust, &stripeSub,
 		&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
 		&p.GrantedExecutions, &grantExpires, &tierExpires,
+		&p.BillingCapUSD,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -252,7 +254,8 @@ func (s *PostgresStore) ListProjectsByOwner(ctx context.Context, ownerUserID str
 		SELECT project_id, name, owner_user_id, owner_email, created_at,
 		       tier, stripe_customer_id, stripe_subscription_id,
 		       current_period_start, current_period_end, executions_this_period,
-		       granted_executions, granted_executions_expires_at, tier_expires_at
+		       granted_executions, granted_executions_expires_at, tier_expires_at,
+		       billing_cap_usd
 		FROM projects
 		WHERE owner_user_id = $1
 		ORDER BY created_at ASC
@@ -273,6 +276,7 @@ func (s *PostgresStore) ListProjectsByOwner(ctx context.Context, ownerUserID str
 			&p.Tier, &stripeCust, &stripeSub,
 			&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
 			&p.GrantedExecutions, &grantExpires, &tierExpires,
+			&p.BillingCapUSD,
 		); err != nil {
 			return nil, fmt.Errorf("scan project: %w", err)
 		}

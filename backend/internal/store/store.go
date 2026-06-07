@@ -29,8 +29,12 @@ type Project struct {
 	OwnerEmail  string    `json:"owner_email,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 
-	// Tier: "hobby" | "pro" | "enterprise". Always populated;
-	// migration 006 backfills existing rows to "hobby".
+	// Tier: "hobby" | "team" | "enterprise". Always populated;
+	// migration 006 backfilled existing rows to "hobby", and migration
+	// 019 renamed any "pro" rows to "team" so the database speaks the
+	// post-rewrite pricing vocabulary. The API layer also calls
+	// normalizeTier() defensively in case a future out-of-band SQL
+	// fix re-inserts the legacy "pro" string.
 	Tier string `json:"tier"`
 	// Stripe identifiers, populated after a successful Checkout.
 	// Empty for hobby-tier projects that never upgraded.
@@ -65,6 +69,16 @@ type Project struct {
 	// (the default for paid Stripe subscriptions and permanent admin
 	// flips). Enforced lazily in HandleGetBilling.
 	TierExpiresAt *time.Time `json:"tier_expires_at,omitempty"`
+	// BillingCapUSD is the monthly hard cap on overage spend
+	// (migration 019). When the computed overage cost crosses this
+	// number, the ingest path silent-drops new executions with a 402
+	// "billing cap reached" response. Default 200 across all tiers;
+	// future slice lets customers configure it.
+	//
+	// Overage cost itself is NOT stored; it's computed on the fly at
+	// every read site as max(0, executions_this_period - included)
+	// times the tier's per-execution rate. Single source of truth.
+	BillingCapUSD float64 `json:"billing_cap_usd"`
 }
 
 // TenantBudgetCeiling is the persisted configuration that powers

@@ -57,25 +57,60 @@ import (
 )
 
 // ── tier constants (mirror /pricing page) ───────────────────────
+//
+// The 4-tier pricing model (post-Tier-1-4 rewrite):
+//
+//   Self-Hosted (Community Edition) : Free forever, MIT (no DB row)
+//   Cloud Hobby                     : 10K execs free / mo, $0.002 overage, $200 cap
+//   Cloud Team                      : $99/mo, 100K execs included, $0.001 overage
+//   Cloud Enterprise                : custom contract, unlimited
+//
+// Migration 019 flipped any pre-existing tier='pro' rows to 'team'
+// so the database speaks the new vocabulary too. The legacy "pro"
+// string is no longer written, but it's accepted at read time via
+// normalizeTier() so any in-flight Stripe webhook that still carries
+// the old label doesn't crash the dispatcher.
 
 const (
 	TierHobby      = "hobby"
-	TierPro        = "pro"
+	TierTeam       = "team"
 	TierEnterprise = "enterprise"
 
+	// TierProLegacy is the pre-rewrite name for what is now "team".
+	// Accepted at read time only; never written. Lets old data
+	// (and pre-deploy Stripe webhook retries) flow without surprise.
+	TierProLegacy = "pro"
+
 	// HobbyExecutionLimit is the included monthly quota on Hobby.
-	// Used by the dashboard's "X of N" display today; will be the
-	// silent-drop threshold in the enforcement slice.
-	HobbyExecutionLimit = 5000
-	// ProExecutionIncluded is the included monthly quota on Pro.
-	// Executions past this number bill at ProOveragePriceUSD each in
-	// the enforcement slice.
-	ProExecutionIncluded = 100000
-	// ProOveragePriceUSD is the per-execution overage cost on Pro.
-	// Surfaced in dashboard copy; used by the enforcement slice to
-	// post Stripe metered-usage records.
-	ProOveragePriceUSD = 0.001
+	// Executions in [0, HobbyExecutionLimit] are free; executions
+	// above this number bill at HobbyOveragePriceUSD each.
+	HobbyExecutionLimit = 10000
+	// HobbyOveragePriceUSD is the per-execution cost above the
+	// Hobby free quota. The cap-enforcement path computes
+	// (executions_above_quota * HobbyOveragePriceUSD) against the
+	// project's billing_cap_usd; when the cost crosses the cap, the
+	// ingest path returns 402 and stops accepting new executions.
+	HobbyOveragePriceUSD = 0.002
+
+	// TeamExecutionIncluded is the included monthly quota on Team.
+	// Executions past this number bill at TeamOveragePriceUSD each.
+	TeamExecutionIncluded = 100000
+	// TeamOveragePriceUSD is the per-execution overage cost on Team.
+	// Half the Hobby rate (volume customers pay less per unit).
+	TeamOveragePriceUSD = 0.001
 )
+
+// normalizeTier maps any legacy tier string to its canonical form.
+// Called on every project read so the rest of the codebase only
+// ever sees "hobby" | "team" | "enterprise". Defensive: even after
+// migration 019 we keep this around so an out-of-band SQL fix that
+// re-inserts "pro" doesn't break the dashboard.
+func normalizeTier(tier string) string {
+	if tier == TierProLegacy {
+		return TierTeam
+	}
+	return tier
+}
 
 // ── config ─────────────────────────────────────────────────────
 
@@ -90,22 +125,25 @@ const (
 // WebhookSecret: the signing secret for the configured webhook
 // endpoint. Begins with "whsec_". Set via MESEDI_STRIPE_WEBHOOK_SECRET.
 //
-// ProPriceID: the Stripe Price ID for the $49/mo Pro plan. Begins
-// with "price_". Set via MESEDI_STRIPE_PRO_PRICE_ID.
+// TeamPriceID: the Stripe Price ID for the $99/mo Team plan. Begins
+// with "price_". Set via MESEDI_STRIPE_TEAM_PRICE_ID; the legacy
+// MESEDI_STRIPE_PRO_PRICE_ID is still honored at startup as a
+// fallback so an in-flight deploy doesn't lose billing on the env
+// rename.
 //
 // If any of the three is empty the billing endpoints respond with
 // 503; this lets the backend run in local-dev without Stripe configured.
 type StripeConfig struct {
 	SecretKey     string
 	WebhookSecret string
-	ProPriceID    string
+	TeamPriceID   string
 }
 
 // Configured returns true iff all three required Stripe values are
 // present. When false, billing endpoints return 503 with a clear
 // message instead of crashing on missing config.
 func (c StripeConfig) Configured() bool {
-	return c.SecretKey != "" && c.WebhookSecret != "" && c.ProPriceID != ""
+	return c.SecretKey != "" && c.WebhookSecret != "" && c.TeamPriceID != ""
 }
 
 // applyKey sets the package-global stripe.Key once per request from
@@ -123,15 +161,30 @@ func (c StripeConfig) applyKey() {
 // for a tier. Enterprise returns 0 meaning "no fixed limit"; the
 // dashboard renders that as the unicode infinity sign.
 func tierExecutionLimit(tier string) int64 {
-	switch tier {
+	switch normalizeTier(tier) {
 	case TierHobby:
 		return HobbyExecutionLimit
-	case TierPro:
-		return ProExecutionIncluded
+	case TierTeam:
+		return TeamExecutionIncluded
 	case TierEnterprise:
 		return 0
 	default:
 		return HobbyExecutionLimit
+	}
+}
+
+// tierOveragePriceUSD returns the per-execution overage price for a
+// tier. Enterprise returns 0 (no per-execution overage; contract-
+// driven). Hobby is the most expensive per unit, Team is half that
+// rate.
+func tierOveragePriceUSD(tier string) float64 {
+	switch normalizeTier(tier) {
+	case TierHobby:
+		return HobbyOveragePriceUSD
+	case TierTeam:
+		return TeamOveragePriceUSD
+	default:
+		return 0
 	}
 }
 
@@ -140,6 +193,59 @@ func tierExecutionLimit(tier string) int64 {
 func billingNotConfigured(w http.ResponseWriter) {
 	writeError(w, http.StatusServiceUnavailable,
 		"Stripe is not configured on this backend; billing endpoints are disabled")
+}
+
+// computeOverageCostUSD returns the paid-overage cost for the
+// project's current period. Computed live from the execution count
+// rather than persisted so there's exactly one source of truth.
+//
+// Formula: max(0, executions_this_period - included_quota) *
+//          per-execution rate for the project's tier.
+//
+// Included quota = tier base + non-expired admin-granted bonus.
+// Enterprise returns 0 (no per-execution overage; contract-driven).
+func computeOverageCostUSD(p *store.Project) float64 {
+	if p == nil {
+		return 0
+	}
+	tier := normalizeTier(p.Tier)
+	rate := tierOveragePriceUSD(tier)
+	if rate == 0 {
+		return 0
+	}
+	now := time.Now().UTC()
+	grant := p.GrantedExecutions
+	if p.GrantedExecutionsExpiresAt != nil && now.After(*p.GrantedExecutionsExpiresAt) {
+		grant = 0
+	}
+	included := tierExecutionLimit(tier) + grant
+	if included < 0 {
+		included = 0
+	}
+	overUnits := p.ExecutionsThisPeriod - included
+	if overUnits <= 0 {
+		return 0
+	}
+	return float64(overUnits) * rate
+}
+
+// capExceeded reports whether the project's current per-period
+// overage cost has crossed its billing_cap_usd. Returns the
+// computed cost and the cap so callers can include both in the
+// error message. A zero or negative cap is treated as "no cap"
+// (the customer explicitly opted into uncapped billing); ingest
+// proceeds normally. Enterprise projects also bypass since their
+// per-execution rate is 0.
+func capExceeded(p *store.Project) (bool, float64, float64) {
+	if p == nil {
+		return false, 0, 0
+	}
+	cost := computeOverageCostUSD(p)
+	capUSD := p.BillingCapUSD
+	if capUSD <= 0 {
+		return false, capUSD, cost
+	}
+	return cost >= capUSD, capUSD, cost
 }
 
 // ── response payloads ──────────────────────────────────────────
@@ -166,12 +272,21 @@ type BillingStatusResponse struct {
 	// this on the current-tier row when set.
 	TierExpiresAt            *time.Time `json:"tier_expires_at,omitempty"`
 	OveragePricePerExecution float64    `json:"overage_price_per_execution_usd"`
+	// BillingCapUSD is the monthly hard cap on overage spend. When
+	// OverageCostThisPeriodUSD crosses this number the ingest path
+	// silent-drops new executions with 402. Default $200; future
+	// slice lets customers configure it.
+	BillingCapUSD float64 `json:"billing_cap_usd"`
+	// OverageCostThisPeriodUSD is the running paid-overage cost for
+	// the active period. Resets to 0 on invoice.paid + on the
+	// per-tier rollover for Hobby (which has no Stripe invoice).
+	OverageCostThisPeriodUSD float64    `json:"overage_cost_this_period_usd"`
 	CurrentPeriodStart       *time.Time `json:"current_period_start,omitempty"`
 	CurrentPeriodEnd         *time.Time `json:"current_period_end,omitempty"`
 	StripeCustomerID         string     `json:"stripe_customer_id,omitempty"`
 	StripeSubscriptionID     string     `json:"stripe_subscription_id,omitempty"`
-	// CanUpgrade is true when this project can go from Hobby to Pro
-	// via POST /billing/checkout. False if already on Pro or
+	// CanUpgrade is true when this project can go from Hobby to Team
+	// via POST /billing/checkout. False if already on Team or
 	// Enterprise.
 	CanUpgrade bool `json:"can_upgrade"`
 	// CanManage is true when this project has an existing Stripe
@@ -228,7 +343,7 @@ func (h *Handlers) HandleGetBilling(w http.ResponseWriter, r *http.Request) {
 	//    the customer dashboard doesn't show a stale "+N admin
 	//    granted" badge.
 	now := time.Now().UTC()
-	effectiveTier := p.Tier
+	effectiveTier := normalizeTier(p.Tier)
 	if p.TierExpiresAt != nil && now.After(*p.TierExpiresAt) {
 		effectiveTier = TierHobby
 	}
@@ -258,7 +373,13 @@ func (h *Handlers) HandleGetBilling(w http.ResponseWriter, r *http.Request) {
 		GrantedExecutions:          effectiveGrant,
 		GrantedExecutionsExpiresAt: p.GrantedExecutionsExpiresAt,
 		TierExpiresAt:              p.TierExpiresAt,
-		OveragePricePerExecution:   ProOveragePriceUSD,
+		OveragePricePerExecution:   tierOveragePriceUSD(effectiveTier),
+		BillingCapUSD:              p.BillingCapUSD,
+		// OverageCostThisPeriodUSD is computed live from the
+		// execution count + tier rate; not persisted. computeOverageCostUSD
+		// returns 0 when the project is still inside the free quota
+		// or when the tier has no overage (Enterprise).
+		OverageCostThisPeriodUSD: computeOverageCostUSD(p),
 		CurrentPeriodStart:         p.CurrentPeriodStart,
 		CurrentPeriodEnd:           p.CurrentPeriodEnd,
 		StripeCustomerID:           p.StripeCustomerID,
@@ -328,7 +449,7 @@ func (h *Handlers) HandleCreateCheckout(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "load project: "+err.Error())
 		return
 	}
-	if p.Tier != TierHobby {
+	if normalizeTier(p.Tier) != TierHobby {
 		writeError(w, http.StatusBadRequest,
 			"project is already on a paid tier; use /billing/portal to manage")
 		return
@@ -343,7 +464,7 @@ func (h *Handlers) HandleCreateCheckout(w http.ResponseWriter, r *http.Request) 
 		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
-				Price:    stripe.String(h.Stripe.ProPriceID),
+				Price:    stripe.String(h.Stripe.TeamPriceID),
 				Quantity: stripe.Int64(1),
 			},
 		},
@@ -564,7 +685,7 @@ func (h *Handlers) handleCheckoutCompleted(event stripe.Event) error {
 	// gracefully.
 	return h.Store.UpdateProjectBilling(
 		context.Background(),
-		projectID, TierPro, customerID, subscriptionID, nil, nil,
+		projectID, TierTeam, customerID, subscriptionID, nil, nil,
 	)
 }
 
@@ -584,10 +705,10 @@ func (h *Handlers) handleSubscriptionUpdated(event stripe.Event) error {
 		return fmt.Errorf("lookup project by customer %s: %w", sub.Customer.ID, err)
 	}
 	periodStart, periodEnd := subscriptionPeriodBounds(&sub)
-	tier := p.Tier
+	tier := normalizeTier(p.Tier)
 	if sub.Status == stripe.SubscriptionStatusActive ||
 		sub.Status == stripe.SubscriptionStatusTrialing {
-		tier = TierPro
+		tier = TierTeam
 	}
 	return h.Store.UpdateProjectBilling(
 		context.Background(),

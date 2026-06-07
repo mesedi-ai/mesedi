@@ -255,13 +255,15 @@ func (s *SQLiteStore) GetProject(ctx context.Context, projectID string) (*Projec
 		SELECT project_id, name, owner_user_id, owner_email, created_at,
 		       tier, stripe_customer_id, stripe_subscription_id,
 		       current_period_start, current_period_end, executions_this_period,
-		       granted_executions, granted_executions_expires_at, tier_expires_at
+		       granted_executions, granted_executions_expires_at, tier_expires_at,
+		       billing_cap_usd
 		FROM projects WHERE project_id = ?
 	`, projectID).Scan(
 		&p.ProjectID, &p.Name, &owner, &email, &p.CreatedAt,
 		&p.Tier, &stripeCust, &stripeSub,
 		&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
 		&p.GrantedExecutions, &grantExpires, &tierExpires,
+		&p.BillingCapUSD,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -314,7 +316,8 @@ func (s *SQLiteStore) ListProjectsByOwner(ctx context.Context, ownerUserID strin
 		SELECT project_id, name, owner_user_id, owner_email, created_at,
 		       tier, stripe_customer_id, stripe_subscription_id,
 		       current_period_start, current_period_end, executions_this_period,
-		       granted_executions, granted_executions_expires_at, tier_expires_at
+		       granted_executions, granted_executions_expires_at, tier_expires_at,
+		       billing_cap_usd
 		FROM projects
 		WHERE owner_user_id = ?
 		ORDER BY created_at ASC
@@ -335,6 +338,7 @@ func (s *SQLiteStore) ListProjectsByOwner(ctx context.Context, ownerUserID strin
 			&p.Tier, &stripeCust, &stripeSub,
 			&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
 			&p.GrantedExecutions, &grantExpires, &tierExpires,
+			&p.BillingCapUSD,
 		); err != nil {
 			return nil, fmt.Errorf("scan project: %w", err)
 		}
@@ -584,7 +588,7 @@ func (s *SQLiteStore) ListAllProjects(ctx context.Context) ([]*AdminProjectRow, 
 // ErrNotFound if the project doesn't exist; the admin handler turns
 // that into a 404. Permissible tier values are not enforced at the
 // store layer, the API layer validates against the canonical
-// TierHobby/TierPro/TierEnterprise constants.
+// TierHobby/TierTeam/TierEnterprise constants.
 func (s *SQLiteStore) UpdateProjectTier(
 	ctx context.Context,
 	projectID, tier string,
