@@ -104,15 +104,16 @@ assert_pattern "Hobby billing failure ceiling = 5 (Go)" \
 assert_pattern "Hobby billing failure ceiling = 5 (TS)" \
   "$TS_CONSTANTS" "HOBBY_BILLING_FAILURE_CEILING[[:space:]]*=[[:space:]]*5" || true
 
-# Hobby retention cap: 15 days (lives in tierRetentionCap in handlers.go)
-assert_pattern "Hobby retention cap = 15 (Go)" \
-  "$GO_HANDLERS" "return 15," || true
+# Hobby retention default: 15 days (constant in billing.go used by
+# both signup default and tierRetentionCap in handlers.go)
+assert_pattern "Hobby retention default = 15 (Go)" \
+  "$GO_BILLING" "HobbyDefaultRetentionDays[[:space:]]*=[[:space:]]*15" || true
 assert_pattern "Hobby retention days = 15 (TS)" \
   "$TS_CONSTANTS" "retentionDays:[[:space:]]*15" || true
 
-# Team retention cap: 90 days
-assert_pattern "Team retention cap = 90 (Go)" \
-  "$GO_HANDLERS" "return 90," || true
+# Team retention default: 90 days
+assert_pattern "Team retention default = 90 (Go)" \
+  "$GO_BILLING" "TeamDefaultRetentionDays[[:space:]]*=[[:space:]]*90" || true
 assert_pattern "Team retention days = 90 (TS)" \
   "$TS_CONSTANTS" "retentionDays:[[:space:]]*90" || true
 

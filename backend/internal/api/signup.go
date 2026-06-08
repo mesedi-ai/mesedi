@@ -197,7 +197,7 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	//     fails the project still works (NULL retention means indefinite
 	//     until customer-set), and the operator can backfill from a
 	//     console; we just log and continue.
-	hobbyDefaultRetention := 15
+	hobbyDefaultRetention := HobbyDefaultRetentionDays
 	if err := h.Store.SetProjectRetentionDays(
 		r.Context(), projectID, &hobbyDefaultRetention,
 	); err != nil {

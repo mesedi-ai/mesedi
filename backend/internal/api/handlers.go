@@ -2541,10 +2541,10 @@ func tierRetentionCap(tier string) (maxDays int, allowIndefinite bool) {
 	case TierEnterprise:
 		return 3650, true
 	case TierTeam:
-		return 90, false
+		return TeamDefaultRetentionDays, false
 	default:
 		// Hobby, empty, or unknown tier.
-		return 15, false
+		return HobbyDefaultRetentionDays, false
 	}
 }
 

@@ -345,11 +345,12 @@ func (s *HobbyBillingScheduler) sendCardDetachedEmail(p *store.Project) {
 	}
 	if err := s.Mailer.SendHobbyBillingNotification(context.Background(),
 		mail.HobbyBillingNotificationInput{
-			Kind:           mail.HobbyBillingNotificationCardDetached,
-			ToEmail:        p.OwnerEmail,
-			ProjectName:    p.Name,
-			DashboardURL:   s.dashboardURL(),
-			FailureCeiling: HobbyBillingFailureCeiling,
+			Kind:               mail.HobbyBillingNotificationCardDetached,
+			ToEmail:            p.OwnerEmail,
+			ProjectName:        p.Name,
+			DashboardURL:       s.dashboardURL(),
+			FailureCeiling:     HobbyBillingFailureCeiling,
+			IncludedExecutions: HobbyExecutionLimit,
 		},
 	); err != nil {
 		s.Logger.Warn("hobby card-detached email failed",

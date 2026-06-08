@@ -88,6 +88,14 @@ const (
 	// Executions in [0, HobbyExecutionLimit] are free; executions
 	// above this number bill at HobbyOveragePriceUSD each.
 	HobbyExecutionLimit = 10000
+	// HobbyDefaultRetentionDays is the retention window applied at
+	// signup AND enforced as the tier cap in tierRetentionCap. Drift
+	// guard tools/check-tier-constants.sh asserts this matches the
+	// TS lib/tier-constants.ts retentionDays for the hobby tier.
+	HobbyDefaultRetentionDays = 15
+	// TeamDefaultRetentionDays is the retention window applied at
+	// upgrade AND enforced as the tier cap in tierRetentionCap.
+	TeamDefaultRetentionDays = 90
 	// HobbyOveragePriceUSD is the per-execution cost above the
 	// Hobby free quota. The cap-enforcement path computes
 	// (executions_above_quota * HobbyOveragePriceUSD) against the

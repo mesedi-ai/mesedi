@@ -20,6 +20,20 @@ import (
 	"time"
 )
 
+// formatThousands renders an integer with comma separators
+// (10000 -> "10,000"). Used in email templates that need to render
+// numbers in customer-readable form without depending on a heavy
+// i18n library.
+func formatThousands(n int) string {
+	if n < 0 {
+		return "-" + formatThousands(-n)
+	}
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return formatThousands(n/1000) + "," + fmt.Sprintf("%03d", n%1000)
+}
+
 // Mailer is the narrow interface signup and other handlers depend on.
 // Implementations: ResendMailer (production) and NoopMailer (dev/test).
 type Mailer interface {
@@ -53,6 +67,13 @@ type HobbyBillingNotificationInput struct {
 	FailureCount    int     // populated for charge_failed
 	FailureCeiling  int     // populated for charge_failed and card_detached
 	PaymentIntentID string  // populated for receipt
+	// IncludedExecutions is the Hobby free-quota size injected by the
+	// scheduler from the api.HobbyExecutionLimit constant. Passed
+	// via the input rather than imported here so the mail package
+	// does not create a circular dependency with the api package.
+	// Used in the card_detached template body. Defaults to 10000 if
+	// the caller passes zero (defensive).
+	IncludedExecutions int
 }
 
 // OrgInviteInput is everything the team-invite email template needs
@@ -482,20 +503,27 @@ func (m *ResendMailer) SendHobbyBillingNotification(
 		)
 	case HobbyBillingNotificationCardDetached:
 		subject = "Mesedi: your saved card has been removed"
+		// Defensive default: a caller that forgot to populate
+		// IncludedExecutions still gets a sensible value rather than
+		// "free Hobby quota (0 executions per month)".
+		includedExecs := in.IncludedExecutions
+		if includedExecs <= 0 {
+			includedExecs = 10000
+		}
 		textBody = fmt.Sprintf(
 			"After %d consecutive failed charge attempts, we have removed the saved card from your Mesedi project.\n\n"+
-				"Your project will continue to work at the free Hobby quota (10,000 executions per month). "+
+				"Your project will continue to work at the free Hobby quota (%s executions per month). "+
 				"To use Mesedi above the free quota again, please attach a new card from %s/app/billing.\n\n"+
 				"Project: %s\nURL: %s/app/billing\n",
-			in.FailureCeiling, dashboardURL, in.ProjectName, dashboardURL,
+			in.FailureCeiling, formatThousands(includedExecs), dashboardURL, in.ProjectName, dashboardURL,
 		)
 		htmlBody = fmt.Sprintf(
 			"<p>After %d consecutive failed charge attempts, we have removed the saved card from your Mesedi project.</p>"+
-				"<p>Your project will continue to work at the free Hobby quota (10,000 executions per month). "+
+				"<p>Your project will continue to work at the free Hobby quota (%s executions per month). "+
 				"To use Mesedi above the free quota again, please attach a new card from "+
 				"<a href=\"%s/app/billing\">%s/app/billing</a>.</p>"+
 				"<p>Project: <strong>%s</strong></p>",
-			in.FailureCeiling, dashboardURL, dashboardURL, in.ProjectName,
+			in.FailureCeiling, formatThousands(includedExecs), dashboardURL, dashboardURL, in.ProjectName,
 		)
 	case HobbyBillingNotificationReceipt:
 		subject = "Mesedi: Hobby overage charged"
