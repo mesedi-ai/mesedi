@@ -395,6 +395,23 @@ func main() {
 	}
 	retentionScheduler.Start(context.Background())
 
+	// Hobby billing scheduler (pre-#30). Daily tick walks every
+	// Hobby-tier project whose billing period has rolled over, attempts
+	// the off-session overage charge against the saved Stripe payment
+	// method, and advances the period bounds on success. Retries every
+	// 48 hours on failed charges; auto-detaches the saved card after
+	// 5 consecutive failures. Also bootstraps NULL period bounds on
+	// existing Hobby projects on first sight. No-op when Stripe is not
+	// configured (CE / local dev).
+	hobbyBillingScheduler := &api.HobbyBillingScheduler{
+		Store:        st,
+		Stripe:       handlers.Stripe,
+		Mailer:       mailer,
+		DashboardURL: cfg.DashboardURL,
+		Logger:       logger,
+	}
+	hobbyBillingScheduler.Start(context.Background())
+
 	// Public POST /signup bypasses the bearer-token auth chain (visitors
 	// have no key yet) but still needs CORS so the marketing site at
 	// mesedi.ai can POST cross-origin. The signup handler's

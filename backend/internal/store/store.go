@@ -79,6 +79,25 @@ type Project struct {
 	// every read site as max(0, executions_this_period - included)
 	// times the tier's per-execution rate. Single source of truth.
 	BillingCapUSD float64 `json:"billing_cap_usd"`
+
+	// HobbyBillingLastAttemptAt is the timestamp of the most recent
+	// charge attempt made by the HobbyBillingScheduler against this
+	// project's saved payment method (migration 021). Nil when no
+	// attempt has been made yet (the default for every existing
+	// row). Drives the every-other-day retry cadence: the scheduler
+	// only attempts a fresh charge when this is nil or > 48 hours
+	// in the past.
+	HobbyBillingLastAttemptAt *time.Time `json:"hobby_billing_last_attempt_at,omitempty"`
+
+	// HobbyBillingConsecutiveFailures counts how many charge
+	// attempts in a row have failed against the saved payment
+	// method (migration 021). Increments on each failed Stripe
+	// PaymentIntent, resets to zero on a successful charge. When
+	// it crosses 5 the scheduler auto-detaches the saved card
+	// (clears StripeCustomerID), reverting the project to the
+	// hard-capped "no card" state until the customer attaches a
+	// new card via Stripe Checkout.
+	HobbyBillingConsecutiveFailures int `json:"hobby_billing_consecutive_failures"`
 }
 
 // TenantBudgetCeiling is the persisted configuration that powers
@@ -1217,6 +1236,55 @@ type Store interface {
 		groupID, analysisMarkdown, analysisModel string,
 		analyzedAt time.Time,
 	) error
+	// CountAIAnalysesSincePeriodStart counts the number of distinct
+	// failure_groups for projectID whose analyzed_at >= since.
+	// Fallback used by the LLM root-cause rate limiter when a
+	// project has no tenant_id (legacy row that escaped the
+	// migration-013 backfill). Tenant-scoped counting via
+	// CountAIAnalysesByTenantSince is preferred for any project
+	// with a tenant_id, because Team customers can own multiple
+	// projects under one organization and the LLM rate limit must
+	// apply across all of them or the cap is trivially bypassed by
+	// spawning more projects.
+	CountAIAnalysesSincePeriodStart(ctx context.Context, projectID string, since time.Time) (int, error)
+	// CountAIAnalysesByTenantSince counts failure_groups summed
+	// across every project owned by tenantID whose analyzed_at >=
+	// since. This is the canonical query for the Team-tier LLM
+	// rate limit: the cap is per-organization per-period, not
+	// per-project, so a Team customer creating 100 projects can
+	// not multiply their LLM analysis quota by 100. Cache hits
+	// and Hobby tier never reach this query.
+	CountAIAnalysesByTenantSince(ctx context.Context, tenantID string, since time.Time) (int, error)
+
+	// ListProjectsForHobbyBillingTick returns every Hobby-tier
+	// project the HobbyBillingScheduler needs to consider this tick:
+	// projects whose current_period_end <= now (period rolled over,
+	// candidate for charging + advancing bounds) AND projects whose
+	// current_period_start IS NULL (legacy unbootstrapped rows that
+	// need their first billing window assigned). Team and
+	// Enterprise tiers are excluded because their billing runs
+	// through Stripe subscriptions, not this scheduler.
+	ListProjectsForHobbyBillingTick(ctx context.Context, now time.Time) ([]*Project, error)
+
+	// UpdateHobbyBillingState records the result of a Hobby billing
+	// charge attempt. On success: sets hobby_billing_last_attempt_at
+	// to attemptAt AND resets hobby_billing_consecutive_failures to 0.
+	// On failure: sets hobby_billing_last_attempt_at to attemptAt AND
+	// increments hobby_billing_consecutive_failures by 1. The
+	// scheduler reads these columns next tick to enforce the every-
+	// other-day retry cadence and to trigger auto-downgrade after
+	// the configured failure ceiling.
+	UpdateHobbyBillingState(ctx context.Context, projectID string, attemptAt time.Time, success bool) error
+
+	// DetachHobbyCardForBillingFailure clears the project's
+	// stripe_customer_id, hobby_billing_consecutive_failures, and
+	// hobby_billing_last_attempt_at in one atomic write. Called by
+	// the HobbyBillingScheduler when consecutive failures cross the
+	// configured ceiling: the saved payment method is treated as
+	// dead, the project reverts to the hard-capped "no card on
+	// file" state, and the customer must attach a new card via
+	// Stripe Checkout to resume billable usage.
+	DetachHobbyCardForBillingFailure(ctx context.Context, projectID string) error
 
 	// Abuse signals + project suspension (#172).
 	//

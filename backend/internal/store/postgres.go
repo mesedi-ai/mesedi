@@ -2663,6 +2663,49 @@ func (s *PostgresStore) SaveFailureGroupAnalysis(
 	return nil
 }
 
+// CountAIAnalysesSincePeriodStart counts failure_groups for projectID
+// whose analyzed_at >= since. Fallback when a project has no
+// tenant_id (legacy unbackfilled row). Postgres twin of the SQLite
+// method.
+func (s *PostgresStore) CountAIAnalysesSincePeriodStart(
+	ctx context.Context, projectID string, since time.Time,
+) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM failure_groups
+		WHERE project_id = $1
+		  AND analyzed_at IS NOT NULL
+		  AND analyzed_at >= $2
+	`, projectID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count ai analyses since: %w", err)
+	}
+	return count, nil
+}
+
+// CountAIAnalysesByTenantSince counts failure_groups summed across
+// every project owned by tenantID whose analyzed_at >= since.
+// Canonical Team-tier rate-limit query. Postgres twin of the
+// SQLite method.
+func (s *PostgresStore) CountAIAnalysesByTenantSince(
+	ctx context.Context, tenantID string, since time.Time,
+) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM failure_groups fg
+		JOIN projects p ON p.project_id = fg.project_id
+		WHERE p.tenant_id = $1
+		  AND fg.analyzed_at IS NOT NULL
+		  AND fg.analyzed_at >= $2
+	`, tenantID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count ai analyses by tenant since: %w", err)
+	}
+	return count, nil
+}
+
 func (s *PostgresStore) GetFailureGroupByClassSignature(ctx context.Context, projectID, failureClass, signature string) (*FailureGroup, error) {
 	groupID := deriveGroupID(projectID, failureClass, signature)
 	return s.GetFailureGroup(ctx, groupID)

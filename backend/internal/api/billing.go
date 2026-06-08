@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -51,6 +52,8 @@ import (
 	"github.com/stripe/stripe-go/v82"
 	portalsession "github.com/stripe/stripe-go/v82/billingportal/session"
 	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
+	"github.com/stripe/stripe-go/v82/customer"
+	"github.com/stripe/stripe-go/v82/invoiceitem"
 	"github.com/stripe/stripe-go/v82/webhook"
 
 	"mesedi/backend/internal/store"
@@ -98,6 +101,64 @@ const (
 	// TeamOveragePriceUSD is the per-execution overage cost on Team.
 	// Half the Hobby rate (volume customers pay less per unit).
 	TeamOveragePriceUSD = 0.001
+
+	// TeamAIAnalysisLimit caps the number of LLM-assisted root-cause
+	// analyses a Team-tier ORGANIZATION can request per billing
+	// period (Mesedi #27). The cap is per-organization (tenant_id),
+	// NOT per-project, because Team allows unlimited projects under
+	// one org and a per-project cap would be trivially bypassed by
+	// creating more projects under the same subscription.
+	//
+	// Each analysis triggers an Anthropic API call billed to
+	// Verdifax LLC's account; without a cap, an org generating
+	// thousands of distinct failure groups could push the monthly
+	// Anthropic bill into hundreds of dollars.
+	//
+	// 200 / period is calibrated to cover realistic diagnostic use:
+	// a typical Team org with a healthy 1-5% failure rate across
+	// 100K monthly executions (summed across all their projects)
+	// produces 1K-5K flagged executions, which deduplicate into
+	// 50-300 distinct failure groups (most failures recur). 200
+	// analyses covers the long-tail comfortably.
+	//
+	// Cap math at $0.03 per analysis (Haiku 4.5 input + output):
+	// 200 * $0.03 = $6 worst case per Team org per month. At
+	// $99/mo revenue, that is ~6% of revenue to Anthropic, a
+	// healthy COGS ratio for an AI-powered feature.
+	//
+	// Past the cap, HandleAnalyzeFailureGroup returns the raw
+	// failure-group row (failure class, severity, sample executions)
+	// without invoking the LLM; the dashboard surfaces an "AI
+	// explanation rate limit reached for this organization this
+	// period" note instead of the Markdown analysis card.
+	TeamAIAnalysisLimit = 200
+
+	// HobbyAIAnalysisLimit is 0: Hobby projects do not get
+	// LLM-assisted root-cause analysis at all. This matches the
+	// industry pattern (Arize Alyx, LangSmith Engine on Plus+) of
+	// gating AI-assisted analysis to paid tiers, and protects
+	// Verdifax LLC's Anthropic bill from being subsidized by free
+	// users. Hobby customers still see the failure detection chip
+	// and event detail, just not the LLM-written paragraph.
+	HobbyAIAnalysisLimit = 0
+
+	// HobbyBillingFailureCeiling is the number of consecutive
+	// failed charge attempts the HobbyBillingScheduler tolerates
+	// before auto-detaching the saved payment method. Once a
+	// customer's card has declined this many times in a row, the
+	// scheduler clears stripe_customer_id (reverting the project to
+	// hard-capped "no card on file" state) and emails the customer
+	// asking them to attach a new card via the dashboard.
+	HobbyBillingFailureCeiling = 5
+
+	// HobbyBillingRetryCadence is the minimum interval between
+	// charge attempts on the same project. With this set to 48h,
+	// the scheduler tries on day 1, then day 3, day 5, etc., until
+	// either the charge succeeds or HobbyBillingFailureCeiling is
+	// hit. The daily scheduler tick still fires every 24h, but
+	// projects that were attempted within the last 48h are
+	// skipped to enforce the every-other-day cadence.
+	HobbyBillingRetryCadence = 48 * time.Hour
 )
 
 // normalizeTier maps any legacy tier string to its canonical form.
@@ -237,16 +298,59 @@ func computeOverageCostUSD(p *store.Project) float64 {
 // (the customer explicitly opted into uncapped billing); ingest
 // proceeds normally. Enterprise projects also bypass since their
 // per-execution rate is 0.
+//
+// Hobby special case: a Hobby project with no Stripe customer on
+// file (i.e., no payment method ever attached) is hard-capped at
+// the included free quota. The first execution past the included
+// quota returns true here, blocking ingest until the customer
+// attaches a card via POST /billing/payment-method/setup. This is
+// the right behavior because we have no way to charge them for any
+// accrued overage; without this guard, every cardless Hobby
+// project would silently accumulate up to $200 of uncollectable
+// overage each month before getting cut off.
 func capExceeded(p *store.Project) (bool, float64, float64) {
 	if p == nil {
 		return false, 0, 0
 	}
 	cost := computeOverageCostUSD(p)
+
+	// Hobby-no-card: hard cap at the included quota. cost > 0 means
+	// they've already exceeded it; block immediately. The reported
+	// "cap" is 0 so the 402 message can say "free quota exceeded; add
+	// a card to continue."
+	if normalizeTier(p.Tier) == TierHobby && p.StripeCustomerID == "" {
+		return cost > 0, 0, cost
+	}
+
 	capUSD := p.BillingCapUSD
 	if capUSD <= 0 {
 		return false, capUSD, cost
 	}
 	return cost >= capUSD, capUSD, cost
+}
+
+// effectiveCapUSD returns the dollar overage ceiling the cap-check
+// actually enforces for this project right now. Mirrors capExceeded's
+// branching so the dashboard can render the same number the ingest
+// path applies.
+//
+//   - Hobby with no Stripe customer  → 0 (hard cap at free quota)
+//   - Anyone else with BillingCapUSD > 0 → BillingCapUSD
+//   - Anyone else with BillingCapUSD <= 0 → math.Inf(+1) is too noisy
+//     for the JSON wire; we return 0 here too and the dashboard treats
+//     0 + has_payment_method=true as "uncapped" (renders an infinity
+//     sign instead of "$0.00").
+func effectiveCapUSD(p *store.Project) float64 {
+	if p == nil {
+		return 0
+	}
+	if normalizeTier(p.Tier) == TierHobby && p.StripeCustomerID == "" {
+		return 0
+	}
+	if p.BillingCapUSD > 0 {
+		return p.BillingCapUSD
+	}
+	return 0
 }
 
 // ── response payloads ──────────────────────────────────────────
@@ -293,6 +397,20 @@ type BillingStatusResponse struct {
 	// CanManage is true when this project has an existing Stripe
 	// customer / subscription it can manage via POST /billing/portal.
 	CanManage bool `json:"can_manage"`
+	// HasPaymentMethod is true when the project has a Stripe customer
+	// id on file (indicating a card has been attached via either the
+	// Team Checkout flow or the Hobby Setup Intent flow). For Hobby
+	// specifically, false here means the project is hard-capped at the
+	// included free quota and ingest returns 402 the moment a
+	// customer exceeds it. The dashboard uses this to surface an
+	// "Add a card" CTA on /app/billing.
+	HasPaymentMethod bool `json:"has_payment_method"`
+	// EffectiveCapUSD is the cap that ingest actually enforces right
+	// now. For Hobby-no-card projects it's 0 (hard-cap at included
+	// quota); for everyone else it's BillingCapUSD. The dashboard
+	// renders this in the "Cap" row so the customer sees the same
+	// number ingest applies.
+	EffectiveCapUSD float64 `json:"effective_cap_usd"`
 }
 
 type CheckoutResponse struct {
@@ -387,6 +505,8 @@ func (h *Handlers) HandleGetBilling(w http.ResponseWriter, r *http.Request) {
 		StripeSubscriptionID:     p.StripeSubscriptionID,
 		CanUpgrade:               effectiveTier == TierHobby && h.Stripe.Configured(),
 		CanManage:                p.StripeCustomerID != "" && h.Stripe.Configured(),
+		HasPaymentMethod:         p.StripeCustomerID != "",
+		EffectiveCapUSD:          effectiveCapUSD(p),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -645,8 +765,21 @@ func (h *Handlers) dispatchStripeEvent(
 		return h.handleSubscriptionUpdated(event)
 	case "customer.subscription.deleted":
 		return h.handleSubscriptionDeleted(event)
+	case "invoice.upcoming":
+		// invoice.upcoming fires ~1 hour before Stripe finalizes the
+		// next subscription invoice (configurable in Dashboard, default
+		// 1 hour). This is our window to push overage as an InvoiceItem
+		// attached to that upcoming invoice so the customer gets billed
+		// for executions above the included quota at period close.
+		return h.handleInvoiceUpcoming(event, logger)
 	case "invoice.paid":
 		return h.handleInvoicePaid(event)
+	case "setup_intent.succeeded":
+		// Hobby card-attach flow: customer finished Stripe Elements
+		// confirmCardSetup; save the resulting payment method as the
+		// customer's default so the hobby billing scheduler can charge
+		// it off-session at period close.
+		return h.handleSetupIntentSucceeded(event, logger)
 	default:
 		logger.Info("stripe event ignored (not handled)")
 		return nil
@@ -768,6 +901,373 @@ func (h *Handlers) handleInvoicePaid(event stripe.Event) error {
 		context.Background(),
 		p.ProjectID, *periodStart, *periodEnd,
 	)
+}
+
+// handleInvoiceUpcoming pushes the project's accumulated overage onto
+// the upcoming invoice as a Stripe InvoiceItem. Called when Stripe
+// emits invoice.upcoming, which by default fires ~1 hour before the
+// next subscription invoice finalizes (configurable per webhook
+// endpoint in the Stripe Dashboard).
+//
+// Only Team-tier projects act here. Hobby has no Stripe subscription
+// so it never emits invoice.upcoming; Hobby overage is collected by a
+// separate scheduler that charges the saved payment method directly.
+// Enterprise has a contract-driven rate ($0/exec at this layer) so
+// computeOverageCostUSD returns 0 and we short-circuit.
+//
+// Idempotency: the Stripe event ID is used as the request idempotency
+// key on invoiceitem.New, so a Stripe-side re-delivery of the same
+// event produces the same InvoiceItem (Stripe dedupes server-side)
+// rather than double-charging the customer.
+//
+// Cap respect: if the project has a billing_cap_usd set, the pushed
+// amount is min(computed_cost, cap). This mirrors the ingest-path cap
+// behavior so the customer never sees a charge larger than they
+// agreed to.
+//
+// Rounding: per-execution rate is $0.001 (sub-cent). We compute the
+// total in dollars then round to the nearest cent. Sub-cent residue
+// is discarded; over a full period this is at most $0.005 of
+// rounding loss in the customer's favor, which is the right
+// direction.
+func (h *Handlers) handleInvoiceUpcoming(event stripe.Event, logger *slog.Logger) error {
+	var invoice stripe.Invoice
+	if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
+		return fmt.Errorf("unmarshal invoice.upcoming: %w", err)
+	}
+	if invoice.Customer == nil {
+		// Not a customer-attached invoice; nothing to bill.
+		return nil
+	}
+	customerID := invoice.Customer.ID
+	p, err := h.Store.GetProjectByStripeCustomerID(context.Background(), customerID)
+	if err != nil {
+		return fmt.Errorf("lookup project by customer %s: %w", customerID, err)
+	}
+	// Only Team-tier customers go through this path. Hobby has no
+	// Stripe subscription (so no invoice.upcoming ever fires for them).
+	// Enterprise is contract-driven; computeOverageCostUSD returns 0
+	// for them which would already short-circuit below, but bail
+	// explicitly so the log is clearer.
+	tier := normalizeTier(p.Tier)
+	if tier != TierTeam {
+		logger.Info("invoice.upcoming ignored: non-Team tier",
+			"project_id", p.ProjectID, "tier", tier)
+		return nil
+	}
+
+	cost := computeOverageCostUSD(p)
+	if cost <= 0 {
+		// Inside the included quota; nothing to bill.
+		logger.Info("invoice.upcoming: no overage to bill",
+			"project_id", p.ProjectID,
+			"executions_this_period", p.ExecutionsThisPeriod)
+		return nil
+	}
+
+	// Respect the billing cap. A cap of zero means uncapped (no
+	// adjustment). Most Team customers run uncapped; this branch
+	// matters only for customers who opted into a self-imposed
+	// ceiling via the dashboard (#168 follow-up).
+	if p.BillingCapUSD > 0 && cost > p.BillingCapUSD {
+		cost = p.BillingCapUSD
+	}
+
+	// Convert to integer cents. Stripe wants minor currency units as
+	// an int64. math.Round to handle the standard float-to-int boundary;
+	// at our sub-cent rate the residue is negligible and the rounding
+	// is in the customer's favor most of the time.
+	cents := int64(math.Round(cost * 100))
+	if cents <= 0 {
+		// Overage existed but rounded to zero cents (less than half a
+		// cent of actual overage). Not worth a Stripe API call.
+		return nil
+	}
+
+	included := tierExecutionLimit(tier) + p.GrantedExecutions
+	if included < 0 {
+		included = 0
+	}
+	overUnits := p.ExecutionsThisPeriod - included
+
+	desc := fmt.Sprintf(
+		"Mesedi Team overage: %d executions x $%.3f",
+		overUnits, TeamOveragePriceUSD,
+	)
+
+	h.Stripe.applyKey()
+	params := &stripe.InvoiceItemParams{
+		Customer:    stripe.String(customerID),
+		Amount:      stripe.Int64(cents),
+		Currency:    stripe.String(string(stripe.CurrencyUSD)),
+		Description: stripe.String(desc),
+		Metadata: map[string]string{
+			"mesedi_project_id":      p.ProjectID,
+			"mesedi_stripe_event_id": event.ID,
+			"mesedi_overage_units":   fmt.Sprintf("%d", overUnits),
+			"mesedi_tier":            tier,
+		},
+	}
+	// InvoiceItem.Customer alone is sufficient: Stripe automatically
+	// attaches "pending" (un-invoiced) items to that customer's next
+	// finalized invoice. We have one subscription per Mesedi project,
+	// so disambiguation isn't needed. (Stripe API v2024+ removed the
+	// Invoice.Subscription field; the relationship lives on a
+	// per-line-item Parent struct now, which the upcoming invoice
+	// preview doesn't always populate.)
+	//
+	// Idempotency key = Stripe event ID. If Stripe re-delivers this
+	// exact event, the duplicate InvoiceItem.New call returns the
+	// already-created item rather than creating a second one.
+	params.IdempotencyKey = stripe.String(event.ID)
+
+	ii, err := invoiceitem.New(params)
+	if err != nil {
+		return fmt.Errorf("create overage invoice item: %w", err)
+	}
+	logger.Info("invoice.upcoming: overage pushed",
+		"project_id", p.ProjectID,
+		"overage_units", overUnits,
+		"amount_cents", cents,
+		"invoice_item_id", ii.ID,
+	)
+	return nil
+}
+
+// ── Hobby Setup Intent flow ──────────────────────────────────────
+//
+// Hobby projects don't go through Stripe Checkout (no subscription)
+// but they DO need a payment method on file to use any execution
+// past the free quota. The Setup Intent flow is how they attach one:
+//
+//   1. Dashboard POSTs /billing/payment-method/setup
+//   2. Backend creates a Stripe customer for the project (if not yet
+//      created) and a SetupIntent against that customer.
+//   3. Backend returns {client_secret, customer_id} to the dashboard.
+//   4. Dashboard renders Stripe Elements with the client_secret and
+//      calls stripe.confirmCardSetup(...) on form submit.
+//   5. Stripe processes the card. On success it fires the
+//      setup_intent.succeeded webhook to our /billing/webhook endpoint.
+//   6. Webhook handler sets the resulting payment method as the
+//      customer's invoice_settings.default_payment_method so future
+//      off-session PaymentIntents charge it automatically. It also
+//      bootstraps the project's billing period bounds if NULL
+//      (period_start = now, period_end = now + 1 month).
+//
+// At this point the project has stripe_customer_id != "", capExceeded
+// reverts to the normal BillingCapUSD ceiling ($200 default), and the
+// hobby billing scheduler will charge any accrued overage at period
+// rollover.
+
+type SetupCheckoutResponse struct {
+	OK        bool   `json:"ok"`
+	URL       string `json:"url"`
+	SessionID string `json:"session_id"`
+}
+
+// HandleCreateSetupCheckout creates (or reuses) the Stripe customer
+// for the calling project and returns a Stripe Checkout session URL
+// in setup mode. The dashboard redirects the customer to that URL;
+// Stripe hosts the card-entry form on its own domain and redirects
+// back to the dashboard's success URL on completion.
+//
+// Setup-mode Checkout generates a SetupIntent under the hood, so
+// the existing handleSetupIntentSucceeded webhook handler picks up
+// the resulting payment method and sets it as the customer's
+// default invoice payment method (so the hobby billing scheduler
+// can charge it off-session at period close).
+//
+// Why Stripe Checkout instead of Stripe Elements in-app: smaller
+// dashboard surface (no @stripe/stripe-js dependency, no CSP
+// adjustments for the Stripe iframe), and Stripe owns all the PCI
+// scope at the cost of a ~10 second redirect round-trip. For a
+// solo-dev ship that trade-off is the right one.
+func (h *Handlers) HandleCreateSetupCheckout(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
+	if !h.Stripe.Configured() {
+		billingNotConfigured(w)
+		return
+	}
+	projectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	p, err := h.Store.GetProject(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load project: "+err.Error())
+		return
+	}
+
+	h.Stripe.applyKey()
+
+	customerID := p.StripeCustomerID
+	if customerID == "" {
+		// First card-attach for this project. Create a Stripe customer
+		// with the project's owner email so invoices land in the right
+		// inbox. The Mesedi project_id goes into metadata so webhook
+		// re-resolution back to a project works.
+		params := &stripe.CustomerParams{
+			Metadata: map[string]string{
+				"mesedi_project_id": p.ProjectID,
+			},
+		}
+		if p.OwnerEmail != "" {
+			params.Email = stripe.String(p.OwnerEmail)
+		}
+		if p.Name != "" {
+			params.Description = stripe.String("Mesedi project: " + p.Name)
+		}
+		cust, cErr := customer.New(params)
+		if cErr != nil {
+			h.Logger.Error("stripe customer create failed",
+				"project_id", projectID, "error", cErr.Error())
+			writeError(w, http.StatusBadGateway,
+				"create Stripe customer: "+cErr.Error())
+			return
+		}
+		customerID = cust.ID
+		// Persist the customer id immediately. Even if the Checkout
+		// session creation below fails, the next attempt will reuse
+		// this customer rather than create a duplicate.
+		if upErr := h.Store.UpdateProjectBilling(
+			r.Context(),
+			p.ProjectID,
+			normalizeTier(p.Tier),
+			customerID,
+			p.StripeSubscriptionID,
+			p.CurrentPeriodStart,
+			p.CurrentPeriodEnd,
+		); upErr != nil {
+			h.Logger.Error("persist stripe customer id failed",
+				"project_id", projectID, "error", upErr.Error())
+			writeError(w, http.StatusInternalServerError,
+				"persist Stripe customer id: "+upErr.Error())
+			return
+		}
+	}
+
+	dashboardBase := h.resolveDashboardBase(r)
+	successURL := dashboardBase + "/app/billing?status=card-attached&session_id={CHECKOUT_SESSION_ID}"
+	cancelURL := dashboardBase + "/app/billing?status=card-attach-canceled"
+
+	// Mode=setup means Stripe does not collect a payment now;
+	// instead it collects the card and generates a SetupIntent that
+	// fires setup_intent.succeeded on completion. usage=off_session
+	// inside SetupIntentData is the magic flag that lets us charge
+	// the saved card later without the customer being present (the
+	// hobby billing scheduler runs at period close off-session).
+	params := &stripe.CheckoutSessionParams{
+		Mode:               stripe.String(string(stripe.CheckoutSessionModeSetup)),
+		Customer:           stripe.String(customerID),
+		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
+		SuccessURL:         stripe.String(successURL),
+		CancelURL:          stripe.String(cancelURL),
+		ClientReferenceID:  stripe.String(p.ProjectID),
+		Metadata: map[string]string{
+			"mesedi_project_id": p.ProjectID,
+			"mesedi_flow":       "hobby_card_attach",
+		},
+		SetupIntentData: &stripe.CheckoutSessionSetupIntentDataParams{
+			Metadata: map[string]string{
+				"mesedi_project_id": p.ProjectID,
+			},
+		},
+	}
+
+	session, err := checkoutsession.New(params)
+	if err != nil {
+		h.Logger.Error("stripe setup checkout create failed",
+			"project_id", projectID, "error", err.Error())
+		writeError(w, http.StatusBadGateway,
+			"create Stripe Setup Checkout session: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, SetupCheckoutResponse{
+		OK:        true,
+		URL:       session.URL,
+		SessionID: session.ID,
+	})
+}
+
+// handleSetupIntentSucceeded fires when the dashboard's Stripe
+// Elements confirmCardSetup call succeeds. The webhook payload
+// carries the attached payment_method ID; we save it as the
+// customer's default invoice payment method so the hobby billing
+// scheduler can charge it off-session at period close.
+//
+// Also bootstraps the project's billing period bounds for Hobby
+// projects whose period_start/end are NULL. We do this at first
+// card-attach (not at signup) because before a card is on file
+// there's no need to track a period boundary (overage is hard-
+// capped at zero so there's nothing to bill).
+func (h *Handlers) handleSetupIntentSucceeded(event stripe.Event, logger *slog.Logger) error {
+	var si stripe.SetupIntent
+	if err := json.Unmarshal(event.Data.Raw, &si); err != nil {
+		return fmt.Errorf("unmarshal setup_intent: %w", err)
+	}
+	if si.Customer == nil || si.Customer.ID == "" {
+		// No customer attached to the SetupIntent. Shouldn't happen
+		// (we always create them against a customer) but bail
+		// cleanly rather than panic.
+		return nil
+	}
+	if si.PaymentMethod == nil || si.PaymentMethod.ID == "" {
+		// No payment method on the succeeded intent. Also shouldn't
+		// happen for our flow.
+		return nil
+	}
+
+	customerID := si.Customer.ID
+	pmID := si.PaymentMethod.ID
+
+	// Set the new payment method as the customer's default for
+	// future invoices.
+	h.Stripe.applyKey()
+	custParams := &stripe.CustomerParams{
+		InvoiceSettings: &stripe.CustomerInvoiceSettingsParams{
+			DefaultPaymentMethod: stripe.String(pmID),
+		},
+	}
+	if _, err := customer.Update(customerID, custParams); err != nil {
+		return fmt.Errorf("set default payment method on customer %s: %w", customerID, err)
+	}
+
+	// Bootstrap period bounds for Hobby on first card-attach.
+	p, err := h.Store.GetProjectByStripeCustomerID(context.Background(), customerID)
+	if err != nil {
+		return fmt.Errorf("lookup project by customer %s: %w", customerID, err)
+	}
+	if normalizeTier(p.Tier) == TierHobby &&
+		(p.CurrentPeriodStart == nil || p.CurrentPeriodEnd == nil) {
+		now := time.Now().UTC()
+		end := now.AddDate(0, 1, 0)
+		if err := h.Store.ResetExecutionsThisPeriod(
+			context.Background(),
+			p.ProjectID, now, end,
+		); err != nil {
+			return fmt.Errorf("bootstrap period bounds for %s: %w", p.ProjectID, err)
+		}
+		logger.Info("hobby period bounds bootstrapped on card-attach",
+			"project_id", p.ProjectID,
+			"period_start", now,
+			"period_end", end,
+		)
+	}
+
+	logger.Info("setup_intent.succeeded: default payment method set",
+		"project_id", p.ProjectID,
+		"customer_id", customerID,
+		"payment_method_id", pmID,
+	)
+	return nil
 }
 
 // ── small helpers ───────────────────────────────────────────────

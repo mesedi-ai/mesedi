@@ -188,6 +188,23 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 			"project_id", projectID, "error", err.Error())
 	}
 
+	// 3b. Apply the Hobby-tier retention default (15 days) on the new
+	//     project. New signups always start on Hobby and the pricing
+	//     card promises "15-day data retention"; the retention scheduler
+	//     prunes accordingly. Customers can dial this DOWN via the
+	//     dashboard settings page for tighter privacy, but cannot
+	//     raise it past the tier cap. Best-effort: if SetProjectRetentionDays
+	//     fails the project still works (NULL retention means indefinite
+	//     until customer-set), and the operator can backfill from a
+	//     console; we just log and continue.
+	hobbyDefaultRetention := 15
+	if err := h.Store.SetProjectRetentionDays(
+		r.Context(), projectID, &hobbyDefaultRetention,
+	); err != nil {
+		h.Logger.Warn("signup: set default retention failed (project will use indefinite until customer sets)",
+			"project_id", projectID, "error", err.Error())
+	}
+
 	// 4. Mint the first API key for this project.
 	rawKey, hash, prefix, err := MintAPIKey()
 	if err != nil {

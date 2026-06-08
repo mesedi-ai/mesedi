@@ -27,6 +27,32 @@ type Mailer interface {
 	SendSuspensionWarning(ctx context.Context, in SuspensionWarningInput) error
 	SendBudgetCeilingBreach(ctx context.Context, in BudgetCeilingBreachInput) error
 	SendOrgInvite(ctx context.Context, in OrgInviteInput) error
+	SendHobbyBillingNotification(ctx context.Context, in HobbyBillingNotificationInput) error
+	Enabled() bool
+}
+
+// HobbyBillingNotificationKind enumerates the three email kinds the
+// HobbyBillingScheduler emits.
+type HobbyBillingNotificationKind string
+
+const (
+	HobbyBillingNotificationChargeFailed HobbyBillingNotificationKind = "charge_failed"
+	HobbyBillingNotificationCardDetached HobbyBillingNotificationKind = "card_detached"
+	HobbyBillingNotificationReceipt      HobbyBillingNotificationKind = "receipt"
+)
+
+// HobbyBillingNotificationInput is the typed payload the scheduler
+// passes to SendHobbyBillingNotification. Kind discriminates which
+// template the mailer renders.
+type HobbyBillingNotificationInput struct {
+	Kind            HobbyBillingNotificationKind
+	ToEmail         string
+	ProjectName     string
+	DashboardURL    string
+	AmountUSD       float64 // populated for charge_failed and receipt
+	FailureCount    int     // populated for charge_failed
+	FailureCeiling  int     // populated for charge_failed and card_detached
+	PaymentIntentID string  // populated for receipt
 }
 
 // OrgInviteInput is everything the team-invite email template needs
@@ -125,6 +151,23 @@ func (m NoopMailer) SendOrgInvite(ctx context.Context, in OrgInviteInput) error 
 	}
 	return nil
 }
+
+func (m NoopMailer) SendHobbyBillingNotification(ctx context.Context, in HobbyBillingNotificationInput) error {
+	if m.Logger != nil {
+		m.Logger.Debug("mail: hobby billing notification (noop, no RESEND_API_KEY)",
+			"to", in.ToEmail,
+			"kind", string(in.Kind),
+			"project", in.ProjectName,
+			"amount_usd", in.AmountUSD,
+		)
+	}
+	return nil
+}
+
+// Enabled reports whether this Noop mailer actually sends anything.
+// Always false; callers can use this to skip pre-render work when no
+// mailer is wired.
+func (m NoopMailer) Enabled() bool { return false }
 
 // ResendMailer posts transactional sends to Resend's HTTP API. No
 // SDK dependency: Resend's surface is small enough that a single
@@ -394,6 +437,119 @@ func (m *ResendMailer) SendOrgInvite(ctx context.Context, in OrgInviteInput) err
 			"to", in.ToEmail,
 			"org", in.OrgName,
 			"role", in.Role,
+		)
+	}
+	return nil
+}
+
+// Enabled reports whether this ResendMailer will actually send.
+// Always true on a non-nil ResendMailer; the NoopMailer counterpart
+// returns false.
+func (m *ResendMailer) Enabled() bool { return m != nil && m.APIKey != "" }
+
+// SendHobbyBillingNotification renders one of three templates
+// (charge_failed, card_detached, receipt) and sends via Resend.
+func (m *ResendMailer) SendHobbyBillingNotification(
+	ctx context.Context, in HobbyBillingNotificationInput,
+) error {
+	var subject, htmlBody, textBody string
+	dashboardURL := in.DashboardURL
+	if dashboardURL == "" {
+		dashboardURL = "https://app.mesedi.ai"
+	}
+
+	switch in.Kind {
+	case HobbyBillingNotificationChargeFailed:
+		subject = fmt.Sprintf("Mesedi: your Hobby card was declined (attempt %d of %d)",
+			in.FailureCount, in.FailureCeiling)
+		textBody = fmt.Sprintf(
+			"Your Mesedi Hobby overage charge of $%.2f did not go through.\n\n"+
+				"We will try again in about 48 hours. After %d consecutive failed attempts, "+
+				"we will remove the saved card from your project and you will need to attach a new one from %s/app/billing to keep using Mesedi above the free quota.\n\n"+
+				"If your card has changed, please update it at: %s/app/billing\n\n"+
+				"Project: %s\nAttempt: %d of %d\n",
+			in.AmountUSD, in.FailureCeiling, dashboardURL, dashboardURL,
+			in.ProjectName, in.FailureCount, in.FailureCeiling,
+		)
+		htmlBody = fmt.Sprintf(
+			"<p>Your Mesedi Hobby overage charge of <strong>$%.2f</strong> did not go through.</p>"+
+				"<p>We will try again in about 48 hours. After %d consecutive failed attempts, "+
+				"we will remove the saved card from your project and you will need to attach a new one from "+
+				"<a href=\"%s/app/billing\">%s/app/billing</a> to keep using Mesedi above the free quota.</p>"+
+				"<p>Project: <strong>%s</strong><br/>Attempt: %d of %d</p>",
+			in.AmountUSD, in.FailureCeiling, dashboardURL, dashboardURL,
+			in.ProjectName, in.FailureCount, in.FailureCeiling,
+		)
+	case HobbyBillingNotificationCardDetached:
+		subject = "Mesedi: your saved card has been removed"
+		textBody = fmt.Sprintf(
+			"After %d consecutive failed charge attempts, we have removed the saved card from your Mesedi project.\n\n"+
+				"Your project will continue to work at the free Hobby quota (10,000 executions per month). "+
+				"To use Mesedi above the free quota again, please attach a new card from %s/app/billing.\n\n"+
+				"Project: %s\nURL: %s/app/billing\n",
+			in.FailureCeiling, dashboardURL, in.ProjectName, dashboardURL,
+		)
+		htmlBody = fmt.Sprintf(
+			"<p>After %d consecutive failed charge attempts, we have removed the saved card from your Mesedi project.</p>"+
+				"<p>Your project will continue to work at the free Hobby quota (10,000 executions per month). "+
+				"To use Mesedi above the free quota again, please attach a new card from "+
+				"<a href=\"%s/app/billing\">%s/app/billing</a>.</p>"+
+				"<p>Project: <strong>%s</strong></p>",
+			in.FailureCeiling, dashboardURL, dashboardURL, in.ProjectName,
+		)
+	case HobbyBillingNotificationReceipt:
+		subject = "Mesedi: Hobby overage charged"
+		textBody = fmt.Sprintf(
+			"Your Mesedi Hobby overage of $%.2f has been charged successfully.\n\n"+
+				"A new billing period has started. The next charge (if any) will fire after the new period closes.\n\n"+
+				"Project: %s\nPayment reference: %s\n",
+			in.AmountUSD, in.ProjectName, in.PaymentIntentID,
+		)
+		htmlBody = fmt.Sprintf(
+			"<p>Your Mesedi Hobby overage of <strong>$%.2f</strong> has been charged successfully.</p>"+
+				"<p>A new billing period has started. The next charge (if any) will fire after the new period closes.</p>"+
+				"<p>Project: <strong>%s</strong><br/>Payment reference: <code>%s</code></p>",
+			in.AmountUSD, in.ProjectName, in.PaymentIntentID,
+		)
+	default:
+		return fmt.Errorf("mail: unknown HobbyBillingNotificationKind %q", in.Kind)
+	}
+
+	body, err := json.Marshal(resendRequest{
+		From:    m.From,
+		To:      []string{in.ToEmail},
+		Subject: subject,
+		HTML:    htmlBody,
+		Text:    textBody,
+	})
+	if err != nil {
+		return fmt.Errorf("mail: marshal hobby billing notification: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("mail: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mail: post to resend: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mail: resend returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	if m.Logger != nil {
+		m.Logger.Info("mail: hobby billing notification sent",
+			"to", in.ToEmail,
+			"kind", string(in.Kind),
+			"project", in.ProjectName,
 		)
 	}
 	return nil

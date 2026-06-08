@@ -232,6 +232,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /billing/usage", h.HandleGetBillingUsage)
 	mux.HandleFunc("POST /billing/checkout", h.HandleCreateCheckout)
 	mux.HandleFunc("POST /billing/portal", h.HandleCreatePortal)
+	mux.HandleFunc("POST /billing/payment-method/setup", h.HandleCreateSetupCheckout)
 }
 
 // HandleGetPlaybook returns the markdown content for the playbook
@@ -1590,6 +1591,89 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Tier gate + per-period rate limit (added pre-#30 to protect
+	// Verdifax LLC's Anthropic bill from being subsidized by free
+	// users and from a Team customer with thousands of distinct
+	// failure groups generating unbounded LLM calls).
+	//
+	// Order:
+	//   1. Load project to get tier + period bounds.
+	//   2. Hobby: refuse with 402; the dashboard surfaces "AI
+	//      analysis is a Team-tier feature" and an upgrade CTA.
+	//   3. Team: count analyses since current_period_start. If at
+	//      or above TeamAIAnalysisLimit, refuse with 429; the
+	//      dashboard renders "AI explanation rate limit reached
+	//      this period" alongside the raw failure-group row.
+	//   4. Enterprise: skip rate limit (contract-defined).
+	//
+	// Cache hits short-circuited above; only real LLM-calling
+	// requests reach this block.
+	proj, err := h.Store.GetProject(r.Context(), authProjectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"load project for tier check: "+err.Error())
+		return
+	}
+	tier := normalizeTier(proj.Tier)
+	if tier == TierHobby {
+		writeError(w, http.StatusPaymentRequired,
+			"LLM-assisted root-cause analysis is a Cloud Team feature. The failure detection itself is included on Hobby; upgrade at /pricing to enable AI explanations.")
+		return
+	}
+	if tier == TierTeam {
+		// Use current_period_start as the rate-limit window. If it
+		// is nil (race window between Stripe checkout and webhook),
+		// fall back to a conservative 30-day rolling window so a
+		// brand-new Team customer can still get analyses.
+		since := time.Now().UTC().AddDate(0, -1, 0)
+		if proj.CurrentPeriodStart != nil {
+			since = *proj.CurrentPeriodStart
+		}
+
+		// Count analyses across the entire ORGANIZATION (tenant),
+		// not just the calling project, because Team allows unlimited
+		// projects under one org and a per-project cap would be
+		// trivially bypassed by spawning more projects. Fall back to
+		// per-project count only when the project has no tenant_id
+		// (legacy row that escaped migration-013 backfill).
+		tenantID, terr := h.Store.GetProjectTenantID(r.Context(), authProjectID)
+		var count int
+		var cErr error
+		switch {
+		case terr == nil && tenantID != nil && *tenantID != "":
+			count, cErr = h.Store.CountAIAnalysesByTenantSince(
+				r.Context(), *tenantID, since,
+			)
+		default:
+			// tenant_id NULL or lookup failed: fall back to project
+			// scope. This leaves an edge-case bypass for legacy
+			// unbackfilled projects, accepted because (a) migration
+			// 013 already ran on prod, (b) any remaining NULL rows
+			// can be one-off backfilled if discovered, and (c)
+			// blocking the request entirely would be worse UX than
+			// occasionally over-allowing on a rare legacy edge case.
+			count, cErr = h.Store.CountAIAnalysesSincePeriodStart(
+				r.Context(), authProjectID, since,
+			)
+		}
+
+		if cErr != nil {
+			h.Logger.Warn("analyze: count check failed",
+				"project_id", authProjectID, "error", cErr.Error())
+			// Fail open on the rate-limit query itself. A DB blip
+			// should not block a legitimate analysis request.
+		} else if count >= TeamAIAnalysisLimit {
+			h.Logger.Info("analyze: rate limit reached",
+				"project_id", authProjectID,
+				"tenant_id", tenantID,
+				"count", count, "limit", TeamAIAnalysisLimit)
+			writeError(w, http.StatusTooManyRequests,
+				fmt.Sprintf("AI explanation rate limit reached for this organization this period (%d of %d). Failure detection still works; AI explanations resume next billing period.",
+					count, TeamAIAnalysisLimit))
+			return
+		}
+	}
+
 	// Pull a small, recent sample of affected executions to give
 	// the model concrete context. We cap deliberately small
 	// (3 executions) so the LLM-side input bill stays bounded.
@@ -2433,11 +2517,17 @@ func (h *Handlers) HandleUpsertBudgetCeiling(w http.ResponseWriter, r *http.Requ
 // indefinite retention. Tier strings are normalized lowercase; an
 // unknown tier falls through to Hobby semantics (conservative).
 //
-// Caps match the /pricing card promises (#262):
+// Caps match the /pricing card promises (#262, updated pre-#30):
 //
-//	Hobby:      up to 7 days,    no indefinite
-//	Pro:        up to 30 days,   no indefinite
+//	Hobby:      up to 15 days,   no indefinite
+//	Team:       up to 90 days,   no indefinite
 //	Enterprise: up to 3650 days, indefinite allowed
+//
+// Hobby was bumped down from 30 to 15 pre-#30 to create a real
+// retention spread vs Team (15 vs 90 days). The new 15-day value
+// matches Arize AX Free and is one day above LangSmith / Braintrust
+// free tiers; well within industry norms for free observability
+// tiers.
 //
 // The 3650-day max on Enterprise is a sanity ceiling matching the
 // global validation in HandleSetRetention; anyone wanting longer is
@@ -2446,8 +2536,7 @@ func (h *Handlers) HandleUpsertBudgetCeiling(w http.ResponseWriter, r *http.Requ
 func tierRetentionCap(tier string) (maxDays int, allowIndefinite bool) {
 	// normalizeTier maps legacy "pro" -> "team" so a stale row
 	// returning the old label still gets the same retention cap as
-	// the renamed tier. Hobby keeps the 30-day cap (was 7); aligns
-	// with the pricing page promise of "30-day data retention".
+	// the renamed tier.
 	switch normalizeTier(strings.ToLower(tier)) {
 	case TierEnterprise:
 		return 3650, true
@@ -2455,7 +2544,7 @@ func tierRetentionCap(tier string) (maxDays int, allowIndefinite bool) {
 		return 90, false
 	default:
 		// Hobby, empty, or unknown tier.
-		return 30, false
+		return 15, false
 	}
 }
 

@@ -3590,6 +3590,51 @@ func (s *SQLiteStore) SaveFailureGroupAnalysis(
 	return nil
 }
 
+// CountAIAnalysesSincePeriodStart counts failure_groups for projectID
+// whose analyzed_at >= since. Fallback when a project has no
+// tenant_id (legacy unbackfilled row). For all other projects the
+// canonical query is CountAIAnalysesByTenantSince.
+func (s *SQLiteStore) CountAIAnalysesSincePeriodStart(
+	ctx context.Context, projectID string, since time.Time,
+) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM failure_groups
+		WHERE project_id = ?
+		  AND analyzed_at IS NOT NULL
+		  AND analyzed_at >= ?
+	`, projectID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count ai analyses since: %w", err)
+	}
+	return count, nil
+}
+
+// CountAIAnalysesByTenantSince counts failure_groups summed across
+// every project owned by tenantID whose analyzed_at >= since. This
+// is the canonical Team-tier rate-limit query because the cap is
+// per-organization per-period, not per-project; without the JOIN
+// here a Team customer could trivially bypass the cap by spawning
+// additional projects under the same org.
+func (s *SQLiteStore) CountAIAnalysesByTenantSince(
+	ctx context.Context, tenantID string, since time.Time,
+) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM failure_groups fg
+		JOIN projects p ON p.project_id = fg.project_id
+		WHERE p.tenant_id = ?
+		  AND fg.analyzed_at IS NOT NULL
+		  AND fg.analyzed_at >= ?
+	`, tenantID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count ai analyses by tenant since: %w", err)
+	}
+	return count, nil
+}
+
 // ---------------------------------------------------------------------
 // Abuse signals + project suspension (#172).
 // ---------------------------------------------------------------------
