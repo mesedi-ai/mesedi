@@ -160,6 +160,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /executions", h.HandleCreateExecution)
 	// #118 Slice 1, read-side project surface for the dashboard.
 	mux.HandleFunc("GET /project", h.HandleGetProject)
+	mux.HandleFunc("PATCH /project/name", h.HandleSetProjectName)
 	mux.HandleFunc("GET /me", h.HandleGetMe)
 	mux.HandleFunc("PATCH /executions/{id}", h.HandleUpdateExecution)
 	mux.HandleFunc("POST /events", h.HandleIngestEvents)
@@ -3615,6 +3616,75 @@ func (h *Handlers) HandleGetProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "get project: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":          true,
+		"project_id":  project.ProjectID,
+		"name":        project.Name,
+		"owner_email": project.OwnerEmail,
+		"created_at":  project.CreatedAt,
+	})
+}
+
+// HandleSetProjectName updates the calling project's display name.
+// Admin role required (anyone with read scope can call GET /project,
+// but a rename is a mutation; only admins can perform it).
+//
+// Body: { "name": "<new name>" }
+// Returns the same payload shape as HandleGetProject after the update.
+//
+// Validation:
+//   - name is trimmed; must be 1-80 characters after trim
+//   - empty / whitespace-only is rejected
+//   - same 80-char cap as signup so a rename cannot bypass the
+//     signup-time bound
+//
+// Added pre-#30 ship (#173): SSO signup defaults all projects to
+// "Default project" because the OAuth flow does not collect a name.
+// Customers need a way to rename without re-signing-up.
+func (h *Handlers) HandleSetProjectName(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	newName := strings.TrimSpace(body.Name)
+	if newName == "" {
+		writeError(w, http.StatusBadRequest,
+			"name is required and cannot be only whitespace")
+		return
+	}
+	if len(newName) > 80 {
+		writeError(w, http.StatusBadRequest,
+			"name must be 80 characters or fewer")
+		return
+	}
+	if err := h.Store.UpdateProjectName(r.Context(), authProjectID, newName); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError,
+			"update project name: "+err.Error())
+		return
+	}
+	h.Logger.Info("project renamed",
+		"project_id", authProjectID, "new_name", newName)
+	project, err := h.Store.GetProject(r.Context(), authProjectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"reload project after rename: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

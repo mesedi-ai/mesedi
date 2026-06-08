@@ -613,6 +613,14 @@ type Store interface {
 	// enforcement: when expiresAt has passed, HandleGetBilling
 	// treats the tier as Hobby. Pass nil to make a permanent flip.
 	UpdateProjectTier(ctx context.Context, projectID, tier string, expiresAt *time.Time) error
+	// UpdateProjectName changes the human-readable display name on a
+	// project row. Customer-driven (#173): the rename endpoint on the
+	// dashboard sends through here so SSO signups whose project
+	// defaulted to "Default project" can pick something meaningful.
+	// Trimming + length-bound (1-80 chars) is the API layer's job;
+	// the store layer just writes whatever name it gets. Returns
+	// ErrNotFound if the project_id does not exist.
+	UpdateProjectName(ctx context.Context, projectID, name string) error
 	// AddGrantedExecutions adds delta to the granted_executions
 	// column atomically. Positive delta grants quota; negative delta
 	// revokes a previous grant. Used for the early-customer 100K

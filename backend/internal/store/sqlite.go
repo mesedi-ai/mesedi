@@ -616,6 +616,31 @@ func (s *SQLiteStore) UpdateProjectTier(
 	return nil
 }
 
+// UpdateProjectName writes a new display name on a project row. The
+// store does no validation; the API handler enforces 1-80 char +
+// trimmed-non-empty before calling here.
+func (s *SQLiteStore) UpdateProjectName(
+	ctx context.Context,
+	projectID, name string,
+) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE projects
+		SET name = ?
+		WHERE project_id = ?
+	`, name, projectID)
+	if err != nil {
+		return fmt.Errorf("update project name: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // AddGrantedExecutions adjusts the granted_executions column by delta.
 // Positive delta grants additional quota; negative delta revokes a
 // prior grant. The column is signed INTEGER so the result may go

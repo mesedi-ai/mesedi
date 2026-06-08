@@ -498,6 +498,25 @@ func (s *PostgresStore) UpdateProjectTier(ctx context.Context, projectID, tier s
 	return nil
 }
 
+func (s *PostgresStore) UpdateProjectName(ctx context.Context, projectID, name string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE projects
+		SET name = $1
+		WHERE project_id = $2
+	`, name, projectID)
+	if err != nil {
+		return fmt.Errorf("update project name: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) AddGrantedExecutions(ctx context.Context, projectID string, delta int64, expiresAt *time.Time) error {
 	var expires sql.NullInt64
 	if expiresAt != nil {
