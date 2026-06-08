@@ -1617,7 +1617,7 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 	tier := normalizeTier(proj.Tier)
 	if tier == TierHobby {
 		writeError(w, http.StatusPaymentRequired,
-			"LLM-assisted root-cause analysis is a Cloud Team feature. The failure detection itself is included on Hobby; upgrade at /pricing to enable AI explanations.")
+			"LLM-assisted root-cause analysis is a Cloud Team feature. The failure detection itself is included on Hobby; upgrade at /app/billing to enable AI explanations.")
 		return
 	}
 	if tier == TierTeam {
