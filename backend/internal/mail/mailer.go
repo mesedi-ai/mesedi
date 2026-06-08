@@ -71,8 +71,8 @@ type WelcomeInput struct {
 	ToEmail      string // recipient
 	ProjectName  string // human-readable project name from signup
 	APIKeyPrefix string // e.g. "mesedi_sk_abc123..." prefix only
-	DashboardURL string // e.g. https://mesedi.vercel.app/app
-	DocsURL      string // e.g. https://mesedi.vercel.app/docs/quickstart
+	DashboardURL string // e.g. https://app.mesedi.ai
+	DocsURL      string // e.g. https://app.mesedi.ai/docs/quickstart
 }
 
 // NoopMailer accepts every send and discards it. Used when no

@@ -262,9 +262,7 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 // but the docs are on the marketing apex (mesedi.ai/docs/quickstart)
 // per the middleware host-split rules. Naively concatenating
 // h.DashboardURL + "/docs/quickstart" yields app.mesedi.ai/docs/...,
-// which the middleware then 308's back to mesedi.ai. Worse, the
-// legacy default was "https://mesedi.vercel.app", which still works
-// as a redirect but renders ugly in the welcome email body. So:
+// which the middleware then 308's back to mesedi.ai. So:
 // derive the marketing origin from the dashboard origin by stripping
 // the "app." subdomain prefix.
 func (h *Handlers) sendWelcomeEmail(toEmail, projectName, keyPrefix string) {

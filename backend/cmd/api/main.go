@@ -24,7 +24,7 @@
 // currently returns ErrPostgresNotYetPorted).
 //
 // MESEDI_DASHBOARD_URL is the public origin of the React dashboard
-// (Vercel-hosted in prod, e.g. https://mesedi.vercel.app). When set,
+// (Cloudflare Workers in prod, e.g. https://app.mesedi.ai). When set,
 // webhook payloads and embed deep-links use this base; otherwise the
 // scheme+host of the inbound request is used (correct for same-origin
 // dev setups, wrong when the backend and dashboard live on different
@@ -397,7 +397,7 @@ func main() {
 
 	// Public POST /signup bypasses the bearer-token auth chain (visitors
 	// have no key yet) but still needs CORS so the marketing site at
-	// mesedi.vercel.app can POST cross-origin. The signup handler's
+	// mesedi.ai can POST cross-origin. The signup handler's
 	// in-process IP rate limiter bounds abuse.
 	signupMux := http.NewServeMux()
 	handlers.RegisterPublicRoutes(signupMux)
@@ -409,7 +409,7 @@ func main() {
 	//   2. Scoped: bearer is a mesedi_sk_ key with scope='admin'
 	//      (migration 015), looked up via the store.
 	// Fails closed with 503 when neither is configured. CORS so the
-	// dashboard at mesedi.vercel.app can call cross-origin.
+	// dashboard at app.mesedi.ai can call cross-origin.
 	adminMux := http.NewServeMux()
 	handlers.RegisterAdminRoutes(adminMux)
 	adminHandler := api.CORSMiddleware()(api.AdminAuth(cfg.AdminToken, st)(adminMux))
@@ -498,8 +498,8 @@ func main() {
 	mux.Handle("OPTIONS /invites/{token}/accept", signupHandler)
 	// Founder-side admin dashboard (#150). Token-gated; refuses every
 	// request when MESEDI_ADMIN_TOKEN is empty. CORS preflight OPTIONS
-	// is needed because the dashboard at mesedi.vercel.app calls
-	// cross-origin from a different host than mesedi-api.fly.dev.
+	// is needed because the dashboard at app.mesedi.ai calls
+	// cross-origin from a different host than the backend (mesedi-api.fly.dev for the hosted service).
 	mux.Handle("GET /admin/projects", adminHandler)
 	mux.Handle("OPTIONS /admin/projects", adminHandler)
 	mux.Handle("GET /admin/projects/{id}", adminHandler)
@@ -601,7 +601,7 @@ func loadConfig() runtimeConfig {
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log verbosity: debug | info | warn | error")
 	flag.StringVar(&cfg.DBURL, "db-url", cfg.DBURL, "SQLite DSN (used when --db-url-postgres is empty)")
 	flag.StringVar(&cfg.DBURLPostgres, "db-url-postgres", cfg.DBURLPostgres, "Postgres DSN (postgres:// or postgresql://); when set, used in preference to --db-url")
-	flag.StringVar(&cfg.DashboardURL, "dashboard-url", cfg.DashboardURL, "public origin of the React dashboard (e.g. https://mesedi.vercel.app)")
+	flag.StringVar(&cfg.DashboardURL, "dashboard-url", cfg.DashboardURL, "public origin of the React dashboard (e.g. https://app.mesedi.ai)")
 	flag.Parse()
 	return cfg
 }

@@ -89,7 +89,7 @@ type Payload struct {
 // links into the receiving channel (exec-test isn't a real row).
 //
 // dashboardBaseURL should be the dashboard origin without a path
-// (e.g. https://mesedi.vercel.app), no trailing slash. Adapters
+// (e.g. https://app.mesedi.ai), no trailing slash. Adapters
 // append their own routes.
 func BuildTestPayload(webhook *store.ProjectWebhook, dashboardBaseURL, deliveryID string) Payload {
 	return Payload{

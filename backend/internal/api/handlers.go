@@ -47,7 +47,7 @@ type Handlers struct {
 	HaltSubs      *HaltSubscribers // sub-slice 21b, SSE halt-channel registry
 	WebhookClient *http.Client     // task #83, outbound dispatcher HTTP client
 	// DashboardURL is the public origin of the React dashboard
-	// (e.g. https://mesedi.vercel.app). Used to build deep-links in
+	// (e.g. https://app.mesedi.ai). Used to build deep-links in
 	// webhook payloads and Discord embeds. When empty, the dispatcher
 	// falls back to the inbound request's scheme + host, correct for
 	// local dev where the dashboard is same-origin with the API, wrong
@@ -3253,7 +3253,7 @@ func (h *Handlers) HandleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dashboard base URL, configured via MESEDI_DASHBOARD_URL in prod
-	// (e.g. https://mesedi.vercel.app); falls back to request-derived
+	// (e.g. https://app.mesedi.ai); falls back to request-derived
 	// scheme + host for local-dev.
 	dashboardBase := h.resolveDashboardBase(r)
 
@@ -3548,12 +3548,12 @@ func (h *Handlers) HandleGetProject(w http.ResponseWriter, r *http.Request) {
 // Response shape:
 //
 //	{
-//	  "user_id":     "rob.j.canario@gmail.com",  // who is calling
-//	  "email":       "rob.j.canario@gmail.com",  // same in v1 (email-as-user-id)
-//	  "role":        "read",                     // read | write | admin
+//	  "user_id":     "alice@example.com",  // who is calling
+//	  "email":       "alice@example.com",  // same in v1 (email-as-user-id)
+//	  "role":        "read",               // read | write | admin
 //	  "project_id":  "proj_...",
-//	  "project_name":"Stripe Live Test",
-//	  "owner_email": "rjc0207@gmail.com"         // project creator, for context
+//	  "project_name":"Acme Production",
+//	  "owner_email": "owner@example.com"   // project creator, for context
 //	}
 //
 // Legacy keys (no user_id) and projects without a tenant_id resolve

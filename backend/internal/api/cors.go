@@ -2,10 +2,9 @@
 //
 // Allows the browser-based Next.js dashboard to call the Fly-hosted API
 // directly. Production origins are mesedi.ai (marketing) and
-// app.mesedi.ai (dashboard); mesedi.vercel.app is preserved for the
-// soft-cutover redirect window. Preview deployments use
-// mesedi-*-mesediai.vercel.app; local dev uses localhost:3000 (default
-// Next.js dev server).
+// app.mesedi.ai (dashboard). Preview deployments are served from
+// Cloudflare Workers under *.workers.dev; local dev uses
+// localhost:3000 (default Next.js dev server).
 //
 // Handles the CORS preflight OPTIONS request inline (returns 204 with
 // the appropriate Access-Control-* headers) and forwards everything
@@ -25,24 +24,26 @@ import (
 // allowedOrigins is the set of explicit, exact-match origins permitted
 // to call this API from a browser. Add new origins by extending this list.
 var allowedOrigins = map[string]struct{}{
-	"https://mesedi.ai":         {},
-	"https://app.mesedi.ai":     {},
-	"https://mesedi.vercel.app": {},
-	"http://localhost:3000":     {},
-	"http://localhost:3001":     {},
-	"http://127.0.0.1:3000":     {},
+	"https://mesedi.ai":     {},
+	"https://app.mesedi.ai": {},
+	"http://localhost:3000": {},
+	"http://localhost:3001": {},
+	"http://127.0.0.1:3000": {},
 }
 
 // isAllowedOrigin reports whether origin should be allowed by CORS.
-// Matches exact entries in allowedOrigins, plus any Vercel preview
-// deployment URL for the mesedi project (mesedi-*-mesediai.vercel.app).
+// Matches exact entries in allowedOrigins, plus any Cloudflare Workers
+// preview deployment URL for the mesedi-web project. CF preview URLs
+// look like https://mesedi-web.<account-subdomain>.workers.dev or
+// https://<hash>-mesedi-web.<account-subdomain>.workers.dev.
 func isAllowedOrigin(origin string) bool {
 	if _, ok := allowedOrigins[origin]; ok {
 		return true
 	}
-	// Vercel preview origins: https://mesedi-<hash>-mesediai.vercel.app
-	if strings.HasPrefix(origin, "https://mesedi-") &&
-		strings.HasSuffix(origin, "-mesediai.vercel.app") {
+	// Cloudflare Workers preview origins.
+	if strings.HasPrefix(origin, "https://") &&
+		strings.HasSuffix(origin, ".workers.dev") &&
+		strings.Contains(origin, "mesedi-web") {
 		return true
 	}
 	return false

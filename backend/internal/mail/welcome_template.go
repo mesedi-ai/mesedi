@@ -142,7 +142,7 @@ run_my_agent("hello")</pre>
         <tr>
           <td style="font-size:15px;line-height:1.6;color:#b5b5b5;padding:24px 0 0;border-top:1px solid #2a2a2a;">
             The full quickstart is at
-            <a href="%s" style="color:#fafafa;">mesedi.vercel.app/docs/quickstart</a>,
+            <a href="%s" style="color:#fafafa;">app.mesedi.ai/docs/quickstart</a>,
             including the LangChain, CrewAI, and Vercel AI SDK adapters.
           </td>
         </tr>

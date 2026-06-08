@@ -1,7 +1,7 @@
 // Package dashboard embeds and serves the local-development UI.
 //
 // This is NOT the production dashboard. The production surface is a
-// Next.js app on Vercel that lives in a separate repository.
+// Next.js app on Cloudflare Workers that lives in a separate repository.
 //
 // What this is: a single static HTML file (with inline CSS + JS, no
 // build step, no framework) embedded in the Go binary and served at
