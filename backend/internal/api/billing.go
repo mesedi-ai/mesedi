@@ -200,7 +200,8 @@ func billingNotConfigured(w http.ResponseWriter) {
 // rather than persisted so there's exactly one source of truth.
 //
 // Formula: max(0, executions_this_period - included_quota) *
-//          per-execution rate for the project's tier.
+//
+//	per-execution rate for the project's tier.
 //
 // Included quota = tier base + non-expired admin-granted bonus.
 // Enterprise returns 0 (no per-execution overage; contract-driven).
@@ -380,12 +381,12 @@ func (h *Handlers) HandleGetBilling(w http.ResponseWriter, r *http.Request) {
 		// returns 0 when the project is still inside the free quota
 		// or when the tier has no overage (Enterprise).
 		OverageCostThisPeriodUSD: computeOverageCostUSD(p),
-		CurrentPeriodStart:         p.CurrentPeriodStart,
-		CurrentPeriodEnd:           p.CurrentPeriodEnd,
-		StripeCustomerID:           p.StripeCustomerID,
-		StripeSubscriptionID:       p.StripeSubscriptionID,
-		CanUpgrade:                 effectiveTier == TierHobby && h.Stripe.Configured(),
-		CanManage:                  p.StripeCustomerID != "" && h.Stripe.Configured(),
+		CurrentPeriodStart:       p.CurrentPeriodStart,
+		CurrentPeriodEnd:         p.CurrentPeriodEnd,
+		StripeCustomerID:         p.StripeCustomerID,
+		StripeSubscriptionID:     p.StripeSubscriptionID,
+		CanUpgrade:               effectiveTier == TierHobby && h.Stripe.Configured(),
+		CanManage:                p.StripeCustomerID != "" && h.Stripe.Configured(),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

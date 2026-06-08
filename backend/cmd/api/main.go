@@ -592,10 +592,10 @@ func loadConfig() runtimeConfig {
 		// the legacy fallback can be removed.
 		StripeTeamPriceID: envString("MESEDI_STRIPE_TEAM_PRICE_ID",
 			envString("MESEDI_STRIPE_PRO_PRICE_ID", "")),
-		AdminToken:          envString("MESEDI_ADMIN_TOKEN", ""),
-		ResendAPIKey:        envString("RESEND_API_KEY", ""),
-		ResendFrom:          envString("MESEDI_MAIL_FROM", "Mesedi <onboarding@resend.dev>"),
-		AlertWebhookURL:     envString("MESEDI_ALERT_WEBHOOK_URL", ""),
+		AdminToken:      envString("MESEDI_ADMIN_TOKEN", ""),
+		ResendAPIKey:    envString("RESEND_API_KEY", ""),
+		ResendFrom:      envString("MESEDI_MAIL_FROM", "Mesedi <onboarding@resend.dev>"),
+		AlertWebhookURL: envString("MESEDI_ALERT_WEBHOOK_URL", ""),
 	}
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "TCP port for the HTTP API")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log verbosity: debug | info | warn | error")

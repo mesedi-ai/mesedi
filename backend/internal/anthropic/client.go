@@ -119,11 +119,11 @@ type Result struct {
 
 // requestBody is the JSON shape we POST to /v1/messages.
 type requestBody struct {
-	Model       string            `json:"model"`
-	MaxTokens   int               `json:"max_tokens"`
-	System      string            `json:"system,omitempty"`
-	Messages    []requestMessage  `json:"messages"`
-	Temperature *float64          `json:"temperature,omitempty"`
+	Model       string           `json:"model"`
+	MaxTokens   int              `json:"max_tokens"`
+	System      string           `json:"system,omitempty"`
+	Messages    []requestMessage `json:"messages"`
+	Temperature *float64         `json:"temperature,omitempty"`
 }
 
 type requestMessage struct {
@@ -134,13 +134,13 @@ type requestMessage struct {
 // responseBody is the relevant subset of the Messages API response.
 // We ignore fields we don't use to keep the unmarshal cheap.
 type responseBody struct {
-	ID         string             `json:"id"`
-	Type       string             `json:"type"`
-	Role       string             `json:"role"`
-	Model      string             `json:"model"`
-	Content    []responseContent  `json:"content"`
-	StopReason string             `json:"stop_reason"`
-	Usage      responseUsage      `json:"usage"`
+	ID         string            `json:"id"`
+	Type       string            `json:"type"`
+	Role       string            `json:"role"`
+	Model      string            `json:"model"`
+	Content    []responseContent `json:"content"`
+	StopReason string            `json:"stop_reason"`
+	Usage      responseUsage     `json:"usage"`
 }
 
 type responseContent struct {
