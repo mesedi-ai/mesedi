@@ -37,7 +37,3 @@ The remediation depends on which shape it is, but the four standard patterns:
 - **Make the retried prompt include the previous response.** If the agent's retrying because the prior answer was unsatisfactory, the next prompt should include the previous response and ask for a refinement. Near-identical prompts with no feedback signal almost always produce near-identical responses.
 
 - **Audit the loop's terminator.** Whatever condition is supposed to make the loop stop, log it on every iteration and watch what happens. Most "infinite loop" bugs are a single-character typo in the terminator condition or a variable that's being mutated in the wrong scope.
-
-## Auto-fix in a future Mesedi release
-
-The v2 roadmap (`docs/REPAIR_TIER_ROADMAP.md`) includes SDK-layer near-duplicate dedup as a Tier 3 capability: when the SDK observes `similar_call` clustering inside a live execution, it can either short-circuit the loop with an error or return the first call's response for the duplicates. Opt-in per project per class, never on by default, false positives on this would silently corrupt agent behavior.

@@ -33,7 +33,3 @@ A third measure for high-stakes deployments: after the model produces a response
 ## What this does NOT mean
 
 If you're building a developer tool, an LLM educational product, or a security-research interface, your users may legitimately need to type these tokens. Same caveat as `instruction_tag`, per-project pattern config in Mesedi v2 will let you opt out. Until then, treat this failure group as expected noise.
-
-## Auto-fix in a future Mesedi release
-
-Per the repair-tier roadmap, Tier 3 SDK-layer prompt normalization will strip role-boundary tokens automatically and emit structured events for each strip. Tier 2 includes the verifier-model pattern as an opt-in service. Both are deferred until the v1 detection surface is fully validated.

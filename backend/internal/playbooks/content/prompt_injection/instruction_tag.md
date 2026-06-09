@@ -31,7 +31,3 @@ A useful instrumentation pattern: when your normalizer fires and strips a tag, e
 ## What this does NOT mean
 
 If your application legitimately produces text containing these tags (a code-generation product, an LLM tutorial, a security tool that shows users injection examples), this detector will fire on every execution and the failure-group count will be misleading. In that case the right fix is per-project pattern config, Mesedi v2 will support per-project rule tuning so legitimate uses can opt out of specific patterns. Until then, treat the high-count failure group as expected noise rather than active attack.
-
-## Auto-fix in a future Mesedi release
-
-The v2 roadmap includes SDK-side input normalization, the `@wrap` decorator can transparently strip known control tokens before they reach the model, emitting a structured event for each strip. Opt-in per project. The detection here remains valuable as the canary for "the normalizer missed something", if this failure group keeps firing after normalization is on, your normalizer is incomplete.

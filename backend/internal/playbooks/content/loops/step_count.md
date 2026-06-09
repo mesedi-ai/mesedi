@@ -49,7 +49,3 @@ After deploying, run the same workload. The relevant signals:
 - The bucket should shift down. An execution that landed in `step_count_500+` should land in `step_count_100+` or `step_count_50+`.
 - The total event count on the dashboard should drop proportionally, Mesedi's storage cost scales with event count, so this is also a quiet cost-control win.
 - If you added a hard step budget, you'll see `halt:local_signal` crash signatures appearing in the dashboard at the budget threshold. That's the budget working as intended.
-
-## Auto-fix in a future Mesedi release
-
-The v2 roadmap includes Mesedi-side step-budget enforcement, the SDK accepts a `max_steps` parameter and emits a halt signal when it's crossed, the same way time-budget enforcement works. Opt-in per project, off by default.

@@ -43,7 +43,3 @@ The remediation pattern here is different from the higher-tier injection pattern
 ## What this does NOT mean
 
 If your product handles user corrections, technical writing, document review, or any conversation pattern where users routinely refer back to prior content, you'll see this signature fire constantly. The high false-positive rate is by design, Mesedi wants the recall. Use it as one input, not the only input. Per-project tuning in v2 will let you opt out for projects where this pattern is mostly noise.
-
-## Auto-fix in a future Mesedi release
-
-Same as the higher-tier patterns: Tier 2 intent classification and Tier 3 SDK-side normalization are on the roadmap. The ignore-instructions case in particular benefits a lot from intent classification because the false-positive rate is so high, automated discrimination between "ignore my previous message about the order number" and "ignore all prior safety rules" is exactly the kind of judgment LLMs are good at.

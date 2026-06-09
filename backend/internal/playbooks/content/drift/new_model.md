@@ -49,7 +49,3 @@ If the new model is unintentional, the fix is structural:
 - **Add startup-time validation.** When your agent boots, check that the configured model is in an allowlist. Crash on boot if it isn't, with a clear error message naming the bad value. This catches misconfiguration at deploy time, not at request time.
 
 - **Test routing logic on every change.** If your model selection lives in routing logic (router by task type, A/B variant chooser, feature-flag dispatcher), add a unit test that asserts the routing for the cases you care about. Routing logic bugs are usually one-line typos and are easy to catch with focused tests.
-
-## Auto-fix in a future Mesedi release
-
-The v2 roadmap includes a per-project expected-models allowlist managed via the dashboard, Mesedi only fires the new-model signal for models outside the allowlist, dramatically reducing false-positive volume on multi-model projects. The detector itself stays unchanged; the failure-group classification gets a "matches allowlist / does not match allowlist" axis.

@@ -47,7 +47,3 @@ After deploying the fix, run the same workload and check the Mesedi dashboard a 
 - The bucket should shift down. An execution that used to land in `time_budget_10m+` should now land in `time_budget_60s+` or below.
 - The `failure_group` row's `execution_count` for the original bucket should plateau (no new entries).
 - If you added a hard time budget, you'll see `halt:local_signal` `crashes/*` failure groups appearing, that's the timeout working as intended, and it's a much better failure mode than runaway duration.
-
-## Auto-fix in a future Mesedi release
-
-The v2 roadmap includes Mesedi sending the SDK a `halt` signal automatically when an execution exceeds a configured time budget, without the customer having to wire it in. This is the dashboard's Halt button on autopilot, same wire format, same SDK consumer side, just policy-driven instead of operator-driven. Opt-in per project, off by default.

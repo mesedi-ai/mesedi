@@ -33,7 +33,3 @@ DAN attempts mostly bounce off frontier model safety on their own, so the remedi
 ## What this does NOT mean
 
 DAN appears legitimately in academic security research, in red-team prompts you yourself wrote to test your defenses, and in agents whose purpose is to study or demonstrate jailbreaks. Same per-project tuning caveat as the other injection patterns, Mesedi v2 will let you opt out.
-
-## Auto-fix in a future Mesedi release
-
-Tier 2 capabilities on the roadmap include automatic classification of "what is the user actually trying to do" when an injection signature fires, strips the jailbreak wrapper and surfaces the underlying request as a separate signal. That makes the human review step much faster.

@@ -49,7 +49,3 @@ The remediation depends on which of the three diagnostics flagged:
 ## A cost-aware product pattern
 
 For high-volume products, instrument cost per request as a first-class metric in your own observability (not just Mesedi). Set a per-request soft budget and a per-request hard limit at the application layer. When the soft budget is hit, log a warning; when the hard limit is hit, return an error before making the call. Mesedi will still classify the run, but you'll prevent the most expensive failures from completing.
-
-## Auto-fix in a future Mesedi release
-
-The v2 roadmap (`docs/REPAIR_TIER_ROADMAP.md`) includes per-project cost budgets enforced via the same halt mechanism as time and step budgets, the SDK can pre-flight estimated cost for each LLM call and halt the execution if the budget would be exceeded. Opt-in per project, off by default. The Tier 2 layer also includes "this execution cost N× the project median, here's a candidate fix" suggestions, which require having a baseline and so are deferred until the cost-history surface has enough data.

@@ -39,7 +39,3 @@ The remediation is less about blocking the phrase (too many false positives) and
 ## What this does NOT mean
 
 By far the most likely innocent source of this signal is collaborative writing, structured prompting, and any product where users genuinely need to declare an assistant role. The detector's Tier-3 classification already reflects this, false positives are expected. If your project's normal traffic produces this signature at high volume, that's a per-project tuning issue (Mesedi v2 will let you opt out), not a flood of attacks.
-
-## Auto-fix in a future Mesedi release
-
-Tier 2 capabilities on the roadmap include intent classification on injection-pattern matches, given the matched text, classify it as benign role declaration vs constraint-removal attempt. That would let this signal escalate only on the latter. Deferred until the v1 detection surface validates.

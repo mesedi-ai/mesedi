@@ -56,7 +56,3 @@ Both detectors are in the `drift` class because they share the same operational 
 - **lexical_drift** is a continuous signal that points at "prompts shifted in general" and the cause might be anywhere in the prompt-construction pipeline. Fix requires investigation.
 
 When you see both fire on the same project in the same window, look at the model change first, sometimes the new model is what's producing the lexically-different prompts (especially if the model is doing some of the prompt construction).
-
-## Auto-fix in a future Mesedi release
-
-The v2 roadmap includes semantic-drift detection via embedding similarity, which catches the lexically-similar-but-semantically-different cases this detector misses. Both signals would compose: lexical drift catches the obvious cases cheaply, semantic drift catches the subtle cases at higher compute cost. The Tier 2 layer also includes "show me which N-grams shifted between the current and historical bags" as a structured diagnostic surface, replacing the manual side-by-side read in the investigation section above.

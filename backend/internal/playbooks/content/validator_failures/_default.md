@@ -39,9 +39,3 @@ If a single validator is producing a high-count failure group, take 10 of the af
 - **All 10 fail the same way.** Structural prompt issue. One fix moves the whole population.
 - **The 10 cluster into 2-3 distinct failure modes.** Multiple sub-bugs sharing one validator. Address them in order of frequency.
 - **All 10 fail differently and the validator's correct each time.** The agent is genuinely producing bad output across a wide distribution, your task is too hard for the current prompt + model, escalate the model class or decompose the task.
-
-## Auto-fix in a future Mesedi release
-
-The v2 roadmap includes per-validator playbook overrides, when your `pii_redaction` validator fails, the playbook can name the specific PII patterns most likely to be leaking through, instead of giving generic guidance. The pattern table already supports per-validator overrides; the gating constraint is authoring content for the validators that fail most across the customer base.
-
-There's also a Tier 2 capability on the roadmap where Mesedi suggests a prompt diff in response to a validator failure, "executions matching this validator failure share these three prompt characteristics; here's a candidate fix." That requires LLM inference at recommendation time and is opt-in per project.

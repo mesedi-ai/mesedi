@@ -39,7 +39,3 @@ Three legitimate sources of this pattern in your traffic:
 - A red-team workflow where you yourself are testing your defenses by sending these prompts.
 
 For all three, the high-count failure group is expected and not actionable. Per-project pattern tuning is the long-term answer; in the short term, treat the group as known noise.
-
-## Auto-fix in a future Mesedi release
-
-Same as the other Tier-2 patterns, v2 roadmap includes automatic intent classification (what is the user actually trying to do, once the persona wrapper is stripped) and per-project rule tuning. Both deferred until the v1 detection surface stabilizes.

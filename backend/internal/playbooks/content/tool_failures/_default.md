@@ -35,7 +35,3 @@ The remediation pattern depends on what kind of failure this tool is producing:
 - **Argument-construction failures.** If the tool is failing because the agent is passing bad arguments, the bug is upstream of the tool, in the prompt that asks the LLM to generate the arguments, or in the schema validation between the LLM output and the tool call. Tighten the validator and feed validation failures back into the prompt as a corrective signal.
 
 - **Silent-degradation by design.** If your agent's intentional behavior is "if this tool fails, answer without it," that's a product decision, not a bug, but it should be EXPLICIT. Emit a custom event (`degraded_response` or similar) so Mesedi can group these separately from accidental tool failures, and so your downstream consumers can flag the response as "this answer was produced without [tool]."
-
-## Auto-fix in a future Mesedi release
-
-The v2 roadmap (`docs/REPAIR_TIER_ROADMAP.md`) includes per-tool playbook overrides, when your agent's `slack.post_message` tool fails routinely with `channel_not_found`, the playbook can be Slack-specific instead of generic. The pattern table in `playbooks.go` already supports prefix-based overrides; the gating constraint is authoring the per-tool content. The current `_default.md` (this file) covers the general pattern; tool-specific entries get added as the customer base reveals which tools fail most.

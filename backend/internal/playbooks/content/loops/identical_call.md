@@ -29,7 +29,3 @@ The remediation depends on the cause, but four standard patterns:
 - **Make the retried prompt actually different.** If your agent is retrying because the LLM's first response was unsatisfactory, the next prompt should include the previous response and ask for a refinement. Identical retries on identical inputs almost always give identical outputs, the agent is wasting tokens.
 
 - **Fix the cache key.** If caching is the culprit, the key must include every field that materially distinguishes one request from another, user_id, session_id, the full text of the prompt, model name, temperature, system prompt hash.
-
-## Auto-fix in a future Mesedi release
-
-The Mesedi v2 roadmap (see `docs/REPAIR_TIER_ROADMAP.md`) includes SDK-layer dedup for this pattern: when the same `(model, user_message)` hash recurs within an execution, the SDK can transparently return the cached first-call response instead of re-calling the model. That saves tokens and breaks the loop simultaneously, without changing your agent code. Opt-in per project per class, never on by default.
