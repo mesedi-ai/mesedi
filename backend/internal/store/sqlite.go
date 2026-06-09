@@ -961,6 +961,30 @@ func (s *SQLiteStore) DeleteAPIKeyByID(ctx context.Context, keyID string) error 
 	return nil
 }
 
+// DeleteAPIKeysByUserID hard-deletes every API key whose user_id
+// matches. Called from HandleRemoveMember so a removed team member's
+// existing credentials stop working immediately (#187). Returns the
+// number of rows deleted; never returns ErrNotFound (0 deletions is a
+// valid outcome when the removed user never minted a key).
+func (s *SQLiteStore) DeleteAPIKeysByUserID(
+	ctx context.Context,
+	userID string,
+) (int, error) {
+	res, err := s.db.ExecContext(
+		ctx,
+		`DELETE FROM api_keys WHERE user_id = ?`,
+		userID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete api_keys by user_id: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 // DeleteAPIKey hard-deletes an API key, but ONLY if the key belongs
 // to the given project. Returns ErrNotFound if the key doesn't exist
 // OR if it belongs to a different project (don't leak existence

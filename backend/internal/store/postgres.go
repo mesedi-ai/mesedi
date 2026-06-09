@@ -761,6 +761,29 @@ func scanPostgresAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 	return out, rows.Err()
 }
 
+// DeleteAPIKeysByUserID hard-deletes every API key whose user_id
+// matches. Postgres counterpart to the SQLiteStore method; called by
+// HandleRemoveMember to revoke a removed team member's credentials
+// (#187). Returns the number of rows deleted.
+func (s *PostgresStore) DeleteAPIKeysByUserID(
+	ctx context.Context,
+	userID string,
+) (int, error) {
+	res, err := s.db.ExecContext(
+		ctx,
+		`DELETE FROM api_keys WHERE user_id = $1`,
+		userID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete api_keys by user_id: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 func (s *PostgresStore) DeleteAPIKey(ctx context.Context, keyID, projectID string) error {
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM api_keys WHERE key_id = $1 AND project_id = $2`,

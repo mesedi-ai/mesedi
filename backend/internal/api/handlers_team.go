@@ -330,9 +330,34 @@ func (h *Handlers) HandleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not remove member")
 		return
 	}
+
+	// Revoke every API key the removed member holds. Without this, a
+	// removed teammate's existing key continues to authenticate against
+	// /me/* until it's manually deleted, so they can still browse the
+	// dashboard and (worse) call write endpoints (#187 Robert flagged).
+	// Hard-deleting matches the existing DeleteAPIKey pattern; a new
+	// invite is required for them to re-join, which mints a fresh key.
+	// Best-effort: if the revoke fails we still report success on the
+	// member removal but log the failure so an operator can clean up.
+	revoked, revokeErr := h.Store.DeleteAPIKeysByUserID(r.Context(), targetUserID)
+	if revokeErr != nil {
+		h.Logger.Error("revoke api_keys after member remove failed",
+			"org_id", orgID,
+			"removed_user_id", targetUserID,
+			"removed_by", callerUserID,
+			"error", revokeErr.Error())
+	} else if revoked > 0 {
+		h.Logger.Info("revoked api_keys for removed member",
+			"org_id", orgID,
+			"removed_user_id", targetUserID,
+			"removed_by", callerUserID,
+			"keys_revoked", revoked)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"user_id": targetUserID,
+		"ok":           true,
+		"user_id":      targetUserID,
+		"keys_revoked": revoked,
 	})
 }
 

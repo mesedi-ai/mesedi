@@ -487,6 +487,11 @@ func main() {
 	mux.Handle("GET /billing/usage", privateHandler)
 	mux.Handle("POST /billing/checkout", privateHandler)
 	mux.Handle("POST /billing/portal", privateHandler)
+	// Hobby Setup Intent flow (#156): the dashboard POSTs here to get
+	// a Stripe Checkout URL in setup-mode so the customer can attach
+	// a card. Without this outer-mux forwarding the route was reachable
+	// on the privateMux but the request never landed there (#187 bug).
+	mux.Handle("POST /billing/payment-method/setup", privateHandler)
 	mux.Handle("POST /billing/webhook", signupHandler)
 	// Task #259, tenant-wide org rollup.
 	mux.Handle("GET /me/rollup", privateHandler)

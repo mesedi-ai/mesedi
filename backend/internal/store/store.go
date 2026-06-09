@@ -725,6 +725,12 @@ type Store interface {
 	// guard. Admin-only: used by /admin/api-keys to revoke any key
 	// (admin or customer scope, any project).
 	DeleteAPIKeyByID(ctx context.Context, keyID string) error
+	// DeleteAPIKeysByUserID hard-deletes every API key whose user_id
+	// matches. Used when an org admin removes a member so the removed
+	// member's existing keys stop working immediately (#187). Returns
+	// the number of keys deleted; the caller logs this as part of the
+	// member-removed audit trail.
+	DeleteAPIKeysByUserID(ctx context.Context, userID string) (int, error)
 
 	// Project webhooks (failure-class escalation, task #83).
 	// CreateProjectWebhook persists a new webhook configuration. The
