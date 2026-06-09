@@ -221,6 +221,29 @@ func (m NoopMailer) SendHobbyBillingNotification(ctx context.Context, in HobbyBi
 	return nil
 }
 
+func (m NoopMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeScheduledInput) error {
+	if m.Logger != nil {
+		m.Logger.Debug("mail: downgrade scheduled (noop, no RESEND_API_KEY)",
+			"to", in.ToEmail,
+			"project", in.ProjectName,
+			"period_end", in.PeriodEnd,
+			"immediate_flip", in.ImmediateFlip,
+		)
+	}
+	return nil
+}
+
+func (m NoopMailer) SendAccountClosed(ctx context.Context, in AccountClosedInput) error {
+	if m.Logger != nil {
+		m.Logger.Debug("mail: account closed (noop, no RESEND_API_KEY)",
+			"to", in.ToEmail,
+			"project", in.ProjectName,
+			"closed_at", in.ClosedAt,
+		)
+	}
+	return nil
+}
+
 // Enabled reports whether this Noop mailer actually sends anything.
 // Always false; callers can use this to skip pre-render work when no
 // mailer is wired.
@@ -613,6 +636,193 @@ func (m *ResendMailer) SendHobbyBillingNotification(
 		m.Logger.Info("mail: hobby billing notification sent",
 			"to", in.ToEmail,
 			"kind", string(in.Kind),
+			"project", in.ProjectName,
+		)
+	}
+	return nil
+}
+
+// SendDowngradeScheduled emails the customer that their Cloud Team
+// downgrade has been recorded (#188 danger-zone flow on /app/settings).
+// Two phrasings depending on ImmediateFlip: in the normal Path-A
+// flow the cancellation lands at PeriodEnd; in the corrupted-state
+// Path B (DB tier=Team but no Stripe subscription) the flip happens
+// instantly because there's nothing to cancel.
+func (m *ResendMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeScheduledInput) error {
+	subject := "Mesedi: Cloud Team downgrade scheduled"
+	if in.ImmediateFlip {
+		subject = "Mesedi: reverted to Cloud Hobby"
+	}
+
+	periodLine := ""
+	if !in.ImmediateFlip {
+		periodLine = fmt.Sprintf(
+			"Cloud Team coverage runs until %s. After that the project reverts to Cloud Hobby (10,000 executions / 15-day retention).\n\n",
+			in.PeriodEnd.Format("January 2, 2006"),
+		)
+	} else {
+		periodLine = "Cloud Hobby is effective immediately.\n\n"
+	}
+
+	textBody := fmt.Sprintf(
+		"Hi,\n\n"+
+			"This is a confirmation that you scheduled a downgrade for the Mesedi project %q.\n\n"+
+			"%s"+
+			"What stays:\n"+
+			"  - All recent executions inside the 15-day Hobby retention window\n"+
+			"  - Your API keys (they continue to authenticate against the Hobby tier)\n"+
+			"  - Project settings, severity routing, webhooks\n\n"+
+			"What changes:\n"+
+			"  - Included executions drop from 100,000 / month to 10,000 / month\n"+
+			"  - SSO and multi-seat are disabled\n"+
+			"  - Executions older than 15 days are pruned at the next period start\n\n"+
+			"If this was a mistake, you can cancel the downgrade from /app/billing in the dashboard before the period ends.\n\n"+
+			"View billing: %s/app/billing\n",
+		in.ProjectName, periodLine, in.DashboardURL,
+	)
+	htmlBody := fmt.Sprintf(
+		"<p>This is a confirmation that you scheduled a downgrade for the Mesedi project <strong>%s</strong>.</p>"+
+			"<p>%s</p>"+
+			"<p><strong>What stays:</strong></p>"+
+			"<ul>"+
+			"<li>All recent executions inside the 15-day Hobby retention window</li>"+
+			"<li>Your API keys (they continue to authenticate against the Hobby tier)</li>"+
+			"<li>Project settings, severity routing, webhooks</li>"+
+			"</ul>"+
+			"<p><strong>What changes:</strong></p>"+
+			"<ul>"+
+			"<li>Included executions drop from 100,000 / month to 10,000 / month</li>"+
+			"<li>SSO and multi-seat are disabled</li>"+
+			"<li>Executions older than 15 days are pruned at the next period start</li>"+
+			"</ul>"+
+			"<p>If this was a mistake, you can cancel the downgrade from <a href=\"%s/app/billing\">your billing page</a> before the period ends.</p>",
+		in.ProjectName, periodLine, in.DashboardURL,
+	)
+
+	body, err := json.Marshal(resendRequest{
+		From:    m.From,
+		To:      []string{in.ToEmail},
+		Subject: subject,
+		HTML:    htmlBody,
+		Text:    textBody,
+	})
+	if err != nil {
+		return fmt.Errorf("mail: marshal downgrade scheduled: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("mail: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mail: post to resend: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mail: resend returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	if m.Logger != nil {
+		m.Logger.Info("mail: downgrade scheduled sent",
+			"to", in.ToEmail,
+			"project", in.ProjectName,
+			"immediate_flip", in.ImmediateFlip,
+		)
+	}
+	return nil
+}
+
+// SendAccountClosed confirms the close-account cascade succeeded
+// (#188). Sent immediately AFTER DeleteProjectCascade, before the
+// dashboard's force-logout fires, so the customer has a paper trail.
+func (m *ResendMailer) SendAccountClosed(ctx context.Context, in AccountClosedInput) error {
+	subject := "Mesedi: account closed"
+
+	supportLine := ""
+	if in.SupportEmail != "" {
+		supportLine = fmt.Sprintf(
+			"If you closed the account by mistake, reply to %s within 7 days. We cannot reverse the deletion, but we can help you re-create the project with your information.\n\n",
+			in.SupportEmail,
+		)
+	}
+
+	textBody := fmt.Sprintf(
+		"Hi,\n\n"+
+			"This confirms that the Mesedi project %q was permanently closed on %s.\n\n"+
+			"What was deleted:\n"+
+			"  - All executions, events, and failure groups\n"+
+			"  - Every API key on the project\n"+
+			"  - Webhooks and their delivery history\n"+
+			"  - The project, organization, members, and pending invites\n"+
+			"  - Any Stripe subscription tied to the project (canceled immediately)\n\n"+
+			"%s"+
+			"Thank you for trying Mesedi.\n",
+		in.ProjectName, in.ClosedAt.Format("January 2, 2006 at 3:04 PM MST"), supportLine,
+	)
+	htmlBody := fmt.Sprintf(
+		"<p>This confirms that the Mesedi project <strong>%s</strong> was permanently closed on %s.</p>"+
+			"<p><strong>What was deleted:</strong></p>"+
+			"<ul>"+
+			"<li>All executions, events, and failure groups</li>"+
+			"<li>Every API key on the project</li>"+
+			"<li>Webhooks and their delivery history</li>"+
+			"<li>The project, organization, members, and pending invites</li>"+
+			"<li>Any Stripe subscription tied to the project (canceled immediately)</li>"+
+			"</ul>"+
+			"<p>%s</p>"+
+			"<p>Thank you for trying Mesedi.</p>",
+		in.ProjectName, in.ClosedAt.Format("January 2, 2006 at 3:04 PM MST"),
+		func() string {
+			if in.SupportEmail != "" {
+				return fmt.Sprintf(
+					"If you closed the account by mistake, reply to <a href=\"mailto:%s\">%s</a> within 7 days. We cannot reverse the deletion, but we can help you re-create the project with your information.",
+					in.SupportEmail, in.SupportEmail,
+				)
+			}
+			return ""
+		}(),
+	)
+
+	body, err := json.Marshal(resendRequest{
+		From:    m.From,
+		To:      []string{in.ToEmail},
+		Subject: subject,
+		HTML:    htmlBody,
+		Text:    textBody,
+	})
+	if err != nil {
+		return fmt.Errorf("mail: marshal account closed: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("mail: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mail: post to resend: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mail: resend returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	if m.Logger != nil {
+		m.Logger.Info("mail: account closed sent",
+			"to", in.ToEmail,
 			"project", in.ProjectName,
 		)
 	}
