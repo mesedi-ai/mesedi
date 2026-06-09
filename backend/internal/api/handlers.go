@@ -3082,6 +3082,21 @@ func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no project context")
 		return
 	}
+	// Last-key protection (#188 Robert flagged): revoking the only
+	// remaining key would leave the project unable to authenticate
+	// against anything but admin endpoints. Only the close-account
+	// flow is allowed to bring key count to zero, so refuse here.
+	keys, lkErr := h.Store.ListAPIKeysForProject(r.Context(), authProjectID)
+	if lkErr != nil {
+		writeError(w, http.StatusInternalServerError,
+			"could not verify remaining keys: "+lkErr.Error())
+		return
+	}
+	if len(keys) <= 1 {
+		writeError(w, http.StatusConflict,
+			"cannot revoke the project's last API key; mint a new key first, or close the account from settings to remove the project entirely")
+		return
+	}
 	if err := h.Store.DeleteAPIKey(r.Context(), keyID, authProjectID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "api key not found")

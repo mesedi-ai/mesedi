@@ -322,6 +322,35 @@ func (h *Handlers) HandleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "cannot remove yourself; transfer admin first")
 		return
 	}
+	// Last-admin protection (#188 Robert flagged): if removing this
+	// member would leave the org with zero admin-role members, refuse.
+	// An org without an admin can't manage billing, settings, or
+	// invites; only the close-account flow is allowed to nuke the
+	// last admin.
+	members, mlErr := h.Store.ListOrganizationMembers(r.Context(), orgID)
+	if mlErr != nil {
+		writeError(w, http.StatusInternalServerError,
+			"could not verify admin count: "+mlErr.Error())
+		return
+	}
+	adminsRemainingAfter := 0
+	targetIsAdmin := false
+	for _, m := range members {
+		if m.UserID == targetUserID {
+			if m.Role == "admin" {
+				targetIsAdmin = true
+			}
+			continue
+		}
+		if m.Role == "admin" {
+			adminsRemainingAfter++
+		}
+	}
+	if targetIsAdmin && adminsRemainingAfter == 0 {
+		writeError(w, http.StatusConflict,
+			"cannot remove the only admin; promote another member to admin first, or close the account from settings")
+		return
+	}
 	if err := h.Store.RemoveOrganizationMember(r.Context(), orgID, targetUserID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "member not found")
