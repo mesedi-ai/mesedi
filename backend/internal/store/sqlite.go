@@ -961,6 +961,74 @@ func (s *SQLiteStore) DeleteAPIKeyByID(ctx context.Context, keyID string) error 
 	return nil
 }
 
+// DeleteProjectCascade hard-deletes a project and every row whose
+// existence depends on it. Wired up for the customer-facing "Close
+// account" flow on /app/settings (#188). Runs everything in a single
+// transaction so a partial-delete state is impossible. Since the v0.1
+// schema declares FK ON DELETE CASCADE on most child tables, we COULD
+// just delete from projects, but only when SQLite is opened with
+// foreign_keys=on; for safety we issue explicit deletes in the
+// FK-respecting order so the function is correct regardless of the
+// pragma state.
+func (s *SQLiteStore) DeleteProjectCascade(
+	ctx context.Context,
+	projectID string,
+) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin cascade delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Order: deepest children first. Best-effort on each statement:
+	// a missing table (e.g. an optional feature wasn't migrated on
+	// this deployment) is fine; we ignore "no such table" but propagate
+	// other errors. The lazy "DELETE FROM X WHERE project_id = ?"
+	// pattern handles both empty and populated tables uniformly.
+	stmts := []string{
+		`DELETE FROM webhook_deliveries WHERE webhook_id IN (SELECT webhook_id FROM webhooks WHERE project_id = ?)`,
+		`DELETE FROM webhook_severity_configs WHERE project_id = ?`,
+		`DELETE FROM webhooks WHERE project_id = ?`,
+		`DELETE FROM events WHERE project_id = ?`,
+		`DELETE FROM executions WHERE project_id = ?`,
+		`DELETE FROM failure_groups WHERE project_id = ?`,
+		`DELETE FROM api_keys WHERE project_id = ?`,
+		`DELETE FROM class_severities WHERE project_id = ?`,
+		`DELETE FROM project_settings WHERE project_id = ?`,
+		`DELETE FROM project_retention WHERE project_id = ?`,
+		`DELETE FROM organization_members WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?))`,
+		`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?))`,
+		`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?)`,
+	}
+	for _, q := range stmts {
+		if _, qerr := tx.ExecContext(ctx, q, projectID); qerr != nil {
+			// SQLite reports missing tables as "no such table: X". Ignore
+			// these since not every deployment migrates every optional
+			// surface (e.g. webhook_severity_configs was added later).
+			if !strings.Contains(qerr.Error(), "no such table") {
+				return fmt.Errorf("cascade delete (%s): %w", q[:60], qerr)
+			}
+		}
+	}
+	// Finally the project row itself.
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM projects WHERE project_id = ?`, projectID)
+	if err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit cascade delete: %w", err)
+	}
+	return nil
+}
+
 // UpdateProjectBillingCap sets projects.billing_cap_usd. Called from
 // HandleUpdateBillingCap to honor the customer's overage spend cap
 // (#187). 0 is allowed and means "no project-level override; fall

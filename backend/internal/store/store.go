@@ -693,6 +693,16 @@ type Store interface {
 	// the hobby billing scheduler still respects the project value if
 	// it's nonzero, so 0 effectively means "use default constant").
 	UpdateProjectBillingCap(ctx context.Context, projectID string, capUSD float64) error
+	// DeleteProjectCascade hard-deletes a project and every dependent
+	// row. Wired up for the customer-facing "Close account" danger-zone
+	// flow on /app/settings (#188). Deletion order respects FK
+	// constraints: events -> executions -> failure_groups -> webhooks
+	// (+ deliveries) -> api_keys -> project_settings -> billing_grant
+	// + class_severities -> webhook_severity_configs ... ending with
+	// projects. Implementations may run this in a single transaction
+	// where the store supports it. Returns ErrNotFound if the project
+	// doesn't exist.
+	DeleteProjectCascade(ctx context.Context, projectID string) error
 	// IncrementExecutionsThisPeriod atomically increments the per-
 	// period execution counter on a project. Called from
 	// HandleCreateExecution on each successful POST /executions. Best-

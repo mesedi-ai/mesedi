@@ -493,6 +493,9 @@ func main() {
 	// on the privateMux but the request never landed there (#187 bug).
 	mux.Handle("POST /billing/payment-method/setup", privateHandler)
 	mux.Handle("PUT /billing/cap", privateHandler)
+	// #188: danger-zone flows.
+	mux.Handle("POST /billing/downgrade", privateHandler)
+	mux.Handle("POST /billing/close-account", privateHandler)
 	mux.Handle("POST /billing/webhook", signupHandler)
 	// Task #259, tenant-wide org rollup.
 	mux.Handle("GET /me/rollup", privateHandler)

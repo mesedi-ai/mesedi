@@ -761,6 +761,64 @@ func scanPostgresAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 	return out, rows.Err()
 }
 
+// DeleteProjectCascade hard-deletes a project and every dependent row
+// in one transaction. Postgres counterpart to the SQLiteStore method
+// (#188).
+func (s *PostgresStore) DeleteProjectCascade(
+	ctx context.Context,
+	projectID string,
+) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin cascade delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`DELETE FROM webhook_deliveries WHERE webhook_id IN (SELECT webhook_id FROM webhooks WHERE project_id = $1)`,
+		`DELETE FROM webhook_severity_configs WHERE project_id = $1`,
+		`DELETE FROM webhooks WHERE project_id = $1`,
+		`DELETE FROM events WHERE project_id = $1`,
+		`DELETE FROM executions WHERE project_id = $1`,
+		`DELETE FROM failure_groups WHERE project_id = $1`,
+		`DELETE FROM api_keys WHERE project_id = $1`,
+		`DELETE FROM class_severities WHERE project_id = $1`,
+		`DELETE FROM project_settings WHERE project_id = $1`,
+		`DELETE FROM project_retention WHERE project_id = $1`,
+		`DELETE FROM organization_members WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
+		`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
+		`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1)`,
+	}
+	for _, q := range stmts {
+		if _, qerr := tx.ExecContext(ctx, q, projectID); qerr != nil {
+			// Postgres reports missing relations as ERROR 42P01. Ignore
+			// these since not every deployment migrates every optional
+			// table; propagate any other error.
+			msg := qerr.Error()
+			if !strings.Contains(msg, "does not exist") &&
+				!strings.Contains(msg, "42P01") {
+				return fmt.Errorf("cascade delete (%s): %w", q[:60], qerr)
+			}
+		}
+	}
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM projects WHERE project_id = $1`, projectID)
+	if err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit cascade delete: %w", err)
+	}
+	return nil
+}
+
 // UpdateProjectBillingCap sets projects.billing_cap_usd. Postgres
 // counterpart to the SQLiteStore method (#187).
 func (s *PostgresStore) UpdateProjectBillingCap(

@@ -239,6 +239,12 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// projects.billing_cap_usd and consulted by the hobby billing
 	// scheduler at period close + ingest-time gate.
 	mux.HandleFunc("PUT /billing/cap", h.HandleUpdateBillingCap)
+	// #188 danger-zone flow on /app/settings. POST /billing/downgrade
+	// cancels the Cloud Team subscription at period end (keep data).
+	// POST /billing/close-account cancels immediately + cascade-deletes
+	// the project (lose data, force logout on next 401).
+	mux.HandleFunc("POST /billing/downgrade", h.HandleDowngradeToHobby)
+	mux.HandleFunc("POST /billing/close-account", h.HandleCloseAccount)
 }
 
 // HandleGetPlaybook returns the markdown content for the playbook

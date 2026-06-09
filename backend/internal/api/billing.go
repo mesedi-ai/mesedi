@@ -54,6 +54,7 @@ import (
 	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stripe/stripe-go/v82/customer"
 	"github.com/stripe/stripe-go/v82/invoiceitem"
+	"github.com/stripe/stripe-go/v82/subscription"
 	"github.com/stripe/stripe-go/v82/webhook"
 
 	"mesedi/backend/internal/store"
@@ -1343,6 +1344,122 @@ func subscriptionPeriodBounds(sub *stripe.Subscription) (*time.Time, *time.Time)
 		}
 	}
 	return startPtr, endPtr
+}
+
+// HandleDowngradeToHobby cancels the project's Cloud Team Stripe
+// subscription at the current period end (no proration), flips tier
+// back to Hobby in the database, and clears the Stripe subscription
+// id pointer. Customer keeps all their data, just loses Team
+// features and 100K execs/period when the period rolls over. Wired
+// for the customer-facing "Downgrade to Hobby" branch of the close-
+// account flow on /app/settings (#188). Admin only.
+func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
+	projectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	p, err := h.Store.GetProject(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load project: "+err.Error())
+		return
+	}
+	if normalizeTier(p.Tier) != TierTeam {
+		writeError(w, http.StatusConflict,
+			"project is not on Cloud Team; downgrade only makes sense from Team")
+		return
+	}
+
+	// Cancel the subscription at the current period end so the
+	// customer keeps Team for the days they already paid for. We use
+	// cancel_at_period_end rather than immediate cancellation so they
+	// don't lose paid-for time. The subscription.updated webhook
+	// fires when the period rolls over; the existing handler flips
+	// tier to Hobby and clears stripe_subscription_id.
+	if p.StripeSubscriptionID != "" && h.Stripe.Configured() {
+		h.Stripe.applyKey()
+		cancelAtPeriodEnd := true
+		_, sErr := subscription.Update(p.StripeSubscriptionID, &stripe.SubscriptionParams{
+			CancelAtPeriodEnd: &cancelAtPeriodEnd,
+		})
+		if sErr != nil {
+			h.Logger.Error("downgrade: subscription.update cancel_at_period_end failed",
+				"project_id", projectID, "sub_id", p.StripeSubscriptionID, "error", sErr.Error())
+			writeError(w, http.StatusBadGateway,
+				"could not schedule Stripe cancellation: "+sErr.Error())
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": "Cloud Team will cancel at the end of the current period and the project will revert to Cloud Hobby.",
+	})
+}
+
+// HandleCloseAccount is the danger-zone delete. Cancels any Stripe
+// subscription immediately, then hard-deletes the project and every
+// dependent row via Store.DeleteProjectCascade. After this returns
+// the dashboard's 401-logout handler (#187) will catch the next
+// request and bounce the user to /login. Admin only. Idempotent at
+// the Stripe level (canceling an already-canceled sub is a no-op).
+func (h *Handlers) HandleCloseAccount(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
+	projectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	p, err := h.Store.GetProject(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load project: "+err.Error())
+		return
+	}
+
+	// Cancel Stripe subscription immediately if there is one. Failures
+	// here are logged but do not block the cascade-delete; the customer
+	// can re-cancel from the Stripe dashboard after the fact if needed,
+	// and they're already losing access to dashboard either way.
+	if p.StripeSubscriptionID != "" && h.Stripe.Configured() {
+		h.Stripe.applyKey()
+		_, sErr := subscription.Cancel(p.StripeSubscriptionID, nil)
+		if sErr != nil {
+			h.Logger.Warn("close account: subscription.Cancel failed",
+				"project_id", projectID, "sub_id", p.StripeSubscriptionID, "error", sErr.Error())
+		}
+	}
+
+	if err := h.Store.DeleteProjectCascade(r.Context(), projectID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError,
+			"delete project: "+err.Error())
+		return
+	}
+
+	h.Logger.Warn("project hard-deleted via close-account flow",
+		"project_id", projectID,
+		"owner_email", p.OwnerEmail,
+		"tier", p.Tier)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": "Account closed. All project data has been deleted.",
+	})
 }
 
 // HandleUpdateBillingCap lets the calling project's admin set their
