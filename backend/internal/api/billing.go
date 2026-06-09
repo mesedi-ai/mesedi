@@ -57,6 +57,7 @@ import (
 	"github.com/stripe/stripe-go/v82/subscription"
 	"github.com/stripe/stripe-go/v82/webhook"
 
+	"mesedi/backend/internal/mail"
 	"mesedi/backend/internal/store"
 )
 
@@ -1411,7 +1412,7 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 	if p.StripeSubscriptionID != "" && h.Stripe.Configured() {
 		h.Stripe.applyKey()
 		cancelAtPeriodEnd := true
-		_, sErr := subscription.Update(p.StripeSubscriptionID, &stripe.SubscriptionParams{
+		sub, sErr := subscription.Update(p.StripeSubscriptionID, &stripe.SubscriptionParams{
 			CancelAtPeriodEnd: &cancelAtPeriodEnd,
 		})
 		if sErr != nil {
@@ -1421,6 +1422,13 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 				"could not schedule Stripe cancellation: "+sErr.Error())
 			return
 		}
+		// Fire the downgrade-scheduled confirmation email. Best-effort:
+		// log on error but never block the response. PeriodEnd comes
+		// from Stripe's response so the customer's email reflects what
+		// Stripe actually agreed to, not what we predicted (#188 email
+		// notifications).
+		h.sendDowngradeEmailBestEffort(r, p, periodEndFromSub(sub), false)
+
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":      true,
 			"message": "Cloud Team will cancel at the end of the current period and the project will revert to Cloud Hobby.",
@@ -1446,10 +1454,58 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 		"project_id", projectID,
 		"prior_tier", p.Tier,
 		"stripe_customer_id", p.StripeCustomerID)
+	// Path-B email: ImmediateFlip=true so the template phrases it as
+	// "reverted to Cloud Hobby" rather than "scheduled cancel".
+	h.sendDowngradeEmailBestEffort(r, p, time.Now().UTC(), true)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"message": "Reverted to Cloud Hobby. No Stripe subscription was active to cancel.",
 	})
+}
+
+// sendDowngradeEmailBestEffort renders + sends the
+// downgrade-scheduled confirmation. Failure is logged but never
+// surfaced to the caller; the downgrade itself already succeeded
+// and the email is a side notification. Skipped when the project
+// has no owner email on file.
+func (h *Handlers) sendDowngradeEmailBestEffort(
+	r *http.Request,
+	p *store.Project,
+	periodEnd time.Time,
+	immediateFlip bool,
+) {
+	if h.Mailer == nil || !h.Mailer.Enabled() || p.OwnerEmail == "" {
+		return
+	}
+	dashboardBase := h.resolveDashboardBase(r)
+	if mailErr := h.Mailer.SendDowngradeScheduled(
+		r.Context(),
+		mail.DowngradeScheduledInput{
+			ToEmail:       p.OwnerEmail,
+			ProjectName:   p.Name,
+			PeriodEnd:     periodEnd,
+			DashboardURL:  dashboardBase,
+			ImmediateFlip: immediateFlip,
+		},
+	); mailErr != nil {
+		h.Logger.Warn("downgrade scheduled email send failed",
+			"project_id", p.ProjectID,
+			"to_email", p.OwnerEmail,
+			"error", mailErr.Error())
+	}
+}
+
+// periodEndFromSub pulls current_period_end off a Stripe Subscription
+// response. Falls back to one month from now if Stripe's response is
+// missing the bound (shouldn't happen for an active sub but be
+// defensive so the email always has a sensible date).
+func periodEndFromSub(sub *stripe.Subscription) time.Time {
+	if sub != nil && len(sub.Items.Data) > 0 &&
+		sub.Items.Data[0].CurrentPeriodEnd > 0 {
+		return time.Unix(sub.Items.Data[0].CurrentPeriodEnd, 0).UTC()
+	}
+	return time.Now().UTC().AddDate(0, 1, 0)
 }
 
 // HandleCloseAccount is the danger-zone delete. Cancels any Stripe
@@ -1487,6 +1543,29 @@ func (h *Handlers) HandleCloseAccount(w http.ResponseWriter, r *http.Request) {
 		if sErr != nil {
 			h.Logger.Warn("close account: subscription.Cancel failed",
 				"project_id", projectID, "sub_id", p.StripeSubscriptionID, "error", sErr.Error())
+		}
+	}
+
+	// Send the close-account confirmation BEFORE the cascade-delete
+	// fires. Once DeleteProjectCascade succeeds, we lose p.OwnerEmail
+	// (the project row is gone), and the customer also loses their
+	// dashboard auth - so this is the last possible window to email
+	// them. Best-effort: log on error but never block the close
+	// (#188 email notifications).
+	if h.Mailer != nil && h.Mailer.Enabled() && p.OwnerEmail != "" {
+		if mailErr := h.Mailer.SendAccountClosed(
+			r.Context(),
+			mail.AccountClosedInput{
+				ToEmail:      p.OwnerEmail,
+				ProjectName:  p.Name,
+				ClosedAt:     time.Now().UTC(),
+				SupportEmail: "support@mesedi.ai",
+			},
+		); mailErr != nil {
+			h.Logger.Warn("account closed email send failed",
+				"project_id", projectID,
+				"to_email", p.OwnerEmail,
+				"error", mailErr.Error())
 		}
 	}
 
