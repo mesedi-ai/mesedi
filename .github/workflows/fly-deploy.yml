@@ -1,0 +1,51 @@
+# Fly.io auto-deploy on push to main (#180).
+#
+# Replaces the manual `cd backend && flyctl deploy` step that's been
+# the recurring miss every time a backend change ships. Triggers only
+# when files under backend/ change; pushes touching only the SDKs,
+# tools, or docs do not redeploy the API.
+#
+# Required repo secret:
+#   FLY_API_TOKEN, an API token with deploy scope on the mesedi-api
+#   app. Generate with `flyctl auth token` and paste into
+#   GitHub repo Settings → Secrets and variables → Actions → New
+#   repository secret.
+#
+# Rollback: if a deploy goes bad, `flyctl releases list -a mesedi-api`
+# from any laptop shows the version history; `flyctl deploy -i
+# registry.fly.io/mesedi-api:<previous-deployment-id>` ships the
+# previous image back. Manual `flyctl deploy` from local also still
+# works for emergencies.
+
+name: Deploy backend to Fly
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/fly-deploy.yml"
+  workflow_dispatch:
+    # Allow manual trigger from the Actions tab for unrelated reasons
+    # (e.g., redeploy after a Fly outage without needing a code push).
+
+concurrency:
+  group: fly-deploy-mesedi-api
+  cancel-in-progress: false
+  # cancel-in-progress=false so two near-simultaneous merges to main
+  # both deploy in order rather than the second one cancelling the
+  # first mid-rollout. Fly's rolling strategy handles back-to-back
+  # deploys correctly.
+
+jobs:
+  deploy:
+    name: flyctl deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy to Fly
+        run: flyctl deploy --remote-only --config backend/fly.toml --dockerfile backend/Dockerfile backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
