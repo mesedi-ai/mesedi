@@ -445,6 +445,10 @@ func main() {
 	mux.Handle("POST /events", privateHandler)
 	// #118 Slice 1, dashboard reads the calling project's identity.
 	mux.Handle("GET /project", privateHandler)
+	// Mesedi #173 — customer-side project rename so SSO-created
+	// projects can move off the default "Default project" name.
+	// Admin scope required; enforced inside the handler.
+	mux.Handle("PATCH /project/name", privateHandler)
 	mux.Handle("GET /me", privateHandler)
 	// Phase 3b, read-side execution + stats surface for the dashboard.
 	mux.Handle("GET /executions", privateHandler)
