@@ -775,16 +775,14 @@ func (s *PostgresStore) DeleteProjectCascade(
 	defer func() { _ = tx.Rollback() }()
 
 	stmts := []string{
-		`DELETE FROM webhook_deliveries WHERE webhook_id IN (SELECT webhook_id FROM webhooks WHERE project_id = $1)`,
-		`DELETE FROM webhook_severity_configs WHERE project_id = $1`,
-		`DELETE FROM webhooks WHERE project_id = $1`,
+		`DELETE FROM webhook_deliveries WHERE project_id = $1`,
+		`DELETE FROM project_webhooks WHERE project_id = $1`,
+		`DELETE FROM project_class_severities WHERE project_id = $1`,
+		`DELETE FROM abuse_signals WHERE project_id = $1`,
 		`DELETE FROM events WHERE project_id = $1`,
 		`DELETE FROM executions WHERE project_id = $1`,
 		`DELETE FROM failure_groups WHERE project_id = $1`,
 		`DELETE FROM api_keys WHERE project_id = $1`,
-		`DELETE FROM class_severities WHERE project_id = $1`,
-		`DELETE FROM project_settings WHERE project_id = $1`,
-		`DELETE FROM project_retention WHERE project_id = $1`,
 		`DELETE FROM organization_members WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
 		`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
 		`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1)`,
@@ -797,7 +795,14 @@ func (s *PostgresStore) DeleteProjectCascade(
 			msg := qerr.Error()
 			if !strings.Contains(msg, "does not exist") &&
 				!strings.Contains(msg, "42P01") {
-				return fmt.Errorf("cascade delete (%s): %w", q[:60], qerr)
+				// Truncate query for the error message defensively
+				// (#188 prior version did `q[:60]` which panicked on
+				// queries shorter than 60 chars).
+				preview := q
+				if len(preview) > 80 {
+					preview = preview[:80] + "..."
+				}
+				return fmt.Errorf("cascade delete (%s): %w", preview, qerr)
 			}
 		}
 	}
