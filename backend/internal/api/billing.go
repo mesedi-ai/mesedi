@@ -513,10 +513,51 @@ func (h *Handlers) HandleGetBilling(w http.ResponseWriter, r *http.Request) {
 		StripeSubscriptionID:     p.StripeSubscriptionID,
 		CanUpgrade:               effectiveTier == TierHobby && h.Stripe.Configured(),
 		CanManage:                p.StripeCustomerID != "" && h.Stripe.Configured(),
-		HasPaymentMethod:         p.StripeCustomerID != "",
-		EffectiveCapUSD:          effectiveCapUSD(p),
+		// HasPaymentMethod was previously derived from p.StripeCustomerID
+		// != "", which is wrong: the Hobby Setup Intent flow creates the
+		// Stripe customer record BEFORE the customer attaches a card. If
+		// they bounce out of the hosted Checkout page without confirming,
+		// the customer record exists with no payment method, and the
+		// dashboard wrongly displayed "Card on file" (#187 Robert
+		// flagged this concretely). Source of truth: Stripe's
+		// invoice_settings.default_payment_method on the customer; the
+		// setup_intent.succeeded webhook sets that, so checking it here
+		// agrees with whatever Stripe says.
+		HasPaymentMethod: stripeCustomerHasPaymentMethod(h, p.StripeCustomerID),
+		EffectiveCapUSD:  effectiveCapUSD(p),
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// stripeCustomerHasPaymentMethod live-queries Stripe for the
+// customer's invoice_settings.default_payment_method. Returns false
+// for empty customer id, unconfigured Stripe, or any API error (we
+// fail closed so a Stripe outage doesn't accidentally show "Card on
+// file" when the truth is unknown). The Stripe call adds ~50-150ms
+// to GET /billing in the worst case; the page is not on a hot path.
+func stripeCustomerHasPaymentMethod(h *Handlers, customerID string) bool {
+	if customerID == "" || !h.Stripe.Configured() {
+		return false
+	}
+	h.Stripe.applyKey()
+	cust, err := customer.Get(customerID, nil)
+	if err != nil || cust == nil {
+		h.Logger.Warn("stripe customer fetch for has_payment_method failed",
+			"customer_id", customerID,
+			"error", func() string {
+				if err != nil {
+					return err.Error()
+				}
+				return "nil customer"
+			}())
+		return false
+	}
+	if cust.InvoiceSettings != nil &&
+		cust.InvoiceSettings.DefaultPaymentMethod != nil &&
+		cust.InvoiceSettings.DefaultPaymentMethod.ID != "" {
+		return true
+	}
+	return false
 }
 
 // HandleGetBillingUsage returns daily execution counts for the last
