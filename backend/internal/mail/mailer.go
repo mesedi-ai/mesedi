@@ -42,6 +42,12 @@ type Mailer interface {
 	SendBudgetCeilingBreach(ctx context.Context, in BudgetCeilingBreachInput) error
 	SendOrgInvite(ctx context.Context, in OrgInviteInput) error
 	SendHobbyBillingNotification(ctx context.Context, in HobbyBillingNotificationInput) error
+	// #188 customer-initiated lifecycle confirmations. Both fire from
+	// the danger-zone flow on /app/settings. SendDowngradeScheduled
+	// confirms that Cloud Team will cancel at the current period end;
+	// SendAccountClosed confirms the project has been hard-deleted.
+	SendDowngradeScheduled(ctx context.Context, in DowngradeScheduledInput) error
+	SendAccountClosed(ctx context.Context, in AccountClosedInput) error
 	Enabled() bool
 }
 
@@ -111,6 +117,36 @@ type SuspensionWarningInput struct {
 	SignalKind   string
 	DetectedAt   time.Time
 	DashboardURL string
+}
+
+// DowngradeScheduledInput carries everything the downgrade-scheduled
+// confirmation email template renders (#188). Sent immediately when
+// the customer clicks Downgrade in the danger zone; the cancellation
+// itself fires at PeriodEnd.
+type DowngradeScheduledInput struct {
+	ToEmail      string
+	ProjectName  string
+	PeriodEnd    time.Time // when Cloud Team coverage ends
+	DashboardURL string
+	// ImmediateFlip is true on the corrupted-state code path where the
+	// DB tier flipped to Hobby instantly because no Stripe
+	// subscription existed. The template tells the customer the
+	// downgrade is already effective in that case.
+	ImmediateFlip bool
+}
+
+// AccountClosedInput carries everything the account-closed
+// confirmation email template renders (#188). Sent after
+// DeleteProjectCascade succeeds; this is the last touch with the
+// recipient because their dashboard credentials are gone.
+type AccountClosedInput struct {
+	ToEmail     string
+	ProjectName string
+	ClosedAt    time.Time
+	// SupportEmail is the address customers can reply to if they
+	// closed by mistake (we cannot undo the cascade but we can help
+	// them re-create the project with their data).
+	SupportEmail string
 }
 
 // WelcomeInput is everything the welcome template needs.

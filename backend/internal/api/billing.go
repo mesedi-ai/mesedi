@@ -859,6 +859,22 @@ func (h *Handlers) handleCheckoutCompleted(event stripe.Event) error {
 	if session.Customer != nil {
 		customerID = session.Customer.ID
 	}
+	// CRITICAL (#188 Robert): the SAME checkout.session.completed event
+	// fires for both Team-tier subscription Checkout AND Hobby-tier
+	// setup-mode Checkout (the card-attach flow). The previous code
+	// unconditionally set TierTeam, which silently upgraded any Hobby
+	// customer who attached a card to Team without ever opening a
+	// subscription. Distinguishing on session.Mode is the only reliable
+	// signal: "subscription" is a real upgrade, "setup" is just
+	// collecting a card.
+	if session.Mode == stripe.CheckoutSessionModeSetup {
+		// Hobby card-attach. The Stripe customer id is already
+		// persisted by HandleCreateSetupCheckout; the
+		// setup_intent.succeeded webhook will save the resulting
+		// payment method and bootstrap period bounds. Nothing to do
+		// here.
+		return nil
+	}
 	subscriptionID := ""
 	if session.Subscription != nil {
 		subscriptionID = session.Subscription.ID
@@ -1377,12 +1393,21 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Cancel the subscription at the current period end so the
-	// customer keeps Team for the days they already paid for. We use
-	// cancel_at_period_end rather than immediate cancellation so they
-	// don't lose paid-for time. The subscription.updated webhook
-	// fires when the period rolls over; the existing handler flips
-	// tier to Hobby and clears stripe_subscription_id.
+	// Two paths depending on whether there's a real Stripe subscription
+	// on file:
+	//
+	// (A) Live subscription: cancel at current_period_end so the
+	//     customer keeps Team for paid-for time. The
+	//     subscription.updated/deleted webhook flips DB tier to Hobby
+	//     when the period rolls.
+	//
+	// (B) Tier=Team in DB but no Stripe subscription id (the corrupted
+	//     state that resulted from the prior handleCheckoutCompleted
+	//     bug auto-upgrading every checkout.session.completed): there's
+	//     nothing to cancel on Stripe's side, so the subscription
+	//     webhook never fires. Flip the DB directly to Hobby so the
+	//     customer can actually escape the wrong tier (#188 Robert
+	//     flagged this).
 	if p.StripeSubscriptionID != "" && h.Stripe.Configured() {
 		h.Stripe.applyKey()
 		cancelAtPeriodEnd := true
@@ -1396,11 +1421,34 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 				"could not schedule Stripe cancellation: "+sErr.Error())
 			return
 		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"message": "Cloud Team will cancel at the end of the current period and the project will revert to Cloud Hobby.",
+		})
+		return
 	}
 
+	// Path (B): no live subscription. Flip DB tier immediately.
+	if err := h.Store.UpdateProjectBilling(
+		r.Context(),
+		p.ProjectID,
+		TierHobby,
+		p.StripeCustomerID,
+		"",
+		nil,
+		nil,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"could not update tier: "+err.Error())
+		return
+	}
+	h.Logger.Info("downgrade: direct tier flip (no active Stripe subscription)",
+		"project_id", projectID,
+		"prior_tier", p.Tier,
+		"stripe_customer_id", p.StripeCustomerID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
-		"message": "Cloud Team will cancel at the end of the current period and the project will revert to Cloud Hobby.",
+		"message": "Reverted to Cloud Hobby. No Stripe subscription was active to cancel.",
 	})
 }
 
