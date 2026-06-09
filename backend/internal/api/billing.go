@@ -1304,6 +1304,55 @@ func subscriptionPeriodBounds(sub *stripe.Subscription) (*time.Time, *time.Time)
 	return startPtr, endPtr
 }
 
+// HandleUpdateBillingCap lets the calling project's admin set their
+// monthly overage spend cap (projects.billing_cap_usd). PUT body:
+// {"cap_usd": <float>}. Validated server-side as a positive number
+// less than $10,000 to avoid accidental nukes; 0 is allowed and means
+// "use the constants default" (the hobby billing scheduler falls back
+// to TIER_CONSTANTS.hobby.defaultCapUSD when the project field is
+// zero). Returns the new value so the dashboard can update its state
+// without a follow-up GET (#187).
+func (h *Handlers) HandleUpdateBillingCap(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
+	projectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	var body struct {
+		CapUSD float64 `json:"cap_usd"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.CapUSD < 0 {
+		writeError(w, http.StatusBadRequest, "cap_usd must be >= 0")
+		return
+	}
+	const maxCap = 10000.0
+	if body.CapUSD > maxCap {
+		writeError(w, http.StatusBadRequest,
+			"cap_usd above $10,000 must be configured by support; this is a sanity guard, not a hard limit")
+		return
+	}
+	if err := h.Store.UpdateProjectBillingCap(r.Context(), projectID, body.CapUSD); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError,
+			"update billing cap: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"cap_usd": body.CapUSD,
+	})
+}
+
 // invoicePeriodBounds extracts the most-likely line-item period
 // from an Invoice. Stripe invoices carry per-line period bounds;
 // for a simple one-product subscription the first line item is the

@@ -961,6 +961,34 @@ func (s *SQLiteStore) DeleteAPIKeyByID(ctx context.Context, keyID string) error 
 	return nil
 }
 
+// UpdateProjectBillingCap sets projects.billing_cap_usd. Called from
+// HandleUpdateBillingCap to honor the customer's overage spend cap
+// (#187). 0 is allowed and means "no project-level override; fall
+// back to the constants default that the hobby billing scheduler
+// applies elsewhere."
+func (s *SQLiteStore) UpdateProjectBillingCap(
+	ctx context.Context,
+	projectID string,
+	capUSD float64,
+) error {
+	res, err := s.db.ExecContext(
+		ctx,
+		`UPDATE projects SET billing_cap_usd = ? WHERE project_id = ?`,
+		capUSD, projectID,
+	)
+	if err != nil {
+		return fmt.Errorf("update project billing_cap_usd: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteAPIKeysByUserID hard-deletes every API key whose user_id
 // matches. Called from HandleRemoveMember so a removed team member's
 // existing credentials stop working immediately (#187). Returns the

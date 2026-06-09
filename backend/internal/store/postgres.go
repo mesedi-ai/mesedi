@@ -761,6 +761,31 @@ func scanPostgresAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 	return out, rows.Err()
 }
 
+// UpdateProjectBillingCap sets projects.billing_cap_usd. Postgres
+// counterpart to the SQLiteStore method (#187).
+func (s *PostgresStore) UpdateProjectBillingCap(
+	ctx context.Context,
+	projectID string,
+	capUSD float64,
+) error {
+	res, err := s.db.ExecContext(
+		ctx,
+		`UPDATE projects SET billing_cap_usd = $1 WHERE project_id = $2`,
+		capUSD, projectID,
+	)
+	if err != nil {
+		return fmt.Errorf("update project billing_cap_usd: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteAPIKeysByUserID hard-deletes every API key whose user_id
 // matches. Postgres counterpart to the SQLiteStore method; called by
 // HandleRemoveMember to revoke a removed team member's credentials

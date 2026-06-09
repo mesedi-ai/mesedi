@@ -492,6 +492,7 @@ func main() {
 	// a card. Without this outer-mux forwarding the route was reachable
 	// on the privateMux but the request never landed there (#187 bug).
 	mux.Handle("POST /billing/payment-method/setup", privateHandler)
+	mux.Handle("PUT /billing/cap", privateHandler)
 	mux.Handle("POST /billing/webhook", signupHandler)
 	// Task #259, tenant-wide org rollup.
 	mux.Handle("GET /me/rollup", privateHandler)

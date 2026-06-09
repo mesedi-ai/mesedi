@@ -686,6 +686,13 @@ type Store interface {
 	// to the owning project for webhook event handling. Returns
 	// ErrNotFound if no project is associated with that customer.
 	GetProjectByStripeCustomerID(ctx context.Context, stripeCustomerID string) (*Project, error)
+	// UpdateProjectBillingCap sets the project's monthly overage spend
+	// cap. Customers configure this from /app/billing to bound their
+	// monthly exposure on Hobby + Team tiers (#187). Pass 0 to clear
+	// the cap back to the constants-default ($200 for Hobby today;
+	// the hobby billing scheduler still respects the project value if
+	// it's nonzero, so 0 effectively means "use default constant").
+	UpdateProjectBillingCap(ctx context.Context, projectID string, capUSD float64) error
 	// IncrementExecutionsThisPeriod atomically increments the per-
 	// period execution counter on a project. Called from
 	// HandleCreateExecution on each successful POST /executions. Best-

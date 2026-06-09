@@ -234,6 +234,11 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /billing/checkout", h.HandleCreateCheckout)
 	mux.HandleFunc("POST /billing/portal", h.HandleCreatePortal)
 	mux.HandleFunc("POST /billing/payment-method/setup", h.HandleCreateSetupCheckout)
+	// #187: customer-configurable monthly overage cap. PUT body is
+	// {"cap_usd": <float>}; the value is persisted to
+	// projects.billing_cap_usd and consulted by the hobby billing
+	// scheduler at period close + ingest-time gate.
+	mux.HandleFunc("PUT /billing/cap", h.HandleUpdateBillingCap)
 }
 
 // HandleGetPlaybook returns the markdown content for the playbook
