@@ -787,23 +787,44 @@ func (s *PostgresStore) DeleteProjectCascade(
 		`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
 		`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1)`,
 	}
-	for _, q := range stmts {
-		if _, qerr := tx.ExecContext(ctx, q, projectID); qerr != nil {
-			// Postgres reports missing relations as ERROR 42P01. Ignore
-			// these since not every deployment migrates every optional
-			// table; propagate any other error.
+	// Postgres aborts the entire transaction on ANY query error
+	// (SQLSTATE 25P02): subsequent queries all return "current
+	// transaction is aborted" until ROLLBACK. SQLite is more
+	// forgiving and continues after a per-statement error. To make
+	// the "ignore missing table" path work on Postgres, we wrap each
+	// statement in a SAVEPOINT so a missing-table error rolls back
+	// only that one statement, not the whole cascade. Real errors
+	// still abort everything.
+	for i, q := range stmts {
+		spName := fmt.Sprintf("cascade_sp_%d", i)
+		if _, spErr := tx.ExecContext(ctx, "SAVEPOINT "+spName); spErr != nil {
+			return fmt.Errorf("savepoint create: %w", spErr)
+		}
+		_, qerr := tx.ExecContext(ctx, q, projectID)
+		if qerr != nil {
 			msg := qerr.Error()
-			if !strings.Contains(msg, "does not exist") &&
-				!strings.Contains(msg, "42P01") {
-				// Truncate query for the error message defensively
-				// (#188 prior version did `q[:60]` which panicked on
-				// queries shorter than 60 chars).
-				preview := q
-				if len(preview) > 80 {
-					preview = preview[:80] + "..."
+			if strings.Contains(msg, "does not exist") ||
+				strings.Contains(msg, "42P01") {
+				// Missing relation: roll back this savepoint and move on.
+				if _, rbErr := tx.ExecContext(ctx,
+					"ROLLBACK TO SAVEPOINT "+spName); rbErr != nil {
+					return fmt.Errorf("savepoint rollback: %w", rbErr)
 				}
-				return fmt.Errorf("cascade delete (%s): %w", preview, qerr)
+				continue
 			}
+			// Real error: propagate. The whole outer transaction will
+			// roll back via the deferred Rollback above.
+			preview := q
+			if len(preview) > 80 {
+				preview = preview[:80] + "..."
+			}
+			return fmt.Errorf("cascade delete (%s): %w", preview, qerr)
+		}
+		// Statement succeeded; release the savepoint to free server
+		// resources (no-op semantically).
+		if _, relErr := tx.ExecContext(ctx,
+			"RELEASE SAVEPOINT "+spName); relErr != nil {
+			return fmt.Errorf("savepoint release: %w", relErr)
 		}
 	}
 	res, err := tx.ExecContext(ctx,
