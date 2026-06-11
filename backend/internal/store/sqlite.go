@@ -234,11 +234,16 @@ func (s *SQLiteStore) CreateProject(ctx context.Context, p *Project) error {
 	if p.Tier == "" {
 		p.Tier = "hobby"
 	}
+	// #209 hotfix: explicitly insert card_on_file=0 instead of relying
+	// on the migration-022 column default of TRUE. The default existed
+	// for migration backfill reasons; new projects always start without
+	// a card on file and flip to TRUE only via handleSetupIntentSucceeded.
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO projects (
-			project_id, name, owner_user_id, owner_email, created_at, tier
+			project_id, name, owner_user_id, owner_email, created_at, tier,
+			card_on_file
 		)
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, 0)
 	`, p.ProjectID, p.Name, nullString(p.OwnerUserID), nullString(p.OwnerEmail), p.CreatedAt, p.Tier)
 	if err != nil {
 		return fmt.Errorf("insert project: %w", err)

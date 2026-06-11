@@ -175,11 +175,14 @@ func (s *PostgresStore) CreateProject(ctx context.Context, p *Project) error {
 	if p.Tier == "" {
 		p.Tier = "hobby"
 	}
+	// #209 hotfix: see sqlite.go for the explicit card_on_file=FALSE
+	// rationale.
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO projects (
-			project_id, name, owner_user_id, owner_email, created_at, tier
+			project_id, name, owner_user_id, owner_email, created_at, tier,
+			card_on_file
 		)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4, $5, $6, FALSE)
 	`, p.ProjectID, p.Name, nullString(p.OwnerUserID), nullString(p.OwnerEmail), p.CreatedAt, p.Tier)
 	if err != nil {
 		return fmt.Errorf("insert project (postgres): %w", err)
