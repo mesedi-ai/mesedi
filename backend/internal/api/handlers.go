@@ -231,9 +231,14 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Task #120, Stripe billing endpoints (auth-required).
 	mux.HandleFunc("GET /billing", h.HandleGetBilling)
 	mux.HandleFunc("GET /billing/usage", h.HandleGetBillingUsage)
+	// #197: AI root-cause analyses usage counter. Surfaced on
+	// /app/billing + as a chip on the main user dashboard so Team
+	// customers can see headroom before they hit the 200/period cap.
+	mux.HandleFunc("GET /billing/ai-analyses-usage", h.HandleGetAIAnalysesUsage)
 	mux.HandleFunc("POST /billing/checkout", h.HandleCreateCheckout)
 	mux.HandleFunc("POST /billing/portal", h.HandleCreatePortal)
 	mux.HandleFunc("POST /billing/payment-method/setup", h.HandleCreateSetupCheckout)
+	mux.HandleFunc("POST /billing/payment-method/remove", h.HandleRemovePaymentMethod)
 	// #187: customer-configurable monthly overage cap. PUT body is
 	// {"cap_usd": <float>}; the value is persisted to
 	// projects.billing_cap_usd and consulted by the hobby billing
@@ -1604,14 +1609,22 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Tier gate + per-period rate limit (added pre-#30 to protect
-	// Verdifax LLC's Anthropic bill from being subsidized by free
-	// users and from a Team customer with thousands of distinct
-	// failure groups generating unbounded LLM calls).
+	// Verdifax LLC's Anthropic bill from being subsidized by users
+	// without payment on file and from a Team customer with thousands
+	// of distinct failure groups generating unbounded LLM calls).
 	//
 	// Order:
 	//   1. Load project to get tier + period bounds.
-	//   2. Hobby: refuse with 402; the dashboard surfaces "AI
-	//      analysis is a Team-tier feature" and an upgrade CTA.
+	//   2. Hobby (#206 pay-per-use, $0.75 each, 50 / period cap):
+	//      a. No Stripe card on file → refuse with 402; analyses
+	//         are billed at period end and cannot be charged to a
+	//         missing card. Dashboard surfaces "add a payment
+	//         method on /app/billing to use AI root-cause."
+	//      b. Card present + count >= HobbyAIAnalysisLimit (50)
+	//         → refuse with 429 + upgrade nudge to Team.
+	//      c. Otherwise allow; scheduler picks up the charge at
+	//         period end (HobbyBillingScheduler combines analysis
+	//         cost with execution overage in one PaymentIntent).
 	//   3. Team: count analyses since current_period_start. If at
 	//      or above TeamAIAnalysisLimit, refuse with 429; the
 	//      dashboard renders "AI explanation rate limit reached
@@ -1628,9 +1641,36 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 	}
 	tier := normalizeTier(proj.Tier)
 	if tier == TierHobby {
-		writeError(w, http.StatusPaymentRequired,
-			"LLM-assisted root-cause analysis is a Cloud Team feature. The failure detection itself is included on Hobby; upgrade at /app/billing to enable AI explanations.")
-		return
+		if !proj.CardOnFile {
+			writeError(w, http.StatusPaymentRequired,
+				fmt.Sprintf("AI root-cause analysis on Cloud Hobby is pay-per-use at $%.2f per analysis. Add a payment method on /app/billing to enable it, or upgrade to Cloud Team for %d analyses included.",
+					HobbyAIAnalysisPriceUSD, TeamAIAnalysisLimit))
+			return
+		}
+		// Hobby is single-project tier; per-project count is the
+		// canonical scope (no tenant fan-out needed here).
+		since := time.Now().UTC().AddDate(0, -1, 0)
+		if proj.CurrentPeriodStart != nil {
+			since = *proj.CurrentPeriodStart
+		}
+		count, cErr := h.Store.CountAIAnalysesSincePeriodStart(
+			r.Context(), authProjectID, since,
+		)
+		if cErr != nil {
+			h.Logger.Warn("analyze: hobby count check failed",
+				"project_id", authProjectID, "error", cErr.Error())
+			// Fail open on the rate-limit query itself. A DB blip
+			// should not block a legitimate analysis request.
+		} else if count >= HobbyAIAnalysisLimit {
+			h.Logger.Info("analyze: hobby rate limit reached",
+				"project_id", authProjectID,
+				"count", count, "limit", HobbyAIAnalysisLimit)
+			writeError(w, http.StatusTooManyRequests,
+				fmt.Sprintf("You have used %d of %d AI root-cause analyses this period on Cloud Hobby ($%.2f each, capped at %d to prevent surprise bills). Upgrade to Cloud Team at /app/billing for %d included per period plus unlimited projects + 90-day retention. Failure detection still works; AI explanations resume next billing period.",
+					count, HobbyAIAnalysisLimit, HobbyAIAnalysisPriceUSD,
+					HobbyAIAnalysisLimit, TeamAIAnalysisLimit))
+			return
+		}
 	}
 	if tier == TierTeam {
 		// Use current_period_start as the rate-limit window. If it
@@ -1675,14 +1715,33 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 			// Fail open on the rate-limit query itself. A DB blip
 			// should not block a legitimate analysis request.
 		} else if count >= TeamAIAnalysisLimit {
-			h.Logger.Info("analyze: rate limit reached",
+			// #209: Team that removed their card mid-cycle is
+			// hard-capped at the included 200 because there's no
+			// way to bill the $0.50 overage. The 402 message
+			// guides them to either re-add a card or wait for
+			// next period.
+			if !proj.CardOnFile {
+				h.Logger.Info("analyze: team no-card hard cap at included",
+					"project_id", authProjectID,
+					"count", count, "included", TeamAIAnalysisLimit)
+				writeError(w, http.StatusPaymentRequired,
+					fmt.Sprintf("You have used your included %d AI root-cause analyses for this period on Cloud Team and your card has been removed. Add a payment method on /app/billing to continue at $%.2f each, or wait for your next billing period.",
+						TeamAIAnalysisLimit, TeamAIAnalysisOveragePriceUSD))
+				return
+			}
+			// #208: Team with card past 200 → overage at
+			// $0.50/each. Log for observability and continue;
+			// invoice.upcoming pushes the InvoiceItem. Customers
+			// who want a hard ceiling set BillingCapUSD on
+			// /app/billing (same mechanism that protects them on
+			// execution overage).
+			h.Logger.Info("analyze: team in AI overage",
 				"project_id", authProjectID,
 				"tenant_id", tenantID,
-				"count", count, "limit", TeamAIAnalysisLimit)
-			writeError(w, http.StatusTooManyRequests,
-				fmt.Sprintf("AI explanation rate limit reached for this organization this period (%d of %d). Failure detection still works; AI explanations resume next billing period.",
-					count, TeamAIAnalysisLimit))
-			return
+				"count", count,
+				"included", TeamAIAnalysisLimit,
+				"overage_units", count-TeamAIAnalysisLimit+1,
+				"overage_rate_usd", TeamAIAnalysisOveragePriceUSD)
 		}
 	}
 

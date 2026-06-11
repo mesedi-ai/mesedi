@@ -485,6 +485,8 @@ func main() {
 	// below alongside the signup endpoint).
 	mux.Handle("GET /billing", privateHandler)
 	mux.Handle("GET /billing/usage", privateHandler)
+	// #197: AI root-cause analyses usage counter for the user dashboard.
+	mux.Handle("GET /billing/ai-analyses-usage", privateHandler)
 	mux.Handle("POST /billing/checkout", privateHandler)
 	mux.Handle("POST /billing/portal", privateHandler)
 	// Hobby Setup Intent flow (#156): the dashboard POSTs here to get
@@ -492,6 +494,7 @@ func main() {
 	// a card. Without this outer-mux forwarding the route was reachable
 	// on the privateMux but the request never landed there (#187 bug).
 	mux.Handle("POST /billing/payment-method/setup", privateHandler)
+	mux.Handle("POST /billing/payment-method/remove", privateHandler)
 	mux.Handle("PUT /billing/cap", privateHandler)
 	// #188: danger-zone flows.
 	mux.Handle("POST /billing/downgrade", privateHandler)

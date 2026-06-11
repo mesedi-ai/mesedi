@@ -143,14 +143,64 @@ const (
 	// period" note instead of the Markdown analysis card.
 	TeamAIAnalysisLimit = 200
 
-	// HobbyAIAnalysisLimit is 0: Hobby projects do not get
-	// LLM-assisted root-cause analysis at all. This matches the
-	// industry pattern (Arize Alyx, LangSmith Engine on Plus+) of
-	// gating AI-assisted analysis to paid tiers, and protects
-	// Verdifax LLC's Anthropic bill from being subsidized by free
-	// users. Hobby customers still see the failure detection chip
-	// and event detail, just not the LLM-written paragraph.
-	HobbyAIAnalysisLimit = 0
+	// HobbyAIAnalysisLimit caps the number of LLM-assisted root-cause
+	// analyses a Hobby project can request per billing period under
+	// the pay-per-use model (pre-#30 product decision). Past this
+	// number, HandleAnalyzeFailureGroup returns 429 with an upgrade
+	// nudge to Cloud Team (200 / period included). Hobby falls under
+	// the per-project scope (not per-org) because Hobby tier is
+	// single-project, single-admin by design.
+	//
+	// 50 / period is calibrated as the upper bound of "try the
+	// feature occasionally" use without crossing into "running the
+	// feature in production." At $0.75 per analysis, 50 caps the
+	// monthly add-on at $37.50. A Hobby customer running more than
+	// 50 analyses a month is operating Mesedi at production scale
+	// and should upgrade to Cloud Team ($99/mo includes 200 plus 10x
+	// executions, 6x retention, unlimited projects, audit logs).
+	HobbyAIAnalysisLimit = 50
+
+	// HobbyAIAnalysisPriceUSD is the per-analysis charge on Hobby
+	// tier (pre-#30 product decision). Billed via the existing
+	// HobbyBillingScheduler period-end PaymentIntent path: the
+	// analysis count since CurrentPeriodStart multiplied by this
+	// rate lands in the same off-session PaymentIntent as execution
+	// overages, capped by the project's BillingCapUSD just like
+	// execution overages are.
+	//
+	// Margin math (Haiku 4.5 at ~$0.03 LLM cost per analysis):
+	//   $0.75 - $0.03 LLM - ~$0.05 amortized Stripe fee
+	//   ≈ $0.67 net per analysis (~89% gross margin).
+	// Worst-case (200K input token failure group, ~$0.30 LLM cost):
+	//   $0.75 - $0.30 - $0.08 ≈ $0.37 net (~50% margin). Healthy.
+	//
+	// Drift guard tools/check-tier-constants.sh asserts this matches
+	// the TS lib/tier-constants.ts hobby.aiAnalysisPriceUSD value.
+	HobbyAIAnalysisPriceUSD = 0.75
+
+	// TeamAIAnalysisOveragePriceUSD is the per-analysis charge on
+	// Team tier for analyses above the TeamAIAnalysisLimit (200)
+	// included in the flat $99/mo (#208 product decision).
+	//
+	// $0.50 follows the same "Team customers pay less per unit than
+	// Hobby" pattern that already governs execution-overage pricing
+	// (Hobby $0.002/exec vs Team $0.001/exec, exactly half). At
+	// $0.50 Team analyses are 2/3 of Hobby's $0.75 rate.
+	//
+	// No hard cap by default: BillingCapUSD on Team is customer-
+	// configurable just like for execution overage. Customers who
+	// want a safety net set their own; everyone else accepts that
+	// heavy AI use bills proportionally to value derived. This
+	// removes the worst-of-times "your AI analysis stopped working
+	// when you needed it most" UX.
+	//
+	// Margin math:
+	//   $0.50 - $0.03 LLM - ~$0.04 amortized Stripe fee
+	//   ≈ $0.43 net per overage analysis (~86% gross margin).
+	//
+	// Drift guard tools/check-tier-constants.sh asserts this matches
+	// the TS lib/tier-constants.ts team.aiAnalysisPriceUSD value.
+	TeamAIAnalysisOveragePriceUSD = 0.50
 
 	// HobbyBillingFailureCeiling is the number of consecutive
 	// failed charge attempts the HobbyBillingScheduler tolerates
@@ -309,26 +359,32 @@ func computeOverageCostUSD(p *store.Project) float64 {
 // proceeds normally. Enterprise projects also bypass since their
 // per-execution rate is 0.
 //
-// Hobby special case: a Hobby project with no Stripe customer on
-// file (i.e., no payment method ever attached) is hard-capped at
-// the included free quota. The first execution past the included
-// quota returns true here, blocking ingest until the customer
-// attaches a card via POST /billing/payment-method/setup. This is
-// the right behavior because we have no way to charge them for any
-// accrued overage; without this guard, every cardless Hobby
-// project would silently accumulate up to $200 of uncollectable
-// overage each month before getting cut off.
+// No-card hard-cap: any project with no Stripe customer on file
+// (Hobby that never attached, or Team that removed the card mid-cycle
+// per #209) is hard-capped at the included quota. The first execution
+// past the included quota returns true here, blocking ingest until
+// the customer attaches a card via POST /billing/payment-method/setup.
+// This is the right behavior because we have no way to charge them
+// for accrued overage; without this guard a cardless project would
+// silently accumulate uncollectable overage each month.
+//
+// Enterprise is exempt because computeOverageCostUSD returns 0 for
+// them (zero per-execution rate), so cost > 0 is false and the
+// hard-cap branch is never entered.
 func capExceeded(p *store.Project) (bool, float64, float64) {
 	if p == nil {
 		return false, 0, 0
 	}
 	cost := computeOverageCostUSD(p)
 
-	// Hobby-no-card: hard cap at the included quota. cost > 0 means
-	// they've already exceeded it; block immediately. The reported
-	// "cap" is 0 so the 402 message can say "free quota exceeded; add
-	// a card to continue."
-	if normalizeTier(p.Tier) == TierHobby && p.StripeCustomerID == "" {
+	// No-card hard cap: cost > 0 means they're past the included
+	// quota; block immediately. The reported "cap" is 0 so the 402
+	// message can say "free quota exceeded; add a card to continue."
+	// Applies to Hobby that never added a card AND Team that removed
+	// theirs mid-cycle (#209). Reads card_on_file (migration 022) so
+	// the signal works for Team where stripe_customer_id stays
+	// populated after removal (subscription linkage preserved).
+	if !p.CardOnFile {
 		return cost > 0, 0, cost
 	}
 
@@ -344,7 +400,8 @@ func capExceeded(p *store.Project) (bool, float64, float64) {
 // branching so the dashboard can render the same number the ingest
 // path applies.
 //
-//   - Hobby with no Stripe customer  → 0 (hard cap at free quota)
+//   - Anyone with no Stripe customer → 0 (hard cap at included quota,
+//     covers Hobby that never attached AND Team that removed mid-cycle)
 //   - Anyone else with BillingCapUSD > 0 → BillingCapUSD
 //   - Anyone else with BillingCapUSD <= 0 → math.Inf(+1) is too noisy
 //     for the JSON wire; we return 0 here too and the dashboard treats
@@ -354,7 +411,7 @@ func effectiveCapUSD(p *store.Project) float64 {
 	if p == nil {
 		return 0
 	}
-	if normalizeTier(p.Tier) == TierHobby && p.StripeCustomerID == "" {
+	if !p.CardOnFile {
 		return 0
 	}
 	if p.BillingCapUSD > 0 {
@@ -439,6 +496,41 @@ type UsageResponse struct {
 	Days  []store.DailyExecutionCount `json:"days"`
 	Since time.Time                   `json:"since"`
 	Until time.Time                   `json:"until"`
+}
+
+// AIAnalysesUsageResponse is the body of GET /billing/ai-analyses-usage.
+// Surfaces how many LLM-assisted root-cause analyses (Mesedi #27)
+// the calling project has consumed this period, the cap, and on
+// Hobby tier the per-analysis price + estimated period-end spend.
+// The dashboard renders an "X of N" counter on /app/billing + an
+// at-a-glance chip on the main user dashboard so customers can see
+// headroom before they hit the rate-limit on POST /failure-groups/{id}/analyze.
+//
+// Applicable is true on Hobby (pay-per-use, 50/period at $0.75
+// each) and Team (200 / period included). Hobby surfaces
+// PricePerAnalysisUSD and EstimatedSpendUSD so the chip can show
+// the running cost.
+//
+// Applicable is false for Enterprise: no cap by contract, no
+// per-analysis billing. Dashboard hides the counter.
+type AIAnalysesUsageResponse struct {
+	OK          bool       `json:"ok"`
+	Applicable  bool       `json:"applicable"`
+	Tier        string     `json:"tier"`
+	Count       int        `json:"count"`
+	Limit       int        `json:"limit"`
+	PeriodStart *time.Time `json:"period_start,omitempty"`
+	PeriodEnd   *time.Time `json:"period_end,omitempty"`
+
+	// PricePerAnalysisUSD is the per-analysis charge on Hobby tier
+	// (pay-per-use). Nil on Team (included in flat $99/mo) and
+	// Enterprise (no per-analysis billing).
+	PricePerAnalysisUSD *float64 `json:"price_per_analysis_usd,omitempty"`
+	// EstimatedSpendUSD is the running period-end charge for Hobby
+	// based on count * PricePerAnalysisUSD. Surfaced so the
+	// confirmation modal and chip can show "you've spent $X this
+	// period." Nil on Team and Enterprise.
+	EstimatedSpendUSD *float64 `json:"estimated_spend_usd,omitempty"`
 }
 
 // ── handlers ───────────────────────────────────────────────────
@@ -589,6 +681,130 @@ func (h *Handlers) HandleGetBillingUsage(w http.ResponseWriter, r *http.Request)
 		Since: since,
 		Until: until,
 	})
+}
+
+// HandleGetAIAnalysesUsage returns how many LLM-assisted root-cause
+// analyses the calling project has consumed this period, the cap,
+// and on Hobby tier the per-analysis price + estimated period-end
+// spend (Mesedi #197 + #206). Counting follows the same logic as
+// HandleAnalyzeFailureGroup so the surfaced number matches
+// enforcement: per-tenant on Team (since tenant scope is the
+// enforcement boundary), per-project on Hobby (single-project tier).
+//
+// Tier branching:
+//   - Hobby: Applicable=true, Limit=HobbyAIAnalysisLimit (50),
+//     PricePerAnalysisUSD=$0.75, EstimatedSpendUSD=count*$0.75.
+//     Dashboard renders pay-per-use chip + confirmation modal.
+//   - Team: Applicable=true, Limit=TeamAIAnalysisLimit (200).
+//     Included in the flat $99/mo, no per-analysis price surfaced.
+//   - Enterprise: Applicable=false. No contractual cap. Dashboard
+//     hides the counter.
+//
+// Available on all auth'd projects so the dashboard can call it
+// regardless of tier and decide UI based on Applicable + Tier.
+func (h *Handlers) HandleGetAIAnalysesUsage(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	p, err := h.Store.GetProject(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load project: "+err.Error())
+		return
+	}
+
+	tier := normalizeTier(p.Tier)
+	resp := AIAnalysesUsageResponse{
+		OK:   true,
+		Tier: tier,
+	}
+
+	if tier == TierEnterprise {
+		// Enterprise: counter not applicable, no per-analysis billing.
+		// Dashboard interprets Applicable=false to hide the card.
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// Hobby + Team: surface count + cap. Both tiers use the same
+	// "since current_period_start (or 30-day fallback)" window so
+	// the displayed number matches the rate-limit math in the
+	// enforcement handler.
+	resp.Applicable = true
+
+	since := time.Now().UTC().AddDate(0, -1, 0)
+	if p.CurrentPeriodStart != nil {
+		since = *p.CurrentPeriodStart
+		resp.PeriodStart = p.CurrentPeriodStart
+		resp.PeriodEnd = p.CurrentPeriodEnd
+	}
+
+	// Count selection: Team caps per-organization (tenant scope),
+	// Hobby caps per-project (Hobby is single-project tier so
+	// tenant scope and project scope are equivalent and the
+	// per-project query is sufficient). Hobby skips the tenant-id
+	// lookup entirely.
+	var count int
+	var cErr error
+	if tier == TierTeam {
+		tenantID, terr := h.Store.GetProjectTenantID(r.Context(), projectID)
+		switch {
+		case terr == nil && tenantID != nil && *tenantID != "":
+			count, cErr = h.Store.CountAIAnalysesByTenantSince(
+				r.Context(), *tenantID, since,
+			)
+		default:
+			// tenant_id NULL or lookup failed: fall back to project
+			// scope. See HandleAnalyzeFailureGroup for the rationale
+			// on accepting this legacy-row edge case.
+			count, cErr = h.Store.CountAIAnalysesSincePeriodStart(
+				r.Context(), projectID, since,
+			)
+		}
+	} else {
+		// Hobby: per-project count is canonical.
+		count, cErr = h.Store.CountAIAnalysesSincePeriodStart(
+			r.Context(), projectID, since,
+		)
+	}
+	if cErr != nil {
+		writeError(w, http.StatusInternalServerError,
+			"count ai analyses: "+cErr.Error())
+		return
+	}
+	resp.Count = count
+
+	switch tier {
+	case TierTeam:
+		// Team: limit is the included threshold (200), not a hard
+		// cap. Surface the overage rate so the dashboard chip can
+		// render the running pay-as-you-go spend once count
+		// crosses included.
+		resp.Limit = TeamAIAnalysisLimit
+		overagePrice := TeamAIAnalysisOveragePriceUSD
+		var overageSpend float64
+		if count > TeamAIAnalysisLimit {
+			overageSpend = float64(count-TeamAIAnalysisLimit) * TeamAIAnalysisOveragePriceUSD
+		}
+		resp.PricePerAnalysisUSD = &overagePrice
+		resp.EstimatedSpendUSD = &overageSpend
+	case TierHobby:
+		// Hobby: limit IS the hard cap (50). Every analysis bills
+		// at the per-use price from analysis #1 because Hobby
+		// doesn't include any.
+		resp.Limit = HobbyAIAnalysisLimit
+		price := HobbyAIAnalysisPriceUSD
+		spend := float64(count) * HobbyAIAnalysisPriceUSD
+		resp.PricePerAnalysisUSD = &price
+		resp.EstimatedSpendUSD = &spend
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleCreateCheckout creates a Stripe Checkout session for the
@@ -1023,12 +1239,23 @@ func (h *Handlers) handleInvoiceUpcoming(event stripe.Event, logger *slog.Logger
 		return nil
 	}
 
-	cost := computeOverageCostUSD(p)
-	if cost <= 0 {
-		// Inside the included quota; nothing to bill.
+	execCost := computeOverageCostUSD(p)
+
+	// #208: Compute AI analysis overage cost alongside execution
+	// overage. Above the TeamAIAnalysisLimit (200), each analysis
+	// bills at TeamAIAnalysisOveragePriceUSD ($0.50). Pushed as a
+	// separate InvoiceItem so the customer's Stripe invoice shows
+	// the breakdown cleanly.
+	analysisCost, analysisOverageCount := h.computeTeamAIAnalysisOverageCostUSD(
+		context.Background(), p, logger,
+	)
+
+	if execCost <= 0 && analysisCost <= 0 {
+		// Inside the included quota on both axes; nothing to bill.
 		logger.Info("invoice.upcoming: no overage to bill",
 			"project_id", p.ProjectID,
-			"executions_this_period", p.ExecutionsThisPeriod)
+			"executions_this_period", p.ExecutionsThisPeriod,
+			"ai_analyses_overage", analysisOverageCount)
 		return nil
 	}
 
@@ -1036,19 +1263,22 @@ func (h *Handlers) handleInvoiceUpcoming(event stripe.Event, logger *slog.Logger
 	// adjustment). Most Team customers run uncapped; this branch
 	// matters only for customers who opted into a self-imposed
 	// ceiling via the dashboard (#168 follow-up).
-	if p.BillingCapUSD > 0 && cost > p.BillingCapUSD {
-		cost = p.BillingCapUSD
-	}
-
-	// Convert to integer cents. Stripe wants minor currency units as
-	// an int64. math.Round to handle the standard float-to-int boundary;
-	// at our sub-cent rate the residue is negligible and the rounding
-	// is in the customer's favor most of the time.
-	cents := int64(math.Round(cost * 100))
-	if cents <= 0 {
-		// Overage existed but rounded to zero cents (less than half a
-		// cent of actual overage). Not worth a Stripe API call.
-		return nil
+	//
+	// Cap is enforced across the combined exec + analysis spend so
+	// $200 cap means $200 max regardless of which axis drove it.
+	// Apply to execCost first (existing behavior), then give
+	// analysisCost whatever headroom is left.
+	if p.BillingCapUSD > 0 {
+		if execCost > p.BillingCapUSD {
+			execCost = p.BillingCapUSD
+		}
+		remainingCap := p.BillingCapUSD - execCost
+		if remainingCap < 0 {
+			remainingCap = 0
+		}
+		if analysisCost > remainingCap {
+			analysisCost = remainingCap
+		}
 	}
 
 	included := tierExecutionLimit(tier) + p.GrantedExecutions
@@ -1056,49 +1286,128 @@ func (h *Handlers) handleInvoiceUpcoming(event stripe.Event, logger *slog.Logger
 		included = 0
 	}
 	overUnits := p.ExecutionsThisPeriod - included
-
-	desc := fmt.Sprintf(
-		"Mesedi Team overage: %d executions x $%.3f",
-		overUnits, TeamOveragePriceUSD,
-	)
+	if overUnits < 0 {
+		overUnits = 0
+	}
 
 	h.Stripe.applyKey()
-	params := &stripe.InvoiceItemParams{
-		Customer:    stripe.String(customerID),
-		Amount:      stripe.Int64(cents),
-		Currency:    stripe.String(string(stripe.CurrencyUSD)),
-		Description: stripe.String(desc),
-		Metadata: map[string]string{
-			"mesedi_project_id":      p.ProjectID,
-			"mesedi_stripe_event_id": event.ID,
-			"mesedi_overage_units":   fmt.Sprintf("%d", overUnits),
-			"mesedi_tier":            tier,
-		},
-	}
-	// InvoiceItem.Customer alone is sufficient: Stripe automatically
-	// attaches "pending" (un-invoiced) items to that customer's next
-	// finalized invoice. We have one subscription per Mesedi project,
-	// so disambiguation isn't needed. (Stripe API v2024+ removed the
-	// Invoice.Subscription field; the relationship lives on a
-	// per-line-item Parent struct now, which the upcoming invoice
-	// preview doesn't always populate.)
-	//
-	// Idempotency key = Stripe event ID. If Stripe re-delivers this
-	// exact event, the duplicate InvoiceItem.New call returns the
-	// already-created item rather than creating a second one.
-	params.IdempotencyKey = stripe.String(event.ID)
 
-	ii, err := invoiceitem.New(params)
-	if err != nil {
-		return fmt.Errorf("create overage invoice item: %w", err)
+	// Push the execution-overage InvoiceItem when applicable.
+	// math.Round to handle the standard float-to-int boundary; at
+	// our sub-cent rate the residue is negligible.
+	if execCents := int64(math.Round(execCost * 100)); execCents > 0 {
+		desc := fmt.Sprintf(
+			"Mesedi Team overage: %d executions x $%.3f",
+			overUnits, TeamOveragePriceUSD,
+		)
+		params := &stripe.InvoiceItemParams{
+			Customer:    stripe.String(customerID),
+			Amount:      stripe.Int64(execCents),
+			Currency:    stripe.String(string(stripe.CurrencyUSD)),
+			Description: stripe.String(desc),
+			Metadata: map[string]string{
+				"mesedi_project_id":      p.ProjectID,
+				"mesedi_stripe_event_id": event.ID,
+				"mesedi_overage_units":   fmt.Sprintf("%d", overUnits),
+				"mesedi_tier":            tier,
+				"mesedi_overage_kind":    "executions",
+			},
+		}
+		// Idempotency key = Stripe event ID + kind. If Stripe
+		// re-delivers this exact event, the duplicate
+		// invoiceitem.New call returns the already-created item
+		// rather than creating a second one. Adding "-exec" lets
+		// the analysis-overage InvoiceItem below use its own
+		// idempotency key without colliding.
+		params.IdempotencyKey = stripe.String(event.ID + "-exec")
+		ii, err := invoiceitem.New(params)
+		if err != nil {
+			return fmt.Errorf("create execution overage invoice item: %w", err)
+		}
+		logger.Info("invoice.upcoming: execution overage pushed",
+			"project_id", p.ProjectID,
+			"overage_units", overUnits,
+			"amount_cents", execCents,
+			"invoice_item_id", ii.ID,
+		)
 	}
-	logger.Info("invoice.upcoming: overage pushed",
-		"project_id", p.ProjectID,
-		"overage_units", overUnits,
-		"amount_cents", cents,
-		"invoice_item_id", ii.ID,
-	)
+
+	// Push the AI-analysis-overage InvoiceItem when applicable.
+	if analysisCents := int64(math.Round(analysisCost * 100)); analysisCents > 0 {
+		desc := fmt.Sprintf(
+			"Mesedi Team AI root-cause overage: %d analyses x $%.2f",
+			analysisOverageCount, TeamAIAnalysisOveragePriceUSD,
+		)
+		params := &stripe.InvoiceItemParams{
+			Customer:    stripe.String(customerID),
+			Amount:      stripe.Int64(analysisCents),
+			Currency:    stripe.String(string(stripe.CurrencyUSD)),
+			Description: stripe.String(desc),
+			Metadata: map[string]string{
+				"mesedi_project_id":      p.ProjectID,
+				"mesedi_stripe_event_id": event.ID,
+				"mesedi_overage_units":   fmt.Sprintf("%d", analysisOverageCount),
+				"mesedi_tier":            tier,
+				"mesedi_overage_kind":    "ai_analyses",
+			},
+		}
+		params.IdempotencyKey = stripe.String(event.ID + "-ai")
+		ii, err := invoiceitem.New(params)
+		if err != nil {
+			return fmt.Errorf("create ai analysis overage invoice item: %w", err)
+		}
+		logger.Info("invoice.upcoming: AI analysis overage pushed",
+			"project_id", p.ProjectID,
+			"overage_units", analysisOverageCount,
+			"amount_cents", analysisCents,
+			"invoice_item_id", ii.ID,
+		)
+	}
+
 	return nil
+}
+
+// computeTeamAIAnalysisOverageCostUSD counts analyses across the
+// project's tenant since CurrentPeriodStart and returns
+// (overage_cost_USD, overage_count) — the analyses ABOVE
+// TeamAIAnalysisLimit, multiplied by TeamAIAnalysisOveragePriceUSD.
+//
+// Counting follows the same logic as HandleAnalyzeFailureGroup so
+// the InvoiceItem amount matches what the dashboard chip displayed
+// during the period. Tenant-scoped because Team allows unlimited
+// projects under one org; a per-project count would let customers
+// trivially bypass the included quota by spawning more projects.
+//
+// Returns (0, 0) on:
+//   - DB lookup error (fail-safe: don't bill a number we can't trust;
+//     next event will re-count)
+//   - count <= TeamAIAnalysisLimit (inside the included quota)
+func (h *Handlers) computeTeamAIAnalysisOverageCostUSD(
+	ctx context.Context, p *store.Project, logger *slog.Logger,
+) (float64, int) {
+	since := time.Now().UTC().AddDate(0, -1, 0)
+	if p.CurrentPeriodStart != nil {
+		since = *p.CurrentPeriodStart
+	}
+	tenantID, terr := h.Store.GetProjectTenantID(ctx, p.ProjectID)
+	var count int
+	var cErr error
+	switch {
+	case terr == nil && tenantID != nil && *tenantID != "":
+		count, cErr = h.Store.CountAIAnalysesByTenantSince(ctx, *tenantID, since)
+	default:
+		count, cErr = h.Store.CountAIAnalysesSincePeriodStart(ctx, p.ProjectID, since)
+	}
+	if cErr != nil {
+		logger.Warn("team AI analysis overage count failed (treating as zero)",
+			"project_id", p.ProjectID, "error", cErr.Error())
+		return 0, 0
+	}
+	if count <= TeamAIAnalysisLimit {
+		return 0, 0
+	}
+	overage := count - TeamAIAnalysisLimit
+	return float64(overage) * TeamAIAnalysisOveragePriceUSD, overage
 }
 
 // ── Hobby Setup Intent flow ──────────────────────────────────────
@@ -1327,6 +1636,40 @@ func (h *Handlers) handleSetupIntentSucceeded(event stripe.Event, logger *slog.L
 			"period_start", now,
 			"period_end", end,
 		)
+	}
+
+	// #209: Flip card_on_file = TRUE so the cap-check and AI
+	// analysis paths know there's a card to bill. Covers first
+	// attach AND re-attach after a prior customer-initiated removal.
+	if err := h.Store.MarkCardAttached(context.Background(), p.ProjectID); err != nil {
+		// Best-effort: log but don't fail the webhook. The card IS
+		// attached at Stripe; worst case the cap-check stays in
+		// "no card" mode briefly and a later GET /billing reconciles.
+		logger.Warn("setup_intent.succeeded: mark card attached failed",
+			"project_id", p.ProjectID, "error", err.Error())
+	}
+
+	// #209: For Team, if the subscription was scheduled to cancel
+	// at period end because of a prior card removal, unschedule it.
+	// The customer changed their mind and re-added a card — keep
+	// them on Team seamlessly. Best-effort; subscription stays in
+	// cancel_at_period_end on failure but the customer has a card
+	// now so the next renewal will at least charge successfully.
+	if normalizeTier(p.Tier) == TierTeam && p.StripeSubscriptionID != "" {
+		cancelAtPeriodEnd := false
+		if _, sErr := subscription.Update(
+			p.StripeSubscriptionID,
+			&stripe.SubscriptionParams{CancelAtPeriodEnd: &cancelAtPeriodEnd},
+		); sErr != nil {
+			logger.Warn("setup_intent.succeeded: clear cancel_at_period_end failed",
+				"project_id", p.ProjectID,
+				"sub_id", p.StripeSubscriptionID,
+				"error", sErr.Error())
+		} else {
+			logger.Info("setup_intent.succeeded: team re-add cleared cancel_at_period_end",
+				"project_id", p.ProjectID,
+				"sub_id", p.StripeSubscriptionID)
+		}
 	}
 
 	logger.Info("setup_intent.succeeded: default payment method set",

@@ -98,6 +98,24 @@ assert_pattern "Team LLM analysis cap = 200 (Go)" \
 assert_pattern "Team LLM analysis cap = 200 (TS)" \
   "$TS_CONSTANTS" "llmRootCausePerPeriod:[[:space:]]*200" || true
 
+# Hobby LLM analysis per-period cap: 50 (#206 pay-per-use)
+assert_pattern "Hobby LLM analysis cap = 50 (Go)" \
+  "$GO_BILLING" "HobbyAIAnalysisLimit[[:space:]]*=[[:space:]]*50" || true
+assert_pattern "Hobby LLM analysis cap = 50 (TS)" \
+  "$TS_CONSTANTS" "llmRootCausePerPeriod:[[:space:]]*50" || true
+
+# Hobby per-analysis price: \$0.75 (#206 pay-per-use)
+assert_pattern "Hobby AI analysis price = 0.75 (Go)" \
+  "$GO_BILLING" "HobbyAIAnalysisPriceUSD[[:space:]]*=[[:space:]]*0\\.75" || true
+assert_pattern "Hobby AI analysis price = 0.75 (TS)" \
+  "$TS_CONSTANTS" "aiAnalysisPriceUSD:[[:space:]]*0\\.75" || true
+
+# Team AI analysis overage price: \$0.50 (#208 no hard cap)
+assert_pattern "Team AI analysis overage = 0.50 (Go)" \
+  "$GO_BILLING" "TeamAIAnalysisOveragePriceUSD[[:space:]]*=[[:space:]]*0\\.50" || true
+assert_pattern "Team AI analysis overage = 0.50 (TS)" \
+  "$TS_CONSTANTS" "aiAnalysisPriceUSD:[[:space:]]*0\\.50" || true
+
 # Hobby billing failure ceiling: 5
 assert_pattern "Hobby billing failure ceiling = 5 (Go)" \
   "$GO_BILLING" "HobbyBillingFailureCeiling[[:space:]]*=[[:space:]]*5" || true

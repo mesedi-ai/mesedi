@@ -203,26 +203,30 @@ func (s *HobbyBillingScheduler) processProject(
 		return
 	}
 
-	// Compute the overage cost in cents. Use min(cost, cap) so a
-	// customer-set billing_cap_usd is respected. computeOverageCostUSD
-	// already applies the tier rate and the granted-executions math.
-	cost := computeOverageCostUSD(p)
+	// Compute total period-end cost: execution overage + AI analysis
+	// usage (#206 Hobby pay-per-analysis). Both line items share the
+	// project's billing_cap_usd, so a $200 cap protects against
+	// surprise bills whether the customer pushed executions, analyses,
+	// or both.
+	executionCost := computeOverageCostUSD(p)
+	analysisCost, analysisCount := s.computeHobbyAnalysisCostUSD(ctx, p, log)
+	cost := executionCost + analysisCost
 	if p.BillingCapUSD > 0 && cost > p.BillingCapUSD {
 		cost = p.BillingCapUSD
 	}
 	cents := int64(math.Round(cost * 100))
 
 	if cents <= 0 {
-		// Zero or near-zero overage: don't ping Stripe; just
+		// Zero or near-zero combined cost: don't ping Stripe; just
 		// rollover. No attempt counted (we did not actually try
 		// to charge).
 		if rErr := s.Store.ResetExecutionsThisPeriod(
 			ctx, p.ProjectID, newStart, newEnd,
 		); rErr != nil {
-			log.Error("rollover (zero overage) failed", "error", rErr.Error())
+			log.Error("rollover (zero charge) failed", "error", rErr.Error())
 			return
 		}
-		log.Info("hobby period rolled over (no overage to charge)",
+		log.Info("hobby period rolled over (no overage or analyses to charge)",
 			"new_period_start", newStart, "new_period_end", newEnd)
 		return
 	}
@@ -237,6 +241,13 @@ func (s *HobbyBillingScheduler) processProject(
 		overUnits = 0
 	}
 
+	// Build a human-readable description that covers whatever line
+	// items contributed to this period's charge. Single-line-item
+	// charges (just executions OR just analyses) get a clean
+	// description; combined charges get a "+" join so the Stripe
+	// receipt + dashboard show the breakdown.
+	desc := buildHobbyChargeDescription(overUnits, analysisCount)
+
 	s.Stripe.applyKey()
 	piParams := &stripe.PaymentIntentParams{
 		Amount:      stripe.Int64(cents),
@@ -244,11 +255,14 @@ func (s *HobbyBillingScheduler) processProject(
 		Customer:    stripe.String(p.StripeCustomerID),
 		Confirm:     stripe.Bool(true),
 		OffSession:  stripe.Bool(true),
-		Description: stripe.String(fmt.Sprintf("Mesedi Hobby overage: %d executions x $%.3f", overUnits, HobbyOveragePriceUSD)),
+		Description: stripe.String(desc),
 		Metadata: map[string]string{
-			"mesedi_project_id": p.ProjectID,
-			"mesedi_tier":       TierHobby,
-			"mesedi_overage":    fmt.Sprintf("%d", overUnits),
+			"mesedi_project_id":     p.ProjectID,
+			"mesedi_tier":           TierHobby,
+			"mesedi_overage":        fmt.Sprintf("%d", overUnits),
+			"mesedi_ai_analyses":    fmt.Sprintf("%d", analysisCount),
+			"mesedi_execution_cost": fmt.Sprintf("%.2f", executionCost),
+			"mesedi_analysis_cost":  fmt.Sprintf("%.2f", analysisCost),
 		},
 	}
 	// Idempotency key: project_id + period_end + failure_count so a
@@ -399,4 +413,75 @@ func (s *HobbyBillingScheduler) dashboardURL() string {
 		return s.DashboardURL
 	}
 	return "https://app.mesedi.ai"
+}
+
+// computeHobbyAnalysisCostUSD counts AI root-cause analyses the
+// Hobby project ran since its current period started and returns
+// (cost_USD, count). Zero on a DB lookup error so a transient blip
+// does NOT result in surprise period-end billing of a number we
+// can't trust; the next period's tick will re-count and pick up
+// whatever was missed (the analyses themselves stay on the
+// failure_groups row indefinitely).
+//
+// Window selection mirrors HandleAnalyzeFailureGroup: use
+// CurrentPeriodStart when set, fall back to 30-day rolling window
+// otherwise (race between Stripe checkout and webhook). We count
+// per-project, not per-tenant, because Hobby is single-project by
+// design.
+func (s *HobbyBillingScheduler) computeHobbyAnalysisCostUSD(
+	ctx context.Context, p *store.Project, log *slog.Logger,
+) (float64, int) {
+	since := time.Now().UTC().AddDate(0, -1, 0)
+	if p.CurrentPeriodStart != nil {
+		since = *p.CurrentPeriodStart
+	}
+	count, err := s.Store.CountAIAnalysesSincePeriodStart(
+		ctx, p.ProjectID, since,
+	)
+	if err != nil {
+		log.Warn("hobby analysis cost count failed (treating as zero)",
+			"error", err.Error())
+		return 0, 0
+	}
+	if count <= 0 {
+		return 0, 0
+	}
+	return float64(count) * HobbyAIAnalysisPriceUSD, count
+}
+
+// buildHobbyChargeDescription formats the Stripe PaymentIntent
+// Description for a Hobby period-end charge. The shape covers the
+// three cases that produce a non-zero charge:
+//
+//   - Executions only          → "Mesedi Hobby overage: N executions x $0.002"
+//   - Analyses only            → "Mesedi Hobby AI root-cause: N analyses x $0.75"
+//   - Executions AND analyses  → both lines joined with " + "
+//
+// Kept package-level (not a method) so it's trivially unit-testable
+// without standing up a scheduler.
+func buildHobbyChargeDescription(overUnits int64, analysisCount int) string {
+	var parts []string
+	if overUnits > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"Mesedi Hobby overage: %d executions x $%.3f",
+			overUnits, HobbyOveragePriceUSD,
+		))
+	}
+	if analysisCount > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"Mesedi Hobby AI root-cause: %d analyses x $%.2f",
+			analysisCount, HobbyAIAnalysisPriceUSD,
+		))
+	}
+	if len(parts) == 0 {
+		// Should never reach here (caller skips zero-cost charges
+		// before computing the description), but keep the fallback
+		// defensive so a malformed period never sends an empty
+		// description string to Stripe.
+		return "Mesedi Hobby period charge"
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return parts[0] + " + " + parts[1]
 }

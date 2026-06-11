@@ -256,14 +256,14 @@ func (s *SQLiteStore) GetProject(ctx context.Context, projectID string) (*Projec
 		       tier, stripe_customer_id, stripe_subscription_id,
 		       current_period_start, current_period_end, executions_this_period,
 		       granted_executions, granted_executions_expires_at, tier_expires_at,
-		       billing_cap_usd
+		       billing_cap_usd, card_on_file
 		FROM projects WHERE project_id = ?
 	`, projectID).Scan(
 		&p.ProjectID, &p.Name, &owner, &email, &p.CreatedAt,
 		&p.Tier, &stripeCust, &stripeSub,
 		&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
 		&p.GrantedExecutions, &grantExpires, &tierExpires,
-		&p.BillingCapUSD,
+		&p.BillingCapUSD, &p.CardOnFile,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

@@ -98,6 +98,23 @@ type Project struct {
 	// hard-capped "no card" state until the customer attaches a
 	// new card via Stripe Checkout.
 	HobbyBillingConsecutiveFailures int `json:"hobby_billing_consecutive_failures"`
+
+	// CardOnFile distinguishes "this project has a Stripe customer
+	// record" from "this project has a card we can charge"
+	// (migration 022, #209). Before this column the two concepts
+	// were conflated via StripeCustomerID == "" which broke Team's
+	// customer-initiated card removal: we want to keep the customer
+	// linkage so the active subscription stays addressable, but
+	// signal "no card" to the hard-cap path.
+	//
+	// True  → the saved card can be charged off-session. Default
+	//         for any project that has ever had a card attached.
+	// False → no card to charge. Ingest path hard-caps at the
+	//         included quota (capExceeded), AI analysis path
+	//         refuses overage requests, Hobby scheduler skips
+	//         charge attempts. Default for brand-new projects
+	//         until the first Setup Intent succeeds.
+	CardOnFile bool `json:"card_on_file"`
 }
 
 // TenantBudgetCeiling is the persisted configuration that powers
@@ -1316,6 +1333,28 @@ type Store interface {
 	// file" state, and the customer must attach a new card via
 	// Stripe Checkout to resume billable usage.
 	DetachHobbyCardForBillingFailure(ctx context.Context, projectID string) error
+
+	// MarkCardDetached is the customer-initiated card-removal store
+	// method (#209). It sets card_on_file = FALSE on the project
+	// WITHOUT nulling stripe_customer_id. Used by the
+	// /billing/payment-method/remove handler so:
+	//   - Hobby projects: keep the Stripe customer record for a
+	//     future re-add (no duplicate customers).
+	//   - Team projects: keep the Stripe customer record so the
+	//     active subscription stays addressable and the
+	//     customer.subscription.deleted webhook can still find the
+	//     project at period-end auto-downgrade.
+	// Hobby billing scheduler counters (consecutive_failures,
+	// last_attempt_at) are NOT reset here; those reset on success
+	// or on the auto-detach path. ErrNotFound if no row matches.
+	MarkCardDetached(ctx context.Context, projectID string) error
+
+	// MarkCardAttached is the inverse: set card_on_file = TRUE.
+	// Called from handleSetupIntentSucceeded when a new payment
+	// method is attached to the customer (covers both first-time
+	// attach and re-attach after a prior removal). ErrNotFound if
+	// no row matches.
+	MarkCardAttached(ctx context.Context, projectID string) error
 
 	// Abuse signals + project suspension (#172).
 	//

@@ -133,12 +133,50 @@ func (s *PostgresStore) DetachHobbyCardForBillingFailure(
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE projects
 		SET stripe_customer_id = NULL,
+		    card_on_file = FALSE,
 		    hobby_billing_consecutive_failures = 0,
 		    hobby_billing_last_attempt_at = NULL
 		WHERE project_id = $1
 	`, projectID)
 	if err != nil {
 		return fmt.Errorf("detach hobby card: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// MarkCardDetached is the customer-initiated detach store method
+// (#209). See store.go for the contract.
+func (s *PostgresStore) MarkCardDetached(
+	ctx context.Context, projectID string,
+) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE projects SET card_on_file = FALSE WHERE project_id = $1`,
+		projectID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark card detached: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// MarkCardAttached is the inverse: set card_on_file = TRUE.
+func (s *PostgresStore) MarkCardAttached(
+	ctx context.Context, projectID string,
+) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE projects SET card_on_file = TRUE WHERE project_id = $1`,
+		projectID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark card attached: %w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
