@@ -170,6 +170,7 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/projects/{id}/export", h.HandleAdminExportProject)
 	mux.HandleFunc("DELETE /admin/projects/{id}", h.HandleAdminDeleteProject)
 	mux.HandleFunc("DELETE /admin/projects/{id}/failure-groups", h.HandleAdminResetFailureGroups)
+	mux.HandleFunc("GET /admin/ai-analyses-by-project", h.HandleAdminAIAnalysesByProject)
 	mux.HandleFunc("GET /admin/storage", h.HandleAdminStorage)
 	mux.HandleFunc("GET /admin/abuse", h.HandleAdminListAbuseSignals)
 	mux.HandleFunc("POST /admin/abuse/{id}/resolve", h.HandleAdminResolveAbuseSignal)
@@ -1075,4 +1076,91 @@ func parseAdminKeyExpiresAt(s string) (string, error) {
 		return t.UTC().Format(time.RFC3339Nano), nil
 	}
 	return "", fmt.Errorf("expected YYYY-MM-DD or RFC3339")
+}
+
+// adminHaikuCostPerAnalysisUSD is the per-analysis Anthropic cost
+// surfaced on the admin breakdown. Matches the Cap-math number in
+// billing.go's TeamAIAnalysisLimit comment (~$0.03 Haiku 4.5
+// input+output for a typical failure group). Used to compute the
+// estimated cost-to-Verdifax column so the founder can spot heavy
+// users whose Anthropic burn outpaces their subscription revenue.
+const adminHaikuCostPerAnalysisUSD = 0.03
+
+// AdminAIAnalysesByProjectRow is the response payload row for
+// GET /admin/ai-analyses-by-project. Wraps the store row with the
+// estimated Anthropic cost so the dashboard can render a single
+// table without extra math.
+type AdminAIAnalysesByProjectRow struct {
+	ProjectID         string  `json:"project_id"`
+	Name              string  `json:"name"`
+	OwnerEmail        string  `json:"owner_email,omitempty"`
+	Tier              string  `json:"tier"`
+	TenantID          string  `json:"tenant_id,omitempty"`
+	Count             int     `json:"count"`
+	EstimatedCostUSD  float64 `json:"estimated_cost_usd"`
+}
+
+// AdminAIAnalysesByProjectResponse is the JSON body of
+// GET /admin/ai-analyses-by-project. Surfaces the per-project
+// breakdown plus aggregate totals so the dashboard can render the
+// summary chip without a second round trip.
+type AdminAIAnalysesByProjectResponse struct {
+	Since                 string                       `json:"since"`
+	TotalCount            int                          `json:"total_count"`
+	TotalEstimatedCostUSD float64                      `json:"total_estimated_cost_usd"`
+	Projects              []AdminAIAnalysesByProjectRow `json:"projects"`
+}
+
+// HandleAdminAIAnalysesByProject returns the per-project AI
+// root-cause analysis breakdown (#197). Default window is the
+// start of the current calendar month UTC; override via ?since=
+// query param as RFC3339. Used by the founder dashboard to spot
+// heavy AI users for billing reconciliation and abuse detection.
+func (h *Handlers) HandleAdminAIAnalysesByProject(w http.ResponseWriter, r *http.Request) {
+	since := startOfCurrentMonthUTC()
+	if raw := strings.TrimSpace(r.URL.Query().Get("since")); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest,
+				"since must be RFC3339 (e.g., 2026-06-01T00:00:00Z): "+err.Error())
+			return
+		}
+		since = t.UTC()
+	}
+
+	rows, err := h.Store.ListAIAnalysesUsageByProject(r.Context(), since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"list ai analyses by project: "+err.Error())
+		return
+	}
+
+	out := AdminAIAnalysesByProjectResponse{
+		Since:    since.Format(time.RFC3339),
+		Projects: make([]AdminAIAnalysesByProjectRow, 0, len(rows)),
+	}
+	for _, r := range rows {
+		est := float64(r.Count) * adminHaikuCostPerAnalysisUSD
+		out.Projects = append(out.Projects, AdminAIAnalysesByProjectRow{
+			ProjectID:        r.ProjectID,
+			Name:             r.Name,
+			OwnerEmail:       r.OwnerEmail,
+			Tier:             r.Tier,
+			TenantID:         r.TenantID,
+			Count:            r.Count,
+			EstimatedCostUSD: est,
+		})
+		out.TotalCount += r.Count
+		out.TotalEstimatedCostUSD += est
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// startOfCurrentMonthUTC returns the first instant of the current
+// UTC calendar month. Used as the default window for the admin
+// AI-analyses breakdown so the dashboard "this month" view matches
+// what most billing reconciliation flows expect.
+func startOfCurrentMonthUTC() time.Time {
+	now := time.Now().UTC()
+	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 }

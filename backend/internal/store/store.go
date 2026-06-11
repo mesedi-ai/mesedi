@@ -191,6 +191,20 @@ type ProjectStorage struct {
 	EstimatedBytes    int64  `json:"estimated_bytes"`
 }
 
+// AIAnalysesByProjectRow is one row of the admin AI-analyses
+// breakdown view (#197). Aggregates failure_groups.analyzed_at
+// counts per project so the founder dashboard can rank tenants by
+// AI usage in the current window. The view is computed live (no
+// rollup table) since AI analyses are sparse and the join is small.
+type AIAnalysesByProjectRow struct {
+	ProjectID   string `json:"project_id"`
+	Name        string `json:"name"`
+	OwnerEmail  string `json:"owner_email,omitempty"`
+	Tier        string `json:"tier"`
+	TenantID    string `json:"tenant_id,omitempty"`
+	Count       int    `json:"count"`
+}
+
 // DailyExecutionCount is one bucket of an execution-usage time series.
 // Used by the billing page's usage chart. The Date is in UTC, midnight,
 // inclusive (so a row with Date=2026-05-23 covers all executions where
@@ -648,6 +662,16 @@ type Store interface {
 	// existing expiration regardless of whether delta is positive or
 	// negative.
 	AddGrantedExecutions(ctx context.Context, projectID string, delta int64, expiresAt *time.Time) error
+	// ListAIAnalysesUsageByProject returns one row per project with
+	// at least one AI root-cause analysis since the supplied time
+	// (#197 admin breakdown). Sorted by Count descending so the
+	// heaviest users land at the top. Used by the founder dashboard
+	// to spot heavy AI users for billing reconciliation and abuse
+	// detection. Empty slice when no projects analyzed in the window.
+	ListAIAnalysesUsageByProject(
+		ctx context.Context, since time.Time,
+	) ([]*AIAnalysesByProjectRow, error)
+
 	// GetProjectStorageStats returns one row per project with counts
 	// across the major child tables plus an EstimatedBytes total from
 	// SUM(LENGTH()) over the large text columns. Used by the admin

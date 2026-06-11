@@ -2835,6 +2835,43 @@ func (s *PostgresStore) CountAIAnalysesSincePeriodStart(
 	return count, nil
 }
 
+// ListAIAnalysesUsageByProject is the Postgres twin of the SQLite
+// method (#197). See sqlite.go for the contract.
+func (s *PostgresStore) ListAIAnalysesUsageByProject(
+	ctx context.Context, since time.Time,
+) ([]*AIAnalysesByProjectRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT fg.project_id, p.name, p.owner_email, p.tier, p.tenant_id, COUNT(*) AS n
+		FROM failure_groups fg
+		JOIN projects p ON p.project_id = fg.project_id
+		WHERE fg.analyzed_at IS NOT NULL
+		  AND fg.analyzed_at >= $1
+		GROUP BY fg.project_id, p.name, p.owner_email, p.tier, p.tenant_id
+		ORDER BY n DESC, p.name ASC
+	`, since)
+	if err != nil {
+		return nil, fmt.Errorf("list ai analyses by project: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*AIAnalysesByProjectRow, 0, 8)
+	for rows.Next() {
+		r := &AIAnalysesByProjectRow{}
+		var email, tenantID sql.NullString
+		if err := rows.Scan(&r.ProjectID, &r.Name, &email, &r.Tier, &tenantID, &r.Count); err != nil {
+			return nil, fmt.Errorf("scan ai analyses by project row: %w", err)
+		}
+		if email.Valid {
+			r.OwnerEmail = email.String
+		}
+		if tenantID.Valid {
+			r.TenantID = tenantID.String
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // CountAIAnalysesByTenantSince counts failure_groups summed across
 // every project owned by tenantID whose analyzed_at >= since.
 // Canonical Team-tier rate-limit query. Postgres twin of the

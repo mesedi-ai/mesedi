@@ -548,6 +548,8 @@ func main() {
 	mux.Handle("OPTIONS /admin/projects/{id}/failure-groups", adminHandler)
 	mux.Handle("GET /admin/storage", adminHandler)
 	mux.Handle("OPTIONS /admin/storage", adminHandler)
+	mux.Handle("GET /admin/ai-analyses-by-project", adminHandler)
+	mux.Handle("OPTIONS /admin/ai-analyses-by-project", adminHandler)
 	mux.Handle("GET /admin/abuse", adminHandler)
 	mux.Handle("OPTIONS /admin/abuse", adminHandler)
 	mux.Handle("POST /admin/abuse/{id}/resolve", adminHandler)
