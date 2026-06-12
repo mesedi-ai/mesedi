@@ -3821,6 +3821,12 @@ func (s *SQLiteStore) ListAIAnalysesUsageByProject(
 // Ordered analyzed_at DESC so the most recent analysis lands at
 // the top. Default limit 200 covers a heavy month even for the
 // largest projected customer; callers can pass 0 to use the default.
+//
+// Column order MUST match scanFailureGroup so the canonical helper
+// can do the string -> time.Time parse for first_seen / last_seen.
+// Those columns are stored as TEXT on the Postgres side (#79 latent
+// scan-bug fix); scanning directly into time.Time blew up the live
+// driver with "storing driver.Value type string into type *time.Time".
 func (s *SQLiteStore) ListAnalyzedFailureGroupsByProject(
 	ctx context.Context, projectID string, since time.Time, limit int,
 ) ([]*FailureGroup, error) {
@@ -3846,36 +3852,9 @@ func (s *SQLiteStore) ListAnalyzedFailureGroupsByProject(
 
 	out := make([]*FailureGroup, 0, 8)
 	for rows.Next() {
-		g := &FailureGroup{}
-		var cost sql.NullFloat64
-		var sample, analysisMD, analysisModel sql.NullString
-		var analyzedAt sql.NullTime
-		if err := rows.Scan(
-			&g.GroupID, &g.ProjectID, &g.FailureClass, &g.Signature,
-			&g.FirstSeen, &g.LastSeen, &g.EventCount, &g.AffectedExecutions,
-			&cost, &sample,
-			&analysisMD, &analyzedAt, &analysisModel,
-		); err != nil {
+		g, err := scanFailureGroup(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan analyzed failure group: %w", err)
-		}
-		if cost.Valid {
-			v := cost.Float64
-			g.CostWastedUSD = &v
-		}
-		if sample.Valid {
-			g.SampleExecutionID = sample.String
-		}
-		if analysisMD.Valid {
-			v := analysisMD.String
-			g.AnalysisMarkdown = &v
-		}
-		if analyzedAt.Valid {
-			v := analyzedAt.Time
-			g.AnalyzedAt = &v
-		}
-		if analysisModel.Valid {
-			v := analysisModel.String
-			g.AnalysisModel = &v
 		}
 		out = append(out, g)
 	}

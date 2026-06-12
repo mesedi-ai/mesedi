@@ -2877,6 +2877,12 @@ func (s *PostgresStore) ListAIAnalysesUsageByProject(
 
 // ListAnalyzedFailureGroupsByProject is the Postgres twin of the
 // SQLite method (#211). See sqlite.go for the contract.
+//
+// Uses the canonical scanFailureGroup helper because first_seen and
+// last_seen are TEXT in the Postgres schema (not TIMESTAMP), and the
+// driver returns them as strings; scanning directly into time.Time
+// throws "storing driver.Value type string into type *time.Time"
+// against the live Neon database.
 func (s *PostgresStore) ListAnalyzedFailureGroupsByProject(
 	ctx context.Context, projectID string, since time.Time, limit int,
 ) ([]*FailureGroup, error) {
@@ -2902,36 +2908,9 @@ func (s *PostgresStore) ListAnalyzedFailureGroupsByProject(
 
 	out := make([]*FailureGroup, 0, 8)
 	for rows.Next() {
-		g := &FailureGroup{}
-		var cost sql.NullFloat64
-		var sample, analysisMD, analysisModel sql.NullString
-		var analyzedAt sql.NullTime
-		if err := rows.Scan(
-			&g.GroupID, &g.ProjectID, &g.FailureClass, &g.Signature,
-			&g.FirstSeen, &g.LastSeen, &g.EventCount, &g.AffectedExecutions,
-			&cost, &sample,
-			&analysisMD, &analyzedAt, &analysisModel,
-		); err != nil {
+		g, err := scanFailureGroup(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan analyzed failure group: %w", err)
-		}
-		if cost.Valid {
-			v := cost.Float64
-			g.CostWastedUSD = &v
-		}
-		if sample.Valid {
-			g.SampleExecutionID = sample.String
-		}
-		if analysisMD.Valid {
-			v := analysisMD.String
-			g.AnalysisMarkdown = &v
-		}
-		if analyzedAt.Valid {
-			v := analyzedAt.Time
-			g.AnalyzedAt = &v
-		}
-		if analysisModel.Valid {
-			v := analysisModel.String
-			g.AnalysisModel = &v
 		}
 		out = append(out, g)
 	}
