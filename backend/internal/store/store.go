@@ -698,6 +698,22 @@ type Store interface {
 	ListAIAnalyses(ctx context.Context, limit, offset int) ([]*AIAnalysis, error)
 	GetAIAnalysesTotals(ctx context.Context) (*AIAnalysesTotals, error)
 
+	// AggregateFailureClassesForMonth + ListFailureClassAggregates
+	// back the LinkedIn-trend anonymized counts (#212). The
+	// aggregate table survives account closure so historical
+	// trend reports remain publishable without retaining
+	// customer-identifying data. kAnonymity > 0 on List drops
+	// rows where distinct_tenants_count < k.
+	AggregateFailureClassesForMonth(
+		ctx context.Context,
+		period string,
+		startInclusive time.Time,
+		endExclusive time.Time,
+	) (int, error)
+	ListFailureClassAggregates(
+		ctx context.Context, kAnonymity, limit int,
+	) ([]*FailureClassAggregateRow, error)
+
 	// ListAIAnalysesUsageByProject returns one row per project with
 	// at least one AI root-cause analysis since the supplied time
 	// (#197 admin breakdown). Sorted by Count descending so the

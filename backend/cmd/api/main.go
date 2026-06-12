@@ -377,6 +377,11 @@ func main() {
 	// process; the OS kills it on SIGTERM along with the HTTP server.
 	api.StartAbuseWorker(context.Background(), st, mailer, logger, cfg.DashboardURL)
 
+	// #212 failure_class aggregate worker. Runs once on startup +
+	// every 24h, refreshing the current-month row so mid-month
+	// account closures don't lose data.
+	api.StartFailureClassAggregateWorker(context.Background(), st, logger)
+
 	// Tenant budget-ceiling scheduler (#252). Walks every
 	// tenant_budget_ceilings row every 5 minutes, evaluates MTD burn
 	// against the configured ceiling, and (on first crossing within
@@ -579,6 +584,11 @@ func main() {
 	mux.Handle("OPTIONS /admin/refunds", adminHandler)
 	mux.Handle("GET /admin/subscriptions-canceled", adminHandler)
 	mux.Handle("OPTIONS /admin/subscriptions-canceled", adminHandler)
+	// #212 anonymized failure_class aggregates (LinkedIn trends).
+	mux.Handle("GET /admin/failure-class-aggregates", adminHandler)
+	mux.Handle("OPTIONS /admin/failure-class-aggregates", adminHandler)
+	mux.Handle("POST /admin/failure-class-aggregates/run", adminHandler)
+	mux.Handle("OPTIONS /admin/failure-class-aggregates/run", adminHandler)
 	// #198 Anthropic credit + 7-day burn rate widget on /admin.
 	mux.Handle("GET /admin/anthropic-credit", adminHandler)
 	mux.Handle("POST /admin/anthropic-credit", adminHandler)

@@ -186,6 +186,11 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/charges", h.HandleAdminListCharges)
 	mux.HandleFunc("GET /admin/refunds", h.HandleAdminListRefunds)
 	mux.HandleFunc("GET /admin/subscriptions-canceled", h.HandleAdminListCanceledSubscriptions)
+	// #212 anonymized failure_class aggregates for LinkedIn trend
+	// reports. GET returns publishable rows (k-anonymity gated),
+	// POST re-runs aggregation for a given month.
+	mux.HandleFunc("GET /admin/failure-class-aggregates", h.HandleAdminListFailureClassAggregates)
+	mux.HandleFunc("POST /admin/failure-class-aggregates/run", h.HandleAdminRunFailureClassAggregation)
 	// #198 Anthropic credit balance + 7-day burn rate. GET returns
 	// the latest manually-entered balance + programmatic burn rate;
 	// POST accepts a new manually-entered balance snapshot.
