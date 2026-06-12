@@ -42,6 +42,15 @@ jobs:
     name: flyctl deploy
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Least-privilege GITHUB_TOKEN scope (#204 CodeQL alert #11). This
+    # job only checks out the repo and runs `flyctl deploy`; it never
+    # writes to the repo, creates comments, publishes packages, or
+    # touches releases. contents:read is the bare minimum needed for
+    # actions/checkout to read the working tree. Repositories created
+    # before 2023 default to read-write, which CodeQL's
+    # missing-workflow-permissions query flags as too broad.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: superfly/flyctl-actions/setup-flyctl@master

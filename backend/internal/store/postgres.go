@@ -1207,6 +1207,13 @@ func (s *PostgresStore) RecordWebhookDelivery(ctx context.Context, d *WebhookDel
 }
 
 func (s *PostgresStore) ListDeliveriesForWebhook(ctx context.Context, webhookID string, limit int) ([]*WebhookDelivery, error) {
+	// Clamp limit to the package ceiling (#204 alert #9). Caller is
+	// trusted to pass a sane value but a defensive cap here keeps a
+	// future-bug caller from driving an unbounded allocation -- and
+	// lets CodeQL see the upper bound at the make() site below.
+	if limit <= 0 || limit > WebhookDeliveryListLimitMax {
+		limit = WebhookDeliveryListLimitMax
+	}
 	if limit <= 0 {
 		limit = 50
 	}
@@ -1225,7 +1232,10 @@ func (s *PostgresStore) ListDeliveriesForWebhook(ctx context.Context, webhookID 
 	}
 	defer rows.Close()
 
-	out := make([]*WebhookDelivery, 0, limit)
+	// Capacity hint uses the package-level constant so the upper
+	// bound is visible to static analysis; `limit` is guaranteed
+	// <= WebhookDeliveryListLimitMax by the clamp at function entry.
+	out := make([]*WebhookDelivery, 0, WebhookDeliveryListLimitMax)
 	for rows.Next() {
 		var d WebhookDelivery
 		var failureClass, signature, groupID, errMsg, respBody sql.NullString

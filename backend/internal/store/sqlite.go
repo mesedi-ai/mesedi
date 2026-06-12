@@ -1478,8 +1478,16 @@ func (s *SQLiteStore) ListDeliveriesForWebhook(
 	webhookID string,
 	limit int,
 ) ([]*WebhookDelivery, error) {
+	// Mirror Postgres clamp (#204 alert #10). Negative / zero falls
+	// back to a sane default; anything above the package ceiling is
+	// clamped so a future-bug caller can not drive an unbounded
+	// allocation -- and CodeQL sees a constant upper bound at the
+	// make() site below.
 	if limit <= 0 {
 		limit = 50
+	}
+	if limit > WebhookDeliveryListLimitMax {
+		limit = WebhookDeliveryListLimitMax
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT delivery_id, webhook_id, project_id,
@@ -1496,7 +1504,9 @@ func (s *SQLiteStore) ListDeliveriesForWebhook(
 	}
 	defer rows.Close()
 
-	out := make([]*WebhookDelivery, 0, limit)
+	// Capacity hint uses the package-level constant; see Postgres
+	// counterpart for the static-analysis rationale.
+	out := make([]*WebhookDelivery, 0, WebhookDeliveryListLimitMax)
 	for rows.Next() {
 		var d WebhookDelivery
 		var failureClass, signature, groupID, errMsg, respBody sql.NullString

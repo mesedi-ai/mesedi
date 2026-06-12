@@ -298,6 +298,15 @@ func IsAPIKeySourceSessionGrade(source string) bool {
 // session lifetimes.
 const APIKeyLoginExpiryDays = 7
 
+// WebhookDeliveryListLimitMax caps the result-set size for
+// ListDeliveriesForWebhook on both SQLite and Postgres implementations.
+// User-controllable `limit` is clamped inside the function before any
+// allocation, so a request with `?limit=999999999` cannot drive an
+// unbounded slice grow. CodeQL's go/uncontrolled-allocation-size query
+// (#204 alerts #9 + #10) needs to see the constant ceiling at the
+// make() site, hence the explicit constant used in both stores.
+const WebhookDeliveryListLimitMax = 500
+
 // APIKeyAdminProjectID is the project_id all admin-scope keys share.
 // Auto-bootstrapped at startup so the projects FK on api_keys still
 // holds for admin keys without needing to relax the constraint.

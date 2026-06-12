@@ -33,6 +33,16 @@ import (
 // calculation happen without a Stripe round trip.
 const TeamMonthlyPriceUSD = 99.0
 
+// adminListLimitMax caps the result-set size for every admin listing
+// endpoint (charges, refunds, canceled subscriptions). User-supplied
+// `?limit=N` is always clamped to this ceiling before any allocation,
+// keeping per-request memory bounded at sizeof(row) * adminListLimitMax.
+// Used as the capacity hint in make([]Row, 0, adminListLimitMax) so a
+// crafted huge `?limit=` cannot drive an excessive allocation -- and
+// so CodeQL's go/uncontrolled-allocation-size query (#204 alerts
+// #6/#7/#8) sees a constant upper bound at the make() site.
+const adminListLimitMax = 200
+
 // AdminAnalyticsSummary is the founder-side accounting tile shown
 // at the top of /admin/analytics. All money fields in USD; counts
 // are integer.
@@ -222,8 +232,8 @@ func (h *Handlers) HandleAdminListCharges(w http.ResponseWriter, r *http.Request
 			limit = n
 		}
 	}
-	if limit > 200 {
-		limit = 200
+	if limit > adminListLimitMax {
+		limit = adminListLimitMax
 	}
 
 	params := &stripe.ChargeListParams{}
@@ -231,7 +241,11 @@ func (h *Handlers) HandleAdminListCharges(w http.ResponseWriter, r *http.Request
 
 	out := AdminListChargesResponse{
 		OK:      true,
-		Charges: make([]AdminChargeRow, 0, limit),
+		// Cap allocation at the package-level constant; `limit` is
+		// guaranteed <= adminListLimitMax by the clamp above. Using
+		// the constant here makes the upper bound visible to static
+		// analysis (#204 alert #6).
+		Charges: make([]AdminChargeRow, 0, adminListLimitMax),
 		Limit:   limit,
 	}
 	iter := charge.List(params)
@@ -302,8 +316,8 @@ func (h *Handlers) HandleAdminListRefunds(w http.ResponseWriter, r *http.Request
 			limit = n
 		}
 	}
-	if limit > 200 {
-		limit = 200
+	if limit > adminListLimitMax {
+		limit = adminListLimitMax
 	}
 
 	params := &stripe.RefundListParams{}
@@ -311,7 +325,9 @@ func (h *Handlers) HandleAdminListRefunds(w http.ResponseWriter, r *http.Request
 
 	out := AdminListRefundsResponse{
 		OK:      true,
-		Refunds: make([]AdminRefundRow, 0, limit),
+		// See Charges allocation above for the rationale on using
+		// the constant rather than `limit` here (#204 alert #7).
+		Refunds: make([]AdminRefundRow, 0, adminListLimitMax),
 		Limit:   limit,
 	}
 	iter := refund.List(params)
@@ -381,8 +397,8 @@ func (h *Handlers) HandleAdminListCanceledSubscriptions(w http.ResponseWriter, r
 			limit = n
 		}
 	}
-	if limit > 200 {
-		limit = 200
+	if limit > adminListLimitMax {
+		limit = adminListLimitMax
 	}
 
 	params := &stripe.SubscriptionListParams{
@@ -392,7 +408,9 @@ func (h *Handlers) HandleAdminListCanceledSubscriptions(w http.ResponseWriter, r
 
 	out := AdminListCanceledSubsResponse{
 		OK:            true,
-		Subscriptions: make([]AdminCanceledSubRow, 0, limit),
+		// See Charges allocation above for the rationale on using
+		// the constant rather than `limit` here (#204 alert #8).
+		Subscriptions: make([]AdminCanceledSubRow, 0, adminListLimitMax),
 		Limit:         limit,
 	}
 	iter := subscription.List(params)
