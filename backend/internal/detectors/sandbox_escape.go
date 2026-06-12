@@ -74,9 +74,14 @@ var sandboxPatterns = mustCompilePatterns([]struct {
 	},
 	{
 		// Cloud instance metadata endpoints. AWS / GCP / Azure all
-		// use 169.254.169.254 as their link-local IMDS address.
+		// use 169.254.169.254 as their link-local IMDS address. Word
+		// boundaries anchor each alternative so the pattern does not
+		// accidentally match inside larger tokens like
+		// "metadata.google.internal.example.com" -- which would still
+		// be suspicious but is structurally a different host (#204
+		// alert #5, go/regex-injection / regex-missing-anchor).
 		id:      "instance_metadata_access",
-		pattern: `(?:169\.254\.169\.254|metadata\.google\.internal|metadata\.azure\.com)`,
+		pattern: `\b(?:169\.254\.169\.254|metadata\.google\.internal|metadata\.azure\.com)\b`,
 	},
 	{
 		// /proc / /sys access typically tied to container-escape

@@ -52,18 +52,48 @@ class ProviderParseResult:
 PREVIEW_CHARS = 4000
 
 
+def _host_matches(host: str, domain: str) -> bool:
+    """True iff `host` is `domain` exactly or a subdomain of `domain`.
+
+    Substring-style matching ("if domain in host") is unsafe for
+    provider routing: an attacker who controls the URL could register
+    "evil-anthropic.com" or "anthropic.evil.com" and have it classified
+    as an Anthropic host (#204 alerts #2 + #3,
+    py/incomplete-url-substring-sanitization). Proper hostname matching
+    requires checking BOTH "host == domain" AND
+    "host.endswith('.' + domain)" so legitimate subdomains
+    (e.g. "api.anthropic.com") match while non-Anthropic hosts with
+    "anthropic" in the name do NOT.
+    """
+    return host == domain or host.endswith("." + domain)
+
+
 def detect_provider(url: str) -> str:
     """Map a URL to one of: 'anthropic', 'openai', 'gemini', 'generic'."""
     host = (urlparse(url).hostname or "").lower()
-    if "anthropic" in host:
+    if _host_matches(host, "anthropic.com"):
         return "anthropic"
-    if "openai" in host:
+    if _host_matches(host, "openai.com") or _host_matches(host, "azure.com"):
+        # Azure OpenAI Service hostnames look like
+        # "<resource>.openai.azure.com"; matching both "openai.com" and
+        # "azure.com" covers the public OpenAI API plus the Azure
+        # variant without false-positive routing on unrelated
+        # *.azure.com hosts (the API-shape check in
+        # parse_request_body decides whether the URL is an LLM call).
         return "openai"
     # Google's Gemini API hosts:
     #   generativelanguage.googleapis.com (PaLM/Gemini public API)
-    #   us-central1-aiplatform.googleapis.com (Vertex AI)
-    if "generativelanguage.googleapis.com" in host or (
-        "aiplatform.googleapis.com" in host
+    #   <region>-aiplatform.googleapis.com (Vertex AI) -- note the
+    #     region is concatenated with a hyphen, not separated by a
+    #     dot, so this is NOT a true subdomain of
+    #     aiplatform.googleapis.com. We match the trailing label
+    #     explicitly. An attacker would have to register a domain
+    #     ending in "-aiplatform.googleapis.com" to bypass, which
+    #     is not possible (googleapis.com is Google-owned).
+    if (
+        _host_matches(host, "generativelanguage.googleapis.com")
+        or _host_matches(host, "aiplatform.googleapis.com")
+        or host.endswith("-aiplatform.googleapis.com")
     ):
         return "gemini"
     return "generic"

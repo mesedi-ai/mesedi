@@ -67,7 +67,17 @@ export class HaltStreamReader {
 
   constructor(opts: HaltStreamReaderOptions) {
     this.executionId = opts.executionId;
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    // Strip trailing slashes from the base URL without using a regex
+    // with a quantifier (#204 alert #4, js/polynomial-redos). The old
+    // .replace(/\/+$/, "") form was flagged because a pathological
+    // input like "/".repeat(N) drives O(N) backtracking on some JS
+    // engines; the explicit loop is linear AND avoids the regex
+    // engine entirely.
+    let normalizedBaseUrl = opts.baseUrl;
+    while (normalizedBaseUrl.endsWith("/")) {
+      normalizedBaseUrl = normalizedBaseUrl.slice(0, -1);
+    }
+    this.baseUrl = normalizedBaseUrl;
     this.apiKey = opts.apiKey;
     this.onHalt = opts.onHalt;
     this.schemaVersion = opts.schemaVersion ?? "1";
