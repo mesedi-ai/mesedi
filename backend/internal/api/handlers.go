@@ -1785,13 +1785,45 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	now := time.Now().UTC()
 	if err := h.Store.SaveFailureGroupAnalysis(
-		r.Context(), groupID, res.Text, model, time.Now().UTC(),
+		r.Context(), groupID, res.Text, model, now,
 	); err != nil {
 		h.Logger.Error("save failure_group analysis failed",
 			"group_id", groupID, "error", err.Error())
 		writeError(w, http.StatusInternalServerError, "persist failed: "+err.Error())
 		return
+	}
+
+	// #199 record one ai_analyses row per call so the founder
+	// accounting view sees actual model + token + cost (not just
+	// the flat $0.03 estimate the dashboard quotes customers).
+	// Best-effort: log and continue on failure so a transient DB
+	// error on this insert never breaks the customer's analysis.
+	tenantID := ""
+	if group.ProjectID != "" {
+		if tp, terr := h.Store.GetProjectTenantID(r.Context(), group.ProjectID); terr == nil && tp != nil {
+			tenantID = *tp
+		}
+	}
+	cost := anthropic.ComputeCostUSD(model, res.InputTokens, res.OutputTokens)
+	if err := h.Store.CreateAIAnalysis(r.Context(), &store.AIAnalysis{
+		AnalysisID:       newAIAnalysisID(),
+		FailureGroupID:   groupID,
+		ProjectID:        group.ProjectID,
+		TenantID:         tenantID,
+		ModelID:          model,
+		InputTokens:      res.InputTokens,
+		OutputTokens:     res.OutputTokens,
+		CostUSD:          cost,
+		GeneratedAt:      now,
+		AnalysisMarkdown: res.Text,
+	}); err != nil {
+		h.Logger.Warn("record ai_analyses row failed (accounting only)",
+			"group_id", groupID,
+			"input_tokens", res.InputTokens,
+			"output_tokens", res.OutputTokens,
+			"error", err.Error())
 	}
 
 	// Re-read so the response matches what a subsequent GET would
@@ -1802,6 +1834,13 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, refreshed)
+}
+
+// newAIAnalysisID returns a stable "ai_<32 hex>" identifier. Uses
+// the same random-id pattern as the audit-event id helper so the
+// PK shape is consistent across Mesedi tables.
+func newAIAnalysisID() string {
+	return "ai_" + newAuditEventID()[len("audit_"):]
 }
 
 // buildFailureGroupAnalysisPrompt assembles the structured prompt

@@ -689,6 +689,15 @@ type Store interface {
 	CreateAnthropicCreditSnapshot(ctx context.Context, snap *AnthropicCreditSnapshot) error
 	GetLatestAnthropicCreditSnapshot(ctx context.Context) (*AnthropicCreditSnapshot, error)
 
+	// CreateAIAnalysis + ListAIAnalyses + GetAIAnalysesTotals power
+	// the per-call accounting surface (#199). One ai_analyses row
+	// is written per Anthropic call (NOT per failure_group), so
+	// re-runs preserve cost history. See store/ai_analyses.go for
+	// contracts.
+	CreateAIAnalysis(ctx context.Context, a *AIAnalysis) error
+	ListAIAnalyses(ctx context.Context, limit, offset int) ([]*AIAnalysis, error)
+	GetAIAnalysesTotals(ctx context.Context) (*AIAnalysesTotals, error)
+
 	// ListAIAnalysesUsageByProject returns one row per project with
 	// at least one AI root-cause analysis since the supplied time
 	// (#197 admin breakdown). Sorted by Count descending so the

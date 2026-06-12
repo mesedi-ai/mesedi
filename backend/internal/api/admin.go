@@ -176,6 +176,10 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	// #211 per-project breakdown of WHICH failure groups generated the
 	// count, surfaced when the admin expands a project row.
 	mux.HandleFunc("GET /admin/projects/{id}/ai-analyses-detail", h.HandleAdminProjectAIAnalysesDetail)
+	// #199 flat list of every analysis ever run + lifetime/month
+	// totals. Powers the founder cost-attribution surface.
+	mux.HandleFunc("GET /admin/ai-analyses", h.HandleAdminListAIAnalyses)
+	mux.HandleFunc("GET /admin/ai-analyses-totals", h.HandleAdminGetAIAnalysesTotals)
 	// #198 Anthropic credit balance + 7-day burn rate. GET returns
 	// the latest manually-entered balance + programmatic burn rate;
 	// POST accepts a new manually-entered balance snapshot.
@@ -1443,6 +1447,65 @@ func (h *Handlers) HandleAdminCreateAnthropicCreditSnapshot(w http.ResponseWrite
 // snapshots are low-volume admin-only writes.
 func newCreditSnapshotID() string {
 	return "credit_" + newAuditEventID()[len("audit_"):]
+}
+
+// --- #199 AI analyses flat list + lifetime totals -----------------
+
+// AdminListAIAnalysesResponse is the JSON body of
+// GET /admin/ai-analyses. One row per Anthropic call ever made by
+// the analyze handler. Sorted recent-first; paginated via limit +
+// offset query params.
+type AdminListAIAnalysesResponse struct {
+	OK       bool                 `json:"ok"`
+	Analyses []*store.AIAnalysis  `json:"analyses"`
+	Limit    int                  `json:"limit"`
+	Offset   int                  `json:"offset"`
+}
+
+// HandleAdminListAIAnalyses returns a flat cross-tenant list of
+// every analysis, newest first. Default limit 100 with a hard
+// ceiling of 500 so a runaway pagination loop on the frontend
+// can't pull a giant payload.
+func (h *Handlers) HandleAdminListAIAnalyses(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	offset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	analyses, err := h.Store.ListAIAnalyses(r.Context(), limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"list ai analyses: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, AdminListAIAnalysesResponse{
+		OK:       true,
+		Analyses: analyses,
+		Limit:    limit,
+		Offset:   offset,
+	})
+}
+
+// HandleAdminGetAIAnalysesTotals returns lifetime + this-month
+// summary stats for the founder tile at the top of /admin/ai-analyses.
+func (h *Handlers) HandleAdminGetAIAnalysesTotals(w http.ResponseWriter, r *http.Request) {
+	totals, err := h.Store.GetAIAnalysesTotals(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"ai analyses totals: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, totals)
 }
 
 // AdminProjectAIAnalysesDetailRow is one analyzed failure group on

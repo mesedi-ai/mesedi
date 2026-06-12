@@ -565,6 +565,11 @@ func main() {
 	// #211 per-project failure-group breakdown for the expanded row.
 	mux.Handle("GET /admin/projects/{id}/ai-analyses-detail", adminHandler)
 	mux.Handle("OPTIONS /admin/projects/{id}/ai-analyses-detail", adminHandler)
+	// #199 cross-tenant flat list + lifetime totals.
+	mux.Handle("GET /admin/ai-analyses", adminHandler)
+	mux.Handle("OPTIONS /admin/ai-analyses", adminHandler)
+	mux.Handle("GET /admin/ai-analyses-totals", adminHandler)
+	mux.Handle("OPTIONS /admin/ai-analyses-totals", adminHandler)
 	// #198 Anthropic credit + 7-day burn rate widget on /admin.
 	mux.Handle("GET /admin/anthropic-credit", adminHandler)
 	mux.Handle("POST /admin/anthropic-credit", adminHandler)
