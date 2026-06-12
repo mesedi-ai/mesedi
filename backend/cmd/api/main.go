@@ -89,6 +89,14 @@ type runtimeConfig struct {
 	// 5xx alert webhook URL (#130). When non-empty the request-log
 	// middleware POSTs an alert on every 5xx response.
 	AlertWebhookURL string
+	// SigninSecret guards POST /signin (#196), the server-to-server
+	// endpoint the dashboard server calls during the SSO callback +
+	// magic-link verify flows. Empty means the dashboard server
+	// CANNOT log existing customers in via SSO; the signup-only flow
+	// still works. Set MESEDI_SIGNIN_SECRET to a high-entropy random
+	// string (32+ bytes base64) on both the backend (Fly) and the
+	// dashboard server (Cloudflare Workers).
+	SigninSecret string
 }
 
 // bootstrapDevProject creates a default "dev" project and a fixed test
@@ -319,6 +327,17 @@ func main() {
 	}
 
 	handlers := api.New(logger, st, cfg.DashboardURL, stripeCfg, mailer)
+	// #196 — SSO + magic-link sign-in. The dashboard server calls
+	// POST /signin from its OAuth callback / magic-link verify
+	// routes; empty secret leaves /signin returning 503 so a
+	// misconfigured deploy fails loudly rather than letting random
+	// callers mint login keys.
+	handlers.SigninSecret = cfg.SigninSecret
+	if cfg.SigninSecret != "" {
+		logger.Info("signin endpoint enabled (#196)")
+	} else {
+		logger.Info("signin endpoint disabled (MESEDI_SIGNIN_SECRET unset; SSO login will 503)")
+	}
 
 	// Mesedi #22 — OpenTelemetry parallel emission. Initialize the
 	// global emitter from env (OTEL_EXPORTER_OTLP_ENDPOINT etc.).
@@ -455,6 +474,19 @@ func main() {
 	mux.Handle("GET /ui/", publicMux)
 	mux.Handle("POST /signup", signupHandler)
 	mux.Handle("OPTIONS /signup", signupHandler)
+	// #196 — POST /signin is a server-to-server endpoint guarded by
+	// MESEDI_SIGNIN_SECRET, registered on the same public mux so it
+	// bypasses the bearer-token auth chain (the dashboard server has
+	// no customer key when calling /signin).
+	mux.Handle("POST /signin", signupHandler)
+	mux.Handle("OPTIONS /signin", signupHandler)
+	// #196 commit 2 — magic-link routes. /start is browser-callable
+	// (rate-limited by IP, no secret). /verify is server-to-server
+	// (gated inside the handler by MESEDI_SIGNIN_SECRET).
+	mux.Handle("POST /magic-link/start", signupHandler)
+	mux.Handle("OPTIONS /magic-link/start", signupHandler)
+	mux.Handle("GET /magic-link/verify", signupHandler)
+	mux.Handle("OPTIONS /magic-link/verify", signupHandler)
 	mux.Handle("POST /executions", privateHandler)
 	mux.Handle("PATCH /executions/{id}", privateHandler)
 	mux.Handle("POST /events", privateHandler)
@@ -674,6 +706,7 @@ func loadConfig() runtimeConfig {
 		ResendAPIKey:    envString("RESEND_API_KEY", ""),
 		ResendFrom:      envString("MESEDI_MAIL_FROM", "Mesedi <onboarding@resend.dev>"),
 		AlertWebhookURL: envString("MESEDI_ALERT_WEBHOOK_URL", ""),
+		SigninSecret:    envString("MESEDI_SIGNIN_SECRET", ""),
 	}
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "TCP port for the HTTP API")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log verbosity: debug | info | warn | error")

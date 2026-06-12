@@ -307,6 +307,73 @@ func (s *SQLiteStore) GetProject(ctx context.Context, projectID string) (*Projec
 	return p, nil
 }
 
+// GetMostRecentProjectByOwnerEmail resolves an email back to the
+// customer's newest project. Used by the #196 /signin handler after
+// SSO/magic-link proves email ownership. See store.go interface for
+// rationale; case-insensitive matching mirrors the signup handler
+// which lowercases at write time.
+func (s *SQLiteStore) GetMostRecentProjectByOwnerEmail(ctx context.Context, email string) (*Project, error) {
+	if email == "" {
+		return nil, ErrNotFound
+	}
+	p := &Project{}
+	var owner, dbEmail, stripeCust, stripeSub sql.NullString
+	var periodStart, periodEnd sql.NullInt64
+	var grantExpires, tierExpires sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT project_id, name, owner_user_id, owner_email, created_at,
+		       tier, stripe_customer_id, stripe_subscription_id,
+		       current_period_start, current_period_end, executions_this_period,
+		       granted_executions, granted_executions_expires_at, tier_expires_at,
+		       billing_cap_usd, card_on_file
+		FROM projects
+		WHERE LOWER(owner_email) = LOWER(?)
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, email).Scan(
+		&p.ProjectID, &p.Name, &owner, &dbEmail, &p.CreatedAt,
+		&p.Tier, &stripeCust, &stripeSub,
+		&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
+		&p.GrantedExecutions, &grantExpires, &tierExpires,
+		&p.BillingCapUSD, &p.CardOnFile,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if owner.Valid {
+		p.OwnerUserID = owner.String
+	}
+	if dbEmail.Valid {
+		p.OwnerEmail = dbEmail.String
+	}
+	if stripeCust.Valid {
+		p.StripeCustomerID = stripeCust.String
+	}
+	if stripeSub.Valid {
+		p.StripeSubscriptionID = stripeSub.String
+	}
+	if periodStart.Valid {
+		t := time.Unix(periodStart.Int64, 0).UTC()
+		p.CurrentPeriodStart = &t
+	}
+	if periodEnd.Valid {
+		t := time.Unix(periodEnd.Int64, 0).UTC()
+		p.CurrentPeriodEnd = &t
+	}
+	if grantExpires.Valid {
+		t := time.Unix(grantExpires.Int64, 0).UTC()
+		p.GrantedExecutionsExpiresAt = &t
+	}
+	if tierExpires.Valid {
+		t := time.Unix(tierExpires.Int64, 0).UTC()
+		p.TierExpiresAt = &t
+	}
+	return p, nil
+}
+
 // ListProjectsByOwner returns every project belonging to ownerUserID,
 // ordered created_at ASC. v0.1 of the org-rollup feature (#259) uses
 // owner_user_id as the tenant boundary, so this is THE query that
@@ -825,10 +892,18 @@ func (s *SQLiteStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 	if scope == "" {
 		scope = APIKeyScopeCustomer
 	}
+	// source defaults to "manual" (long-lived, customer-visible) to
+	// match the migration 028 default. Callers that need a different
+	// classification (signup flow, /signin from OAuth callback, magic
+	// link verify) set k.Source explicitly before calling this.
+	source := k.Source
+	if source == "" {
+		source = APIKeySourceManual
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt)
+		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at, source)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt, source)
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
 	}
@@ -840,9 +915,9 @@ func (s *SQLiteStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*API
 	var name, userID sql.NullString
 	var lastUsed sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at
+		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at, source
 		FROM api_keys WHERE key_hash = ?
-	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt)
+	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt, &k.Source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -879,10 +954,17 @@ func (s *SQLiteStore) ListAPIKeysForProject(
 	ctx context.Context,
 	projectID string,
 ) ([]*APIKey, error) {
+	// Filter session-grade keys (sso_login, magic_link) out of the
+	// customer-facing listing. They are minted invisibly by the SSO
+	// callback / magic-link verify routes and the customer never
+	// consciously created them; surfacing them in /admin/api-keys
+	// would clutter the list and the "revoke" affordance would
+	// silently log the customer out (#196).
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source
 		FROM api_keys
 		WHERE project_id = ?
+		  AND source NOT IN ('sso_login', 'magic_link')
 		ORDER BY created_at DESC
 	`, projectID)
 	if err != nil {
@@ -896,10 +978,16 @@ func (s *SQLiteStore) ListAPIKeysForProject(
 // Admin-only: used by the /admin/api-keys page to surface keys across
 // every project (including the synthetic _admin project that holds
 // admin-scope keys). key_hash is intentionally not selected.
+//
+// Session-grade keys (sso_login, magic_link) are excluded from this
+// listing for the same reason ListAPIKeysForProject excludes them:
+// they are invisible session credentials, not credentials the
+// operator should be reasoning about in the admin UI.
 func (s *SQLiteStore) ListAllAPIKeys(ctx context.Context) ([]*APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source
 		FROM api_keys
+		WHERE source NOT IN ('sso_login', 'magic_link')
 		ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -924,7 +1012,7 @@ func scanAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 		)
 		if err := rows.Scan(
 			&k.KeyID, &k.ProjectID, &k.KeyPrefix,
-			&name, &createdAt, &lastUsedAt, &k.Scope, &k.ExpiresAt,
+			&name, &createdAt, &lastUsedAt, &k.Scope, &k.ExpiresAt, &k.Source,
 		); err != nil {
 			return nil, err
 		}

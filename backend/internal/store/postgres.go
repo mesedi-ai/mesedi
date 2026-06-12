@@ -246,6 +246,72 @@ func (s *PostgresStore) GetProject(ctx context.Context, projectID string) (*Proj
 	return p, nil
 }
 
+// GetMostRecentProjectByOwnerEmail is the Postgres counterpart to
+// SQLiteStore.GetMostRecentProjectByOwnerEmail. See store.go for the
+// contract -- used by #196 /signin after SSO/magic-link proves email
+// ownership.
+func (s *PostgresStore) GetMostRecentProjectByOwnerEmail(ctx context.Context, email string) (*Project, error) {
+	if email == "" {
+		return nil, ErrNotFound
+	}
+	p := &Project{}
+	var owner, dbEmail, stripeCust, stripeSub sql.NullString
+	var periodStart, periodEnd sql.NullInt64
+	var grantExpires, tierExpires sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT project_id, name, owner_user_id, owner_email, created_at,
+		       tier, stripe_customer_id, stripe_subscription_id,
+		       current_period_start, current_period_end, executions_this_period,
+		       granted_executions, granted_executions_expires_at, tier_expires_at,
+		       billing_cap_usd, card_on_file
+		FROM projects
+		WHERE LOWER(owner_email) = LOWER($1)
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, email).Scan(
+		&p.ProjectID, &p.Name, &owner, &dbEmail, &p.CreatedAt,
+		&p.Tier, &stripeCust, &stripeSub,
+		&periodStart, &periodEnd, &p.ExecutionsThisPeriod,
+		&p.GrantedExecutions, &grantExpires, &tierExpires,
+		&p.BillingCapUSD, &p.CardOnFile,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if owner.Valid {
+		p.OwnerUserID = owner.String
+	}
+	if dbEmail.Valid {
+		p.OwnerEmail = dbEmail.String
+	}
+	if stripeCust.Valid {
+		p.StripeCustomerID = stripeCust.String
+	}
+	if stripeSub.Valid {
+		p.StripeSubscriptionID = stripeSub.String
+	}
+	if periodStart.Valid {
+		t := time.Unix(periodStart.Int64, 0).UTC()
+		p.CurrentPeriodStart = &t
+	}
+	if periodEnd.Valid {
+		t := time.Unix(periodEnd.Int64, 0).UTC()
+		p.CurrentPeriodEnd = &t
+	}
+	if grantExpires.Valid {
+		t := time.Unix(grantExpires.Int64, 0).UTC()
+		p.GrantedExecutionsExpiresAt = &t
+	}
+	if tierExpires.Valid {
+		t := time.Unix(tierExpires.Int64, 0).UTC()
+		p.TierExpiresAt = &t
+	}
+	return p, nil
+}
+
 // ListProjectsByOwner is the Postgres counterpart to
 // SQLiteStore.ListProjectsByOwner. See that method's doc comment for
 // the contract and the tenant-model rationale (#259).
@@ -661,10 +727,14 @@ func (s *PostgresStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 	if scope == "" {
 		scope = APIKeyScopeCustomer
 	}
+	source := k.Source
+	if source == "" {
+		source = APIKeySourceManual
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt)
+		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at, source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt, source)
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
 	}
@@ -676,9 +746,9 @@ func (s *PostgresStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*A
 	var name, userID sql.NullString
 	var lastUsed sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at
+		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at, source
 		FROM api_keys WHERE key_hash = $1
-	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt)
+	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt, &k.Source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -707,10 +777,13 @@ func (s *PostgresStore) TouchAPIKey(ctx context.Context, keyID string) error {
 }
 
 func (s *PostgresStore) ListAPIKeysForProject(ctx context.Context, projectID string) ([]*APIKey, error) {
+	// Filter session-grade keys (sso_login, magic_link) out of the
+	// customer-facing listing. See sqlite.go counterpart.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source
 		FROM api_keys
 		WHERE project_id = $1
+		  AND source NOT IN ('sso_login', 'magic_link')
 		ORDER BY created_at DESC
 	`, projectID)
 	if err != nil {
@@ -721,11 +794,13 @@ func (s *PostgresStore) ListAPIKeysForProject(ctx context.Context, projectID str
 }
 
 // ListAllAPIKeys returns every API key in the system, NEWEST first.
-// Admin-only. See sqlite.go counterpart for full docs.
+// Admin-only. See sqlite.go counterpart for full docs (session-grade
+// keys are filtered out for the same reason there).
 func (s *PostgresStore) ListAllAPIKeys(ctx context.Context) ([]*APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source
 		FROM api_keys
+		WHERE source NOT IN ('sso_login', 'magic_link')
 		ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -748,7 +823,7 @@ func scanPostgresAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 		)
 		if err := rows.Scan(
 			&k.KeyID, &k.ProjectID, &k.KeyPrefix,
-			&name, &k.CreatedAt, &lastUsedAt, &k.Scope, &k.ExpiresAt,
+			&name, &k.CreatedAt, &lastUsedAt, &k.Scope, &k.ExpiresAt, &k.Source,
 		); err != nil {
 			return nil, err
 		}

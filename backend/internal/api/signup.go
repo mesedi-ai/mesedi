@@ -226,6 +226,11 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		// user-id is the convention until then -- matches the
 		// invite-accept flow and bootstrapOrgForProject's admin row.
 		UserID: email,
+		// Source tags this key as the first one minted at signup. It
+		// is long-lived (no expires_at) and customer-visible in
+		// /admin/api-keys, distinct from session-grade keys minted
+		// later by SSO login or magic-link verify (#196).
+		Source: store.APIKeySourceSignup,
 	}
 	if err := h.Store.CreateAPIKey(r.Context(), keyRecord); err != nil {
 		h.Logger.Error("signup: persist key failed", "error", err.Error(), "project_id", projectID)

@@ -247,6 +247,13 @@ type APIKey struct {
 	// rejects an arriving request past ExpiresAt identically to a
 	// revoked / missing key.
 	ExpiresAt string `json:"expires_at,omitempty"`
+	// Source records HOW this key was minted. Added by migration 028
+	// to discriminate long-lived "customer-visible" credentials from
+	// short-lived "session-grade" credentials minted by SSO login and
+	// magic-link sign-in (#196). Listings of customer-facing keys
+	// filter session-grade rows OUT so the /admin/api-keys page only
+	// surfaces keys the user consciously created.
+	Source string `json:"source,omitempty"`
 }
 
 // APIKeyScopeCustomer / APIKeyScopeAdmin are the only legal values of
@@ -256,6 +263,40 @@ const (
 	APIKeyScopeCustomer = "customer"
 	APIKeyScopeAdmin    = "admin"
 )
+
+// APIKeySource* enumerate the four legal values of APIKey.Source. The
+// "manual" default covers pre-#196 keys that predate the source column
+// (every backfilled row is treated as long-lived); "signup" tags the
+// first key minted on POST /signup; "sso_login" and "magic_link" tag
+// short-lived session credentials. The session-grade values are
+// filtered out of customer-facing listings (see
+// IsAPIKeySourceSessionGrade) and out of admin listings by default.
+const (
+	APIKeySourceManual     = "manual"
+	APIKeySourceSignup     = "signup"
+	APIKeySourceSSOLogin   = "sso_login"
+	APIKeySourceMagicLink  = "magic_link"
+)
+
+// IsAPIKeySourceSessionGrade reports whether the given source value
+// identifies a key that should be HIDDEN from customer-facing key
+// lists. Session-grade keys are minted by /signin (SSO callback) and
+// magic-link verify; they expire after a short window (7 days from
+// mint) and exist purely to keep the dashboard signed in. They must
+// never surface in the /admin/api-keys UI because (a) the customer
+// did not consciously create them and (b) clicking "revoke" on one
+// would silently log them out, which is a confusing UX.
+func IsAPIKeySourceSessionGrade(source string) bool {
+	return source == APIKeySourceSSOLogin || source == APIKeySourceMagicLink
+}
+
+// APIKeyLoginExpiryDays is the lifetime (in days) of session-grade
+// keys minted by SSO login and magic-link verify. Chosen short so a
+// leaked localStorage entry stops being a valid bearer quickly; long
+// enough that a customer signing in on Monday does not get bounced
+// out before Friday. Aligned with industry-standard SaaS dashboard
+// session lifetimes.
+const APIKeyLoginExpiryDays = 7
 
 // APIKeyAdminProjectID is the project_id all admin-scope keys share.
 // Auto-bootstrapped at startup so the projects FK on api_keys still
@@ -674,6 +715,13 @@ type Store interface {
 	CreateAuditEvent(ctx context.Context, e *AuditEvent) error
 	ListAuditEventsByProject(ctx context.Context, projectID string, limit int) ([]*AuditEvent, error)
 
+	// CreateMagicLinkToken + GetMagicLinkTokenByHash + MarkMagicLinkTokenUsed
+	// back the magic-link sign-in feature (#196 commit 2). See
+	// store/magic_link_tokens.go for contracts.
+	CreateMagicLinkToken(ctx context.Context, t *MagicLinkToken) error
+	GetMagicLinkTokenByHash(ctx context.Context, tokenHash string) (*MagicLinkToken, error)
+	MarkMagicLinkTokenUsed(ctx context.Context, tokenID string) error
+
 	// ListAnalyzedFailureGroupsByProject powers the per-project
 	// failure-group breakdown on the admin AI analyses page (#211).
 	// Pass limit=0 for the default cap (200 rows).
@@ -779,6 +827,23 @@ type Store interface {
 	// to the owning project for webhook event handling. Returns
 	// ErrNotFound if no project is associated with that customer.
 	GetProjectByStripeCustomerID(ctx context.Context, stripeCustomerID string) (*Project, error)
+	// GetMostRecentProjectByOwnerEmail resolves a verified email
+	// address back to the customer's most recently-created project.
+	// Used by the /signin handler (#196) after SSO or magic-link
+	// proves email ownership; the dashboard server hands us the
+	// email, we hand back the project the new session-grade key will
+	// belong to. Returns ErrNotFound when the email has never signed
+	// up (callers surface a "no account for that email" UX).
+	//
+	// "Most recent" matters because the v0.1 schema does not enforce
+	// email uniqueness on projects (a user could call POST /signup
+	// twice with the same email and get two projects). Picking the
+	// latest matches the customer's mental model of "log me into my
+	// dashboard" -- the most recent project is the one they almost
+	// certainly mean. When session-cookie auth ships in #213 this
+	// becomes "list all projects, let the user pick", but for the
+	// API-key-as-session expedient one project per signin is fine.
+	GetMostRecentProjectByOwnerEmail(ctx context.Context, email string) (*Project, error)
 	// UpdateProjectBillingCap sets the project's monthly overage spend
 	// cap. Customers configure this from /app/billing to bound their
 	// monthly exposure on Hobby + Team tiers (#187). Pass 0 to clear

@@ -96,6 +96,15 @@ type Handlers struct {
 	// dashboard; the handler then responds with a "not
 	// configured" payload rather than failing the request.
 	AnthropicAdmin *anthropic.AdminClient
+	// SigninSecret is the server-to-server shared secret that
+	// guards POST /signin (#196). The dashboard server (Cloudflare
+	// Workers) calls /signin from its OAuth callback and magic-link
+	// verify routes after it has already proved email ownership; the
+	// secret keeps the browser from calling /signin directly with an
+	// arbitrary email. Loaded from MESEDI_SIGNIN_SECRET. Empty
+	// disables the endpoint entirely (returns 503), which is the
+	// safe default in local dev where SSO is not configured.
+	SigninSecret string
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
@@ -148,6 +157,19 @@ func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg Stri
 // rate limiter.
 func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /signup", h.HandleSignup)
+	// Server-to-server signin endpoint (#196). Public from the HTTP
+	// layer's perspective so the dashboard server (Cloudflare Workers)
+	// can call it cross-origin during the SSO callback / magic-link
+	// verify flows; authenticity is verified inside the handler via
+	// the X-Mesedi-Signin-Secret header against the configured shared
+	// secret. See signin.go's file-level doc comment for the full
+	// trust model.
+	mux.HandleFunc("POST /signin", h.HandleSignin)
+	// Magic-link sign-in (#196 commit 2). /start mints a token + emails;
+	// /verify is server-to-server (dashboard calls it from its handoff
+	// route after the customer clicks the email link).
+	mux.HandleFunc("POST /magic-link/start", h.HandleMagicLinkStart)
+	mux.HandleFunc("GET /magic-link/verify", h.HandleMagicLinkVerify)
 	// Stripe webhook receiver. Public because Stripe POSTs server-
 	// to-server with no bearer; authenticity is verified inside the
 	// handler via the Stripe-Signature header against the configured
