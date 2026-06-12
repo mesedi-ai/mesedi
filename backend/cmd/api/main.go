@@ -552,6 +552,9 @@ func main() {
 	mux.Handle("OPTIONS /admin/storage", adminHandler)
 	mux.Handle("GET /admin/ai-analyses-by-project", adminHandler)
 	mux.Handle("OPTIONS /admin/ai-analyses-by-project", adminHandler)
+	// #211 per-project failure-group breakdown for the expanded row.
+	mux.Handle("GET /admin/projects/{id}/ai-analyses-detail", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}/ai-analyses-detail", adminHandler)
 	mux.Handle("GET /admin/abuse", adminHandler)
 	mux.Handle("OPTIONS /admin/abuse", adminHandler)
 	mux.Handle("POST /admin/abuse/{id}/resolve", adminHandler)

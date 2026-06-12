@@ -3813,6 +3813,75 @@ func (s *SQLiteStore) ListAIAnalysesUsageByProject(
 	return out, rows.Err()
 }
 
+// ListAnalyzedFailureGroupsByProject returns one row per failure
+// group on the given project that has been analyzed (analyzed_at
+// IS NOT NULL) on or after `since`. Used by the admin AI analyses
+// breakdown (#211) so the founder can click a project row and see
+// WHICH failure groups generated the count, not just the total.
+// Ordered analyzed_at DESC so the most recent analysis lands at
+// the top. Default limit 200 covers a heavy month even for the
+// largest projected customer; callers can pass 0 to use the default.
+func (s *SQLiteStore) ListAnalyzedFailureGroupsByProject(
+	ctx context.Context, projectID string, since time.Time, limit int,
+) ([]*FailureGroup, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT group_id, project_id, failure_class, signature,
+		       first_seen, last_seen, event_count, affected_executions,
+		       cost_wasted_usd, sample_execution_id,
+		       analysis_markdown, analyzed_at, analysis_model
+		FROM failure_groups
+		WHERE project_id = ?
+		  AND analyzed_at IS NOT NULL
+		  AND analyzed_at >= ?
+		ORDER BY analyzed_at DESC
+		LIMIT ?
+	`, projectID, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list analyzed failure groups: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*FailureGroup, 0, 8)
+	for rows.Next() {
+		g := &FailureGroup{}
+		var cost sql.NullFloat64
+		var sample, analysisMD, analysisModel sql.NullString
+		var analyzedAt sql.NullTime
+		if err := rows.Scan(
+			&g.GroupID, &g.ProjectID, &g.FailureClass, &g.Signature,
+			&g.FirstSeen, &g.LastSeen, &g.EventCount, &g.AffectedExecutions,
+			&cost, &sample,
+			&analysisMD, &analyzedAt, &analysisModel,
+		); err != nil {
+			return nil, fmt.Errorf("scan analyzed failure group: %w", err)
+		}
+		if cost.Valid {
+			v := cost.Float64
+			g.CostWastedUSD = &v
+		}
+		if sample.Valid {
+			g.SampleExecutionID = sample.String
+		}
+		if analysisMD.Valid {
+			v := analysisMD.String
+			g.AnalysisMarkdown = &v
+		}
+		if analyzedAt.Valid {
+			v := analyzedAt.Time
+			g.AnalyzedAt = &v
+		}
+		if analysisModel.Valid {
+			v := analysisModel.String
+			g.AnalysisModel = &v
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // CountAIAnalysesByTenantSince counts failure_groups summed across
 // every project owned by tenantID whose analyzed_at >= since. This
 // is the canonical Team-tier rate-limit query because the cap is

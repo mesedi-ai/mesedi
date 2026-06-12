@@ -669,6 +669,13 @@ type Store interface {
 	CreateAuditEvent(ctx context.Context, e *AuditEvent) error
 	ListAuditEventsByProject(ctx context.Context, projectID string, limit int) ([]*AuditEvent, error)
 
+	// ListAnalyzedFailureGroupsByProject powers the per-project
+	// failure-group breakdown on the admin AI analyses page (#211).
+	// Pass limit=0 for the default cap (200 rows).
+	ListAnalyzedFailureGroupsByProject(
+		ctx context.Context, projectID string, since time.Time, limit int,
+	) ([]*FailureGroup, error)
+
 	// ListAIAnalysesUsageByProject returns one row per project with
 	// at least one AI root-cause analysis since the supplied time
 	// (#197 admin breakdown). Sorted by Count descending so the

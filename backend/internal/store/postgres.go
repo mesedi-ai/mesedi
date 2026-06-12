@@ -2875,6 +2875,69 @@ func (s *PostgresStore) ListAIAnalysesUsageByProject(
 	return out, rows.Err()
 }
 
+// ListAnalyzedFailureGroupsByProject is the Postgres twin of the
+// SQLite method (#211). See sqlite.go for the contract.
+func (s *PostgresStore) ListAnalyzedFailureGroupsByProject(
+	ctx context.Context, projectID string, since time.Time, limit int,
+) ([]*FailureGroup, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT group_id, project_id, failure_class, signature,
+		       first_seen, last_seen, event_count, affected_executions,
+		       cost_wasted_usd, sample_execution_id,
+		       analysis_markdown, analyzed_at, analysis_model
+		FROM failure_groups
+		WHERE project_id = $1
+		  AND analyzed_at IS NOT NULL
+		  AND analyzed_at >= $2
+		ORDER BY analyzed_at DESC
+		LIMIT $3
+	`, projectID, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list analyzed failure groups (postgres): %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*FailureGroup, 0, 8)
+	for rows.Next() {
+		g := &FailureGroup{}
+		var cost sql.NullFloat64
+		var sample, analysisMD, analysisModel sql.NullString
+		var analyzedAt sql.NullTime
+		if err := rows.Scan(
+			&g.GroupID, &g.ProjectID, &g.FailureClass, &g.Signature,
+			&g.FirstSeen, &g.LastSeen, &g.EventCount, &g.AffectedExecutions,
+			&cost, &sample,
+			&analysisMD, &analyzedAt, &analysisModel,
+		); err != nil {
+			return nil, fmt.Errorf("scan analyzed failure group: %w", err)
+		}
+		if cost.Valid {
+			v := cost.Float64
+			g.CostWastedUSD = &v
+		}
+		if sample.Valid {
+			g.SampleExecutionID = sample.String
+		}
+		if analysisMD.Valid {
+			v := analysisMD.String
+			g.AnalysisMarkdown = &v
+		}
+		if analyzedAt.Valid {
+			v := analyzedAt.Time
+			g.AnalyzedAt = &v
+		}
+		if analysisModel.Valid {
+			v := analysisModel.String
+			g.AnalysisModel = &v
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // CountAIAnalysesByTenantSince counts failure_groups summed across
 // every project owned by tenantID whose analyzed_at >= since.
 // Canonical Team-tier rate-limit query. Postgres twin of the

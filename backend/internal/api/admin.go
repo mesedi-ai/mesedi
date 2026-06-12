@@ -171,6 +171,9 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /admin/projects/{id}", h.HandleAdminDeleteProject)
 	mux.HandleFunc("DELETE /admin/projects/{id}/failure-groups", h.HandleAdminResetFailureGroups)
 	mux.HandleFunc("GET /admin/ai-analyses-by-project", h.HandleAdminAIAnalysesByProject)
+	// #211 per-project breakdown of WHICH failure groups generated the
+	// count, surfaced when the admin expands a project row.
+	mux.HandleFunc("GET /admin/projects/{id}/ai-analyses-detail", h.HandleAdminProjectAIAnalysesDetail)
 	mux.HandleFunc("GET /admin/storage", h.HandleAdminStorage)
 	mux.HandleFunc("GET /admin/abuse", h.HandleAdminListAbuseSignals)
 	mux.HandleFunc("POST /admin/abuse/{id}/resolve", h.HandleAdminResolveAbuseSignal)
@@ -1163,4 +1166,89 @@ func (h *Handlers) HandleAdminAIAnalysesByProject(w http.ResponseWriter, r *http
 func startOfCurrentMonthUTC() time.Time {
 	now := time.Now().UTC()
 	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+// AdminProjectAIAnalysesDetailRow is one analyzed failure group on
+// the per-project breakdown surface (#211). Trims store.FailureGroup
+// down to the columns the admin actually needs to spot heavy users
+// and reconcile Anthropic spend.
+type AdminProjectAIAnalysesDetailRow struct {
+	GroupID            string  `json:"group_id"`
+	FailureClass       string  `json:"failure_class"`
+	Signature          string  `json:"signature"`
+	EventCount         int     `json:"event_count"`
+	AffectedExecutions int     `json:"affected_executions"`
+	AnalyzedAt         string  `json:"analyzed_at"`
+	AnalysisModel      string  `json:"analysis_model,omitempty"`
+	EstimatedCostUSD   float64 `json:"estimated_cost_usd"`
+	LastSeen           string  `json:"last_seen"`
+}
+
+// AdminProjectAIAnalysesDetailResponse is the JSON body of
+// GET /admin/projects/{id}/ai-analyses-detail. Surfaces the per-group
+// breakdown plus this-project's aggregate totals so the dashboard
+// can render an inset summary inside the expanded row without a
+// second round trip.
+type AdminProjectAIAnalysesDetailResponse struct {
+	ProjectID             string                            `json:"project_id"`
+	Since                 string                            `json:"since"`
+	TotalCount            int                               `json:"total_count"`
+	TotalEstimatedCostUSD float64                           `json:"total_estimated_cost_usd"`
+	Groups                []AdminProjectAIAnalysesDetailRow `json:"groups"`
+}
+
+// HandleAdminProjectAIAnalysesDetail returns the analyzed failure
+// groups for one project since the given window (#211). The default
+// window matches the parent admin AI-analyses page (start of current
+// UTC month) so the expanded row's totals add up to the table row.
+func (h *Handlers) HandleAdminProjectAIAnalysesDetail(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "project_id path parameter required")
+		return
+	}
+	since := startOfCurrentMonthUTC()
+	if raw := strings.TrimSpace(r.URL.Query().Get("since")); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest,
+				"since must be RFC3339 (e.g., 2026-06-01T00:00:00Z): "+err.Error())
+			return
+		}
+		since = t.UTC()
+	}
+
+	groups, err := h.Store.ListAnalyzedFailureGroupsByProject(r.Context(), projectID, since, 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"list analyzed failure groups: "+err.Error())
+		return
+	}
+
+	out := AdminProjectAIAnalysesDetailResponse{
+		ProjectID: projectID,
+		Since:     since.Format(time.RFC3339),
+		Groups:    make([]AdminProjectAIAnalysesDetailRow, 0, len(groups)),
+	}
+	for _, g := range groups {
+		row := AdminProjectAIAnalysesDetailRow{
+			GroupID:            g.GroupID,
+			FailureClass:       g.FailureClass,
+			Signature:          g.Signature,
+			EventCount:         g.EventCount,
+			AffectedExecutions: g.AffectedExecutions,
+			EstimatedCostUSD:   adminHaikuCostPerAnalysisUSD,
+			LastSeen:           g.LastSeen.UTC().Format(time.RFC3339),
+		}
+		if g.AnalyzedAt != nil {
+			row.AnalyzedAt = g.AnalyzedAt.UTC().Format(time.RFC3339)
+		}
+		if g.AnalysisModel != nil {
+			row.AnalysisModel = *g.AnalysisModel
+		}
+		out.Groups = append(out.Groups, row)
+		out.TotalCount++
+		out.TotalEstimatedCostUSD += adminHaikuCostPerAnalysisUSD
+	}
+	writeJSON(w, http.StatusOK, out)
 }
