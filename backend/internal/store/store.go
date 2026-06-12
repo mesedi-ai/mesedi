@@ -197,12 +197,17 @@ type ProjectStorage struct {
 // AI usage in the current window. The view is computed live (no
 // rollup table) since AI analyses are sparse and the join is small.
 type AIAnalysesByProjectRow struct {
-	ProjectID   string `json:"project_id"`
-	Name        string `json:"name"`
-	OwnerEmail  string `json:"owner_email,omitempty"`
-	Tier        string `json:"tier"`
-	TenantID    string `json:"tenant_id,omitempty"`
-	Count       int    `json:"count"`
+	ProjectID  string `json:"project_id"`
+	Name       string `json:"name"`
+	OwnerEmail string `json:"owner_email,omitempty"`
+	Tier       string `json:"tier"`
+	TenantID   string `json:"tenant_id,omitempty"`
+	Count      int    `json:"count"`
+	// FailureClasses is the distinct list of failure_class slugs the
+	// project ran analyses against in this window (#211 filter
+	// chips). Order is whatever the DB returned; the dashboard sorts
+	// alphabetically before rendering. Empty when no analyses ran.
+	FailureClasses []string `json:"failure_classes,omitempty"`
 }
 
 // DailyExecutionCount is one bucket of an execution-usage time series.

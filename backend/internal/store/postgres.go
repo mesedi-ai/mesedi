@@ -2843,8 +2843,14 @@ func (s *PostgresStore) CountAIAnalysesSincePeriodStart(
 func (s *PostgresStore) ListAIAnalysesUsageByProject(
 	ctx context.Context, since time.Time,
 ) ([]*AIAnalysesByProjectRow, error) {
+	// #211 filter chips: string_agg(DISTINCT ...) is the Postgres
+	// twin of SQLite's group_concat(DISTINCT). Returns the comma-
+	// joined list of failure_class slugs; splitFailureClassesCSV
+	// parses it into a deduped slice.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT fg.project_id, p.name, p.owner_email, p.tier, p.tenant_id, COUNT(*) AS n
+		SELECT fg.project_id, p.name, p.owner_email, p.tier, p.tenant_id,
+		       COUNT(*) AS n,
+		       string_agg(DISTINCT fg.failure_class, ',') AS classes
 		FROM failure_groups fg
 		JOIN projects p ON p.project_id = fg.project_id
 		WHERE fg.analyzed_at IS NOT NULL
@@ -2860,8 +2866,8 @@ func (s *PostgresStore) ListAIAnalysesUsageByProject(
 	out := make([]*AIAnalysesByProjectRow, 0, 8)
 	for rows.Next() {
 		r := &AIAnalysesByProjectRow{}
-		var email, tenantID sql.NullString
-		if err := rows.Scan(&r.ProjectID, &r.Name, &email, &r.Tier, &tenantID, &r.Count); err != nil {
+		var email, tenantID, classes sql.NullString
+		if err := rows.Scan(&r.ProjectID, &r.Name, &email, &r.Tier, &tenantID, &r.Count, &classes); err != nil {
 			return nil, fmt.Errorf("scan ai analyses by project row: %w", err)
 		}
 		if email.Valid {
@@ -2870,6 +2876,7 @@ func (s *PostgresStore) ListAIAnalysesUsageByProject(
 		if tenantID.Valid {
 			r.TenantID = tenantID.String
 		}
+		r.FailureClasses = splitFailureClassesCSV(classes)
 		out = append(out, r)
 	}
 	return out, rows.Err()

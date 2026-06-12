@@ -3781,8 +3781,15 @@ func (s *SQLiteStore) CountAIAnalysesSincePeriodStart(
 func (s *SQLiteStore) ListAIAnalysesUsageByProject(
 	ctx context.Context, since time.Time,
 ) ([]*AIAnalysesByProjectRow, error) {
+	// #211 filter chips: group_concat(DISTINCT) returns the comma-
+	// joined list of failure_class slugs this project ran analyses
+	// against in the window. Empty string when none (shouldn't
+	// happen given the WHERE clause but defensive). Frontend splits
+	// the CSV.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT fg.project_id, p.name, p.owner_email, p.tier, p.tenant_id, COUNT(*) AS n
+		SELECT fg.project_id, p.name, p.owner_email, p.tier, p.tenant_id,
+		       COUNT(*) AS n,
+		       group_concat(DISTINCT fg.failure_class) AS classes
 		FROM failure_groups fg
 		JOIN projects p ON p.project_id = fg.project_id
 		WHERE fg.analyzed_at IS NOT NULL
@@ -3798,8 +3805,8 @@ func (s *SQLiteStore) ListAIAnalysesUsageByProject(
 	out := make([]*AIAnalysesByProjectRow, 0, 8)
 	for rows.Next() {
 		r := &AIAnalysesByProjectRow{}
-		var email, tenantID sql.NullString
-		if err := rows.Scan(&r.ProjectID, &r.Name, &email, &r.Tier, &tenantID, &r.Count); err != nil {
+		var email, tenantID, classes sql.NullString
+		if err := rows.Scan(&r.ProjectID, &r.Name, &email, &r.Tier, &tenantID, &r.Count, &classes); err != nil {
 			return nil, fmt.Errorf("scan ai analyses by project row: %w", err)
 		}
 		if email.Valid {
@@ -3808,9 +3815,35 @@ func (s *SQLiteStore) ListAIAnalysesUsageByProject(
 		if tenantID.Valid {
 			r.TenantID = tenantID.String
 		}
+		r.FailureClasses = splitFailureClassesCSV(classes)
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// splitFailureClassesCSV parses the comma-delimited string from
+// group_concat / string_agg into a deduped + non-empty slice. Same
+// helper used by both sqlite + postgres so the slice contract is
+// identical regardless of driver.
+func splitFailureClassesCSV(s sql.NullString) []string {
+	if !s.Valid || s.String == "" {
+		return nil
+	}
+	parts := strings.Split(s.String, ",")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
 }
 
 // ListAnalyzedFailureGroupsByProject returns one row per failure

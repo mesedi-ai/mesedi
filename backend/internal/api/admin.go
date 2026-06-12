@@ -1094,13 +1094,17 @@ const adminHaikuCostPerAnalysisUSD = 0.03
 // estimated Anthropic cost so the dashboard can render a single
 // table without extra math.
 type AdminAIAnalysesByProjectRow struct {
-	ProjectID         string  `json:"project_id"`
-	Name              string  `json:"name"`
-	OwnerEmail        string  `json:"owner_email,omitempty"`
-	Tier              string  `json:"tier"`
-	TenantID          string  `json:"tenant_id,omitempty"`
-	Count             int     `json:"count"`
-	EstimatedCostUSD  float64 `json:"estimated_cost_usd"`
+	ProjectID        string   `json:"project_id"`
+	Name             string   `json:"name"`
+	OwnerEmail       string   `json:"owner_email,omitempty"`
+	Tier             string   `json:"tier"`
+	TenantID         string   `json:"tenant_id,omitempty"`
+	Count            int      `json:"count"`
+	EstimatedCostUSD float64  `json:"estimated_cost_usd"`
+	// FailureClasses powers the per-row chip filter on the admin
+	// dashboard (#211). Distinct failure_class slugs the project
+	// ran analyses against during this window. Empty omitted.
+	FailureClasses []string `json:"failure_classes,omitempty"`
 }
 
 // AdminAIAnalysesByProjectResponse is the JSON body of
@@ -1152,6 +1156,7 @@ func (h *Handlers) HandleAdminAIAnalysesByProject(w http.ResponseWriter, r *http
 			TenantID:         r.TenantID,
 			Count:            r.Count,
 			EstimatedCostUSD: est,
+			FailureClasses:   r.FailureClasses,
 		})
 		out.TotalCount += r.Count
 		out.TotalEstimatedCostUSD += est
