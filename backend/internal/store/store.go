@@ -662,6 +662,13 @@ type Store interface {
 	// existing expiration regardless of whether delta is positive or
 	// negative.
 	AddGrantedExecutions(ctx context.Context, projectID string, delta int64, expiresAt *time.Time) error
+
+	// CreateAuditEvent + ListAuditEventsByProject power the Cloud
+	// Team audit-log feature (#207 v1). See store/audit_events.go
+	// for contracts.
+	CreateAuditEvent(ctx context.Context, e *AuditEvent) error
+	ListAuditEventsByProject(ctx context.Context, projectID string, limit int) ([]*AuditEvent, error)
+
 	// ListAIAnalysesUsageByProject returns one row per project with
 	// at least one AI root-cause analysis since the supplied time
 	// (#197 admin breakdown). Sorted by Count descending so the

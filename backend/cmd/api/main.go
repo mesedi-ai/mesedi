@@ -469,6 +469,8 @@ func main() {
 	mux.Handle("GET /api-keys", privateHandler)
 	mux.Handle("POST /api-keys", privateHandler)
 	mux.Handle("DELETE /api-keys/{id}", privateHandler)
+	// #207 Audit logs v1 (auth-required; admin-role guard inside handler).
+	mux.Handle("GET /audit-log", privateHandler)
 	// Sub-slice 21b, SSE remote-halt channel (auth-required).
 	mux.Handle("GET /executions/{id}/halt-stream", privateHandler)
 	mux.Handle("POST /executions/{id}/halt", privateHandler)

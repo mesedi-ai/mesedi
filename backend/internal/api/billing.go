@@ -1772,6 +1772,15 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 		// notifications).
 		h.sendDowngradeEmailBestEffort(r, p, periodEndFromSub(sub), false)
 
+		// #207 audit log: downgrade is admin-tier and reversible up
+		// until the period rolls. Captured here so a customer can
+		// see who scheduled the cancel and at what time.
+		h.recordAuditEvent(r, AuditBillingDowngrade, "subscription", p.StripeSubscriptionID, map[string]any{
+			"from_tier":           p.Tier,
+			"to_tier":             TierHobby,
+			"cancel_at_period_end": true,
+		})
+
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":      true,
 			"message": "Cloud Team will cancel at the end of the current period and the project will revert to Cloud Hobby.",
@@ -1800,6 +1809,15 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 	// Path-B email: ImmediateFlip=true so the template phrases it as
 	// "reverted to Cloud Hobby" rather than "scheduled cancel".
 	h.sendDowngradeEmailBestEffort(r, p, time.Now().UTC(), true)
+
+	// #207 audit log: Path-B (immediate flip) variant. Same action
+	// slug; metadata records that this was the synchronous path.
+	h.recordAuditEvent(r, AuditBillingDowngrade, "project", projectID, map[string]any{
+		"from_tier":     p.Tier,
+		"to_tier":       TierHobby,
+		"immediate":     true,
+		"path":          "no_active_subscription",
+	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
@@ -1912,6 +1930,18 @@ func (h *Handlers) HandleCloseAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// #207 audit log: record account-close BEFORE the cascade fires.
+	// The cascade will remove this audit row along with the rest of
+	// the project's data; that's expected (project closure means all
+	// data goes). The row exists in the small window where the
+	// cascade might fail, so if the close errors out mid-cascade,
+	// the operator still has a trace.
+	h.recordAuditEvent(r, AuditBillingAccountClose, "project", projectID, map[string]any{
+		"tier":               p.Tier,
+		"had_subscription":   p.StripeSubscriptionID != "",
+		"stripe_customer_id": p.StripeCustomerID,
+	})
+
 	if err := h.Store.DeleteProjectCascade(r.Context(), projectID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "project not found")
@@ -1975,6 +2005,12 @@ func (h *Handlers) HandleUpdateBillingCap(w http.ResponseWriter, r *http.Request
 			"update billing cap: "+err.Error())
 		return
 	}
+	// #207 audit log: capturing both new value and the project ID
+	// gives a customer the row they need to attribute a sudden cap
+	// change back to a specific admin login.
+	h.recordAuditEvent(r, AuditBillingCapUpdate, "billing_cap", projectID, map[string]any{
+		"cap_usd": body.CapUSD,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"cap_usd": body.CapUSD,

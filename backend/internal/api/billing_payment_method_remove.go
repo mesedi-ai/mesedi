@@ -190,6 +190,12 @@ func (h *Handlers) HandleRemovePaymentMethod(w http.ResponseWriter, r *http.Requ
 		}
 		h.Logger.Info("card removed (no pending charges)",
 			"project_id", p.ProjectID, "tier", tier)
+		// #207 audit log: removal with no settlement charge.
+		h.recordAuditEvent(r, AuditBillingPaymentMethodRm, "payment_method", p.StripeCustomerID, map[string]any{
+			"tier":         tier,
+			"charged_usd":  0,
+			"settlement":   "no_pending_charges",
+		})
 		writeJSON(w, http.StatusOK, PaymentMethodRemoveResponse{
 			OK:                     true,
 			Tier:                   tier,
@@ -227,6 +233,12 @@ func (h *Handlers) HandleRemovePaymentMethod(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusInternalServerError, "detach: "+err.Error())
 			return
 		}
+		// #207 audit log: round-to-zero settlement, still a card-removal.
+		h.recordAuditEvent(r, AuditBillingPaymentMethodRm, "payment_method", p.StripeCustomerID, map[string]any{
+			"tier":        tier,
+			"charged_usd": 0,
+			"settlement":  "rounded_to_zero",
+		})
 		writeJSON(w, http.StatusOK, PaymentMethodRemoveResponse{
 			OK:                     true,
 			Tier:                   tier,
@@ -301,6 +313,17 @@ func (h *Handlers) HandleRemovePaymentMethod(w http.ResponseWriter, r *http.Requ
 		"execution_overage_units", overUnits,
 		"ai_analysis_overage_units", aiCount,
 	)
+	// #207 audit log: removal with settlement charge. Captured after
+	// the charge clears and the detach succeeds so a failed flow does
+	// not leave a misleading row.
+	h.recordAuditEvent(r, AuditBillingPaymentMethodRm, "payment_method", p.StripeCustomerID, map[string]any{
+		"tier":                      tier,
+		"charged_usd":               pending,
+		"payment_intent_id":         pi.ID,
+		"execution_overage_units":   overUnits,
+		"ai_analysis_overage_units": aiCount,
+		"settlement":                "charged",
+	})
 	writeJSON(w, http.StatusOK, PaymentMethodRemoveResponse{
 		OK:                     true,
 		Tier:                   tier,

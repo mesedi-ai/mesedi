@@ -214,6 +214,9 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api-keys", h.HandleListAPIKeys)
 	mux.HandleFunc("POST /api-keys", h.HandleCreateAPIKey)
 	mux.HandleFunc("DELETE /api-keys/{id}", h.HandleRevokeAPIKey)
+	// #207 Audit logs v1 (admin role required; enforced inside handler).
+	// Backs the Team-tier "Audit logs (who did what, when)" promise.
+	mux.HandleFunc("GET /audit-log", h.HandleListAuditEvents)
 	// Sub-slice 21b, SSE remote-halt channel.
 	mux.HandleFunc("GET /executions/{id}/halt-stream", h.HandleHaltStream)
 	mux.HandleFunc("POST /executions/{id}/halt", h.HandleTriggerHalt)
@@ -3113,6 +3116,14 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		"name", body.Name,
 	)
 
+	// #207 audit log: API key creation is a top-tier admin action.
+	// Recorded after the row lands so a failed mint never produces
+	// a false-positive audit entry.
+	h.recordAuditEvent(r, AuditAPIKeyCreate, "api_key", keyID, map[string]any{
+		"name":   body.Name,
+		"prefix": prefix,
+	})
+
 	// Return the raw key in this ONE response. The hash never leaves.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
@@ -3168,6 +3179,8 @@ func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		"key_id", keyID,
 		"project_id", authProjectID,
 	)
+	// #207 audit log: key revocation is admin-tier.
+	h.recordAuditEvent(r, AuditAPIKeyRevoke, "api_key", keyID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
 		"key_id": keyID,
@@ -3344,6 +3357,16 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		"class_filter_count", len(body.EnabledClasses),
 		"severity_filter", body.SeverityFilter,
 	)
+	// #207 audit log: webhook create. URL captured because rotating
+	// a delivery target is a meaningful security event the customer
+	// will want to verify against their own change-management.
+	h.recordAuditEvent(r, AuditWebhookCreate, "webhook", webhookID, map[string]any{
+		"name":            body.Name,
+		"url":             body.URL,
+		"enabled":         enabled,
+		"enabled_classes": body.EnabledClasses,
+		"severity_filter": body.SeverityFilter,
+	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":              true,
@@ -3387,6 +3410,10 @@ func (h *Handlers) HandleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		"webhook_id", webhookID,
 		"project_id", authProjectID,
 	)
+	// #207 audit log: webhook delete is a write-tier action but a
+	// silent disable of alerting can mask incidents, so it is worth
+	// the audit row.
+	h.recordAuditEvent(r, AuditWebhookDelete, "webhook", webhookID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
 		"webhook_id": webhookID,

@@ -1,0 +1,155 @@
+package api
+
+// Audit-log helpers used by the customer-facing admin endpoints
+// (#207 v1). One central recordAuditEvent function so handlers
+// stay terse — they call recordAuditEvent(ctx, "api_key.create",
+// "api_key", keyID, meta) after their state-change succeeds.
+//
+// Best-effort posture: a failure to write the audit row logs a
+// warning but never fails the underlying action. Customers losing
+// the ability to revoke a key because the audit log is full is a
+// worse outcome than a missing audit row.
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"mesedi/backend/internal/store"
+)
+
+// Stable audit action slugs. Centralized so the dashboard's UI map
+// stays in sync with what the handlers actually emit.
+const (
+	AuditAPIKeyCreate            = "api_key.create"
+	AuditAPIKeyRevoke            = "api_key.revoke"
+	AuditWebhookCreate           = "webhook.create"
+	AuditWebhookDelete           = "webhook.delete"
+	AuditBillingCapUpdate        = "billing.cap_update"
+	AuditBillingDowngrade        = "billing.downgrade_scheduled"
+	AuditBillingAccountClose     = "billing.account_closed"
+	AuditBillingPaymentMethodRm  = "billing.payment_method_removed"
+)
+
+// recordAuditEvent inserts one audit row for the request's project.
+// Reads actor identity from the request context (set by AuthMiddleware).
+// Metadata is JSON-encoded into the metadata_json column; pass nil to
+// omit. Errors are logged at WARN and swallowed so the calling
+// handler's success path is not affected.
+func (h *Handlers) recordAuditEvent(
+	r *http.Request,
+	action, targetType, targetID string,
+	metadata map[string]any,
+) {
+	projectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		// No project context means this was called from a code
+		// path we don't audit (e.g., unauthenticated). Silently
+		// no-op rather than scream.
+		return
+	}
+
+	var metaJSON string
+	if metadata != nil {
+		if b, err := json.Marshal(metadata); err == nil {
+			metaJSON = string(b)
+		}
+	}
+
+	// Capture actor identity from context. All values are optional;
+	// any missing piece just leaves that field NULL in the row.
+	keyID, _ := APIKeyIDFromContext(r.Context())
+	keyName := ""
+	// Use legacy admin-key-name when available (admin endpoints
+	// already populate this); otherwise leave empty.
+	if name, ok := AdminKeyNameFromContext(r.Context()); ok {
+		keyName = name
+	}
+
+	event := &store.AuditEvent{
+		EventID:      newAuditEventID(),
+		ProjectID:    projectID,
+		ActorKeyID:   keyID,
+		ActorKeyName: keyName,
+		Action:       action,
+		TargetType:   targetType,
+		TargetID:     targetID,
+		MetadataJSON: metaJSON,
+		CreatedAt:    time.Now().UTC(),
+	}
+
+	if err := h.Store.CreateAuditEvent(r.Context(), event); err != nil {
+		// Best-effort: log and continue. An audit-write failure
+		// MUST NOT break the customer's underlying admin action.
+		h.Logger.Warn("audit event write failed",
+			"project_id", projectID,
+			"action", action,
+			"error", err.Error())
+	}
+}
+
+// newAuditEventID produces a "audit_<32 hex chars>" identifier.
+// 128 bits of entropy is overkill for an audit row id but matches
+// the prefix-+-random pattern used elsewhere in Mesedi (api keys,
+// failure groups, etc.) so the format is consistent.
+func newAuditEventID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Reader failures are exceptionally rare on Linux/macOS.
+		// Fall back to a timestamp-only ID rather than panic; an
+		// unlikely collision is better than blocking the audit
+		// log. Length still 32 hex chars to keep parsers happy.
+		ts := time.Now().UTC().UnixNano()
+		return "audit_" + hexFromInt64(ts)
+	}
+	return "audit_" + hex.EncodeToString(b[:])
+}
+
+// hexFromInt64 renders an int64 as a 32-character hex string with
+// zero padding. Used only by the RNG-failure fallback in
+// newAuditEventID; not exported.
+func hexFromInt64(v int64) string {
+	const hexDigits = "0123456789abcdef"
+	var out [32]byte
+	for i := 31; i >= 0; i-- {
+		out[i] = hexDigits[v&0xf]
+		v >>= 4
+	}
+	return string(out[:])
+}
+
+// ListAuditEventsResponse is the body shape returned by
+// GET /audit-log. Wrapping in {events: [...]} matches the pattern
+// other list endpoints follow (api keys, webhooks) and leaves room
+// for pagination metadata if we ever ship it.
+type ListAuditEventsResponse struct {
+	OK     bool                `json:"ok"`
+	Events []*store.AuditEvent `json:"events"`
+}
+
+// HandleListAuditEvents returns the last 100 audit events for the
+// calling project. Admin-role only. Returned in created_at DESC
+// order so the UI can render newest first without re-sorting.
+func (h *Handlers) HandleListAuditEvents(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "admin") {
+		return
+	}
+	projectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	events, err := h.Store.ListAuditEventsByProject(r.Context(), projectID, 100)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"list audit events: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, ListAuditEventsResponse{
+		OK:     true,
+		Events: events,
+	})
+}
+
