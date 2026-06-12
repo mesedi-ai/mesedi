@@ -180,6 +180,12 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	// totals. Powers the founder cost-attribution surface.
 	mux.HandleFunc("GET /admin/ai-analyses", h.HandleAdminListAIAnalyses)
 	mux.HandleFunc("GET /admin/ai-analyses-totals", h.HandleAdminGetAIAnalysesTotals)
+	// #202 Stripe-side analytics + accounting (MRR/ARR, charges,
+	// refunds, churn).
+	mux.HandleFunc("GET /admin/analytics-summary", h.HandleAdminGetAnalyticsSummary)
+	mux.HandleFunc("GET /admin/charges", h.HandleAdminListCharges)
+	mux.HandleFunc("GET /admin/refunds", h.HandleAdminListRefunds)
+	mux.HandleFunc("GET /admin/subscriptions-canceled", h.HandleAdminListCanceledSubscriptions)
 	// #198 Anthropic credit balance + 7-day burn rate. GET returns
 	// the latest manually-entered balance + programmatic burn rate;
 	// POST accepts a new manually-entered balance snapshot.

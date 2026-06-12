@@ -570,6 +570,15 @@ func main() {
 	mux.Handle("OPTIONS /admin/ai-analyses", adminHandler)
 	mux.Handle("GET /admin/ai-analyses-totals", adminHandler)
 	mux.Handle("OPTIONS /admin/ai-analyses-totals", adminHandler)
+	// #202 founder analytics + accounting (Stripe-derived).
+	mux.Handle("GET /admin/analytics-summary", adminHandler)
+	mux.Handle("OPTIONS /admin/analytics-summary", adminHandler)
+	mux.Handle("GET /admin/charges", adminHandler)
+	mux.Handle("OPTIONS /admin/charges", adminHandler)
+	mux.Handle("GET /admin/refunds", adminHandler)
+	mux.Handle("OPTIONS /admin/refunds", adminHandler)
+	mux.Handle("GET /admin/subscriptions-canceled", adminHandler)
+	mux.Handle("OPTIONS /admin/subscriptions-canceled", adminHandler)
 	// #198 Anthropic credit + 7-day burn rate widget on /admin.
 	mux.Handle("GET /admin/anthropic-credit", adminHandler)
 	mux.Handle("POST /admin/anthropic-credit", adminHandler)
