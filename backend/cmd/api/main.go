@@ -357,6 +357,16 @@ func main() {
 	logger.Info("anthropic client configured",
 		"enabled", anthropicClient.Enabled())
 
+	// Mesedi #198 — founder burn-rate widget on /admin. Uses the
+	// Anthropic Admin API Cost Report endpoint via the
+	// ANTHROPIC_ADMIN_KEY env var (sk-ant-admin-...). Disabled when
+	// the env var is empty; the admin handler returns a "not
+	// configured" response and the dashboard renders an empty-state.
+	anthropicAdminClient := anthropic.NewAdminClient(os.Getenv("ANTHROPIC_ADMIN_KEY"), nil)
+	handlers.AnthropicAdmin = anthropicAdminClient
+	logger.Info("anthropic admin client configured",
+		"enabled", anthropicAdminClient.Configured())
+
 	handlers.RegisterRoutes(privateMux)
 	privateHandler := api.NewAuthChain(logger, st, handlers.Abuse)(privateMux)
 
@@ -555,6 +565,10 @@ func main() {
 	// #211 per-project failure-group breakdown for the expanded row.
 	mux.Handle("GET /admin/projects/{id}/ai-analyses-detail", adminHandler)
 	mux.Handle("OPTIONS /admin/projects/{id}/ai-analyses-detail", adminHandler)
+	// #198 Anthropic credit + 7-day burn rate widget on /admin.
+	mux.Handle("GET /admin/anthropic-credit", adminHandler)
+	mux.Handle("POST /admin/anthropic-credit", adminHandler)
+	mux.Handle("OPTIONS /admin/anthropic-credit", adminHandler)
 	mux.Handle("GET /admin/abuse", adminHandler)
 	mux.Handle("OPTIONS /admin/abuse", adminHandler)
 	mux.Handle("POST /admin/abuse/{id}/resolve", adminHandler)

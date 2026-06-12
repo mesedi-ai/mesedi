@@ -681,6 +681,14 @@ type Store interface {
 		ctx context.Context, projectID string, since time.Time, limit int,
 	) ([]*FailureGroup, error)
 
+	// CreateAnthropicCreditSnapshot + GetLatestAnthropicCreditSnapshot
+	// back the manual-entry remaining-credit-balance surface (#198).
+	// See store/anthropic_credit.go for contracts. GetLatest returns
+	// ErrNotFound when no snapshot has ever been recorded so the
+	// admin endpoint can render an empty-state.
+	CreateAnthropicCreditSnapshot(ctx context.Context, snap *AnthropicCreditSnapshot) error
+	GetLatestAnthropicCreditSnapshot(ctx context.Context) (*AnthropicCreditSnapshot, error)
+
 	// ListAIAnalysesUsageByProject returns one row per project with
 	// at least one AI root-cause analysis since the supplied time
 	// (#197 admin breakdown). Sorted by Count descending so the

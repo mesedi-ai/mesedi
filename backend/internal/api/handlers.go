@@ -90,6 +90,12 @@ type Handlers struct {
 	// then responds with a "not configured" message instead
 	// of crashing.
 	Anthropic *anthropic.Client
+	// AnthropicAdmin wraps the Anthropic Admin API Cost Report
+	// endpoint (Mesedi #198). nil or a client without a key
+	// disables the burn-rate display on the founder admin
+	// dashboard; the handler then responds with a "not
+	// configured" payload rather than failing the request.
+	AnthropicAdmin *anthropic.AdminClient
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
