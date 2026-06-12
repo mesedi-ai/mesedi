@@ -48,7 +48,22 @@ type Mailer interface {
 	// SendAccountClosed confirms the project has been hard-deleted.
 	SendDowngradeScheduled(ctx context.Context, in DowngradeScheduledInput) error
 	SendAccountClosed(ctx context.Context, in AccountClosedInput) error
+	// SendMagicLink ships the one-time sign-in link (#196 commit 2).
+	// The body contains a single tappable URL and a short explanation
+	// of the 15-minute expiry window; no marketing, no images.
+	SendMagicLink(ctx context.Context, in MagicLinkInput) error
 	Enabled() bool
+}
+
+// MagicLinkInput carries everything the magic-link template renders.
+// SignInURL is the full https URL the recipient clicks; the dashboard
+// server's /api/auth/magic-link/verify route handles the token. We
+// pass the full URL rather than the raw token so the template stays
+// composable -- the email layer never assembles the URL itself.
+type MagicLinkInput struct {
+	ToEmail   string
+	SignInURL string
+	ExpiresAt time.Time
 }
 
 // HobbyBillingNotificationKind enumerates the three email kinds the
@@ -239,6 +254,19 @@ func (m NoopMailer) SendAccountClosed(ctx context.Context, in AccountClosedInput
 			"to", in.ToEmail,
 			"project", in.ProjectName,
 			"closed_at", in.ClosedAt,
+		)
+	}
+	return nil
+}
+
+func (m NoopMailer) SendMagicLink(ctx context.Context, in MagicLinkInput) error {
+	if m.Logger != nil {
+		// Log the URL at debug so dev runs can copy/paste it from the
+		// log instead of needing a real Resend account.
+		m.Logger.Debug("mail: magic-link (noop, no RESEND_API_KEY)",
+			"to", in.ToEmail,
+			"sign_in_url", in.SignInURL,
+			"expires_at", in.ExpiresAt,
 		)
 	}
 	return nil
@@ -824,6 +852,66 @@ func (m *ResendMailer) SendAccountClosed(ctx context.Context, in AccountClosedIn
 		m.Logger.Info("mail: account closed sent",
 			"to", in.ToEmail,
 			"project", in.ProjectName,
+		)
+	}
+	return nil
+}
+
+// SendMagicLink ships the one-time sign-in link email (#196). Body
+// is intentionally austere: one URL, a short expiry note, no
+// branding or marketing. Customers expect transactional auth mail to
+// look transactional; HTML-heavy templates raise phishing concerns.
+func (m *ResendMailer) SendMagicLink(ctx context.Context, in MagicLinkInput) error {
+	subject := "Your Mesedi sign-in link"
+	expiresIn := time.Until(in.ExpiresAt).Round(time.Minute)
+	textBody := fmt.Sprintf(
+		"Click the link below to sign in to Mesedi.\n\n"+
+			"%s\n\n"+
+			"This link is valid for %s and can be used once.\n"+
+			"If you did not request this, you can ignore the email.\n",
+		in.SignInURL, expiresIn,
+	)
+	htmlBody := fmt.Sprintf(
+		"<p>Click the link below to sign in to Mesedi.</p>"+
+			"<p><a href=\"%s\">%s</a></p>"+
+			"<p>This link is valid for %s and can be used once. "+
+			"If you did not request this, you can ignore the email.</p>",
+		in.SignInURL, in.SignInURL, expiresIn,
+	)
+
+	body, err := json.Marshal(resendRequest{
+		From:    m.From,
+		To:      []string{in.ToEmail},
+		Subject: subject,
+		HTML:    htmlBody,
+		Text:    textBody,
+	})
+	if err != nil {
+		return fmt.Errorf("mail: marshal magic link: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("mail: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mail: post to resend: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mail: resend returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	if m.Logger != nil {
+		m.Logger.Info("mail: magic link sent",
+			"to", in.ToEmail,
 		)
 	}
 	return nil
