@@ -34,6 +34,16 @@ const (
 	// #207 step C — additional v1.5 capture points.
 	AuditProjectRename     = "project.rename"
 	AuditRetentionUpdate   = "project.retention_update"
+	// Team-management actions. Recorded against the calling admin's
+	// project (the project they were looking at when they made the
+	// change); a multi-project org sees the row only on that one
+	// project's audit log. team.invite_accept is intentionally not
+	// captured here because the accept endpoint is public + token-only
+	// and has no caller project context.
+	AuditTeamInviteCreate = "team.invite_create"
+	AuditTeamInviteRevoke = "team.invite_revoke"
+	AuditTeamMemberRemove = "team.member_remove"
+	AuditTeamRoleUpdate   = "team.role_update"
 )
 
 // recordAuditEvent inserts one audit row for the request's project.

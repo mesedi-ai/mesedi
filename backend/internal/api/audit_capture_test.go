@@ -69,6 +69,16 @@ type auditCaptureStubStore struct {
 	// revoke flow set this to 2+ entries to bypass the last-key
 	// protection guard.
 	apiKeysForProject []*store.APIKey
+
+	// Team-handler state. Default-nil so the existing batch-1/2 tests
+	// keep the legacy "no tenant => admin" RBAC path. Team tests
+	// populate both so resolveAdminContext finds a real org and the
+	// caller looks up as a non-NotFound admin member.
+	tenantID  *string
+	orgMember *store.OrganizationMember
+	// orgMembers backs ListOrganizationMembers (HandleRemoveMember's
+	// last-admin protection guard reads it).
+	orgMembers []*store.OrganizationMember
 }
 
 func (s *auditCaptureStubStore) CreateAuditEvent(_ context.Context, e *store.AuditEvent) error {
@@ -77,12 +87,54 @@ func (s *auditCaptureStubStore) CreateAuditEvent(_ context.Context, e *store.Aud
 	return nil
 }
 
-// GetProjectTenantID returning nil drives resolveCallerRole down its
-// legacy "no tenant => admin" branch, which means requireRole("admin")
-// and requireRole("write") both pass without our needing to set up an
-// organization_members row. Same pattern as the existing stubAuditStore.
+// GetProjectTenantID drives resolveCallerRole. Default-nil keeps the
+// legacy "no tenant => admin" branch live for the batch-1/2 tests;
+// team tests set s.tenantID so resolveAdminContext finds a real org
+// and proceeds to the member lookup below.
 func (s *auditCaptureStubStore) GetProjectTenantID(_ context.Context, _ string) (*string, error) {
-	return nil, nil
+	return s.tenantID, nil
+}
+
+// GetOrganizationMember is consulted by resolveAdminContext after
+// tenantPtr resolves. Returning s.orgMember (admin role) lets team
+// tests pass the "admin role required" gate. The arg signature here
+// must match the real Store interface exactly.
+func (s *auditCaptureStubStore) GetOrganizationMember(_ context.Context, _, _ string) (*store.OrganizationMember, error) {
+	if s.orgMember == nil {
+		return nil, store.ErrNotFound
+	}
+	return s.orgMember, nil
+}
+
+// ListOrganizationMembers backs HandleRemoveMember's last-admin check.
+func (s *auditCaptureStubStore) ListOrganizationMembers(_ context.Context, _ string) ([]*store.OrganizationMember, error) {
+	return s.orgMembers, nil
+}
+
+// CreateOrganizationInvite backs HandleCreateInvite.
+func (s *auditCaptureStubStore) CreateOrganizationInvite(_ context.Context, _ *store.OrganizationInvite) error {
+	return nil
+}
+
+// RevokeOrganizationInvite backs HandleRevokeInvite.
+func (s *auditCaptureStubStore) RevokeOrganizationInvite(_ context.Context, _, _ string) error {
+	return nil
+}
+
+// UpdateOrganizationMemberRole backs HandleUpdateMemberRole.
+func (s *auditCaptureStubStore) UpdateOrganizationMemberRole(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
+// RemoveOrganizationMember backs HandleRemoveMember.
+func (s *auditCaptureStubStore) RemoveOrganizationMember(_ context.Context, _, _ string) error {
+	return nil
+}
+
+// DeleteAPIKeysByUserID backs the post-remove key-revocation step in
+// HandleRemoveMember. Returns the canned revoked-count for assertions.
+func (s *auditCaptureStubStore) DeleteAPIKeysByUserID(_ context.Context, _ string) (int, error) {
+	return 0, nil
 }
 
 func (s *auditCaptureStubStore) GetProject(_ context.Context, _ string) (*store.Project, error) {
@@ -629,5 +681,217 @@ func Test_HandleSetRetention_FiresAuditEvent(t *testing.T) {
 	}
 	if meta["tier"] != TierTeam {
 		t.Errorf("metadata.tier: got %v, want %q", meta["tier"], TierTeam)
+	}
+}
+
+// teamCaptureSetup wires the shared org / tenant / admin-member state
+// the four team-handler tests below all need. Centralized so a tweak
+// to resolveAdminContext only forces one update here.
+func teamCaptureSetup(t *testing.T, projectID, actor, orgID string) *auditCaptureStubStore {
+	t.Helper()
+	tenant := orgID
+	return &auditCaptureStubStore{
+		project: &store.Project{
+			ProjectID:   projectID,
+			OwnerEmail:  actor,
+			OwnerUserID: actor,
+		},
+		tenantID: &tenant,
+		orgMember: &store.OrganizationMember{
+			OrgID:  orgID,
+			UserID: actor,
+			Role:   "admin",
+		},
+	}
+}
+
+// --- Test_HandleCreateInvite_FiresAuditEvent ----------------------
+
+func Test_HandleCreateInvite_FiresAuditEvent(t *testing.T) {
+	const (
+		projectID  = "proj-capture-invite-create"
+		actor      = "admin@example.com"
+		orgID      = "org-team-cap-1"
+		inviteEmail = "alice@example.com"
+		inviteRole  = "write"
+	)
+	s := teamCaptureSetup(t, projectID, actor, orgID)
+	h := newCaptureHandlers(s)
+
+	r := newJSONRequest(t, http.MethodPost, "/me/team/invites", projectID, actor, map[string]any{
+		"email": inviteEmail,
+		"role":  inviteRole,
+	})
+	w := httptest.NewRecorder()
+	h.HandleCreateInvite(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%q", w.Code, w.Body.String())
+	}
+	if s.captured == nil {
+		t.Fatal("expected audit event to be captured")
+	}
+	if s.captured.Action != AuditTeamInviteCreate {
+		t.Errorf("action: got %q, want %q", s.captured.Action, AuditTeamInviteCreate)
+	}
+	if s.captured.TargetType != "invite" || s.captured.TargetID == "" {
+		t.Errorf("target: got %q/%q, want invite/<inv_...>",
+			s.captured.TargetType, s.captured.TargetID)
+	}
+	if s.captured.ProjectID != projectID {
+		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(s.captured.MetadataJSON), &meta); err != nil {
+		t.Fatalf("metadata_json not valid JSON: %v", err)
+	}
+	if meta["email"] != inviteEmail {
+		t.Errorf("metadata.email: got %v, want %q", meta["email"], inviteEmail)
+	}
+	if meta["role"] != inviteRole {
+		t.Errorf("metadata.role: got %v, want %q", meta["role"], inviteRole)
+	}
+	if meta["org_id"] != orgID {
+		t.Errorf("metadata.org_id: got %v, want %q", meta["org_id"], orgID)
+	}
+}
+
+// --- Test_HandleRevokeInvite_FiresAuditEvent ----------------------
+
+func Test_HandleRevokeInvite_FiresAuditEvent(t *testing.T) {
+	const (
+		projectID = "proj-capture-invite-revoke"
+		actor     = "admin@example.com"
+		orgID     = "org-team-cap-2"
+		inviteID  = "inv_deadbeef"
+	)
+	s := teamCaptureSetup(t, projectID, actor, orgID)
+	h := newCaptureHandlers(s)
+
+	r := newJSONRequest(t, http.MethodDelete, "/me/team/invites/"+inviteID, projectID, actor, nil)
+	r.SetPathValue("invite", inviteID)
+	w := httptest.NewRecorder()
+	h.HandleRevokeInvite(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%q", w.Code, w.Body.String())
+	}
+	if s.captured == nil {
+		t.Fatal("expected audit event to be captured")
+	}
+	if s.captured.Action != AuditTeamInviteRevoke {
+		t.Errorf("action: got %q, want %q", s.captured.Action, AuditTeamInviteRevoke)
+	}
+	if s.captured.TargetType != "invite" || s.captured.TargetID != inviteID {
+		t.Errorf("target: got %q/%q, want invite/%q",
+			s.captured.TargetType, s.captured.TargetID, inviteID)
+	}
+	if s.captured.ProjectID != projectID {
+		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
+}
+
+// --- Test_HandleUpdateMemberRole_FiresAuditEvent ------------------
+
+func Test_HandleUpdateMemberRole_FiresAuditEvent(t *testing.T) {
+	const (
+		projectID  = "proj-capture-role"
+		actor      = "admin@example.com"
+		orgID      = "org-team-cap-3"
+		targetUser = "bob@example.com"
+		newRole    = "admin"
+	)
+	s := teamCaptureSetup(t, projectID, actor, orgID)
+	h := newCaptureHandlers(s)
+
+	r := newJSONRequest(t, http.MethodPut, "/me/team/members/"+targetUser+"/role", projectID, actor, map[string]any{
+		"role": newRole,
+	})
+	r.SetPathValue("user", targetUser)
+	w := httptest.NewRecorder()
+	h.HandleUpdateMemberRole(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%q", w.Code, w.Body.String())
+	}
+	if s.captured == nil {
+		t.Fatal("expected audit event to be captured")
+	}
+	if s.captured.Action != AuditTeamRoleUpdate {
+		t.Errorf("action: got %q, want %q", s.captured.Action, AuditTeamRoleUpdate)
+	}
+	if s.captured.TargetType != "member" || s.captured.TargetID != targetUser {
+		t.Errorf("target: got %q/%q, want member/%q",
+			s.captured.TargetType, s.captured.TargetID, targetUser)
+	}
+	if s.captured.ProjectID != projectID {
+		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(s.captured.MetadataJSON), &meta); err != nil {
+		t.Fatalf("metadata_json not valid JSON: %v", err)
+	}
+	if meta["new_role"] != newRole {
+		t.Errorf("metadata.new_role: got %v, want %q", meta["new_role"], newRole)
+	}
+}
+
+// --- Test_HandleRemoveMember_FiresAuditEvent ----------------------
+
+func Test_HandleRemoveMember_FiresAuditEvent(t *testing.T) {
+	const (
+		projectID  = "proj-capture-remove"
+		actor      = "admin@example.com"
+		orgID      = "org-team-cap-4"
+		targetUser = "carol@example.com"
+	)
+	s := teamCaptureSetup(t, projectID, actor, orgID)
+	// orgMembers must include another admin so the last-admin
+	// protection guard does NOT block the removal.
+	s.orgMembers = []*store.OrganizationMember{
+		{OrgID: orgID, UserID: actor, Role: "admin"},
+		{OrgID: orgID, UserID: targetUser, Role: "write"},
+	}
+	h := newCaptureHandlers(s)
+
+	r := newJSONRequest(t, http.MethodDelete, "/me/team/members/"+targetUser, projectID, actor, nil)
+	r.SetPathValue("user", targetUser)
+	w := httptest.NewRecorder()
+	h.HandleRemoveMember(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%q", w.Code, w.Body.String())
+	}
+	if s.captured == nil {
+		t.Fatal("expected audit event to be captured")
+	}
+	if s.captured.Action != AuditTeamMemberRemove {
+		t.Errorf("action: got %q, want %q", s.captured.Action, AuditTeamMemberRemove)
+	}
+	if s.captured.TargetType != "member" || s.captured.TargetID != targetUser {
+		t.Errorf("target: got %q/%q, want member/%q",
+			s.captured.TargetType, s.captured.TargetID, targetUser)
+	}
+	if s.captured.ProjectID != projectID {
+		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(s.captured.MetadataJSON), &meta); err != nil {
+		t.Fatalf("metadata_json not valid JSON: %v", err)
+	}
+	if meta["org_id"] != orgID {
+		t.Errorf("metadata.org_id: got %v, want %q", meta["org_id"], orgID)
 	}
 }

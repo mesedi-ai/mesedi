@@ -300,6 +300,13 @@ func (h *Handlers) HandleUpdateMemberRole(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "could not update role")
 		return
 	}
+	// #207 step C — role changes alter who can manage billing, keys,
+	// webhooks, and team. High security value; recorded against the
+	// calling admin's project audit log.
+	h.recordAuditEvent(r, AuditTeamRoleUpdate, "member", targetUserID, map[string]any{
+		"org_id":   orgID,
+		"new_role": body.Role,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"user_id": targetUserID,
@@ -383,6 +390,15 @@ func (h *Handlers) HandleRemoveMember(w http.ResponseWriter, r *http.Request) {
 			"keys_revoked", revoked)
 	}
 
+	// #207 step C — removing a member is a top-tier security action
+	// (revokes their dashboard access AND every API key they hold).
+	// Captured after the keys are best-effort revoked so a partial
+	// removal still leaves a row, with revoked-count in the metadata
+	// for forensics.
+	h.recordAuditEvent(r, AuditTeamMemberRemove, "member", targetUserID, map[string]any{
+		"org_id":       orgID,
+		"keys_revoked": revoked,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"user_id":      targetUserID,
@@ -498,6 +514,16 @@ func (h *Handlers) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		"email", body.Email,
 		"role", body.Role,
 		"expires_at", expiresAt.Format(time.RFC3339))
+	// #207 step C — invite-create is the moment a new email is granted
+	// future access at a specific role. The single most useful row in
+	// the team-management audit set. Captured after the row persists
+	// so a failed insert never produces a misleading audit entry.
+	h.recordAuditEvent(r, AuditTeamInviteCreate, "invite", inviteID, map[string]any{
+		"org_id":      orgID,
+		"email":       body.Email,
+		"role":        body.Role,
+		"expires_at":  expiresAt.Format(time.RFC3339),
+	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
@@ -527,6 +553,13 @@ func (h *Handlers) HandleRevokeInvite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not revoke invite")
 		return
 	}
+	// #207 step C — invite-revoke kills the pending access grant. Worth
+	// the row so the audit reader can see "invite for alice@... was
+	// revoked before she accepted." No metadata payload; the invite_id
+	// alone is enough context (the original create row holds the rest).
+	h.recordAuditEvent(r, AuditTeamInviteRevoke, "invite", inviteID, map[string]any{
+		"org_id": orgID,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
 		"invite_id": inviteID,
@@ -582,6 +615,16 @@ func (h *Handlers) HandleGetInviteByToken(w http.ResponseWriter, r *http.Request
 // Until session auth ships (Phase 4), we use the invitee's email as
 // user_id. After session auth, this endpoint will require an active
 // session and use the session's user_id instead of the email-as-id.
+//
+// #207 step C — NOT audit-logged in v1.5. The audit_events table
+// requires project_id NOT NULL, but the accept endpoint runs with no
+// caller project context (token-only public auth, the invitee has no
+// API key yet) and a multi-project org has no canonical primary
+// project to attach the row to. Parking-lot item PL5 tracks this:
+// either move accept rows to a separate org-scoped audit table, or
+// pick a deterministic project per org (oldest by created_at). The
+// accept is partially observable today via the prior invite_create
+// audit row plus the org_members row inserted here.
 func (h *Handlers) HandleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	if token == "" {
