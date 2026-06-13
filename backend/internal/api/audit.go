@@ -31,6 +31,9 @@ const (
 	AuditBillingDowngrade        = "billing.downgrade_scheduled"
 	AuditBillingAccountClose     = "billing.account_closed"
 	AuditBillingPaymentMethodRm  = "billing.payment_method_removed"
+	// #207 step C — additional v1.5 capture points.
+	AuditProjectRename     = "project.rename"
+	AuditRetentionUpdate   = "project.retention_update"
 )
 
 // recordAuditEvent inserts one audit row for the request's project.

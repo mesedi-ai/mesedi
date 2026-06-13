@@ -126,6 +126,18 @@ func (s *auditCaptureStubStore) DeleteProjectCascade(_ context.Context, _ string
 	return nil
 }
 
+// UpdateProjectName backs HandleSetProjectName (#207 step C, C1).
+func (s *auditCaptureStubStore) UpdateProjectName(_ context.Context, _, _ string) error {
+	return nil
+}
+
+// SetProjectRetentionDays backs HandleSetRetention (#207 step C, C6).
+// days==nil means indefinite (Enterprise-only); tests scope to Team
+// with a concrete value within the tier cap.
+func (s *auditCaptureStubStore) SetProjectRetentionDays(_ context.Context, _ string, _ *int) error {
+	return nil
+}
+
 // newCaptureHandlers wires a Handlers instance with the stub Store
 // and a quiet logger. Mailer is intentionally left nil — every
 // handler we exercise either does not touch the mailer or guards on
@@ -499,5 +511,123 @@ func Test_HandleCloseAccount_FiresAuditEvent(t *testing.T) {
 	}
 	if s.captured.MetadataJSON == "" {
 		t.Fatal("metadata_json should be populated")
+	}
+}
+
+// --- Test_HandleSetProjectName_FiresAuditEvent --------------------
+
+func Test_HandleSetProjectName_FiresAuditEvent(t *testing.T) {
+	const (
+		projectID = "proj-capture-rename"
+		actor     = "rename-actor@example.com"
+		newName   = "Renamed Project"
+	)
+	s := &auditCaptureStubStore{
+		project: &store.Project{
+			ProjectID:  projectID,
+			Name:       "Original Project",
+			OwnerEmail: "owner@example.com",
+		},
+	}
+	h := newCaptureHandlers(s)
+
+	r := newJSONRequest(t, http.MethodPut, "/me/project/name", projectID, actor, map[string]any{
+		"name": newName,
+	})
+	w := httptest.NewRecorder()
+	h.HandleSetProjectName(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%q", w.Code, w.Body.String())
+	}
+	if s.captured == nil {
+		t.Fatal("expected audit event to be captured")
+	}
+	if s.captured.Action != AuditProjectRename {
+		t.Errorf("action: got %q, want %q", s.captured.Action, AuditProjectRename)
+	}
+	if s.captured.TargetType != "project" || s.captured.TargetID != projectID {
+		t.Errorf("target: got %q/%q, want %q/%q",
+			s.captured.TargetType, s.captured.TargetID, "project", projectID)
+	}
+	if s.captured.ProjectID != projectID {
+		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
+	if s.captured.MetadataJSON == "" {
+		t.Fatal("metadata_json should be populated")
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(s.captured.MetadataJSON), &meta); err != nil {
+		t.Fatalf("metadata_json not valid JSON: %v", err)
+	}
+	if meta["new_name"] != newName {
+		t.Errorf("metadata.new_name: got %v, want %q", meta["new_name"], newName)
+	}
+}
+
+// --- Test_HandleSetRetention_FiresAuditEvent ----------------------
+
+func Test_HandleSetRetention_FiresAuditEvent(t *testing.T) {
+	// Project is on Team tier so the 30-day request is within the
+	// tier's 90-day cap. Without a valid tier the handler returns 403
+	// before reaching the audit-write step.
+	const (
+		projectID    = "proj-capture-retention"
+		actor        = "retention-actor@example.com"
+		requestedDays = 30
+	)
+	s := &auditCaptureStubStore{
+		project: &store.Project{
+			ProjectID: projectID,
+			Tier:      TierTeam,
+		},
+	}
+	h := newCaptureHandlers(s)
+
+	r := newJSONRequest(t, http.MethodPut, "/me/project/retention", projectID, actor, map[string]any{
+		"retention_days": requestedDays,
+		"is_indefinite":  false,
+	})
+	w := httptest.NewRecorder()
+	h.HandleSetRetention(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%q", w.Code, w.Body.String())
+	}
+	if s.captured == nil {
+		t.Fatal("expected audit event to be captured")
+	}
+	if s.captured.Action != AuditRetentionUpdate {
+		t.Errorf("action: got %q, want %q", s.captured.Action, AuditRetentionUpdate)
+	}
+	if s.captured.TargetType != "project" || s.captured.TargetID != projectID {
+		t.Errorf("target: got %q/%q, want %q/%q",
+			s.captured.TargetType, s.captured.TargetID, "project", projectID)
+	}
+	if s.captured.ProjectID != projectID {
+		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
+	if s.captured.MetadataJSON == "" {
+		t.Fatal("metadata_json should be populated")
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(s.captured.MetadataJSON), &meta); err != nil {
+		t.Fatalf("metadata_json not valid JSON: %v", err)
+	}
+	if meta["retention_days"] != float64(requestedDays) {
+		t.Errorf("metadata.retention_days: got %v, want %d",
+			meta["retention_days"], requestedDays)
+	}
+	if meta["is_indefinite"] != false {
+		t.Errorf("metadata.is_indefinite: got %v, want false", meta["is_indefinite"])
+	}
+	if meta["tier"] != TierTeam {
+		t.Errorf("metadata.tier: got %v, want %q", meta["tier"], TierTeam)
 	}
 }

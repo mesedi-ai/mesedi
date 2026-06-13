@@ -2828,6 +2828,17 @@ func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
 		"tier", p.Tier,
 		"retention_days", days,
 		"is_indefinite", days == nil)
+	// #207 step C — retention is a data-handling control. Customers and
+	// auditors want to see when it changes and by whom. days is *int
+	// so we record nil as is_indefinite=true and skip retention_days.
+	retentionMeta := map[string]any{
+		"tier":          p.Tier,
+		"is_indefinite": days == nil,
+	}
+	if days != nil {
+		retentionMeta["retention_days"] = *days
+	}
+	h.recordAuditEvent(r, AuditRetentionUpdate, "project", authProjectID, retentionMeta)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":               true,
@@ -3860,6 +3871,12 @@ func (h *Handlers) HandleSetProjectName(w http.ResponseWriter, r *http.Request) 
 	}
 	h.Logger.Info("project renamed",
 		"project_id", authProjectID, "new_name", newName)
+	// #207 step C — project rename is admin-tier and changes how the
+	// project surfaces in invoices, emails, and the dashboard. Worth
+	// the audit row.
+	h.recordAuditEvent(r, AuditProjectRename, "project", authProjectID, map[string]any{
+		"new_name": newName,
+	})
 	project, err := h.Store.GetProject(r.Context(), authProjectID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError,
