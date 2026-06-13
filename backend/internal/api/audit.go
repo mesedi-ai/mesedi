@@ -67,12 +67,20 @@ func (h *Handlers) recordAuditEvent(
 	if name, ok := AdminKeyNameFromContext(r.Context()); ok {
 		keyName = name
 	}
+	// Actor email is the api_keys.user_id of the bearer token,
+	// which signin.go and signup.go both initialize to the owner's
+	// email address. The auth middleware copies it onto the request
+	// context under ctxKeyUserID. Without this, every non-signin
+	// audit row shows the key id in the dashboard's ACTOR column
+	// instead of the human-readable email.
+	actorEmail, _ := UserIDFromContext(r.Context())
 
 	event := &store.AuditEvent{
 		EventID:      newAuditEventID(),
 		ProjectID:    projectID,
 		ActorKeyID:   keyID,
 		ActorKeyName: keyName,
+		ActorEmail:   actorEmail,
 		Action:       action,
 		TargetType:   targetType,
 		TargetID:     targetID,

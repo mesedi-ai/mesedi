@@ -134,9 +134,20 @@ func newCaptureHandlers(s *auditCaptureStubStore) *Handlers {
 	return &Handlers{Store: s, Logger: quietLogger()}
 }
 
-// newJSONRequest constructs an httptest request with a JSON body and
-// the project_id context key the handlers read.
-func newJSONRequest(t *testing.T, method, path, projectID string, body any) *http.Request {
+// withUserID puts the API key's user_id on the request context under
+// the same key (ctxKeyUserID) the auth middleware uses. signin.go and
+// signup.go both initialize api_keys.user_id to the owner's email, so
+// the audit-capture helper reads this as the human-readable actor
+// email and the dashboard renders it in the ACTOR column.
+func withUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, ctxKeyUserID, userID)
+}
+
+// newJSONRequest constructs an httptest request with a JSON body, the
+// project_id context key the handlers read, and (when non-empty) the
+// actor email under ctxKeyUserID so recordAuditEvent populates
+// AuditEvent.ActorEmail.
+func newJSONRequest(t *testing.T, method, path, projectID, actorEmail string, body any) *http.Request {
 	t.Helper()
 	var buf bytes.Buffer
 	if body != nil {
@@ -146,14 +157,21 @@ func newJSONRequest(t *testing.T, method, path, projectID string, body any) *htt
 	}
 	r := httptest.NewRequest(method, path, &buf)
 	r.Header.Set("Content-Type", "application/json")
-	r = r.WithContext(withProjectID(r.Context(), projectID))
+	ctx := withProjectID(r.Context(), projectID)
+	if actorEmail != "" {
+		ctx = withUserID(ctx, actorEmail)
+	}
+	r = r.WithContext(ctx)
 	return r
 }
 
 // --- Test_HandleCreateAPIKey_FiresAuditEvent ----------------------
 
 func Test_HandleCreateAPIKey_FiresAuditEvent(t *testing.T) {
-	const projectID = "proj-capture-create"
+	const (
+		projectID = "proj-capture-create"
+		actor     = "create-actor@example.com"
+	)
 	s := &auditCaptureStubStore{
 		project: &store.Project{
 			ProjectID:   projectID,
@@ -163,7 +181,7 @@ func Test_HandleCreateAPIKey_FiresAuditEvent(t *testing.T) {
 	}
 	h := newCaptureHandlers(s)
 
-	r := newJSONRequest(t, http.MethodPost, "/api-keys", projectID, map[string]any{
+	r := newJSONRequest(t, http.MethodPost, "/api-keys", projectID, actor, map[string]any{
 		"name": "test-key",
 	})
 	w := httptest.NewRecorder()
@@ -187,6 +205,9 @@ func Test_HandleCreateAPIKey_FiresAuditEvent(t *testing.T) {
 	if s.captured.ProjectID != projectID {
 		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
 	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
 	if s.captured.MetadataJSON == "" {
 		t.Error("metadata_json should contain name + prefix, got empty")
 	}
@@ -199,6 +220,7 @@ func Test_HandleRevokeAPIKey_FiresAuditEvent(t *testing.T) {
 		projectID  = "proj-capture-revoke"
 		keyToKill  = "key-aaaa-1"
 		otherKeyID = "key-bbbb-2"
+		actor      = "revoke-actor@example.com"
 	)
 	s := &auditCaptureStubStore{
 		// >=2 keys so the last-key protection guard is bypassed.
@@ -209,7 +231,7 @@ func Test_HandleRevokeAPIKey_FiresAuditEvent(t *testing.T) {
 	}
 	h := newCaptureHandlers(s)
 
-	r := newJSONRequest(t, http.MethodDelete, "/api-keys/"+keyToKill, projectID, nil)
+	r := newJSONRequest(t, http.MethodDelete, "/api-keys/"+keyToKill, projectID, actor, nil)
 	r.SetPathValue("id", keyToKill)
 	w := httptest.NewRecorder()
 	h.HandleRevokeAPIKey(w, r)
@@ -230,12 +252,18 @@ func Test_HandleRevokeAPIKey_FiresAuditEvent(t *testing.T) {
 	if s.captured.ProjectID != projectID {
 		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
 	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
 }
 
 // --- Test_HandleCreateWebhook_FiresAuditEvent ---------------------
 
 func Test_HandleCreateWebhook_FiresAuditEvent(t *testing.T) {
-	const projectID = "proj-capture-webhook-create"
+	const (
+		projectID = "proj-capture-webhook-create"
+		actor     = "webhook-create-actor@example.com"
+	)
 	s := &auditCaptureStubStore{}
 	h := newCaptureHandlers(s)
 
@@ -245,7 +273,7 @@ func Test_HandleCreateWebhook_FiresAuditEvent(t *testing.T) {
 		"enabled_classes": []string{"crashes"},
 		"enabled":         true,
 	}
-	r := newJSONRequest(t, http.MethodPost, "/webhooks", projectID, body)
+	r := newJSONRequest(t, http.MethodPost, "/webhooks", projectID, actor, body)
 	w := httptest.NewRecorder()
 	h.HandleCreateWebhook(w, r)
 
@@ -267,6 +295,9 @@ func Test_HandleCreateWebhook_FiresAuditEvent(t *testing.T) {
 	if s.captured.ProjectID != projectID {
 		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
 	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
 	if s.captured.MetadataJSON == "" {
 		t.Fatal("metadata_json should be populated")
 	}
@@ -285,11 +316,12 @@ func Test_HandleDeleteWebhook_FiresAuditEvent(t *testing.T) {
 	const (
 		projectID = "proj-capture-webhook-delete"
 		webhookID = "wh-cafe"
+		actor     = "webhook-delete-actor@example.com"
 	)
 	s := &auditCaptureStubStore{}
 	h := newCaptureHandlers(s)
 
-	r := newJSONRequest(t, http.MethodDelete, "/webhooks/"+webhookID, projectID, nil)
+	r := newJSONRequest(t, http.MethodDelete, "/webhooks/"+webhookID, projectID, actor, nil)
 	r.SetPathValue("id", webhookID)
 	w := httptest.NewRecorder()
 	h.HandleDeleteWebhook(w, r)
@@ -310,16 +342,22 @@ func Test_HandleDeleteWebhook_FiresAuditEvent(t *testing.T) {
 	if s.captured.ProjectID != projectID {
 		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
 	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
 }
 
 // --- Test_HandleUpdateBillingCap_FiresAuditEvent ------------------
 
 func Test_HandleUpdateBillingCap_FiresAuditEvent(t *testing.T) {
-	const projectID = "proj-capture-cap"
+	const (
+		projectID = "proj-capture-cap"
+		actor     = "cap-actor@example.com"
+	)
 	s := &auditCaptureStubStore{}
 	h := newCaptureHandlers(s)
 
-	r := newJSONRequest(t, http.MethodPut, "/billing/cap", projectID, map[string]any{
+	r := newJSONRequest(t, http.MethodPut, "/billing/cap", projectID, actor, map[string]any{
 		"cap_usd": 250,
 	})
 	w := httptest.NewRecorder()
@@ -341,6 +379,9 @@ func Test_HandleUpdateBillingCap_FiresAuditEvent(t *testing.T) {
 	if s.captured.ProjectID != projectID {
 		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
 	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
 	if s.captured.MetadataJSON == "" {
 		t.Fatal("metadata_json should be populated")
 	}
@@ -360,7 +401,10 @@ func Test_HandleDowngradeToHobby_PathB_FiresAuditEvent(t *testing.T) {
 	// id. The handler skips the Stripe call and flips the DB directly.
 	// The audit row fires after the DB flip with the immediate=true
 	// metadata field set.
-	const projectID = "proj-capture-downgrade"
+	const (
+		projectID = "proj-capture-downgrade"
+		actor     = "downgrade-actor@example.com"
+	)
 	s := &auditCaptureStubStore{
 		project: &store.Project{
 			ProjectID:            projectID,
@@ -371,7 +415,7 @@ func Test_HandleDowngradeToHobby_PathB_FiresAuditEvent(t *testing.T) {
 	}
 	h := newCaptureHandlers(s)
 
-	r := newJSONRequest(t, http.MethodPost, "/billing/downgrade", projectID, nil)
+	r := newJSONRequest(t, http.MethodPost, "/billing/downgrade", projectID, actor, nil)
 	w := httptest.NewRecorder()
 	h.HandleDowngradeToHobby(w, r)
 
@@ -391,6 +435,9 @@ func Test_HandleDowngradeToHobby_PathB_FiresAuditEvent(t *testing.T) {
 	}
 	if s.captured.ProjectID != projectID {
 		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
 	}
 	if s.captured.MetadataJSON == "" {
 		t.Fatal("metadata_json should be populated")
@@ -412,7 +459,10 @@ func Test_HandleCloseAccount_FiresAuditEvent(t *testing.T) {
 	// so the mailer block is also skipped. The audit row fires
 	// immediately before the cascade-delete, which is the contract
 	// the migration documents.
-	const projectID = "proj-capture-close"
+	const (
+		projectID = "proj-capture-close"
+		actor     = "close-actor@example.com"
+	)
 	s := &auditCaptureStubStore{
 		project: &store.Project{
 			ProjectID:            projectID,
@@ -424,7 +474,7 @@ func Test_HandleCloseAccount_FiresAuditEvent(t *testing.T) {
 	}
 	h := newCaptureHandlers(s)
 
-	r := newJSONRequest(t, http.MethodPost, "/billing/close-account", projectID, nil)
+	r := newJSONRequest(t, http.MethodPost, "/billing/close-account", projectID, actor, nil)
 	w := httptest.NewRecorder()
 	h.HandleCloseAccount(w, r)
 
@@ -443,6 +493,9 @@ func Test_HandleCloseAccount_FiresAuditEvent(t *testing.T) {
 	}
 	if s.captured.ProjectID != projectID {
 		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
 	}
 	if s.captured.MetadataJSON == "" {
 		t.Fatal("metadata_json should be populated")
