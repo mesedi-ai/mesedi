@@ -137,6 +137,11 @@ func (s *auditCaptureStubStore) DeleteAPIKeysByUserID(_ context.Context, _ strin
 	return 0, nil
 }
 
+// UpdateProjectTier backs HandleAdminSetTier (#207 step C, C8 / PL4).
+func (s *auditCaptureStubStore) UpdateProjectTier(_ context.Context, _, _ string, _ *time.Time) error {
+	return nil
+}
+
 func (s *auditCaptureStubStore) GetProject(_ context.Context, _ string) (*store.Project, error) {
 	if s.project == nil {
 		return &store.Project{ProjectID: "proj-test"}, nil
@@ -977,5 +982,70 @@ func Test_recordAuditEventForProject_EmptyProjectID_NoOp(t *testing.T) {
 
 	if s.captured != nil {
 		t.Fatalf("expected no store write for empty projectID, got %+v", s.captured)
+	}
+}
+
+// --- Test_HandleAdminSetTier_FiresAuditEvent ----------------------
+
+// Closes PL4: a platform-admin tier change is now surfaced in the
+// customer's own audit log so they can attribute a sudden tier flip
+// back to a Mesedi-side action. The actor email is the synthetic
+// AuditActorPlatformAdmin sentinel, NOT the real platform admin's
+// email -- by design.
+func Test_HandleAdminSetTier_FiresAuditEvent(t *testing.T) {
+	const (
+		projectID = "proj-capture-admin-tier"
+		fromTier  = "hobby"
+		toTier    = "team"
+	)
+	s := &auditCaptureStubStore{
+		project: &store.Project{
+			ProjectID: projectID,
+			Tier:      fromTier,
+		},
+	}
+	h := newCaptureHandlers(s)
+
+	r := httptest.NewRequest(http.MethodPost,
+		"/admin/projects/"+projectID+"/tier",
+		bytes.NewBufferString(`{"tier":"team","expires_days":0}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.SetPathValue("id", projectID)
+	w := httptest.NewRecorder()
+	h.HandleAdminSetTier(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%q", w.Code, w.Body.String())
+	}
+	if s.captured == nil {
+		t.Fatal("expected audit event to be captured")
+	}
+	if s.captured.Action != AuditTierChangeByPlatformAdmin {
+		t.Errorf("action: got %q, want %q",
+			s.captured.Action, AuditTierChangeByPlatformAdmin)
+	}
+	if s.captured.TargetType != "project" || s.captured.TargetID != projectID {
+		t.Errorf("target: got %q/%q, want project/%q",
+			s.captured.TargetType, s.captured.TargetID, projectID)
+	}
+	if s.captured.ProjectID != projectID {
+		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != AuditActorPlatformAdmin {
+		t.Errorf("actor_email: got %q, want %q (synthetic sentinel)",
+			s.captured.ActorEmail, AuditActorPlatformAdmin)
+	}
+	if s.captured.MetadataJSON == "" {
+		t.Fatal("metadata_json should be populated")
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(s.captured.MetadataJSON), &meta); err != nil {
+		t.Fatalf("metadata_json not valid JSON: %v", err)
+	}
+	if meta["from_tier"] != fromTier {
+		t.Errorf("metadata.from_tier: got %v, want %q", meta["from_tier"], fromTier)
+	}
+	if meta["to_tier"] != toTier {
+		t.Errorf("metadata.to_tier: got %v, want %q", meta["to_tier"], toTier)
 	}
 }

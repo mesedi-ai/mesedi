@@ -46,7 +46,21 @@ const (
 	AuditTeamInviteRevoke = "team.invite_revoke"
 	AuditTeamMemberRemove = "team.member_remove"
 	AuditTeamRoleUpdate   = "team.role_update"
+	// Platform-admin actions (Mesedi staff modifying a customer
+	// project from the admin dashboard). The actor email is a
+	// synthetic sentinel so the customer sees that a Mesedi staff
+	// member made the change without leaking which staff account.
+	AuditTierChangeByPlatformAdmin = "tier.change_by_platform_admin"
 )
+
+// AuditActorPlatformAdmin is the synthetic actor_email written by
+// platform-admin capture points (Mesedi staff acting on a customer
+// project). Customers see this in their audit log's ACTOR column;
+// the dashboard renders it verbatim and does not need to know it is
+// not a real address. Centralized so other platform-admin captures
+// (grant, suspend, etc.) write the same string and the dashboard's
+// special-casing has one source of truth.
+const AuditActorPlatformAdmin = "Mesedi platform admin"
 
 // recordAuditEvent inserts one audit row for the request's project.
 // Reads actor identity from the request context (set by AuthMiddleware).

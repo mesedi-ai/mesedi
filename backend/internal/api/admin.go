@@ -637,6 +637,14 @@ func (h *Handlers) HandleAdminSetTier(w http.ResponseWriter, r *http.Request) {
 		t := time.Now().UTC().Add(time.Duration(req.ExpiresDays) * 24 * time.Hour)
 		expiresAt = &t
 	}
+	// Load the project BEFORE the update so the audit row can record
+	// the from_tier value. Best-effort: a load failure is logged but
+	// does not block the tier change; the audit row will then carry
+	// from_tier="" and the customer still sees the change happened.
+	var fromTier string
+	if p, gerr := h.Store.GetProject(context.Background(), projectID); gerr == nil && p != nil {
+		fromTier = p.Tier
+	}
 	if err := h.Store.UpdateProjectTier(context.Background(), projectID, tier, expiresAt); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "project not found")
@@ -645,12 +653,33 @@ func (h *Handlers) HandleAdminSetTier(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "update tier: "+err.Error())
 		return
 	}
-	// The admin audit trail is just structured log lines today ,
-	// rotate to a real audit_events table when traffic justifies it.
 	h.Logger.Info("admin: tier set",
 		"project_id", projectID,
 		"new_tier", tier,
 		"expires_days", req.ExpiresDays,
+	)
+	// #207 step C / PL4 — surface platform-admin tier changes in the
+	// customer's own audit log so they can attribute a sudden tier
+	// flip back to a Mesedi-side action rather than silently to
+	// "someone in your org." Actor is the synthetic
+	// AuditActorPlatformAdmin sentinel; the specific staff identity
+	// is intentionally not exposed to the customer.
+	tierMeta := map[string]any{
+		"from_tier":    fromTier,
+		"to_tier":      tier,
+		"expires_days": req.ExpiresDays,
+	}
+	if expiresAt != nil {
+		tierMeta["expires_at"] = expiresAt.UTC().Format(time.RFC3339)
+	}
+	h.recordAuditEventForProject(
+		context.Background(),
+		projectID,
+		AuditActorPlatformAdmin,
+		AuditTierChangeByPlatformAdmin,
+		"project",
+		projectID,
+		tierMeta,
 	)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
