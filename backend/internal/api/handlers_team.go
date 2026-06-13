@@ -389,15 +389,30 @@ func (h *Handlers) HandleRemoveMember(w http.ResponseWriter, r *http.Request) {
 			"removed_by", callerUserID,
 			"keys_revoked", revoked)
 	}
+	// #213 Batch 2: ALSO kill every dashboard session the removed
+	// member has open. Without this, the kicked-out member can
+	// continue using whatever browser tab they had pointed at
+	// /app until the cookie TTL expires (up to 7 days). Best-
+	// effort: log on failure but never block the removal.
+	sessionsRevoked := 0
+	if n, sErr := h.Store.DeleteSessionsByUserID(r.Context(), targetUserID); sErr != nil {
+		h.Logger.Error("kill sessions after member remove failed",
+			"org_id", orgID,
+			"removed_user_id", targetUserID,
+			"error", sErr.Error())
+	} else {
+		sessionsRevoked = n
+	}
 
 	// #207 step C — removing a member is a top-tier security action
 	// (revokes their dashboard access AND every API key they hold).
 	// Captured after the keys are best-effort revoked so a partial
 	// removal still leaves a row, with revoked-count in the metadata
-	// for forensics.
+	// for forensics. #213 Batch 2 adds sessions_revoked.
 	h.recordAuditEvent(r, AuditTeamMemberRemove, "member", targetUserID, map[string]any{
-		"org_id":       orgID,
-		"keys_revoked": revoked,
+		"org_id":           orgID,
+		"keys_revoked":     revoked,
+		"sessions_revoked": sessionsRevoked,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,

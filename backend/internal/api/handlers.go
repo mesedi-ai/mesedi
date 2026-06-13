@@ -170,6 +170,11 @@ func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
 	// route after the customer clicks the email link).
 	mux.HandleFunc("POST /magic-link/start", h.HandleMagicLinkStart)
 	mux.HandleFunc("GET /magic-link/verify", h.HandleMagicLinkVerify)
+	// #213 Batch 2 — POST /auth/logout destroys the caller's session.
+	// Public so a customer who has already lost their session row
+	// (expired, kicked, key revoked) can still click Sign Out
+	// without a 401. See auth_logout.go.
+	mux.HandleFunc("POST /auth/logout", h.HandleAuthLogout)
 	// Stripe webhook receiver. Public because Stripe POSTs server-
 	// to-server with no bearer; authenticity is verified inside the
 	// handler via the Stripe-Signature header against the configured
@@ -3245,6 +3250,18 @@ func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 			"cannot revoke the project's last API key; mint a new key first, or close the account from settings to remove the project entirely")
 		return
 	}
+	// #213 Batch 2: find the target key's UserID so we can kill that
+	// user's dashboard sessions after the API key is gone. Robert's
+	// rule: revoking a member's key MUST also log them out of every
+	// browser they have open. We pluck the UserID from the existing
+	// keys slice rather than make a new Store call.
+	var revokedKeyUserID string
+	for _, k := range keys {
+		if k.KeyID == keyID {
+			revokedKeyUserID = k.UserID
+			break
+		}
+	}
 	if err := h.Store.DeleteAPIKey(r.Context(), keyID, authProjectID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "api key not found")
@@ -3253,12 +3270,30 @@ func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// #213 Batch 2: kick the affected user out of every dashboard
+	// browser tab they have open. Best-effort: a delete-sessions
+	// failure does NOT undo the key revocation; the audit row
+	// records sessions_revoked=0 so an operator can re-run a
+	// cleanup if needed.
+	sessionsRevoked := 0
+	if revokedKeyUserID != "" {
+		if n, sErr := h.Store.DeleteSessionsByUserID(r.Context(), revokedKeyUserID); sErr == nil {
+			sessionsRevoked = n
+		} else {
+			h.Logger.Warn("api key revoke: kill sessions failed (key still revoked)",
+				"key_id", keyID, "user_id", revokedKeyUserID, "error", sErr.Error())
+		}
+	}
 	h.Logger.Info("api key revoked",
 		"key_id", keyID,
 		"project_id", authProjectID,
+		"sessions_revoked", sessionsRevoked,
 	)
-	// #207 audit log: key revocation is admin-tier.
-	h.recordAuditEvent(r, AuditAPIKeyRevoke, "api_key", keyID, nil)
+	// #207 audit log: key revocation is admin-tier. #213 Batch 2
+	// adds sessions_revoked so the row records the full effect.
+	h.recordAuditEvent(r, AuditAPIKeyRevoke, "api_key", keyID, map[string]any{
+		"sessions_revoked": sessionsRevoked,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
 		"key_id": keyID,

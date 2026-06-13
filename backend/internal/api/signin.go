@@ -84,6 +84,18 @@ type SigninResponse struct {
 	ProjectName string `json:"project_name"`
 	KeyPrefix   string `json:"key_prefix"`
 	Warning     string `json:"warning"`
+	// SessionToken is the raw HttpOnly cookie value the dashboard
+	// Worker writes onto its browser-facing response (#213 Batch 2).
+	// The backend persists only the SHA-256 hash in the sessions
+	// table; this raw value is shown exactly once, in this response.
+	// Empty during the Batch 2 transition window for callers older
+	// than the Batch 3 Worker code, which still consume APIKey from
+	// the same payload. Batch 3 removes APIKey from this response.
+	SessionToken string `json:"session_token,omitempty"`
+	// SessionExpiresAt mirrors SessionToken's expires_at column from
+	// the sessions table as an RFC 3339 string. Lets the Worker set
+	// the cookie Max-Age without re-deriving the TTL on its side.
+	SessionExpiresAt string `json:"session_expires_at,omitempty"`
 }
 
 // signinHeaderSecret is the name of the request header the dashboard
@@ -229,19 +241,54 @@ func (h *Handlers) HandleSignin(w http.ResponseWriter, r *http.Request) {
 			"error", err.Error(), "email", email, "project_id", project.ProjectID)
 	}
 
+	// 6b. #213 Batch 2: also create a real session row + return its
+	//     raw token to the Worker. The dashboard's Worker writes the
+	//     raw token into a browser-side HttpOnly cookie in Batch 3;
+	//     once the dashboard is fully cut over we drop the API key
+	//     from this response. Best-effort: a session-create failure
+	//     does NOT roll back the signin because the API-key path
+	//     still works for legacy / SDK consumers.
+	var sessionToken string
+	var sessionExpiresAt time.Time
+	rawSess, sessHash, sessErr := MintSessionToken()
+	if sessErr != nil {
+		h.Logger.Warn("signin: mint session token failed (API-key path still works)",
+			"error", sessErr.Error(), "email", email, "project_id", project.ProjectID)
+	} else {
+		sessionExpiresAt = now.Add(SessionTTL)
+		sess := &store.Session{
+			TokenHash:  sessHash,
+			UserID:     email,
+			ProjectID:  project.ProjectID,
+			CreatedAt:  now,
+			ExpiresAt:  sessionExpiresAt,
+			LastUsedAt: now,
+			UserAgent:  r.Header.Get("User-Agent"),
+			IPAddress:  extractClientIP(r),
+		}
+		if persistErr := h.Store.CreateSession(r.Context(), sess); persistErr != nil {
+			h.Logger.Warn("signin: persist session failed (API-key path still works)",
+				"error", persistErr.Error(), "email", email, "project_id", project.ProjectID)
+		} else {
+			sessionToken = rawSess
+		}
+	}
+
 	h.Logger.Info("signin ok",
 		"project_id", project.ProjectID,
 		"key_prefix", prefix,
 		"email", email,
 		"source", source,
+		"session_created", sessionToken != "",
 	)
 
-	// 7. Return the fresh key to the dashboard server. The dashboard
-	//    server writes this into a short-lived, sameSite=strict
-	//    cookie that the welcome / login page reads exactly once and
-	//    then wipes. The raw key never lives in URL query strings,
-	//    Referer headers, or server logs.
-	writeJSON(w, http.StatusCreated, SigninResponse{
+	// 7. Return the fresh key + the fresh session token to the
+	//    dashboard server. The dashboard server writes these into
+	//    short-lived cookies that the welcome / login page reads
+	//    exactly once. The raw values never live in URL query
+	//    strings, Referer headers, or server logs. The two paths
+	//    coexist during the #213 cutover; Batch 3 drops APIKey.
+	resp := SigninResponse{
 		OK:          true,
 		APIKey:      rawKey,
 		ProjectID:   project.ProjectID,
@@ -250,7 +297,12 @@ func (h *Handlers) HandleSignin(w http.ResponseWriter, r *http.Request) {
 		Warning: "Session-grade key. Expires in " +
 			fmt.Sprint(store.APIKeyLoginExpiryDays) +
 			" days. Hidden from the API keys list.",
-	})
+	}
+	if sessionToken != "" {
+		resp.SessionToken = sessionToken
+		resp.SessionExpiresAt = sessionExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // signinKeyName produces a human-readable name for the api_keys.name

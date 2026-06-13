@@ -487,6 +487,12 @@ func main() {
 	mux.Handle("OPTIONS /magic-link/start", signupHandler)
 	mux.Handle("GET /magic-link/verify", signupHandler)
 	mux.Handle("OPTIONS /magic-link/verify", signupHandler)
+	// #213 Batch 2 — POST /auth/logout destroys the caller's session
+	// cookie. Intentionally on the public mux: a customer who has
+	// already lost their session row (expired, kicked, key revoked)
+	// should still be able to click Sign Out without a 401.
+	mux.Handle("POST /auth/logout", signupHandler)
+	mux.Handle("OPTIONS /auth/logout", signupHandler)
 	mux.Handle("POST /executions", privateHandler)
 	mux.Handle("PATCH /executions/{id}", privateHandler)
 	mux.Handle("POST /events", privateHandler)

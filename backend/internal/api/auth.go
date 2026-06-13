@@ -164,6 +164,22 @@ func HashSessionToken(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// MintSessionToken returns a fresh raw cookie value plus its hash.
+// The raw token is 16 random bytes hex-encoded (32 hex chars = 128
+// bits of entropy) prefixed with "sess_", matching the api_key
+// "mesedi_sk_" convention. Only the hash lands in the DB; the raw
+// value is set in the HttpOnly cookie that travels to the customer
+// browser. Callers MUST NOT log the raw token.
+func MintSessionToken() (raw, hash string, err error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", "", err
+	}
+	raw = "sess_" + hex.EncodeToString(b[:])
+	hash = HashSessionToken(raw)
+	return raw, hash, nil
+}
+
 // authMiddleware constructs the request-auth middleware. It accepts
 // two credential paths:
 //

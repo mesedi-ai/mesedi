@@ -142,6 +142,22 @@ func (s *auditCaptureStubStore) UpdateProjectTier(_ context.Context, _, _ string
 	return nil
 }
 
+// --- #213 Batch 2 session-related stubs ---------------------------
+//
+// The embedded store.Store is nil, so the new session methods on the
+// Store interface fall through to a nil interface and panic at
+// runtime. These stubs return zero-values so the existing handler
+// paths (HandleRevokeAPIKey, HandleRemoveMember, HandleSignin) can
+// call them without segfaulting in the tests.
+
+func (s *auditCaptureStubStore) CreateSession(_ context.Context, _ *store.Session) error {
+	return nil
+}
+
+func (s *auditCaptureStubStore) DeleteSessionsByUserID(_ context.Context, _ string) (int, error) {
+	return 0, nil
+}
+
 func (s *auditCaptureStubStore) GetProject(_ context.Context, _ string) (*store.Project, error) {
 	if s.project == nil {
 		return &store.Project{ProjectID: "proj-test"}, nil
