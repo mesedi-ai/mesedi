@@ -702,7 +702,7 @@ func (m *ResendMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeS
 			"  - Project settings, severity routing, webhooks\n\n"+
 			"What changes:\n"+
 			"  - Included executions drop from 100,000 / month to 10,000 / month\n"+
-			"  - SSO and multi-seat are disabled\n"+
+			"  - Hobby is 1 project, 1 person. Team invites are no longer accepted; if your org had other members, remove them before downgrading or the downgrade will be blocked.\n"+
 			"  - Executions older than 15 days are pruned at the next period start\n\n"+
 			"If this was a mistake, you can cancel the downgrade from /app/billing in the dashboard before the period ends.\n\n"+
 			"View billing: %s/app/billing\n",
@@ -720,7 +720,7 @@ func (m *ResendMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeS
 			"<p><strong>What changes:</strong></p>"+
 			"<ul>"+
 			"<li>Included executions drop from 100,000 / month to 10,000 / month</li>"+
-			"<li>SSO and multi-seat are disabled</li>"+
+			"<li>Hobby is 1 project, 1 person. Team invites are no longer accepted; if your org had other members, remove them before downgrading or the downgrade will be blocked.</li>"+
 			"<li>Executions older than 15 days are pruned at the next period start</li>"+
 			"</ul>"+
 			"<p>If this was a mistake, you can cancel the downgrade from <a href=\"%s/app/billing\">your billing page</a> before the period ends.</p>",

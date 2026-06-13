@@ -1756,6 +1756,23 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 			"project is not on Cloud Team; downgrade only makes sense from Team")
 		return
 	}
+	// PL6 — Hobby is 1 project, 1 person. If the calling org has
+	// more than one member, the downgrade would leave them in an
+	// inconsistent state (members continuing to authenticate against
+	// what is now a single-user tier). Refuse with a clear message
+	// so the admin removes the others first. Fail-open if the tenant
+	// lookup fails: we already know the project exists from the
+	// GetProject above and the admin has already passed the role
+	// check via requireRole.
+	tenantPtr, terr := h.Store.GetProjectTenantID(r.Context(), p.ProjectID)
+	if terr == nil && tenantPtr != nil && *tenantPtr != "" {
+		members, mlerr := h.Store.ListOrganizationMembers(r.Context(), *tenantPtr)
+		if mlerr == nil && len(members) > 1 {
+			writeError(w, http.StatusConflict,
+				"cannot downgrade to Hobby with multiple team members; Hobby is 1 project, 1 person. Remove other members from /app/team before downgrading.")
+			return
+		}
+	}
 
 	// Two paths depending on whether there's a real Stripe subscription
 	// on file:

@@ -1049,3 +1049,79 @@ func Test_HandleAdminSetTier_FiresAuditEvent(t *testing.T) {
 		t.Errorf("metadata.to_tier: got %v, want %q", meta["to_tier"], toTier)
 	}
 }
+
+// --- Test_HandleCreateInvite_HobbyTier_Returns402 -----------------
+
+// PL6: Hobby is 1 project, 1 person. Team invites are not allowed.
+// The new gate at the top of HandleCreateInvite returns 402 with an
+// upgrade pointer.
+func Test_HandleCreateInvite_HobbyTier_Returns402(t *testing.T) {
+	const (
+		projectID = "proj-pl6-hobby-invite"
+		actor     = "hobby-admin@example.com"
+		orgID     = "org-pl6-hobby"
+	)
+	s := teamCaptureSetup(t, projectID, actor, orgID)
+	// Override the project tier to Hobby; teamCaptureSetup defaults
+	// the tier to empty which would fail-open through the gate.
+	s.project.Tier = TierHobby
+	h := newCaptureHandlers(s)
+
+	r := newJSONRequest(t, http.MethodPost, "/me/team/invites", projectID, actor, map[string]any{
+		"email": "newbie@example.com",
+		"role":  "write",
+	})
+	w := httptest.NewRecorder()
+	h.HandleCreateInvite(w, r)
+
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("status: got %d, want 402; body=%q", w.Code, w.Body.String())
+	}
+	if s.captured != nil {
+		t.Errorf("Hobby invite should not write an audit row, got %+v", s.captured)
+	}
+}
+
+// --- Test_HandleDowngradeToHobby_WithExtraMembers_Returns409 -------
+
+// PL6: a Team org with >1 member cannot downgrade directly. The
+// admin must remove other members first so the resulting Hobby
+// project matches the 1-project-1-person contract.
+func Test_HandleDowngradeToHobby_WithExtraMembers_Returns409(t *testing.T) {
+	const (
+		projectID = "proj-pl6-downgrade-with-members"
+		actor     = "admin@example.com"
+		orgID     = "org-pl6-multi"
+	)
+	tenant := orgID
+	s := &auditCaptureStubStore{
+		project: &store.Project{
+			ProjectID:            projectID,
+			Tier:                 TierTeam,
+			StripeCustomerID:     "cus_test_multi_member",
+			StripeSubscriptionID: "",
+		},
+		tenantID: &tenant,
+		orgMember: &store.OrganizationMember{
+			OrgID: orgID, UserID: actor, Role: "admin",
+		},
+		// 2 members in the org: admin + one more. The gate must trip
+		// at len(members) > 1 and refuse the downgrade.
+		orgMembers: []*store.OrganizationMember{
+			{OrgID: orgID, UserID: actor, Role: "admin"},
+			{OrgID: orgID, UserID: "extra@example.com", Role: "write"},
+		},
+	}
+	h := newCaptureHandlers(s)
+
+	r := newJSONRequest(t, http.MethodPost, "/billing/downgrade", projectID, actor, nil)
+	w := httptest.NewRecorder()
+	h.HandleDowngradeToHobby(w, r)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status: got %d, want 409; body=%q", w.Code, w.Body.String())
+	}
+	if s.captured != nil {
+		t.Errorf("blocked downgrade should not write an audit row, got %+v", s.captured)
+	}
+}

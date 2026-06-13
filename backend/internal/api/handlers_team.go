@@ -430,6 +430,21 @@ func (h *Handlers) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// PL6 — Hobby is single-user (1 project, 1 person). Multi-seat
+	// is a Team-tier capability. We look up the calling project's
+	// tier and refuse invite creation if it is Hobby. A failed
+	// GetProject is treated as fail-open (rather than block the
+	// invite incorrectly) since the caller already passed admin
+	// auth and the project clearly exists.
+	if authProjectID, hasProject := ProjectIDFromContext(r.Context()); hasProject {
+		if p, err := h.Store.GetProject(r.Context(), authProjectID); err == nil && p != nil {
+			if normalizeTier(p.Tier) == TierHobby {
+				writeError(w, http.StatusPaymentRequired,
+					"team invites are a Cloud Team feature; Hobby is 1 project, 1 person. Upgrade at /app/billing to invite teammates.")
+				return
+			}
+		}
+	}
 
 	var body struct {
 		Email string `json:"email"`
