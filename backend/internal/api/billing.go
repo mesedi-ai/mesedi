@@ -1648,6 +1648,26 @@ func (h *Handlers) handleSetupIntentSucceeded(event stripe.Event, logger *slog.L
 		logger.Warn("setup_intent.succeeded: mark card attached failed",
 			"project_id", p.ProjectID, "error", err.Error())
 	}
+	// #207 step C / PL3 — card add is the security-parity counterpart
+	// to billing.payment_method_removed. Webhook handlers have no
+	// caller request context (Stripe-to-server), so we use the
+	// no-request variant and populate ActorEmail from the project's
+	// OwnerEmail. setup_intent webhooks can be redelivered by Stripe
+	// on retry, which would produce duplicate audit rows; v2
+	// idempotency hardening will dedupe by stripe_setup_intent_id.
+	h.recordAuditEventForProject(
+		context.Background(),
+		p.ProjectID,
+		p.OwnerEmail,
+		AuditBillingPaymentMethodAdd,
+		"payment_method",
+		customerID,
+		map[string]any{
+			"tier":                   p.Tier,
+			"stripe_setup_intent_id": si.ID,
+			"stripe_payment_method":  pmID,
+		},
+	)
 
 	// #209: For Team, if the subscription was scheduled to cancel
 	// at period end because of a prior card removal, unschedule it.

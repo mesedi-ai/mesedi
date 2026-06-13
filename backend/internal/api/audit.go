@@ -11,6 +11,7 @@ package api
 // worse outcome than a missing audit row.
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -30,6 +31,7 @@ const (
 	AuditBillingCapUpdate        = "billing.cap_update"
 	AuditBillingDowngrade        = "billing.downgrade_scheduled"
 	AuditBillingAccountClose     = "billing.account_closed"
+	AuditBillingPaymentMethodAdd = "billing.payment_method_added"
 	AuditBillingPaymentMethodRm  = "billing.payment_method_removed"
 	// #207 step C — additional v1.5 capture points.
 	AuditProjectRename     = "project.rename"
@@ -105,6 +107,54 @@ func (h *Handlers) recordAuditEvent(
 		// Best-effort: log and continue. An audit-write failure
 		// MUST NOT break the customer's underlying admin action.
 		h.Logger.Warn("audit event write failed",
+			"project_id", projectID,
+			"action", action,
+			"error", err.Error())
+	}
+}
+
+// recordAuditEventForProject is the variant of recordAuditEvent for
+// code paths that don't have an *http.Request to read context from.
+// Stripe webhook handlers are the canonical case: the request comes
+// from Stripe's servers, the API key context machinery doesn't apply,
+// and there's no caller user_id to extract. Callers pass projectID
+// and actorEmail directly (typically project.OwnerEmail from a
+// GetProjectByStripeCustomerID lookup the handler has already done).
+//
+// Same best-effort posture as recordAuditEvent: a CreateAuditEvent
+// failure is logged at WARN and swallowed so the calling business
+// logic (e.g., MarkCardAttached) is not affected. Empty projectID is
+// a silent no-op rather than a panic.
+func (h *Handlers) recordAuditEventForProject(
+	ctx context.Context,
+	projectID, actorEmail string,
+	action, targetType, targetID string,
+	metadata map[string]any,
+) {
+	if projectID == "" {
+		return
+	}
+
+	var metaJSON string
+	if metadata != nil {
+		if b, err := json.Marshal(metadata); err == nil {
+			metaJSON = string(b)
+		}
+	}
+
+	event := &store.AuditEvent{
+		EventID:      newAuditEventID(),
+		ProjectID:    projectID,
+		ActorEmail:   actorEmail,
+		Action:       action,
+		TargetType:   targetType,
+		TargetID:     targetID,
+		MetadataJSON: metaJSON,
+		CreatedAt:    time.Now().UTC(),
+	}
+
+	if err := h.Store.CreateAuditEvent(ctx, event); err != nil {
+		h.Logger.Warn("audit event write failed (no-request variant)",
 			"project_id", projectID,
 			"action", action,
 			"error", err.Error())

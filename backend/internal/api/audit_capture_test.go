@@ -895,3 +895,87 @@ func Test_HandleRemoveMember_FiresAuditEvent(t *testing.T) {
 		t.Errorf("metadata.org_id: got %v, want %q", meta["org_id"], orgID)
 	}
 }
+
+// --- Test_recordAuditEventForProject_PopulatesRowAndJSON ----------
+
+// Covers the no-request helper variant used by Stripe webhook
+// handlers (#207 step C, C7 / PL3). The webhook handler itself is
+// not exercised end-to-end because handleSetupIntentSucceeded calls
+// out to Stripe via the package-level customer.Update / subscription
+// SDK functions; static review confirms the call site is correct
+// and this test confirms the helper writes the row shape the
+// dashboard expects.
+func Test_recordAuditEventForProject_PopulatesRowAndJSON(t *testing.T) {
+	const (
+		projectID  = "proj-capture-pm-add"
+		actor      = "owner@example.com"
+		customerID = "cus_test_pm_add"
+	)
+	s := &auditCaptureStubStore{}
+	h := &Handlers{Store: s, Logger: quietLogger()}
+
+	meta := map[string]any{
+		"tier":                   "hobby",
+		"stripe_setup_intent_id": "seti_test",
+		"stripe_payment_method":  "pm_test",
+	}
+	h.recordAuditEventForProject(
+		context.Background(),
+		projectID,
+		actor,
+		AuditBillingPaymentMethodAdd,
+		"payment_method",
+		customerID,
+		meta,
+	)
+
+	if s.captured == nil {
+		t.Fatal("expected audit event to be captured by the helper")
+	}
+	if s.captured.Action != AuditBillingPaymentMethodAdd {
+		t.Errorf("action: got %q, want %q", s.captured.Action, AuditBillingPaymentMethodAdd)
+	}
+	if s.captured.TargetType != "payment_method" || s.captured.TargetID != customerID {
+		t.Errorf("target: got %q/%q, want payment_method/%q",
+			s.captured.TargetType, s.captured.TargetID, customerID)
+	}
+	if s.captured.ProjectID != projectID {
+		t.Errorf("project_id: got %q, want %q", s.captured.ProjectID, projectID)
+	}
+	if s.captured.ActorEmail != actor {
+		t.Errorf("actor_email: got %q, want %q", s.captured.ActorEmail, actor)
+	}
+	if s.captured.MetadataJSON == "" {
+		t.Fatal("metadata_json should be populated")
+	}
+	var roundtrip map[string]any
+	if err := json.Unmarshal([]byte(s.captured.MetadataJSON), &roundtrip); err != nil {
+		t.Fatalf("metadata_json not valid JSON: %v", err)
+	}
+	if roundtrip["stripe_setup_intent_id"] != "seti_test" {
+		t.Errorf("metadata.stripe_setup_intent_id: got %v, want seti_test",
+			roundtrip["stripe_setup_intent_id"])
+	}
+	if roundtrip["tier"] != "hobby" {
+		t.Errorf("metadata.tier: got %v, want hobby", roundtrip["tier"])
+	}
+}
+
+func Test_recordAuditEventForProject_EmptyProjectID_NoOp(t *testing.T) {
+	s := &auditCaptureStubStore{}
+	h := &Handlers{Store: s, Logger: quietLogger()}
+
+	h.recordAuditEventForProject(
+		context.Background(),
+		"", // empty project id is a documented silent no-op
+		"owner@example.com",
+		AuditBillingPaymentMethodAdd,
+		"payment_method",
+		"cus_test",
+		nil,
+	)
+
+	if s.captured != nil {
+		t.Fatalf("expected no store write for empty projectID, got %+v", s.captured)
+	}
+}
