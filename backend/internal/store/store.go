@@ -731,6 +731,21 @@ type Store interface {
 	GetMagicLinkTokenByHash(ctx context.Context, tokenHash string) (*MagicLinkToken, error)
 	MarkMagicLinkTokenUsed(ctx context.Context, tokenID string) error
 
+	// Session CRUD backs the cookie-based dashboard auth flow (#213).
+	// See store/sessions.go for contracts. The auth middleware calls
+	// GetSessionByTokenHash + TouchSession on every dashboard request;
+	// HandleRevokeAPIKey and HandleRemoveMember call
+	// DeleteSessionsByUserID so revoking a key or kicking a member
+	// immediately logs them out of every active browser tab.
+	CreateSession(ctx context.Context, s *Session) error
+	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*Session, error)
+	TouchSession(ctx context.Context, tokenHash string, lastUsedAt, newExpiresAt time.Time) error
+	DeleteSession(ctx context.Context, tokenHash string) error
+	DeleteSessionsByUserID(ctx context.Context, userID string) (int, error)
+	ListSessionsForUser(ctx context.Context, userID string, now time.Time) ([]*Session, error)
+	UpdateSessionProjectID(ctx context.Context, tokenHash, newProjectID string) error
+	DeleteExpiredSessions(ctx context.Context, asOf time.Time) (int, error)
+
 	// ListAnalyzedFailureGroupsByProject powers the per-project
 	// failure-group breakdown on the admin AI analyses page (#211).
 	// Pass limit=0 for the default cap (200 rows).

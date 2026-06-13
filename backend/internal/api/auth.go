@@ -24,6 +24,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"mesedi/backend/internal/store"
 )
@@ -143,88 +144,181 @@ func MintAPIKey() (rawKey, hash, prefix string, err error) {
 	return rawKey, hash, prefix, nil
 }
 
-// authMiddleware constructs the bearer-token verification middleware.
-// Returns a function that wraps an http.Handler; failed auth returns
-// 401 without calling the wrapped handler.
+// SessionCookieName is the HttpOnly cookie that carries the raw
+// session token for cookie-based dashboard auth (#213). The value
+// in the cookie is the raw token; the DB stores only its SHA-256
+// hash so a leaked sessions table does not yield usable cookies.
+const SessionCookieName = "mesedi_session"
+
+// SessionTTL is the sliding-window TTL applied to a session on
+// every authenticated request. An active customer stays signed in
+// indefinitely; an idle browser tab expires after this window.
+const SessionTTL = 7 * 24 * time.Hour
+
+// HashSessionToken returns the SHA-256 hex digest of the raw
+// session cookie value. Exported so signin.go (Batch 2) can hash
+// the freshly-minted raw token before inserting into the sessions
+// table.
+func HashSessionToken(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+// authMiddleware constructs the request-auth middleware. It accepts
+// two credential paths:
+//
+//   1. Bearer API key (SDK / curl) — Authorization: Bearer mesedi_sk_*
+//   2. Session cookie (dashboard) — Cookie: mesedi_session=<raw token>
+//
+// API key path is tried first because the SDK is the higher-volume
+// caller; the cookie path runs only when no Authorization header is
+// present. Either path produces the same context shape (projectID +
+// userID + optional keyID) so downstream handlers do not branch on
+// which credential was used.
 //
 // detector (may be nil) is the process-wide AbuseDetector. After a
-// successful key lookup, the middleware feeds it (a) the project +
-// IP pair so the key-leak detector can spot keys seen from too many
-// IPs, and (b) the project-suspension check so suspended projects
-// get 403 instead of being allowed through.
+// successful API key lookup, the middleware feeds it (a) the
+// project + IP pair so the key-leak detector can spot keys seen
+// from too many IPs, and (b) the project-suspension check so
+// suspended projects get 403 instead of being allowed through.
+// Cookie auth runs the suspension check too but skips the key-leak
+// detector (which only makes sense for API keys).
 func authMiddleware(s store.Store, detector *AbuseDetector) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token, ok := extractBearer(r.Header.Get("Authorization"))
-			if !ok {
-				writeError(w, http.StatusUnauthorized, "missing or malformed Authorization header (expected: Bearer mesedi_sk_...)")
-				return
-			}
-			if !strings.HasPrefix(token, "mesedi_sk_") {
-				writeError(w, http.StatusUnauthorized, "invalid API key format (must start with mesedi_sk_)")
+			// Path 1: Bearer API key (existing SDK contract).
+			if token, ok := extractBearer(r.Header.Get("Authorization")); ok {
+				authViaBearer(w, r, s, detector, next, token)
 				return
 			}
 
-			hash := HashAPIKey(token)
-			key, err := s.GetAPIKeyByHash(r.Context(), hash)
-			if err != nil {
-				if errors.Is(err, store.ErrNotFound) {
-					writeError(w, http.StatusUnauthorized, "API key not recognized")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, "auth lookup failed: "+err.Error())
+			// Path 2: session cookie (dashboard, #213).
+			if cookie, err := r.Cookie(SessionCookieName); err == nil && cookie.Value != "" {
+				authViaSessionCookie(w, r, s, next, cookie.Value)
 				return
 			}
 
-			// Suspension check (#172). Fast read against the projects
-			// table. If suspended, refuse every authenticated request
-			// with 403 + the suspension reason so the customer's
-			// client gets a clear signal instead of a generic 401.
-			suspended, reason, sErr := s.IsProjectSuspended(r.Context(), key.ProjectID)
-			if sErr != nil {
-				writeError(w, http.StatusInternalServerError, "suspension lookup failed: "+sErr.Error())
-				return
-			}
-			if suspended {
-				msg := "project suspended"
-				if reason != "" {
-					msg = msg + " (" + reason + "). Contact hello@mesedi.ai to appeal."
-				}
-				writeError(w, http.StatusForbidden, msg)
-				return
-			}
-
-			// Attach project + key IDs to the request context for handlers.
-			ctx := context.WithValue(r.Context(), ctxKeyProjectID, key.ProjectID)
-			ctx = context.WithValue(ctx, ctxKeyAPIKeyID, key.KeyID)
-			// Attach the API key's user_id so downstream handlers can
-			// enforce per-member roles (#263). Empty for legacy pre-014
-			// keys; downstream handlers fall back to project.OwnerUserID
-			// or OwnerEmail in that case.
-			if key.UserID != "" {
-				ctx = context.WithValue(ctx, ctxKeyUserID, key.UserID)
-			}
-
-			// Stamp project_id onto the wrapped ResponseWriter so the
-			// request-log middleware (which runs in the outer chain
-			// without context access) can include it in the log line.
-			SetProjectIDForLogging(w, key.ProjectID)
-
-			// Feed the key-leak detector. Cheap; the detector's own
-			// rolling-window state filters out the noise.
-			if detector != nil {
-				detector.RecordRequestForKeyLeak(r.Context(), key.ProjectID, key.KeyPrefix, extractClientIP(r))
-			}
-
-			// Touch last_used_at asynchronously, fire-and-forget so a slow
-			// DB write doesn't add latency to the request hot path.
-			go func(keyID string) {
-				_ = s.TouchAPIKey(context.Background(), keyID)
-			}(key.KeyID)
-
-			next.ServeHTTP(w, r.WithContext(ctx))
+			writeError(w, http.StatusUnauthorized,
+				"missing credentials (expected Authorization: Bearer mesedi_sk_... or a mesedi_session cookie)")
 		})
 	}
+}
+
+// authViaBearer is the Bearer-API-key half of authMiddleware. Kept
+// in a separate function so the cookie path can be added without
+// turning the middleware closure into a 100-line block.
+func authViaBearer(
+	w http.ResponseWriter, r *http.Request,
+	s store.Store, detector *AbuseDetector,
+	next http.Handler, token string,
+) {
+	if !strings.HasPrefix(token, "mesedi_sk_") {
+		writeError(w, http.StatusUnauthorized, "invalid API key format (must start with mesedi_sk_)")
+		return
+	}
+
+	hash := HashAPIKey(token)
+	key, err := s.GetAPIKeyByHash(r.Context(), hash)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusUnauthorized, "API key not recognized")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "auth lookup failed: "+err.Error())
+		return
+	}
+
+	// Suspension check (#172).
+	suspended, reason, sErr := s.IsProjectSuspended(r.Context(), key.ProjectID)
+	if sErr != nil {
+		writeError(w, http.StatusInternalServerError, "suspension lookup failed: "+sErr.Error())
+		return
+	}
+	if suspended {
+		msg := "project suspended"
+		if reason != "" {
+			msg = msg + " (" + reason + "). Contact hello@mesedi.ai to appeal."
+		}
+		writeError(w, http.StatusForbidden, msg)
+		return
+	}
+
+	ctx := context.WithValue(r.Context(), ctxKeyProjectID, key.ProjectID)
+	ctx = context.WithValue(ctx, ctxKeyAPIKeyID, key.KeyID)
+	if key.UserID != "" {
+		ctx = context.WithValue(ctx, ctxKeyUserID, key.UserID)
+	}
+
+	SetProjectIDForLogging(w, key.ProjectID)
+
+	if detector != nil {
+		detector.RecordRequestForKeyLeak(r.Context(), key.ProjectID, key.KeyPrefix, extractClientIP(r))
+	}
+
+	go func(keyID string) {
+		_ = s.TouchAPIKey(context.Background(), keyID)
+	}(key.KeyID)
+
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// authViaSessionCookie is the cookie half of authMiddleware (#213).
+// Hashes the raw cookie value, looks up the session row, validates
+// expiry, runs the suspension check, sliding-window-extends the
+// session, and forwards the request with project_id + user_id on
+// the context.
+func authViaSessionCookie(
+	w http.ResponseWriter, r *http.Request,
+	s store.Store, next http.Handler, rawToken string,
+) {
+	tokenHash := HashSessionToken(rawToken)
+	sess, err := s.GetSessionByTokenHash(r.Context(), tokenHash)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusUnauthorized, "session not recognized; sign in again")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "session lookup failed: "+err.Error())
+		return
+	}
+
+	now := time.Now().UTC()
+	if sess.ExpiresAt.Before(now) {
+		// Best-effort delete the stale row so the next request from
+		// this browser does not pay for the same lookup again.
+		go func(h string) { _ = s.DeleteSession(context.Background(), h) }(tokenHash)
+		writeError(w, http.StatusUnauthorized, "session expired; sign in again")
+		return
+	}
+
+	suspended, reason, sErr := s.IsProjectSuspended(r.Context(), sess.ProjectID)
+	if sErr != nil {
+		writeError(w, http.StatusInternalServerError, "suspension lookup failed: "+sErr.Error())
+		return
+	}
+	if suspended {
+		msg := "project suspended"
+		if reason != "" {
+			msg = msg + " (" + reason + "). Contact hello@mesedi.ai to appeal."
+		}
+		writeError(w, http.StatusForbidden, msg)
+		return
+	}
+
+	// Sliding-window refresh. Fire-and-forget so a slow DB write
+	// does not add latency to the request hot path.
+	go func(h string, t time.Time) {
+		_ = s.TouchSession(context.Background(), h, t, t.Add(SessionTTL))
+	}(tokenHash, now)
+
+	ctx := context.WithValue(r.Context(), ctxKeyProjectID, sess.ProjectID)
+	if sess.UserID != "" {
+		ctx = context.WithValue(ctx, ctxKeyUserID, sess.UserID)
+	}
+
+	SetProjectIDForLogging(w, sess.ProjectID)
+
+	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // extractBearer parses an Authorization header value, returning the bearer
