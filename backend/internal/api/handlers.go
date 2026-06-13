@@ -3270,18 +3270,36 @@ func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────
 
 // validFailureClasses is the allowlist of class names accepted in the
-// `enabled_classes` field on POST /webhooks. Bigger than the
-// FailureClass* constants in store.go feels like duplication, but it
-// lets us treat the webhook layer's accepted classes as an
-// independently-evolving surface from the detector's emitted classes.
+// `enabled_classes` field on POST /webhooks. Must stay in sync with
+// the FailureClass* constants in store.go so that every class the
+// detector emits is also acceptable in a webhook filter. The PL2
+// fix on 2026-06-13 unblocked the 13 newer classes that had drifted
+// since the webhook layer was first written; the dashboard's
+// /app/webhooks form no longer renders chips at all (routing for
+// individual classes is configured under /app/settings, severity
+// routing), so the only consumer of this list now is API-direct
+// users posting to /webhooks via curl or SDK.
 var validFailureClasses = map[string]struct{}{
-	store.FailureClassCrashes:      {},
-	store.FailureClassLoops:        {},
-	store.FailureClassToolFailures: {},
-	store.FailureClassValidator:    {},
-	store.FailureClassDrift:        {},
-	store.FailureClassCostVelocity: {},
-	store.FailureClassInjection:    {},
+	store.FailureClassCrashes:             {},
+	store.FailureClassLoops:               {},
+	store.FailureClassToolFailures:        {},
+	store.FailureClassValidator:           {},
+	store.FailureClassDrift:               {},
+	store.FailureClassCostVelocity:        {},
+	store.FailureClassInjection:           {},
+	store.FailureClassInfraThrottled:      {},
+	store.FailureClassDataLeakage:         {},
+	store.FailureClassSemanticLoop:        {},
+	store.FailureClassToolSchemaDrift:     {},
+	store.FailureClassContextOverflow:     {},
+	store.FailureClassTokenWaste:          {},
+	store.FailureClassSandboxEscape:       {},
+	store.FailureClassGroundingFailure:    {},
+	store.FailureClassCascadingFailure:    {},
+	store.FailureClassCoordinationDeadlock: {},
+	store.FailureClassProviderIncident:    {},
+	store.FailureClassHITLTimeout:         {},
+	store.FailureClassHITLRejectionSpike:  {},
 }
 
 // HandleListWebhooks returns the calling project's webhooks. The
