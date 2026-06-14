@@ -770,16 +770,22 @@ func (m *ResendMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeS
 // SendAccountClosed confirms the close-account cascade succeeded
 // (#188). Sent immediately AFTER DeleteProjectCascade, before the
 // dashboard's force-logout fires, so the customer has a paper trail.
+//
+// PL8 cleanup (Robert): the older copy promised "we can help you
+// re-create the project with your information" which is false,
+// since the cascade wipes everything including the audit trail,
+// leaving us with nothing to help anyone reconstruct. We considered
+// pointing
+// at security@ for takeover cases, but in an honest accounting
+// there's still nothing we can do: deleted data can't be restored,
+// the audit row capturing the close is also gone, and the Stripe
+// cancel was immediate. So the email is now a clean confirmation
+// with no support pointer and a warm "we'd love to have you back
+// anytime" closer. The SupportEmail field stays on the struct for
+// backward compat with existing callers but is intentionally unused
+// here now.
 func (m *ResendMailer) SendAccountClosed(ctx context.Context, in AccountClosedInput) error {
 	subject := "Mesedi: account closed"
-
-	supportLine := ""
-	if in.SupportEmail != "" {
-		supportLine = fmt.Sprintf(
-			"If you closed the account by mistake, reply to %s within 7 days. We cannot reverse the deletion, but we can help you re-create the project with your information.\n\n",
-			in.SupportEmail,
-		)
-	}
 
 	textBody := fmt.Sprintf(
 		"Hi,\n\n"+
@@ -790,9 +796,8 @@ func (m *ResendMailer) SendAccountClosed(ctx context.Context, in AccountClosedIn
 			"  - Webhooks and their delivery history\n"+
 			"  - The project, organization, members, and pending invites\n"+
 			"  - Any Stripe subscription tied to the project (canceled immediately)\n\n"+
-			"%s"+
-			"Thank you for trying Mesedi.\n",
-		in.ProjectName, in.ClosedAt.Format("January 2, 2006 at 3:04 PM MST"), supportLine,
+			"Thank you for trying Mesedi. We'd love to have you back anytime.\n",
+		in.ProjectName, in.ClosedAt.Format("January 2, 2006 at 3:04 PM MST"),
 	)
 	htmlBody := fmt.Sprintf(
 		"<p>This confirms that the Mesedi project <strong>%s</strong> was permanently closed on %s.</p>"+
@@ -804,18 +809,8 @@ func (m *ResendMailer) SendAccountClosed(ctx context.Context, in AccountClosedIn
 			"<li>The project, organization, members, and pending invites</li>"+
 			"<li>Any Stripe subscription tied to the project (canceled immediately)</li>"+
 			"</ul>"+
-			"<p>%s</p>"+
-			"<p>Thank you for trying Mesedi.</p>",
+			"<p>Thank you for trying Mesedi. We'd love to have you back anytime.</p>",
 		in.ProjectName, in.ClosedAt.Format("January 2, 2006 at 3:04 PM MST"),
-		func() string {
-			if in.SupportEmail != "" {
-				return fmt.Sprintf(
-					"If you closed the account by mistake, reply to <a href=\"mailto:%s\">%s</a> within 7 days. We cannot reverse the deletion, but we can help you re-create the project with your information.",
-					in.SupportEmail, in.SupportEmail,
-				)
-			}
-			return ""
-		}(),
 	)
 
 	body, err := json.Marshal(resendRequest{
