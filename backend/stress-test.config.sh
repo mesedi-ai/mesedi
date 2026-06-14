@@ -36,7 +36,7 @@ DEPS_NODE=""
 STATIC_TOOLS="AUTO"   # picks golangci-lint for go projects
 
 # ── Live API tests (against production) ──────────────────────────────────
-API_BASE_URL="https://mesedi-api.fly.dev"
+API_BASE_URL="https://api.mesedi.ai"
 API_HEALTH_PATH="/health"
 
 # Mesedi uses standard Bearer auth. The header name is literally
@@ -73,7 +73,7 @@ AUTH_BOUNDARIES=(
 )
 
 # ── TLS posture ──────────────────────────────────────────────────────────
-TLS_HOSTNAME="mesedi-api.fly.dev"
+TLS_HOSTNAME="api.mesedi.ai"
 TLS_PORT=443
 
 # ── Load / soak ──────────────────────────────────────────────────────────

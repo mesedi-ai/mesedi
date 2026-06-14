@@ -587,7 +587,7 @@ func main() {
 	// Founder-side admin dashboard (#150). Token-gated; refuses every
 	// request when MESEDI_ADMIN_TOKEN is empty. CORS preflight OPTIONS
 	// is needed because the dashboard at app.mesedi.ai calls
-	// cross-origin from a different host than the backend (mesedi-api.fly.dev for the hosted service).
+	// cross-origin from a different host than the backend (api.mesedi.ai for the hosted service).
 	mux.Handle("GET /admin/projects", adminHandler)
 	mux.Handle("OPTIONS /admin/projects", adminHandler)
 	mux.Handle("GET /admin/projects/{id}", adminHandler)
