@@ -96,7 +96,7 @@ There is no in-place restore for a Fly volume. The flow is:
 
    ```
    fly machines start <machine_id> -a mesedi-api
-   curl https://mesedi-api.fly.dev/health
+   curl https://api.mesedi.ai/health
    ```
 
    Then spot-check the data: open the dashboard, confirm executions

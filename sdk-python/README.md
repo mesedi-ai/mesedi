@@ -1,6 +1,6 @@
 # Mesedi Python SDK
 
-**Status:** v0.1.0 alpha. Live on PyPI.
+**Status:** v0.2.0. Live on PyPI.
 
 The Mesedi SDK observes autonomous AI agent runs and ships them to the Mesedi
 backend for failure-class detection and analysis. The v1 surface:
@@ -11,7 +11,7 @@ backend for failure-class detection and analysis. The v1 surface:
   crash signature suitable for grouping identical exceptions.
 - `@mesedi.tool`: decorate any function as an observed tool call. Emits
   `tool_call` events into the surrounding execution context.
-- Framework adapters for LangChain and CrewAI (see below).
+- Framework adapters for LangChain, LangGraph, OpenAI Agents SDK, and CrewAI (see below).
 
 ## Install
 
@@ -55,11 +55,11 @@ production code.
 
 ## Framework integrations
 
-If your agent is built on LangChain or CrewAI, you don't have to wrap every
-function with `@mesedi.tool` by hand. Adapter modules under
-`mesedi.integrations.*` translate each framework's native callback or hook
-surface into Mesedi telemetry. They're **optional**: importing `mesedi`
-itself never requires any framework to be installed.
+If your agent is built on LangChain, LangGraph, the OpenAI Agents SDK, or
+CrewAI, you don't have to wrap every function with `@mesedi.tool` by hand.
+Adapter modules under `mesedi.integrations.*` translate each framework's
+native callback or hook surface into Mesedi telemetry. They're **optional**:
+importing `mesedi` itself never requires any framework to be installed.
 
 The pattern is the same across frameworks: your function gets `@mesedi.wrap`
 for the execution boundary, and a one-line adapter does the in-execution
@@ -91,6 +91,50 @@ The callback handler subscribes to LangChain's standard `on_llm_start` /
 hand-written `mesedi.emit_llm_call()` + `@mesedi.tool` pair. Detectors
 (drift, identical/similar-call loops, tool-failures, cost-velocity,
 prompt-injection) see no difference.
+
+### LangGraph
+
+```bash
+pip install mesedi[langgraph]
+```
+
+```python
+import mesedi
+from mesedi.integrations.langgraph import instrument_graph
+
+@mesedi.wrap
+def run_my_graph(question: str) -> str:
+    graph = build_graph()
+    instrument_graph(graph)
+    result = graph.invoke({"input": question})
+    return result["output"]
+```
+
+`instrument_graph` attaches Mesedi telemetry to each node in the graph,
+emits `llm_call` and `tool_call` events for the LLM-backed nodes, and
+labels each event with the node name so the dashboard timeline shows the
+graph's flow alongside the per-step detail.
+
+### OpenAI Agents SDK
+
+```bash
+pip install mesedi[openai-agents]
+```
+
+```python
+import mesedi
+from mesedi.integrations.openai_agents import instrument_agent
+
+@mesedi.wrap
+def run_my_agent(question: str) -> str:
+    agent = build_agent()
+    instrument_agent(agent)
+    return agent.run(question)
+```
+
+`instrument_agent` subscribes to the OpenAI Agents SDK's lifecycle hooks
+and emits `llm_call` + `tool_call` events with the same wire format as
+the LangChain and LangGraph adapters, so detectors see no difference.
 
 ### CrewAI
 

@@ -2,7 +2,7 @@
 
 Go HTTP service that ingests AI agent execution telemetry, runs detection engines, and surfaces alerts via webhook + dashboard.
 
-**Status:** v1 in production. Hosted at https://mesedi-api.fly.dev (Fly.io). Self-hostable from this directory.
+**Status:** v1 in production. Hosted at https://api.mesedi.ai (Fly.io). Self-hostable from this directory.
 
 ## Quickstart (local development)
 
@@ -126,7 +126,7 @@ Storage is in-memory today (single-instance only). Per-project overrides will ev
 |---|---|---|---|
 | `MESEDI_PORT` | `--port` | `8080` | TCP port the HTTP server binds to |
 | `MESEDI_LOG_LEVEL` | `--log-level` | `info` | `debug` / `info` / `warn` / `error` |
-| `MESEDI_DB_URL` | `--db-url` | _(empty)_ | Postgres connection string (required Phase 1.5+) |
+| `MESEDI_DB_URL` | `--db-url` | _(empty)_ | Postgres connection string (required for production) |
 
 ## Directory layout
 
@@ -147,8 +147,10 @@ backend/
 └── README.md
 ```
 
-## Roadmap
+## Status
 
-All seven failure-class detectors are live (crash, time-budget, step-count, tool-failure, validator-failure, prompt-injection, cost-velocity, drift, identical-call loop, similar-call loop). Failure-group deduplication, hard-halt with local budgets + SSE remote channel, webhook escalation on first-occurrence, and framework adapters for LangChain, CrewAI, and the Vercel AI SDK are all shipped.
+All 24 failure-class detectors are live. See `internal/severity/severity.go` for the canonical list. Failure-group deduplication, webhook escalation on first occurrence, hard-halt with local budgets + SSE remote channel, multi-agent topology tracking, human-in-the-loop lifecycle, and OpenTelemetry parallel emission are all shipped.
 
-Next on the production-hardening track: Postgres migration (currently SQLite on a Fly volume), backups + disaster recovery, end-to-end monitoring + alerting on the backend itself.
+Postgres is the primary storage backend in production. SQLite is supported for single-node self-hosting via the `MESEDI_DB_URL` `file:` scheme. The store interface abstracts both behind the same call shape.
+
+Framework adapters ship across both SDKs: LangChain, LangGraph, OpenAI Agents SDK, and CrewAI in Python; LangGraph, OpenAI Agents SDK, and the Vercel AI SDK in TypeScript.

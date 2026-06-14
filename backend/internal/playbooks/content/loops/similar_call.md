@@ -12,7 +12,7 @@ Your agent made **three or more LLM calls whose `user_message` text was nearly i
 
 ## What this does NOT catch
 
-True semantic paraphrases, `"Extract the date"` vs `"Find the date mentioned"` vs `"What date appears in this doc"`, usually share too few char-3-grams to cluster, even though a human reads them as the same intent. Semantic-paraphrase detection requires embedding similarity, which is on the roadmap once Mesedi has an embeddings substrate.
+True semantic paraphrases, `"Extract the date"` vs `"Find the date mentioned"` vs `"What date appears in this doc"`, usually share too few char-3-grams to cluster, even though a human reads them as the same intent. Semantic-paraphrase detection requires embedding similarity, which v1 does not implement.
 
 ## How to find the bug
 

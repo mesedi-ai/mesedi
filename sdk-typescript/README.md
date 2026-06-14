@@ -1,6 +1,6 @@
 # Mesedi TypeScript SDK
 
-**Status:** v0.1.0 alpha. Live on npm.
+**Status:** v0.2.0. Live on npm.
 
 The TypeScript companion to `sdk-python/`. Feature parity for the v1
 surface (`configure()`, `wrap()`, `tool()`, async event shipper,
@@ -65,6 +65,54 @@ invisibility, not to broken production code.
 
 ## Framework integrations
 
+Adapter modules under `mesedi/integrations/*` translate each framework's
+native callback or hook surface into Mesedi telemetry. They're optional;
+importing `mesedi` itself never requires any framework to be installed.
+
+Currently shipping: **LangGraph**, **OpenAI Agents SDK**, and **Vercel AI
+SDK**. Each peer dependency is opt-in.
+
+### LangGraph
+
+```typescript
+import { configure, wrap } from "mesedi";
+import { instrumentGraph } from "mesedi/integrations/langgraph";
+
+configure({ apiKey: process.env.MESEDI_API_KEY! });
+
+export const runMyGraph = wrap(async (question: string) => {
+  const graph = buildGraph();
+  instrumentGraph(graph);
+  const result = await graph.invoke({ input: question });
+  return result.output;
+});
+```
+
+`instrumentGraph` attaches Mesedi telemetry to each node in the graph
+and emits `llm_call` and `tool_call` events labeled with the node name,
+so the dashboard timeline shows the graph's flow alongside per-step
+detail.
+
+### OpenAI Agents SDK
+
+```typescript
+import { configure, wrap } from "mesedi";
+import { instrumentAgent } from "mesedi/integrations/openai_agents";
+
+configure({ apiKey: process.env.MESEDI_API_KEY! });
+
+export const runMyAgent = wrap(async (question: string) => {
+  const agent = buildAgent();
+  instrumentAgent(agent);
+  return agent.run(question);
+});
+```
+
+`instrumentAgent` subscribes to the OpenAI Agents SDK's lifecycle hooks
+and emits `llm_call` + `tool_call` events with the same wire format as
+the LangGraph and Vercel AI SDK adapters, so detectors see no
+difference.
+
 ### Vercel AI SDK
 
 If your agent uses Vercel's `ai` package (`generateText`, multi-step
@@ -116,7 +164,9 @@ hand-written `mesedi` instrumentation produces.
 `mesedi` doesn't require it. If your project already has `ai`
 installed for `generateText`, the integration just works.
 
-`streamText` and `generateObject` ship in a later slice.
+Only `generateText` is wrapped today. `streamText` and `generateObject`
+are not currently supported; use hand-instrumentation with
+`emitLLMCall` / `tool()` for those code paths.
 
 ## Releases
 

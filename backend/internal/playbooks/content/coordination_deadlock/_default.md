@@ -38,4 +38,4 @@ After deploying, the deadlock failure_group should plateau. A subtler signal tha
 
 ## A note on detection scope
 
-The detector finds 2-cycles only in v1 (A→B and B→A). Longer cycles (A→B→C→A) are possible in principle but rarer in practice and require Tarjan's algorithm to detect; that is on the roadmap. Most deadlocks customers see in real multi-agent systems are 2-cycles, so v1 covers the common case. If you suspect a longer cycle and the detector did not fire, open an issue with the topology graph as a starting point.
+The detector finds 2-cycles only in v1 (A→B and B→A). Longer cycles (A→B→C→A) are possible in principle but rarer in practice and require Tarjan's algorithm to detect; v1 does not implement this. Most deadlocks customers see in real multi-agent systems are 2-cycles, so v1 covers the common case. If you suspect a longer cycle and the detector did not fire, open an issue with the topology graph as a starting point.

@@ -8,7 +8,7 @@ An execution in this project incurred **more cost than the cost-velocity thresho
 - `cost_$1+`, between $1.00 and $10.00
 - `cost_$10+`, $10.00 or more
 
-The threshold is intentionally low ($0.001) in v0.0.1 so the detector is visible on local-dev traffic. Production deployments will either raise the absolute threshold OR move to baseline-relative detection (Phase 5+: "this execution cost N× the project's median," which is the more useful signal once enough traffic exists to compute a baseline).
+The threshold is intentionally low ($0.001) so the detector is visible on local-dev traffic. Production deployments will either raise the absolute threshold OR move to baseline-relative detection ("this execution cost N× the project's median," which is the more useful signal once enough traffic exists to compute a baseline).
 
 The bucket on this failure group tells you, in dollars, what your agent is spending per execution. Use that as the triage signal, a `cost_$0.10+` group in a project where the average execution costs $0.001 means specific executions are 100× more expensive than the population, and those are where the spend leaks live.
 
