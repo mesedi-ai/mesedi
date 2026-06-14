@@ -771,21 +771,43 @@ func (m *ResendMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeS
 // (#188). Sent immediately AFTER DeleteProjectCascade, before the
 // dashboard's force-logout fires, so the customer has a paper trail.
 //
-// PL8 cleanup (Robert): the older copy promised "we can help you
-// re-create the project with your information" which is false,
-// since the cascade wipes everything including the audit trail,
-// leaving us with nothing to help anyone reconstruct. We considered
-// pointing
-// at security@ for takeover cases, but in an honest accounting
-// there's still nothing we can do: deleted data can't be restored,
-// the audit row capturing the close is also gone, and the Stripe
-// cancel was immediate. So the email is now a clean confirmation
-// with no support pointer and a warm "we'd love to have you back
-// anytime" closer. The SupportEmail field stays on the struct for
-// backward compat with existing callers but is intentionally unused
-// here now.
+// History:
+//
+// PL8 (Robert): an older draft promised "we can help you re-create
+// the project with your information" which was false, since the
+// cascade wiped everything including the audit trail, leaving us
+// with nothing. We also considered pointing at security@ for
+// takeover cases but dropped it because the audit row capturing
+// the close was also gone, so there was nothing for security to
+// investigate.
+//
+// Pre-launch (#221, migration 031): we decoupled audit_events
+// from projects so audit rows now survive DeleteProjectCascade
+// (project_name_snapshot + project_deleted_at columns). That
+// makes the security pointer honest again -- if a victim of an
+// account takeover or a member-without-permission contacts us,
+// we CAN tell them who pressed Close from what IP at what time
+// against what API key, because that audit row is now preserved
+// for forensic queries against the admin-only search endpoint.
+// So the security pointer is back in the email body, with a
+// 30-day window that matches our "fast triage" support promise
+// rather than the full 7-year retention window. Deleted DATA
+// (executions, events, webhooks) is still unrecoverable; the
+// pointer is about establishing accountability, not restoration.
+//
+// The SupportEmail field on AccountClosedInput is used here as
+// the contact address customers reply to.
 func (m *ResendMailer) SendAccountClosed(ctx context.Context, in AccountClosedInput) error {
 	subject := "Mesedi: account closed"
+
+	// Default support address if caller did not set one. Falling
+	// back to a hard-coded address avoids an awkward "contact
+	// {{empty}}" line if a future caller forgets to populate the
+	// field.
+	supportAddr := in.SupportEmail
+	if supportAddr == "" {
+		supportAddr = "security@mesedi.ai"
+	}
 
 	textBody := fmt.Sprintf(
 		"Hi,\n\n"+
@@ -796,8 +818,14 @@ func (m *ResendMailer) SendAccountClosed(ctx context.Context, in AccountClosedIn
 			"  - Webhooks and their delivery history\n"+
 			"  - The project, organization, members, and pending invites\n"+
 			"  - Any Stripe subscription tied to the project (canceled immediately)\n\n"+
+			"If you did NOT authorize this closure, contact %s within 30 days.\n"+
+			"We retain the audit trail of who pressed Close and from where, and can\n"+
+			"use it to investigate. Deleted data itself cannot be recovered, but we\n"+
+			"can help you establish accountability.\n\n"+
 			"Thank you for trying Mesedi. We'd love to have you back anytime.\n",
-		in.ProjectName, in.ClosedAt.Format("January 2, 2006 at 3:04 PM MST"),
+		in.ProjectName,
+		in.ClosedAt.Format("January 2, 2006 at 3:04 PM MST"),
+		supportAddr,
 	)
 	htmlBody := fmt.Sprintf(
 		"<p>This confirms that the Mesedi project <strong>%s</strong> was permanently closed on %s.</p>"+
@@ -809,8 +837,15 @@ func (m *ResendMailer) SendAccountClosed(ctx context.Context, in AccountClosedIn
 			"<li>The project, organization, members, and pending invites</li>"+
 			"<li>Any Stripe subscription tied to the project (canceled immediately)</li>"+
 			"</ul>"+
+			"<p>If you did <strong>NOT</strong> authorize this closure, contact "+
+			"<a href=\"mailto:%s\">%s</a> within 30 days. We retain the audit "+
+			"trail of who pressed Close and from where, and can use it to "+
+			"investigate. Deleted data itself cannot be recovered, but we can "+
+			"help you establish accountability.</p>"+
 			"<p>Thank you for trying Mesedi. We'd love to have you back anytime.</p>",
-		in.ProjectName, in.ClosedAt.Format("January 2, 2006 at 3:04 PM MST"),
+		in.ProjectName,
+		in.ClosedAt.Format("January 2, 2006 at 3:04 PM MST"),
+		supportAddr, supportAddr,
 	)
 
 	body, err := json.Marshal(resendRequest{

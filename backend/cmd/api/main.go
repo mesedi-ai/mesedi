@@ -643,6 +643,12 @@ func main() {
 	mux.Handle("OPTIONS /admin/api-keys/{id}", adminHandler)
 	mux.Handle("GET /admin/whoami", adminHandler)
 	mux.Handle("OPTIONS /admin/whoami", adminHandler)
+	// Closed-project audit search (#221, migration 031). R1 + R2:
+	// staff-only forensics for account-takeover + customer-support
+	// response to a "I did not press Close" claim. Dashboard UI
+	// ships in task #220; staff curl this directly today.
+	mux.Handle("GET /admin/audit-events", adminHandler)
+	mux.Handle("OPTIONS /admin/audit-events", adminHandler)
 
 	// Top-level middleware chain. SecurityHeaders is outermost so its
 	// four hardening headers (HSTS, X-Content-Type-Options,

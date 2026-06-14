@@ -199,6 +199,18 @@ func (s *auditCaptureStubStore) DeleteProjectCascade(_ context.Context, _ string
 	return nil
 }
 
+// SnapshotAuditEventsForClosedProject backs HandleCloseAccount's
+// migration-031 path (#221). HandleCloseAccount calls this between
+// recordAuditEvent and DeleteProjectCascade so audit rows survive
+// the cascade. The test only cares that the call doesn't panic; the
+// store-level semantics are exercised in store-package tests + the
+// staging smoke run.
+func (s *auditCaptureStubStore) SnapshotAuditEventsForClosedProject(
+	_ context.Context, _, _ string,
+) error {
+	return nil
+}
+
 // UpdateProjectName backs HandleSetProjectName (#207 step C, C1).
 func (s *auditCaptureStubStore) UpdateProjectName(_ context.Context, _, _ string) error {
 	return nil

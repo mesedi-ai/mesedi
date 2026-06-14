@@ -721,8 +721,18 @@ type Store interface {
 	// CreateAuditEvent + ListAuditEventsByProject power the Cloud
 	// Team audit-log feature (#207 v1). See store/audit_events.go
 	// for contracts.
+	//
+	// SnapshotAuditEventsForClosedProject preserves the audit
+	// history past project close (migration 031). Called from
+	// HandleCloseAccount BEFORE DeleteProjectCascade.
+	//
+	// SearchClosedProjectAuditEvents serves admin-side forensic
+	// lookups (R1 takeover, R2 customer support). At least one
+	// of email or project_id is required in the filter.
 	CreateAuditEvent(ctx context.Context, e *AuditEvent) error
 	ListAuditEventsByProject(ctx context.Context, projectID string, limit int) ([]*AuditEvent, error)
+	SnapshotAuditEventsForClosedProject(ctx context.Context, projectID, projectName string) error
+	SearchClosedProjectAuditEvents(ctx context.Context, filter ClosedProjectAuditFilter) ([]*AuditEvent, error)
 
 	// CreateMagicLinkToken + GetMagicLinkTokenByHash + MarkMagicLinkTokenUsed
 	// back the magic-link sign-in feature (#196 commit 2). See

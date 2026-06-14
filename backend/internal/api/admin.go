@@ -204,6 +204,10 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/api-keys", h.HandleAdminCreateAPIKey)
 	mux.HandleFunc("DELETE /admin/api-keys/{id}", h.HandleAdminRevokeAPIKey)
 	mux.HandleFunc("GET /admin/whoami", h.HandleAdminWhoami)
+	// #221 closed-project audit search. R1 takeover forensics + R2
+	// customer-support response. Read-only; rows are written by the
+	// snapshot call inside HandleCloseAccount (migration 031).
+	mux.HandleFunc("GET /admin/audit-events", h.HandleAdminSearchClosedProjectAudit)
 }
 
 // AdminProjectDetail bundles everything the founder dashboard's
@@ -1631,4 +1635,140 @@ func (h *Handlers) HandleAdminProjectAIAnalysesDetail(w http.ResponseWriter, r *
 		out.TotalEstimatedCostUSD += adminHaikuCostPerAnalysisUSD
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// AdminClosedProjectAuditRow is the wire shape returned by the
+// closed-project audit search endpoint. We project AuditEvent into
+// a flat shape so the caller does not have to know about
+// sql.NullString / sql.NullTime serialization quirks.
+type AdminClosedProjectAuditRow struct {
+	EventID             string         `json:"event_id"`
+	ProjectID           string         `json:"project_id"`
+	ProjectNameSnapshot string         `json:"project_name_snapshot,omitempty"`
+	ProjectDeletedAt    string         `json:"project_deleted_at,omitempty"`
+	ActorKeyID          string         `json:"actor_key_id,omitempty"`
+	ActorKeyName        string         `json:"actor_key_name,omitempty"`
+	ActorEmail          string         `json:"actor_email,omitempty"`
+	Action              string         `json:"action"`
+	TargetType          string         `json:"target_type,omitempty"`
+	TargetID            string         `json:"target_id,omitempty"`
+	Metadata            map[string]any `json:"metadata,omitempty"`
+	CreatedAt           string         `json:"created_at"`
+}
+
+// AdminClosedProjectAuditResponse wraps the search results with the
+// echoed filter so a caller paging through results can confirm what
+// the server actually applied (e.g. limit fell back to the default).
+type AdminClosedProjectAuditResponse struct {
+	Email     string                       `json:"email,omitempty"`
+	ProjectID string                       `json:"project_id,omitempty"`
+	Limit     int                          `json:"limit"`
+	Count     int                          `json:"count"`
+	Rows      []AdminClosedProjectAuditRow `json:"rows"`
+}
+
+// HandleAdminSearchClosedProjectAudit serves R1 + R2 lookups against
+// closed-project audit history. Migration 031 added the survival
+// columns (project_name_snapshot, project_deleted_at); this endpoint
+// is the read path.
+//
+// Auth: AdminAuth (legacy token OR admin-scope API key). Customer
+// keys do not reach this route.
+//
+// Query params:
+//
+//	email      — search every closed project where actor_email = X
+//	             (powers R1 account-takeover forensics: "show me
+//	              every Close action this victim's email ever fired").
+//	project_id — search every audit row for a specific closed project
+//	             (powers R2 customer-support response: "user X says
+//	              they did not close project Y; show me the close
+//	              event and who pressed it").
+//	limit      — cap rows (default 100, store-side enforced).
+//
+// At least one of email or project_id must be present; both empty
+// returns 400 (the store would also refuse, but we fail fast at the
+// edge with a clearer message).
+//
+// Response shape: AdminClosedProjectAuditResponse. Rows are ordered
+// by created_at DESC (store contract). metadata_json is parsed into
+// a typed map; on parse failure we drop the field rather than 500
+// the whole row (an unreadable metadata blob shouldn't hide the
+// audit row itself from the operator).
+//
+// Follow-up: task #220 ships the dashboard UI on top of this
+// endpoint. For now staff curl it directly.
+func (h *Handlers) HandleAdminSearchClosedProjectAudit(w http.ResponseWriter, r *http.Request) {
+	email := strings.TrimSpace(r.URL.Query().Get("email"))
+	projectID := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	if email == "" && projectID == "" {
+		writeError(w, http.StatusBadRequest,
+			"at least one of email or project_id is required")
+		return
+	}
+
+	limit := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest,
+				"limit must be a non-negative integer")
+			return
+		}
+		limit = n
+	}
+
+	// NOTE: do not name this slice "events" -- the package imports
+	// mesedi/backend/internal/events and the local name would shadow
+	// it for the rest of the function. Pick something distinct.
+	auditRows, err := h.Store.SearchClosedProjectAuditEvents(
+		r.Context(), store.ClosedProjectAuditFilter{
+			Email:     email,
+			ProjectID: projectID,
+			Limit:     limit,
+		},
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"search closed project audit: "+err.Error())
+		return
+	}
+
+	rows := make([]AdminClosedProjectAuditRow, 0, len(auditRows))
+	for _, ev := range auditRows {
+		row := AdminClosedProjectAuditRow{
+			EventID:             ev.EventID,
+			ProjectID:           ev.ProjectID,
+			ProjectNameSnapshot: ev.ProjectNameSnapshot,
+			ActorKeyID:          ev.ActorKeyID,
+			ActorKeyName:        ev.ActorKeyName,
+			ActorEmail:          ev.ActorEmail,
+			Action:              ev.Action,
+			TargetType:          ev.TargetType,
+			TargetID:            ev.TargetID,
+			CreatedAt:           ev.CreatedAt.UTC().Format(time.RFC3339),
+		}
+		if ev.ProjectDeletedAt != nil {
+			row.ProjectDeletedAt = ev.ProjectDeletedAt.UTC().Format(time.RFC3339)
+		}
+		if ev.MetadataJSON != "" {
+			var md map[string]any
+			if jerr := json.Unmarshal([]byte(ev.MetadataJSON), &md); jerr == nil {
+				row.Metadata = md
+			}
+		}
+		rows = append(rows, row)
+	}
+
+	effectiveLimit := limit
+	if effectiveLimit == 0 {
+		effectiveLimit = 100
+	}
+	writeJSON(w, http.StatusOK, AdminClosedProjectAuditResponse{
+		Email:     email,
+		ProjectID: projectID,
+		Limit:     effectiveLimit,
+		Count:     len(rows),
+		Rows:      rows,
+	})
 }

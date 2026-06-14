@@ -1954,10 +1954,16 @@ func (h *Handlers) HandleCloseAccount(w http.ResponseWriter, r *http.Request) {
 		if mailErr := h.Mailer.SendAccountClosed(
 			r.Context(),
 			mail.AccountClosedInput{
-				ToEmail:      p.OwnerEmail,
-				ProjectName:  p.Name,
-				ClosedAt:     time.Now().UTC(),
-				SupportEmail: "support@mesedi.ai",
+				ToEmail:     p.OwnerEmail,
+				ProjectName: p.Name,
+				ClosedAt:    time.Now().UTC(),
+				// #221 security@, not support@: the body's pointer is
+				// specifically about "I did not authorize this closure"
+				// forensics, which routes to the security inbox now
+				// that migration 031 preserves the audit row past
+				// DeleteProjectCascade. General product questions still
+				// go to support@; this inbox is for takeover triage.
+				SupportEmail: "security@mesedi.ai",
 			},
 		); mailErr != nil {
 			h.Logger.Warn("account closed email send failed",
@@ -1968,16 +1974,35 @@ func (h *Handlers) HandleCloseAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// #207 audit log: record account-close BEFORE the cascade fires.
-	// The cascade will remove this audit row along with the rest of
-	// the project's data; that's expected (project closure means all
-	// data goes). The row exists in the small window where the
-	// cascade might fail, so if the close errors out mid-cascade,
-	// the operator still has a trace.
+	// Migration 031 decoupled audit_events from projects (dropped the
+	// FK, added project_name_snapshot + project_deleted_at columns).
+	// We record the close, then snapshot the entire audit history
+	// for this project so the rows survive DeleteProjectCascade and
+	// stay queryable by admin staff for takeover-forensics (R1) and
+	// support-response (R2). Retention: 7 years by default (task
+	// #218 ships the cleanup job), GDPR purge supported via task
+	// #219. See store/audit_events.go SnapshotAuditEventsForClosedProject.
 	h.recordAuditEvent(r, AuditBillingAccountClose, "project", projectID, map[string]any{
 		"tier":               p.Tier,
 		"had_subscription":   p.StripeSubscriptionID != "",
 		"stripe_customer_id": p.StripeCustomerID,
 	})
+
+	// Snapshot the project name + mark every audit row for this
+	// project as belonging to a closed project. Best-effort: log
+	// on failure but do not block the close. A snapshot failure
+	// just means the audit rows go through DeleteProjectCascade
+	// without survival metadata; we still want the user's close
+	// request honored. After migration 031 lands, the rows survive
+	// the cascade because the FK was dropped; the snapshot only
+	// fails-soft if the UPDATE itself errors out (e.g. DB transient).
+	if snapErr := h.Store.SnapshotAuditEventsForClosedProject(
+		r.Context(), projectID, p.Name,
+	); snapErr != nil {
+		h.Logger.Warn("close account: snapshot audit events failed",
+			"project_id", projectID,
+			"error", snapErr.Error())
+	}
 
 	if err := h.Store.DeleteProjectCascade(r.Context(), projectID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
