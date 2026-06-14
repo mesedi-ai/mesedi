@@ -53,9 +53,24 @@ type AdminAnalyticsSummary struct {
 	StripeConfigured bool `json:"stripe_configured"`
 
 	// Subscription-derived metrics (computed from local DB).
-	ActiveTeamSubscriptions int     `json:"active_team_subscriptions"`
-	MRRUsd                  float64 `json:"mrr_usd"`
-	ARRUsd                  float64 `json:"arr_usd"`
+	//
+	// ActiveTeamSubscriptions counts projects where tier='team' AND
+	// stripe_subscription_id is set. The Stripe subscription id is
+	// the canonical "actually paying" signal: admin tier-flips and
+	// comped Team projects never get one. Pre-#214 this counter
+	// ignored the subscription id and any tier='team' row counted
+	// as $99 MRR, which let admin-comped Team projects (and Team
+	// projects whose subscription was canceled but tier was not
+	// reverted) inflate MRR. The new filter excludes both.
+	ActiveTeamSubscriptions int `json:"active_team_subscriptions"`
+	// CompedTeamProjects counts projects where tier='team' but
+	// stripe_subscription_id is empty. These are admin-granted /
+	// comped seats that DO NOT count toward MRR. Surfaced as a
+	// separate tile on the analytics page so the gap between
+	// total Team seats and paying Team seats is always visible.
+	CompedTeamProjects int     `json:"comped_team_projects"`
+	MRRUsd             float64 `json:"mrr_usd"`
+	ARRUsd             float64 `json:"arr_usd"`
 
 	// Stripe-derived metrics (this month). Nil when Stripe isn't
 	// configured or when the live call failed; the dashboard
@@ -81,13 +96,21 @@ func (h *Handlers) HandleAdminGetAnalyticsSummary(w http.ResponseWriter, r *http
 	}
 
 	// 1. MRR / ARR from the local projects table. Always available,
-	// no API hop. team-tier counter is the canonical "paying
-	// customer" count for Mesedi's pricing model.
+	// no API hop. A project counts toward MRR only when it has a
+	// Stripe subscription id; admin-comped Team tiers and stale
+	// Team rows whose subscription was canceled but tier never
+	// reverted are split out into CompedTeamProjects so they stay
+	// visible without inflating MRR (see #214).
 	rows, err := h.Store.ListAllProjects(r.Context())
 	if err == nil {
 		for _, p := range rows {
-			if strings.EqualFold(p.Tier, TierTeam) {
+			if !strings.EqualFold(p.Tier, TierTeam) {
+				continue
+			}
+			if p.StripeSubscriptionID != "" {
 				out.ActiveTeamSubscriptions++
+			} else {
+				out.CompedTeamProjects++
 			}
 		}
 		out.MRRUsd = float64(out.ActiveTeamSubscriptions) * TeamMonthlyPriceUSD
