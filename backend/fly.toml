@@ -39,14 +39,32 @@ primary_region = "iad"
   destination = "/data"
 
 # HTTP service config. Force HTTPS, auto-start machines on inbound
-# traffic, keep at least one machine running so health checks always
-# have somewhere to land.
+# traffic.
+#
+# PRE-LAUNCH NEON COST FIX (2026-06-14): auto_stop_machines is set
+# to "stop" and min_machines_running is 0 to let the backend fully
+# shut down during idle periods. Reason: the Go database/sql pool
+# keeps Neon connections open 24/7 while the machine is running,
+# preventing Neon's serverless compute from scaling to zero, which
+# was burning 6.1 CU-hrs/day against the 100 CU-hr Free-tier
+# monthly cap (projection: ~180 CU-hrs/month). With these two
+# settings the machine stops when idle, Neon's connections drop,
+# Neon's compute scales to zero, and CU-hr burn essentially stops
+# during quiet hours. Cold-start cost: 10-30 seconds for the first
+# request after idle.
+#
+# REVERT BEFORE PUBLIC LAUNCH (#157):
+#   auto_stop_machines = false
+#   min_machines_running = 1
+# Real customers cannot tolerate 10-30s cold starts. The Neon plan
+# at launch time will be Launch ($19/mo) or Scale ($69/mo), which
+# accommodate always-on compute.
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = false
+  auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
 
   [http_service.concurrency]
     type = "requests"
