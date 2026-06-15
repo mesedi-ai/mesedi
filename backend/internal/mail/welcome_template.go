@@ -15,10 +15,31 @@ import (
 	"html"
 )
 
+// welcomeVerifyTextBlock returns the plain-text "verify your email"
+// preamble if VerifyURL is populated, otherwise an empty string. The
+// block leads the email (above the quickstart) because the recipient
+// MUST click it before the dashboard unlocks (#232).
+func welcomeVerifyTextBlock(in WelcomeInput) string {
+	if in.VerifyURL == "" {
+		return ""
+	}
+	return fmt.Sprintf(`Before you can open the dashboard, we need to
+confirm this email address. Click the link below within 24 hours:
+
+  %s
+
+(Single-use. If it expires you can request a fresh one from the
+"check your email" screen in the dashboard.)
+
+---
+
+`, in.VerifyURL)
+}
+
 func welcomeText(in WelcomeInput) string {
 	return fmt.Sprintf(`Welcome to Mesedi.
 
-Your project "%s" is live. The API key prefix is %s (the raw key was
+%sYour project "%s" is live. The API key prefix is %s (the raw key was
 shown to you once during signup; we don't store it).
 
 Five minutes to your first observed execution:
@@ -64,6 +85,7 @@ Questions, corrections, or stuck somewhere? Reply to this email.
 Mesedi
 Verdifax, LLC d/b/a Mesedi
 `,
+		welcomeVerifyTextBlock(in),
 		in.ProjectName,
 		in.APIKeyPrefix,
 		in.DashboardURL,
@@ -91,6 +113,7 @@ func welcomeHTML(in WelcomeInput) string {
             <h1 style="margin:0;font-size:28px;font-weight:600;color:#fafafa;letter-spacing:-0.01em;">Welcome to Mesedi.</h1>
           </td>
         </tr>
+        %s
         <tr>
           <td style="font-size:15px;line-height:1.6;color:#b5b5b5;padding-bottom:24px;">
             Your project <strong style="color:#fafafa;">%s</strong> is live. The API key prefix is
@@ -163,9 +186,32 @@ run_my_agent("hello")</pre>
 </table>
 </body>
 </html>`,
+		welcomeVerifyHTMLBlock(in),
 		html.EscapeString(in.ProjectName),
 		html.EscapeString(in.APIKeyPrefix),
 		html.EscapeString(in.DashboardURL),
 		html.EscapeString(in.DocsURL),
 	)
+}
+
+// welcomeVerifyHTMLBlock returns the styled HTML "verify your email"
+// card if VerifyURL is populated, otherwise an empty string. Empty
+// string renders as nothing in the table — the surrounding %s slot
+// just collapses.
+func welcomeVerifyHTMLBlock(in WelcomeInput) string {
+	if in.VerifyURL == "" {
+		return ""
+	}
+	return fmt.Sprintf(`<tr>
+  <td style="background:#1f1505;border:1px solid #f97316;border-radius:8px;padding:18px 18px 22px;margin-bottom:24px;font-size:14px;line-height:1.55;color:#fde8c8;">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#f97316;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;padding-bottom:6px;">Step 0 &middot; Verify this email</div>
+    Before you can open the dashboard, click the link below within 24 hours.
+    <div style="padding-top:14px;">
+      <a href="%s" style="display:inline-block;background:#f97316;color:#000;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:600;font-size:14px;">Verify my email &rarr;</a>
+    </div>
+    <div style="font-size:12px;color:#b5b5b5;padding-top:12px;">Single-use. If the link expires you can ask for a fresh one from the dashboard&rsquo;s &ldquo;check your email&rdquo; screen.</div>
+  </td>
+</tr>
+<tr><td style="height:24px;line-height:24px;font-size:0;">&nbsp;</td></tr>`,
+		html.EscapeString(in.VerifyURL))
 }

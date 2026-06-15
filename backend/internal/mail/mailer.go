@@ -171,6 +171,11 @@ type WelcomeInput struct {
 	APIKeyPrefix string // e.g. "mesedi_sk_abc123..." prefix only
 	DashboardURL string // e.g. https://app.mesedi.ai
 	DocsURL      string // e.g. https://app.mesedi.ai/docs/quickstart
+	// VerifyURL is populated for raw-email signups (#232) — the
+	// one-click link the recipient must click before the dashboard
+	// unlocks. Empty string means "skip the verify block" (e.g. SSO
+	// signups inherit a verified email from the IdP and don't need it).
+	VerifyURL string
 }
 
 // NoopMailer accepts every send and discards it. Used when no
