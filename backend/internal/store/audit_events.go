@@ -426,3 +426,61 @@ func (s *PostgresStore) SearchClosedProjectAuditEvents(
 	defer rows.Close()
 	return scanAuditEventRows(rows)
 }
+
+// DeleteClosedProjectAuditEventsOlderThan purges closed-project audit
+// rows whose project_deleted_at < cutoff (#218 SOC 2 / financial-
+// compliance 7-year retention cron).
+//
+// Eligibility filter:
+//
+//   - project_deleted_at IS NOT NULL ensures we never touch a live
+//     project's audit history. Snapshot rows for a closed project
+//     have this column set; live rows have it NULL by definition
+//     (migration 031).
+//   - project_deleted_at < cutoff is the retention check itself.
+//     Cutoff is computed by the scheduler as now - 7 years.
+//
+// Returns the number of rows deleted. Errors propagate; the scheduler
+// logs + continues on the next tick.
+func (s *SQLiteStore) DeleteClosedProjectAuditEventsOlderThan(
+	ctx context.Context, cutoff time.Time,
+) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM audit_events
+		WHERE project_deleted_at IS NOT NULL
+		  AND project_deleted_at < ?
+	`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete closed-project audit events (sqlite): %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		// RowsAffected() failing is exceedingly rare on modernc.org/sqlite
+		// (it does not require driver round trips). Treat as a soft
+		// failure: the DELETE itself succeeded, we just cannot report
+		// the count. Return 0 + nil so the scheduler logs no-deletion
+		// rather than a bogus error.
+		return 0, nil
+	}
+	return n, nil
+}
+
+// DeleteClosedProjectAuditEventsOlderThan is the Postgres twin of the
+// SQLite impl. Same eligibility filter, same return contract.
+func (s *PostgresStore) DeleteClosedProjectAuditEventsOlderThan(
+	ctx context.Context, cutoff time.Time,
+) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM audit_events
+		WHERE project_deleted_at IS NOT NULL
+		  AND project_deleted_at < $1
+	`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete closed-project audit events (postgres): %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return n, nil
+}

@@ -429,6 +429,19 @@ func main() {
 	}
 	retentionScheduler.Start(context.Background())
 
+	// Closed-project audit_events retention scheduler (#218). Daily
+	// tick prunes audit rows whose project_deleted_at is older than
+	// the 7-year SOC 2 / financial-services retention window. Only
+	// closed-project rows (project_deleted_at IS NOT NULL) are
+	// eligible; live-project audit history is untouched. The default
+	// retention window comes from api.DefaultAuditEventsRetention;
+	// override here for stricter (e.g. EU-only) deploys.
+	auditEventsRetentionScheduler := &api.AuditEventsRetentionScheduler{
+		Store:  st,
+		Logger: logger,
+	}
+	auditEventsRetentionScheduler.Start(context.Background())
+
 	// Hobby billing scheduler (pre-#30). Daily tick walks every
 	// Hobby-tier project whose billing period has rolled over, attempts
 	// the off-session overage charge against the saved Stripe payment

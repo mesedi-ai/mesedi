@@ -729,10 +729,19 @@ type Store interface {
 	// SearchClosedProjectAuditEvents serves admin-side forensic
 	// lookups (R1 takeover, R2 customer support). At least one
 	// of email or project_id is required in the filter.
+	//
+	// DeleteClosedProjectAuditEventsOlderThan purges closed-project
+	// audit rows whose project_deleted_at < cutoff (#218 SOC 2 /
+	// financial-compliance 7-year retention cron). Only rows that
+	// are tagged as belonging to a closed project are eligible
+	// (project_deleted_at IS NOT NULL); live-project audit history
+	// is untouched. Returns the number of rows deleted so the
+	// scheduler can log prune volume.
 	CreateAuditEvent(ctx context.Context, e *AuditEvent) error
 	ListAuditEventsByProject(ctx context.Context, projectID string, limit int) ([]*AuditEvent, error)
 	SnapshotAuditEventsForClosedProject(ctx context.Context, projectID, projectName string) error
 	SearchClosedProjectAuditEvents(ctx context.Context, filter ClosedProjectAuditFilter) ([]*AuditEvent, error)
+	DeleteClosedProjectAuditEventsOlderThan(ctx context.Context, cutoff time.Time) (deleted int64, err error)
 
 	// CreateMagicLinkToken + GetMagicLinkTokenByHash + MarkMagicLinkTokenUsed
 	// back the magic-link sign-in feature (#196 commit 2). See
