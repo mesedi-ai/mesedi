@@ -1866,11 +1866,16 @@ func (s *SQLiteStore) SaveEvents(ctx context.Context, batch []events.Event) erro
 var ErrNotFound = errors.New("not found")
 
 // ErrProjectStillActive is returned by GDPR purge paths (#219) when
-// the caller passes a project_id that still has live audit rows
-// (project_deleted_at IS NULL). The purge surface refuses live
-// projects: customer-initiated audit deletion must follow the normal
-// HandleCloseAccount flow first; admin-initiated GDPR purge is for
-// already-closed projects only. The handler maps this to HTTP 422.
+// the caller passes a project_id that still has a row in the
+// `projects` table — i.e. the project has not been closed via
+// HandleCloseAccount + DeleteProjectCascade. The purge surface refuses
+// live projects: customer-initiated audit deletion must follow the
+// normal HandleCloseAccount flow first; admin-initiated GDPR purge is
+// for already-closed projects only. Pre-#231 the guard counted
+// audit_events with project_deleted_at IS NULL, which silently
+// bypassed for newly-signed-up projects with no audit history — see
+// audit_events.go for the bug history. The handler maps this to
+// HTTP 422.
 var ErrProjectStillActive = errors.New("project still active; close it before GDPR purge")
 
 // ErrInvalidLifecycleTransition is returned when PauseExecution or

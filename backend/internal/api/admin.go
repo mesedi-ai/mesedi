@@ -1812,9 +1812,10 @@ type AdminGDPRPurgeResponse struct {
 //
 //	200 OK on success with AdminGDPRPurgeResponse body.
 //	400 Bad Request when projectID is missing from path.
-//	422 Unprocessable Entity when projectID still has live audit
-//	    rows (project_deleted_at IS NULL). The customer must close
-//	    the account first via the normal HandleCloseAccount flow.
+//	422 Unprocessable Entity when projectID still exists in the
+//	    projects table (i.e. the project has not been closed). The
+//	    customer must close the account first via the normal
+//	    HandleCloseAccount flow before GDPR purge is allowed.
 //	500 Internal Server Error for DB failures.
 //
 // Idempotency: re-running the purge after a previous successful run
@@ -1858,9 +1859,13 @@ func (h *Handlers) HandleAdminGDPRPurgeClosedProjectAudit(w http.ResponseWriter,
 	if err != nil {
 		if errors.Is(err, store.ErrProjectStillActive) {
 			// Operator footgun guard: refusing prevents an irreversible
-			// purge of a paying customer's audit history.
+			// purge of a paying customer's audit history. Phrased in
+			// terms of the projects table because that is what the
+			// store guard actually checks after #231 — a project with
+			// zero audit_events yet but a row in `projects` is still
+			// active and must be closed first.
 			writeError(w, http.StatusUnprocessableEntity,
-				"project still has live audit rows; close the project before GDPR purge")
+				"project still active; close the account first via /app/settings before requesting GDPR purge")
 			return
 		}
 		writeError(w, http.StatusInternalServerError,

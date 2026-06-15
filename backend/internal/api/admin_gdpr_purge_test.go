@@ -3,7 +3,7 @@
 // Coverage:
 //   - Missing project_id in path returns 400.
 //   - Store returns ErrProjectStillActive => handler responds 422
-//     with a clear "close the project first" message.
+//     with a clear "close the account first" message.
 //   - Store returns a generic error => 500.
 //   - Happy path: response includes rows_purged + purged_at + the
 //     meta-audit-event is recorded against _admin (we verify the
@@ -160,7 +160,7 @@ func Test_HandleAdminGDPRPurge_LiveProject_422(t *testing.T) {
 		t.Fatalf("want 422 for live project, got %d (body: %s)",
 			w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "close the project") {
+	if !strings.Contains(w.Body.String(), "close the account") {
 		t.Errorf("422 body should hint at the fix; got %s", w.Body.String())
 	}
 	if st.createdAudit != nil {
