@@ -259,6 +259,15 @@ func authViaBearer(
 		return
 	}
 
+	// #232 — gate the request behind email_verified=true on the
+	// project's owner. Exempt routes are listed in
+	// emailVerifyExemptPaths. Customer-grandfathered projects (every
+	// signup before migration 032) sail through; new raw-email
+	// signups must click the link in their welcome email first.
+	if !requireEmailVerified(w, r, s, key.ProjectID) {
+		return
+	}
+
 	ctx := context.WithValue(r.Context(), ctxKeyProjectID, key.ProjectID)
 	ctx = context.WithValue(ctx, ctxKeyAPIKeyID, key.KeyID)
 	if key.UserID != "" {
@@ -321,6 +330,14 @@ func authViaSessionCookie(
 		return
 	}
 
+	// #232 — same email-verified gate as the bearer path. The
+	// dashboard's interstitial polls /me/email-verification-status
+	// which is on the exempt list so the customer can monitor their
+	// own verified state without being gated by it.
+	if !requireEmailVerified(w, r, s, sess.ProjectID) {
+		return
+	}
+
 	// Sliding-window refresh. Fire-and-forget so a slow DB write
 	// does not add latency to the request hot path.
 	go func(h string, t time.Time) {
@@ -335,6 +352,53 @@ func authViaSessionCookie(
 	SetProjectIDForLogging(w, sess.ProjectID)
 
 	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// emailVerifyExemptPaths lists the routes the email-verified gate
+// (#232) must NOT block, even when the authenticated email is not
+// yet verified. Only the status endpoint qualifies: the dashboard
+// interstitial polls it to know when the customer has clicked the
+// link in another tab. Every other authed route is gated.
+//
+// Auth/logout is a public endpoint (no middleware), so it doesn't
+// need to be listed here.
+var emailVerifyExemptPaths = map[string]struct{}{
+	"/me/email-verification-status": {},
+}
+
+// requireEmailVerified is the shared #232 gate run by both auth
+// paths. Returns true when the caller may proceed, false when a 403
+// response has already been written. Exempts the routes the gate
+// itself depends on (see emailVerifyExemptPaths). Best-effort on
+// transient errors: a DB hiccup must not lock a verified customer
+// out, so we fail open in that case (the next request retries).
+func requireEmailVerified(
+	w http.ResponseWriter, r *http.Request, s store.Store, projectID string,
+) bool {
+	if _, exempt := emailVerifyExemptPaths[r.URL.Path]; exempt {
+		return true
+	}
+	project, err := s.GetProject(r.Context(), projectID)
+	if err != nil {
+		// Fail open on transient error — a healthy request must not
+		// be blocked by a DB blip. The project-suspended check
+		// already ran above; the request is going through.
+		return true
+	}
+	verified, err := s.IsEmailVerified(r.Context(), project.OwnerEmail)
+	if err != nil {
+		return true
+	}
+	if !verified {
+		// 403 with a machine-readable code so SDKs / the dashboard
+		// can recognise and surface a precise message instead of a
+		// generic forbidden.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"email_not_verified","message":"Verify your email to continue. Check your inbox for the welcome email from Mesedi."}`))
+		return false
+	}
+	return true
 }
 
 // extractBearer parses an Authorization header value, returning the bearer
