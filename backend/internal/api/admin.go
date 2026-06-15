@@ -208,6 +208,11 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	// customer-support response. Read-only; rows are written by the
 	// snapshot call inside HandleCloseAccount (migration 031).
 	mux.HandleFunc("GET /admin/audit-events", h.HandleAdminSearchClosedProjectAudit)
+	// #219 GDPR Article 17 purge endpoint. Hard-deletes every audit
+	// row owned by the supplied projectID; writes a meta-audit-event
+	// against the _admin system project so we keep a paper trail of
+	// the deletion. Refuses to operate on live projects (422).
+	mux.HandleFunc("POST /admin/projects/{id}/audit-events/purge", h.HandleAdminGDPRPurgeClosedProjectAudit)
 }
 
 // AdminProjectDetail bundles everything the founder dashboard's
@@ -1770,5 +1775,139 @@ func (h *Handlers) HandleAdminSearchClosedProjectAudit(w http.ResponseWriter, r 
 		Limit:     effectiveLimit,
 		Count:     len(rows),
 		Rows:      rows,
+	})
+}
+
+// AdminGDPRPurgeRequest is the JSON body shape for the GDPR purge
+// endpoint. The reason field is optional but strongly encouraged for
+// the meta-audit-event recorded against the _admin system project.
+// Carrying the support ticket number or the original customer email
+// here is good practice; the field is stored verbatim.
+type AdminGDPRPurgeRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+// AdminGDPRPurgeResponse is the success shape. The handler also emits
+// a meta-audit-event so a future regulator audit can prove "we deleted
+// N rows for project X on Y by admin actor Z".
+type AdminGDPRPurgeResponse struct {
+	ProjectID  string `json:"project_id"`
+	RowsPurged int64  `json:"rows_purged"`
+	PurgedAt   string `json:"purged_at"`
+	PurgedBy   string `json:"purged_by,omitempty"`
+}
+
+// HandleAdminGDPRPurgeClosedProjectAudit hard-deletes every audit_events
+// row for the supplied projectID and records a meta-audit-event for
+// the deletion itself (#219).
+//
+// Auth: AdminAuth (legacy token OR admin-scope API key). Customer
+// keys do not reach this route.
+//
+// Path: POST /admin/projects/{id}/audit-events/purge
+//
+// Body shape: AdminGDPRPurgeRequest (optional reason).
+//
+// Response codes:
+//
+//	200 OK on success with AdminGDPRPurgeResponse body.
+//	400 Bad Request when projectID is missing from path.
+//	422 Unprocessable Entity when projectID still has live audit
+//	    rows (project_deleted_at IS NULL). The customer must close
+//	    the account first via the normal HandleCloseAccount flow.
+//	500 Internal Server Error for DB failures.
+//
+// Idempotency: re-running the purge after a previous successful run
+// returns 200 with RowsPurged=0 (no rows left to delete). That makes
+// retries safe.
+//
+// Compliance posture (the meta-audit-event):
+//
+//   Action     = AuditAuditGDPRPurge
+//   ProjectID  = store.APIKeyAdminProjectID ("_admin" system project)
+//   TargetType = "project"
+//   TargetID   = <the purged project id>
+//   ActorEmail = AuditActorPlatformAdmin (synthetic sentinel)
+//   Metadata   = { "rows_purged": N, "reason": "...", "admin_key_id": "...",
+//                  "admin_key_name": "...", "admin_auth_method": "..." }
+//
+// This row survives the deletion because it is owned by the _admin
+// system project, not the purged project. It is also covered by the
+// 7-year retention scheduler (#218) so it eventually rotates out per
+// the same policy.
+func (h *Handlers) HandleAdminGDPRPurgeClosedProjectAudit(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "missing project id")
+		return
+	}
+
+	// Body is optional. An empty/missing body is allowed (reason ""):
+	// the support ticket may have all the context elsewhere. We do
+	// NOT require a body so curl/scripted operators can fire-and-
+	// forget when needed.
+	var req AdminGDPRPurgeRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "decode body: "+err.Error())
+			return
+		}
+	}
+
+	deleted, err := h.Store.PurgeAuditEventsForClosedProject(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrProjectStillActive) {
+			// Operator footgun guard: refusing prevents an irreversible
+			// purge of a paying customer's audit history.
+			writeError(w, http.StatusUnprocessableEntity,
+				"project still has live audit rows; close the project before GDPR purge")
+			return
+		}
+		writeError(w, http.StatusInternalServerError,
+			"purge audit events: "+err.Error())
+		return
+	}
+
+	// Meta-audit-event for the purge itself (paper trail). We use the
+	// no-request variant because it cleanly attaches to the _admin
+	// system project regardless of the caller's request context.
+	// Synthetic actor email (AuditActorPlatformAdmin) matches the
+	// convention for platform-admin actions; the specific admin key
+	// name + id go into the metadata blob.
+	metadata := map[string]any{
+		"rows_purged": deleted,
+		"reason":      req.Reason,
+	}
+	if v := r.Context().Value(ctxKeyAdminAuthMethod); v != nil {
+		if m, ok := v.(string); ok && m != "" {
+			metadata["admin_auth_method"] = m
+		}
+	}
+	if v := r.Context().Value(ctxKeyAdminKeyID); v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			metadata["admin_key_id"] = s
+		}
+	}
+	if v := r.Context().Value(ctxKeyAdminKeyName); v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			metadata["admin_key_name"] = s
+		}
+	}
+	h.recordAuditEventForProject(
+		r.Context(),
+		store.APIKeyAdminProjectID,
+		AuditActorPlatformAdmin,
+		AuditAuditGDPRPurge,
+		"project",
+		projectID,
+		metadata,
+	)
+
+	purgedBy, _ := metadata["admin_key_name"].(string)
+	writeJSON(w, http.StatusOK, AdminGDPRPurgeResponse{
+		ProjectID:  projectID,
+		RowsPurged: deleted,
+		PurgedAt:   time.Now().UTC().Format(time.RFC3339),
+		PurgedBy:   purgedBy,
 	})
 }

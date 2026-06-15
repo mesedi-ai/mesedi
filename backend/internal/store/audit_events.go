@@ -484,3 +484,93 @@ func (s *PostgresStore) DeleteClosedProjectAuditEventsOlderThan(
 	}
 	return n, nil
 }
+
+// PurgeAuditEventsForClosedProject hard-deletes every audit row owned
+// by projectID. Refuses to operate on a project that still has LIVE
+// audit rows (project_deleted_at IS NULL); returns ErrProjectStillActive.
+//
+// Atomic via a transaction: the "is the project live?" check and the
+// DELETE both run under the same tx so a concurrent close (snapshot)
+// can't race us into deleting only half the rows.
+func (s *SQLiteStore) PurgeAuditEventsForClosedProject(
+	ctx context.Context, projectID string,
+) (int64, error) {
+	if projectID == "" {
+		return 0, errors.New("PurgeAuditEventsForClosedProject: empty projectID")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx (sqlite): %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Guard rail: if ANY row for this project_id has
+	// project_deleted_at IS NULL, the project is still live and we
+	// must refuse. Saves an admin operator from a fat-finger purge.
+	var liveCount int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM audit_events
+		WHERE project_id = ? AND project_deleted_at IS NULL
+	`, projectID).Scan(&liveCount); err != nil {
+		return 0, fmt.Errorf("purge guard read (sqlite): %w", err)
+	}
+	if liveCount > 0 {
+		return 0, ErrProjectStillActive
+	}
+
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM audit_events WHERE project_id = ?
+	`, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("purge audit events (sqlite): %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		n = 0
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit tx (sqlite): %w", err)
+	}
+	return n, nil
+}
+
+// PurgeAuditEventsForClosedProject is the Postgres twin. Same atomic
+// pattern, same guard rail, same return contract.
+func (s *PostgresStore) PurgeAuditEventsForClosedProject(
+	ctx context.Context, projectID string,
+) (int64, error) {
+	if projectID == "" {
+		return 0, errors.New("PurgeAuditEventsForClosedProject: empty projectID")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx (postgres): %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var liveCount int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM audit_events
+		WHERE project_id = $1 AND project_deleted_at IS NULL
+	`, projectID).Scan(&liveCount); err != nil {
+		return 0, fmt.Errorf("purge guard read (postgres): %w", err)
+	}
+	if liveCount > 0 {
+		return 0, ErrProjectStillActive
+	}
+
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM audit_events WHERE project_id = $1
+	`, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("purge audit events (postgres): %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		n = 0
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit tx (postgres): %w", err)
+	}
+	return n, nil
+}

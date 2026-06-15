@@ -662,6 +662,10 @@ func main() {
 	// ships in task #220; staff curl this directly today.
 	mux.Handle("GET /admin/audit-events", adminHandler)
 	mux.Handle("OPTIONS /admin/audit-events", adminHandler)
+	// #219 GDPR Article 17 purge endpoint. Hard-delete every audit
+	// row owned by the supplied closed project. Refuses live projects.
+	mux.Handle("POST /admin/projects/{id}/audit-events/purge", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}/audit-events/purge", adminHandler)
 
 	// Top-level middleware chain. SecurityHeaders is outermost so its
 	// four hardening headers (HSTS, X-Content-Type-Options,

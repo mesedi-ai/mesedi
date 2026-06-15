@@ -1865,6 +1865,14 @@ func (s *SQLiteStore) SaveEvents(ctx context.Context, batch []events.Event) erro
 // ErrNotFound is returned when a requested row does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrProjectStillActive is returned by GDPR purge paths (#219) when
+// the caller passes a project_id that still has live audit rows
+// (project_deleted_at IS NULL). The purge surface refuses live
+// projects: customer-initiated audit deletion must follow the normal
+// HandleCloseAccount flow first; admin-initiated GDPR purge is for
+// already-closed projects only. The handler maps this to HTTP 422.
+var ErrProjectStillActive = errors.New("project still active; close it before GDPR purge")
+
 // ErrInvalidLifecycleTransition is returned when PauseExecution or
 // ResumeExecution is called against an execution that is not in
 // the expected prior state. The transition matrix is enforced at

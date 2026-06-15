@@ -742,6 +742,20 @@ type Store interface {
 	SnapshotAuditEventsForClosedProject(ctx context.Context, projectID, projectName string) error
 	SearchClosedProjectAuditEvents(ctx context.Context, filter ClosedProjectAuditFilter) ([]*AuditEvent, error)
 	DeleteClosedProjectAuditEventsOlderThan(ctx context.Context, cutoff time.Time) (deleted int64, err error)
+	// PurgeAuditEventsForClosedProject hard-deletes every audit row
+	// owned by projectID (#219 GDPR Article 17 right-to-be-forgotten).
+	//
+	// Refuses to operate on a project that still has LIVE audit rows
+	// (project_deleted_at IS NULL on any row) by returning
+	// ErrProjectStillActive. The handler maps that to HTTP 422 so an
+	// operator who pasted the wrong project_id gets stopped instead
+	// of accidentally wiping a paying customer's audit history.
+	//
+	// Returns the number of rows hard-deleted on success. Callers
+	// are expected to record a meta-audit-event (action=
+	// AuditAuditGDPRPurge) on the _admin system project recording
+	// who fired the purge, when, and the original target project_id.
+	PurgeAuditEventsForClosedProject(ctx context.Context, projectID string) (deleted int64, err error)
 
 	// CreateMagicLinkToken + GetMagicLinkTokenByHash + MarkMagicLinkTokenUsed
 	// back the magic-link sign-in feature (#196 commit 2). See

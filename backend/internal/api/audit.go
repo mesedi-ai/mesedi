@@ -51,6 +51,12 @@ const (
 	// synthetic sentinel so the customer sees that a Mesedi staff
 	// member made the change without leaking which staff account.
 	AuditTierChangeByPlatformAdmin = "tier.change_by_platform_admin"
+	// #219 — GDPR Article 17 "right to be forgotten" purge of a
+	// closed project's audit history. Recorded against the _admin
+	// system project so the meta-paper-trail of the deletion
+	// survives the deletion itself. Metadata field carries
+	// rows_purged + reason.
+	AuditAuditGDPRPurge = "audit.gdpr_purge"
 )
 
 // AuditActorPlatformAdmin is the synthetic actor_email written by
