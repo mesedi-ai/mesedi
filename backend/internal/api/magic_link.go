@@ -289,6 +289,14 @@ func (h *Handlers) HandleMagicLinkVerify(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "burn token failed: "+err.Error())
 		return
 	}
+	// Clicking the magic link proves the customer owns the inbox, so
+	// flip the email-verified bit too (#232). Best-effort: a DB hiccup
+	// must not block the sign-in handoff about to happen.
+	if err := h.Store.MarkEmailVerified(r.Context(), record.Email, "magic_link"); err != nil {
+		h.Logger.Warn("magic-link verify: mark email verified failed (sign-in still proceeds)",
+			"error", err.Error(), "email", record.Email)
+	}
+
 	h.Logger.Info("magic-link verify ok",
 		"token_id", record.TokenID,
 		"email", record.Email,

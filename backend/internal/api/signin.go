@@ -217,6 +217,18 @@ func (h *Handlers) HandleSignin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 5b. Mark the email verified (#232). SSO callers reach signin
+	//     only after the IdP has attested the email; magic-link
+	//     callers reach signin only after the customer clicked the
+	//     link in their inbox. Either way, ownership is proved.
+	//     Best-effort: a transient DB error must not block sign-in
+	//     (the customer still gets their session key); the next
+	//     successful sign-in will re-mark.
+	if err := h.Store.MarkEmailVerified(r.Context(), email, source); err != nil {
+		h.Logger.Warn("signin: mark email verified failed (sign-in still succeeded)",
+			"error", err.Error(), "email", email, "source", source)
+	}
+
 	// 6. Best-effort audit log. Failure here MUST NOT block the
 	//    signin -- the customer would be left in a half-completed
 	//    state with a key minted but a 500 response, which is worse

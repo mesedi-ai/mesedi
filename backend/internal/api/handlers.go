@@ -170,6 +170,14 @@ func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
 	// route after the customer clicks the email link).
 	mux.HandleFunc("POST /magic-link/start", h.HandleMagicLinkStart)
 	mux.HandleFunc("GET /magic-link/verify", h.HandleMagicLinkVerify)
+
+	// Email verification (#232). The confirm + resend endpoints are
+	// public — the recipient may not be signed in when they click
+	// the verification link, and resend is keyed on the email itself.
+	// The status endpoint is bearer-gated because the dashboard reads
+	// it under the customer's existing auth.
+	mux.HandleFunc("POST /api/email-verify/confirm", h.HandleEmailVerifyConfirm)
+	mux.HandleFunc("POST /api/email-verify/resend", h.HandleEmailVerifyResend)
 	// #213 Batch 2 — POST /auth/logout destroys the caller's session.
 	// Public so a customer who has already lost their session row
 	// (expired, kicked, key revoked) can still click Sign Out
@@ -195,6 +203,9 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /project", h.HandleGetProject)
 	mux.HandleFunc("PATCH /project/name", h.HandleSetProjectName)
 	mux.HandleFunc("GET /me", h.HandleGetMe)
+	// #232 — dashboard polls this once per layout mount to decide
+	// whether to render the email-verification interstitial.
+	mux.HandleFunc("GET /me/email-verification-status", h.HandleEmailVerificationStatus)
 	mux.HandleFunc("PATCH /executions/{id}", h.HandleUpdateExecution)
 	mux.HandleFunc("POST /events", h.HandleIngestEvents)
 	// Phase 3b, read-side execution surface for the dashboard.

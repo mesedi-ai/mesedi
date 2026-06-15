@@ -254,10 +254,43 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		"ip", ip,
 	)
 
-	// 6. Fire the welcome email out-of-band. Non-blocking: if Resend
-	//    is slow or down, the user still gets their key. NoopMailer
-	//    in local dev makes this a no-op.
-	h.sendWelcomeEmail(email, projectName, prefix)
+	// 6. Fire the welcome+verify email out-of-band. Non-blocking: if
+	//    Resend is slow or down, the user still gets their key.
+	//    NoopMailer in local dev makes this a no-op. For raw-email
+	//    signups (#232) we issue a one-shot verification token and
+	//    embed the click-through URL in the welcome email so the
+	//    dashboard can gate behind email_verified=true. If token
+	//    issuance fails we still send the plain welcome — the user
+	//    can request a fresh verify link from the dashboard
+	//    interstitial later.
+	verifyURL := ""
+	rawToken, tokenErr := MintEmailVerifyToken()
+	if tokenErr == nil {
+		now := time.Now().UTC()
+		if err := h.Store.CreateEmailVerificationToken(
+			r.Context(), &store.EmailVerificationToken{
+				Token:     rawToken,
+				Email:     email,
+				ProjectID: projectID,
+				CreatedAt: now,
+				ExpiresAt: now.Add(EmailVerifyTokenTTL),
+			},
+		); err != nil {
+			h.Logger.Warn("signup: persist verify token failed (welcome will skip verify block)",
+				"error", err.Error(), "project_id", projectID)
+		} else {
+			dashboardURL := h.DashboardURL
+			if dashboardURL == "" {
+				dashboardURL = "https://app.mesedi.ai"
+			}
+			verifyURL = strings.TrimRight(dashboardURL, "/") +
+				"/verify-email/confirm/" + rawToken
+		}
+	} else {
+		h.Logger.Warn("signup: mint verify token failed",
+			"error", tokenErr.Error(), "project_id", projectID)
+	}
+	h.sendWelcomeEmailWithVerify(email, projectName, prefix, verifyURL)
 
 	// 7. Feed the suspicious-signup detector. Many signups from a
 	//    single IP in a short window fire an abuse signal (#172).
@@ -288,6 +321,16 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 // derive the marketing origin from the dashboard origin by stripping
 // the "app." subdomain prefix.
 func (h *Handlers) sendWelcomeEmail(toEmail, projectName, keyPrefix string) {
+	h.sendWelcomeEmailWithVerify(toEmail, projectName, keyPrefix, "")
+}
+
+// sendWelcomeEmailWithVerify is the post-#232 superset: the verifyURL
+// argument is non-empty for raw-email signups (a one-click verify
+// link is embedded in the welcome email). Pass "" to skip the verify
+// block (existing callers from SSO/magic-link paths and dev helpers).
+func (h *Handlers) sendWelcomeEmailWithVerify(
+	toEmail, projectName, keyPrefix, verifyURL string,
+) {
 	dashboardURL := h.DashboardURL
 	if dashboardURL == "" {
 		dashboardURL = "https://app.mesedi.ai"
@@ -303,6 +346,7 @@ func (h *Handlers) sendWelcomeEmail(toEmail, projectName, keyPrefix string) {
 		APIKeyPrefix: keyPrefix,
 		DashboardURL: dashboardURL + "/app",
 		DocsURL:      docsURL,
+		VerifyURL:    verifyURL,
 	}
 
 	go func() {
