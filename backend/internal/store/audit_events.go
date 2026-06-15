@@ -486,12 +486,29 @@ func (s *PostgresStore) DeleteClosedProjectAuditEventsOlderThan(
 }
 
 // PurgeAuditEventsForClosedProject hard-deletes every audit row owned
-// by projectID. Refuses to operate on a project that still has LIVE
-// audit rows (project_deleted_at IS NULL); returns ErrProjectStillActive.
+// by projectID. Refuses to operate while the project is still active
+// (a row exists in the `projects` table for projectID); returns
+// ErrProjectStillActive in that case.
 //
-// Atomic via a transaction: the "is the project live?" check and the
-// DELETE both run under the same tx so a concurrent close (snapshot)
-// can't race us into deleting only half the rows.
+// Why we check `projects` not `audit_events`: a brand-new project
+// with zero API usage has zero audit_events. The previous guard
+// counted audit_events WHERE project_deleted_at IS NULL and bypassed
+// for any project with no audit history at all, allowing a destructive
+// purge against a live customer that happened to have no audit
+// activity yet. Discovered during #225 Step 3.d.1 smoke test
+// 2026-06-15 against test project proj_1781546145391007210 (a fresh
+// signup) where the purge succeeded with 0 rows deleted instead of
+// returning 422. See task #231.
+//
+// The projects table is the source of truth for "is this project
+// closed?": HandleCloseAccount runs DeleteProjectCascade which
+// removes the projects row; surviving audit_events rows then have
+// project_deleted_at IS NOT NULL.
+//
+// Atomic via a transaction: the project-exists check and the DELETE
+// both run under the same tx so a concurrent close can't race us into
+// either deleting only some rows or refusing a legitimately-closed
+// project.
 func (s *SQLiteStore) PurgeAuditEventsForClosedProject(
 	ctx context.Context, projectID string,
 ) (int64, error) {
@@ -504,17 +521,16 @@ func (s *SQLiteStore) PurgeAuditEventsForClosedProject(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Guard rail: if ANY row for this project_id has
-	// project_deleted_at IS NULL, the project is still live and we
-	// must refuse. Saves an admin operator from a fat-finger purge.
-	var liveCount int
+	// Guard rail: if the project still exists in the `projects` table,
+	// it has not been closed and we must refuse the purge. See the
+	// function comment above for the bug that motivated this check.
+	var projectExists int
 	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM audit_events
-		WHERE project_id = ? AND project_deleted_at IS NULL
-	`, projectID).Scan(&liveCount); err != nil {
+		SELECT COUNT(*) FROM projects WHERE project_id = ?
+	`, projectID).Scan(&projectExists); err != nil {
 		return 0, fmt.Errorf("purge guard read (sqlite): %w", err)
 	}
-	if liveCount > 0 {
+	if projectExists > 0 {
 		return 0, ErrProjectStillActive
 	}
 
@@ -535,7 +551,8 @@ func (s *SQLiteStore) PurgeAuditEventsForClosedProject(
 }
 
 // PurgeAuditEventsForClosedProject is the Postgres twin. Same atomic
-// pattern, same guard rail, same return contract.
+// pattern, same guard rail, same return contract. See the SQLite
+// version's doc comment for the bug history (#225 Step 3.d.1, #231).
 func (s *PostgresStore) PurgeAuditEventsForClosedProject(
 	ctx context.Context, projectID string,
 ) (int64, error) {
@@ -548,14 +565,13 @@ func (s *PostgresStore) PurgeAuditEventsForClosedProject(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var liveCount int
+	var projectExists int
 	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM audit_events
-		WHERE project_id = $1 AND project_deleted_at IS NULL
-	`, projectID).Scan(&liveCount); err != nil {
+		SELECT COUNT(*) FROM projects WHERE project_id = $1
+	`, projectID).Scan(&projectExists); err != nil {
 		return 0, fmt.Errorf("purge guard read (postgres): %w", err)
 	}
-	if liveCount > 0 {
+	if projectExists > 0 {
 		return 0, ErrProjectStillActive
 	}
 
