@@ -764,6 +764,22 @@ type Store interface {
 	GetMagicLinkTokenByHash(ctx context.Context, tokenHash string) (*MagicLinkToken, error)
 	MarkMagicLinkTokenUsed(ctx context.Context, tokenID string) error
 
+	// Email verification (#232 pre-launch). IsEmailVerified is the gate
+	// the customer-facing auth middleware checks on every request — if
+	// it returns false the dashboard renders an "verify your email"
+	// interstitial instead of customer pages. MarkEmailVerified is
+	// called by (a) the email-link confirm handler when a raw-email
+	// signup clicks the link in their welcome email, (b) the OAuth
+	// callbacks where the IdP has already attested the email, and (c)
+	// the migration backfill that grandfathers pre-launch accounts.
+	// The verification-token methods power the one-click confirm
+	// flow shipped in the welcome email. See store/email_verification.go.
+	IsEmailVerified(ctx context.Context, email string) (bool, error)
+	MarkEmailVerified(ctx context.Context, email, method string) error
+	CreateEmailVerificationToken(ctx context.Context, t *EmailVerificationToken) error
+	GetEmailVerificationToken(ctx context.Context, token string) (*EmailVerificationToken, error)
+	MarkEmailVerificationTokenUsed(ctx context.Context, token string) error
+
 	// Session CRUD backs the cookie-based dashboard auth flow (#213).
 	// See store/sessions.go for contracts. The auth middleware calls
 	// GetSessionByTokenHash + TouchSession on every dashboard request;
