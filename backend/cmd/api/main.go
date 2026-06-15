@@ -506,6 +506,18 @@ func main() {
 	// should still be able to click Sign Out without a 401.
 	mux.Handle("POST /auth/logout", signupHandler)
 	mux.Handle("OPTIONS /auth/logout", signupHandler)
+	// #232 email-verification confirm + resend. Public from the HTTP
+	// layer (the customer may not be signed in when they click the
+	// link in their welcome email). Authenticity is provided by the
+	// token in the request body (confirm) or by the per-email rate
+	// limit inside the handler (resend; always 202s to avoid an
+	// existence oracle). Routed to signupHandler (CORSMiddleware over
+	// signupMux) so the public-route set in RegisterPublicRoutes is
+	// reached without the bearer-token auth chain.
+	mux.Handle("POST /api/email-verify/confirm", signupHandler)
+	mux.Handle("OPTIONS /api/email-verify/confirm", signupHandler)
+	mux.Handle("POST /api/email-verify/resend", signupHandler)
+	mux.Handle("OPTIONS /api/email-verify/resend", signupHandler)
 	mux.Handle("POST /executions", privateHandler)
 	mux.Handle("PATCH /executions/{id}", privateHandler)
 	mux.Handle("POST /events", privateHandler)
@@ -516,6 +528,13 @@ func main() {
 	// Admin scope required; enforced inside the handler.
 	mux.Handle("PATCH /project/name", privateHandler)
 	mux.Handle("GET /me", privateHandler)
+	// #232 email-verification status. Bearer-gated so the dashboard's
+	// /verify-email interstitial can poll its own project's verified
+	// flag. Listed in emailVerifyExemptPaths inside auth.go so the
+	// #232 gate itself does NOT block this route (otherwise the
+	// dashboard could never learn it's been verified).
+	mux.Handle("GET /me/email-verification-status", privateHandler)
+	mux.Handle("OPTIONS /me/email-verification-status", privateHandler)
 	// Phase 3b, read-side execution + stats surface for the dashboard.
 	mux.Handle("GET /executions", privateHandler)
 	mux.Handle("GET /executions/{id}", privateHandler)
