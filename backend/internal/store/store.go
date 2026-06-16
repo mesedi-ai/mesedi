@@ -775,6 +775,15 @@ type Store interface {
 	// The verification-token methods power the one-click confirm
 	// flow shipped in the welcome email. See store/email_verification.go.
 	IsEmailVerified(ctx context.Context, email string) (bool, error)
+	// GetEmailVerificationMethod returns the method label stored on
+	// the verified_emails row, e.g. "email_link", "magic_link",
+	// "sso_google", "sso_github", "grandfathered". Empty string +
+	// nil error when the email has no verified_emails row (i.e. not
+	// yet verified). The /me/email-verification-status endpoint
+	// surfaces this so the dashboard can suppress the "VERIFIED"
+	// chip on the settings page for SSO-attested accounts where the
+	// label would be redundant.
+	GetEmailVerificationMethod(ctx context.Context, email string) (string, error)
 	MarkEmailVerified(ctx context.Context, email, method string) error
 	CreateEmailVerificationToken(ctx context.Context, t *EmailVerificationToken) error
 	GetEmailVerificationToken(ctx context.Context, token string) (*EmailVerificationToken, error)

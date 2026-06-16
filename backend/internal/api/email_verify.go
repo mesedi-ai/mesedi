@@ -336,10 +336,16 @@ func (h *Handlers) HandleEmailVerifyResend(w http.ResponseWriter, r *http.Reques
 // EmailVerifyStatusResponse is what GET /api/me/email-verification-status
 // returns. The dashboard reads this once per layout mount and uses
 // the verified flag to decide whether to render the interstitial.
+// Method is the verified_emails.method label ("email_link",
+// "magic_link", "sso_google", "sso_github", "grandfathered"); empty
+// string when verified=false. The settings page reads it to suppress
+// the "VERIFIED" chip on SSO-attested accounts where the label would
+// be redundant.
 type EmailVerifyStatusResponse struct {
 	OK       bool   `json:"ok"`
 	Verified bool   `json:"verified"`
 	Email    string `json:"email"`
+	Method   string `json:"method"`
 }
 
 // HandleEmailVerificationStatus is the GET /api/me/email-verification-status
@@ -372,7 +378,23 @@ func (h *Handlers) HandleEmailVerificationStatus(w http.ResponseWriter, r *http.
 			"failed to check verified state: "+err.Error())
 		return
 	}
+	// Fetch the method label alongside the verified flag so the
+	// dashboard can decide whether to render the VERIFIED chip on
+	// the settings page (we suppress it for SSO since the IdP-attested
+	// flow makes the label redundant). Best-effort: a method-lookup
+	// failure does not block the verified flag from reaching the
+	// dashboard.
+	var method string
+	if verified {
+		m, mErr := h.Store.GetEmailVerificationMethod(r.Context(), project.OwnerEmail)
+		if mErr != nil {
+			h.Logger.Warn("email-verify status: read method failed",
+				"error", mErr.Error(), "project_id", projectID)
+		} else {
+			method = m
+		}
+	}
 	writeJSON(w, http.StatusOK, EmailVerifyStatusResponse{
-		OK: true, Verified: verified, Email: project.OwnerEmail,
+		OK: true, Verified: verified, Email: project.OwnerEmail, Method: method,
 	})
 }

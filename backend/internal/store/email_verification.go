@@ -77,6 +77,24 @@ func (s *SQLiteStore) IsEmailVerified(ctx context.Context, email string) (bool, 
 	return true, nil
 }
 
+func (s *SQLiteStore) GetEmailVerificationMethod(ctx context.Context, email string) (string, error) {
+	normalized := normalizeEmail(email)
+	if normalized == "" {
+		return "", nil
+	}
+	var method string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT method FROM verified_emails WHERE email = ?
+	`, normalized).Scan(&method)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read verified_emails method (sqlite): %w", err)
+	}
+	return method, nil
+}
+
 func (s *SQLiteStore) MarkEmailVerified(ctx context.Context, email, method string) error {
 	normalized := normalizeEmail(email)
 	if normalized == "" {
@@ -199,6 +217,24 @@ func (s *PostgresStore) IsEmailVerified(ctx context.Context, email string) (bool
 		return false, fmt.Errorf("read verified_emails (postgres): %w", err)
 	}
 	return true, nil
+}
+
+func (s *PostgresStore) GetEmailVerificationMethod(ctx context.Context, email string) (string, error) {
+	normalized := normalizeEmail(email)
+	if normalized == "" {
+		return "", nil
+	}
+	var method string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT method FROM verified_emails WHERE email = $1
+	`, normalized).Scan(&method)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read verified_emails method (postgres): %w", err)
+	}
+	return method, nil
 }
 
 func (s *PostgresStore) MarkEmailVerified(ctx context.Context, email, method string) error {
