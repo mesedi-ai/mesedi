@@ -153,7 +153,14 @@ const SessionCookieName = "mesedi_session"
 // SessionTTL is the sliding-window TTL applied to a session on
 // every authenticated request. An active customer stays signed in
 // indefinitely; an idle browser tab expires after this window.
-const SessionTTL = 7 * 24 * time.Hour
+//
+// Set to 30 days per the #213 design choice on 2026-06-16: a
+// dashboard that the operator opens at least monthly will never
+// require a fresh sign-in, but an abandoned browser tab eventually
+// drops off so a stolen / lost device's pre-existing session does
+// not persist forever. Matches the lifecycle of session cookies on
+// Stripe / Linear / Vercel.
+const SessionTTL = 30 * 24 * time.Hour
 
 // HashSessionToken returns the SHA-256 hex digest of the raw
 // session cookie value. Exported so signin.go (Batch 2) can hash
