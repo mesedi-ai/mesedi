@@ -78,8 +78,14 @@ type SigninRequest struct {
 // Mirrors SignupResponse so the dashboard server's OAuth callback and
 // magic-link verify can share a single cookie-write code path.
 type SigninResponse struct {
-	OK          bool   `json:"ok"`
-	APIKey      string `json:"api_key"`
+	OK bool `json:"ok"`
+	// APIKey is the legacy mesedi_sk_... bearer the dashboard used
+	// before #213. As of step 4 (2026-06-16) we only populate it
+	// when SessionToken minting failed, so the dashboard's worker
+	// route has a fallback credential to write into the legacy
+	// localStorage path. On the happy path APIKey is empty and the
+	// omitempty tag drops it from the JSON wire payload entirely.
+	APIKey      string `json:"api_key,omitempty"`
 	ProjectID   string `json:"project_id"`
 	ProjectName string `json:"project_name"`
 	KeyPrefix   string `json:"key_prefix"`
@@ -88,9 +94,8 @@ type SigninResponse struct {
 	// Worker writes onto its browser-facing response (#213 Batch 2).
 	// The backend persists only the SHA-256 hash in the sessions
 	// table; this raw value is shown exactly once, in this response.
-	// Empty during the Batch 2 transition window for callers older
-	// than the Batch 3 Worker code, which still consume APIKey from
-	// the same payload. Batch 3 removes APIKey from this response.
+	// Empty only if session creation failed; the dashboard treats
+	// this as the primary success signal post-#213-step-4.
 	SessionToken string `json:"session_token,omitempty"`
 	// SessionExpiresAt mirrors SessionToken's expires_at column from
 	// the sessions table as an RFC 3339 string. Lets the Worker set
@@ -294,15 +299,22 @@ func (h *Handlers) HandleSignin(w http.ResponseWriter, r *http.Request) {
 		"session_created", sessionToken != "",
 	)
 
-	// 7. Return the fresh key + the fresh session token to the
-	//    dashboard server. The dashboard server writes these into
-	//    short-lived cookies that the welcome / login page reads
-	//    exactly once. The raw values never live in URL query
-	//    strings, Referer headers, or server logs. The two paths
-	//    coexist during the #213 cutover; Batch 3 drops APIKey.
+	// 7. Return the session token + project metadata to the dashboard
+	//    Worker. The Worker writes session_token into the HttpOnly
+	//    mesedi_session cookie that authenticates every subsequent
+	//    dashboard request. The raw values never live in URL query
+	//    strings, Referer headers, or server logs.
+	//
+	//    #213 step 4 (2026-06-16): we no longer return APIKey on the
+	//    happy path. The dashboard's session cookie is now the only
+	//    credential it needs. APIKey is only attached when session
+	//    minting failed so the Worker has a fallback credential to
+	//    write into legacy localStorage — this keeps any future
+	//    dashboard version that still expects the api_key field
+	//    working until it gets upgraded. omitempty in the JSON tag
+	//    drops the field from the wire payload when empty.
 	resp := SigninResponse{
 		OK:          true,
-		APIKey:      rawKey,
 		ProjectID:   project.ProjectID,
 		ProjectName: project.Name,
 		KeyPrefix:   prefix,
@@ -313,6 +325,10 @@ func (h *Handlers) HandleSignin(w http.ResponseWriter, r *http.Request) {
 	if sessionToken != "" {
 		resp.SessionToken = sessionToken
 		resp.SessionExpiresAt = sessionExpiresAt.UTC().Format(time.RFC3339Nano)
+	} else {
+		// Session mint failed; fall back to api_key-only auth so the
+		// dashboard's legacy localStorage path can keep the user in.
+		resp.APIKey = rawKey
 	}
 	writeJSON(w, http.StatusCreated, resp)
 }
