@@ -387,7 +387,18 @@ func main() {
 		"enabled", anthropicAdminClient.Configured())
 
 	handlers.RegisterRoutes(privateMux)
-	privateHandler := api.NewAuthChain(logger, st, handlers.Abuse)(privateMux)
+	// Request-log middleware (#256) wraps the auth chain so it can
+	// read the project + key IDs the chain stamps into the context
+	// AND capture the response status code on the way out. Hobby +
+	// Enterprise tiers are skipped inside the middleware; only Team
+	// requests land a row in the request_log table.
+	requestLogger := &api.RequestLogger{
+		Store:  st,
+		Logger: logger,
+	}
+	privateHandler := requestLogger.Middleware(
+		api.NewAuthChain(logger, st, handlers.Abuse)(privateMux),
+	)
 
 	// Abuse-detection background worker (#172). Reads unresolved
 	// signals every few minutes, sends the 24h-warning email, then
@@ -441,6 +452,16 @@ func main() {
 		Logger: logger,
 	}
 	auditEventsRetentionScheduler.Start(context.Background())
+
+	// request_log retention scheduler (#256). Daily tick prunes rows
+	// older than 90 days from the request_log table. Keeps the
+	// forensic-attribution window long enough for typical compromise
+	// investigations without letting the table balloon Neon storage.
+	requestLogRetentionScheduler := &api.RequestLogRetentionScheduler{
+		Store:  st,
+		Logger: logger,
+	}
+	requestLogRetentionScheduler.Start(context.Background())
 
 	// Hobby billing scheduler (pre-#30). Daily tick walks every
 	// Hobby-tier project whose billing period has rolled over, attempts

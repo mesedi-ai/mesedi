@@ -769,6 +769,18 @@ type Store interface {
 	GetBillingEvent(ctx context.Context, eventID string) (*BillingEvent, error)
 	ResolveBillingEvent(ctx context.Context, eventID, resolvedBy, note string) error
 
+	// CreateRequestLog + ListRequestLog + DeleteRequestLogOlderThan
+	// back the persisted HTTP request audit table (#256). One row
+	// per authenticated Team-tier request. The request-log middleware
+	// writes via CreateRequestLog after each authenticated request.
+	// The admin "share recent use" report (#257) reads via ListRequestLog.
+	// The daily request_log_retention_scheduler prunes via
+	// DeleteRequestLogOlderThan to keep the table from growing
+	// without bound (90-day window by default).
+	CreateRequestLog(ctx context.Context, r *RequestLog) error
+	ListRequestLog(ctx context.Context, filter RequestLogFilter) ([]*RequestLog, error)
+	DeleteRequestLogOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+
 	// CreateMagicLinkToken + GetMagicLinkTokenByHash + MarkMagicLinkTokenUsed
 	// back the magic-link sign-in feature (#196 commit 2). See
 	// store/magic_link_tokens.go for contracts.
