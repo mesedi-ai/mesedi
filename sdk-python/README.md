@@ -42,7 +42,7 @@ For local backend development against `localhost:8080`, pass an explicit
 For each `@wrap`-decorated call:
 
 - **On entry:** `POST /executions` with `execution_id`, `status="started"`,
-  `sdk_language="python"`, `sdk_version="0.0.1"`.
+  `sdk_language="python"`, `sdk_version="0.2.0"`.
 - **On normal return:** `PATCH /executions/{id}` with `status="completed"`,
   `ended_at`, `duration_ms`.
 - **On exception:** `PATCH /executions/{id}` with `status="crashed"`,

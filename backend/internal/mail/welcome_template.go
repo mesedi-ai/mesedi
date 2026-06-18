@@ -77,8 +77,8 @@ Five minutes to your first observed execution:
 
    Your first execution lands within a few seconds.
 
-The full quickstart is at %s, including the LangChain, CrewAI, and
-Vercel AI SDK adapters.
+The full quickstart is at %s, including the LangChain, LangGraph,
+CrewAI, OpenAI Agents SDK, and Vercel AI SDK adapters.
 
 Questions, corrections, or stuck somewhere? Reply to this email.
 
@@ -166,7 +166,7 @@ run_my_agent("hello")</pre>
           <td style="font-size:15px;line-height:1.6;color:#b5b5b5;padding:24px 0 0;border-top:1px solid #2a2a2a;">
             The full quickstart is at
             <a href="%s" style="color:#fafafa;">app.mesedi.ai/docs/quickstart</a>,
-            including the LangChain, CrewAI, and Vercel AI SDK adapters.
+            including the LangChain, LangGraph, CrewAI, OpenAI Agents SDK, and Vercel AI SDK adapters.
           </td>
         </tr>
         <tr>
