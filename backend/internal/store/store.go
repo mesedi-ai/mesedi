@@ -757,6 +757,18 @@ type Store interface {
 	// who fired the purge, when, and the original target project_id.
 	PurgeAuditEventsForClosedProject(ctx context.Context, projectID string) (deleted int64, err error)
 
+	// CreateBillingEvent + ListBillingEvents + GetBillingEvent +
+	// ResolveBillingEvent back the Stripe webhook fraud/dunning
+	// signal table (#261). See store/billing_events.go for
+	// contracts. The handler in api/billing.go inserts a row when
+	// a charge.dispute.created or invoice.payment_failed webhook
+	// arrives; the /admin/billing-events page reads from the same
+	// table and stamps resolved_at when ops clears a signal.
+	CreateBillingEvent(ctx context.Context, e *BillingEvent) error
+	ListBillingEvents(ctx context.Context, filter BillingEventFilter) ([]*BillingEvent, error)
+	GetBillingEvent(ctx context.Context, eventID string) (*BillingEvent, error)
+	ResolveBillingEvent(ctx context.Context, eventID, resolvedBy, note string) error
+
 	// CreateMagicLinkToken + GetMagicLinkTokenByHash + MarkMagicLinkTokenUsed
 	// back the magic-link sign-in feature (#196 commit 2). See
 	// store/magic_link_tokens.go for contracts.

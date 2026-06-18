@@ -51,6 +51,7 @@ import (
 
 	"github.com/stripe/stripe-go/v82"
 	portalsession "github.com/stripe/stripe-go/v82/billingportal/session"
+	stripecharge "github.com/stripe/stripe-go/v82/charge"
 	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stripe/stripe-go/v82/customer"
 	"github.com/stripe/stripe-go/v82/invoiceitem"
@@ -1041,6 +1042,17 @@ func (h *Handlers) dispatchStripeEvent(
 		return h.handleInvoiceUpcoming(event, logger)
 	case "invoice.paid":
 		return h.handleInvoicePaid(event)
+	case "invoice.payment_failed":
+		// Stripe could not collect on a finalized invoice (card
+		// declined, expired, insufficient funds, etc.). Lands a
+		// billing_events row so /admin/billing-events surfaces the
+		// dunning case without polling Stripe (#261).
+		return h.handleInvoicePaymentFailed(event, logger)
+	case "charge.dispute.created":
+		// A customer initiated a chargeback through their card
+		// issuer; potential fraud signal. Lands a billing_events
+		// row so /admin/billing-events surfaces the dispute (#261).
+		return h.handleChargeDisputeCreated(event, logger)
 	case "setup_intent.succeeded":
 		// Hobby card-attach flow: customer finished Stripe Elements
 		// confirmCardSetup; save the resulting payment method as the
@@ -1184,6 +1196,196 @@ func (h *Handlers) handleInvoicePaid(event stripe.Event) error {
 		context.Background(),
 		p.ProjectID, *periodStart, *periodEnd,
 	)
+}
+
+// handleInvoicePaymentFailed lands a billing_events row when Stripe
+// fails to collect on a finalized invoice. The customer-facing failure
+// modes are usually card expired, lost, blocked, or insufficient
+// funds; functionally it's a dunning signal that ops needs to nudge
+// the customer to update payment method before service is interrupted
+// (#261).
+//
+// We do NOT auto-downgrade or auto-suspend on this event. Stripe's
+// own Smart Retries scheduler keeps trying the card on its dunning
+// cadence; the customer.subscription.deleted webhook is what
+// eventually downgrades them if the dunning sequence fails. This
+// handler only records the signal so admin can act sooner if they
+// want (e.g., reach out personally to a Team customer).
+//
+// Idempotency: the Stripe event_id is the natural primary key on
+// billing_events, so a Stripe redelivery becomes a no-op INSERT.
+func (h *Handlers) handleInvoicePaymentFailed(event stripe.Event, logger *slog.Logger) error {
+	var invoice stripe.Invoice
+	if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
+		return fmt.Errorf("unmarshal invoice.payment_failed: %w", err)
+	}
+	if invoice.Customer == nil {
+		// Non-subscription invoice without a customer; nothing to
+		// attribute. Log and drop, matching handleInvoicePaid.
+		logger.Info("invoice.payment_failed: invoice has no customer; dropping")
+		return nil
+	}
+	customerID := invoice.Customer.ID
+	p, err := h.Store.GetProjectByStripeCustomerID(context.Background(), customerID)
+	if err != nil {
+		// Customer present but no Mesedi project resolves. Could
+		// happen if a project was hard-deleted (GDPR purge) while
+		// the invoice was in flight. Log and drop rather than fail
+		// the webhook, which would put Stripe into redelivery loop.
+		logger.Warn("invoice.payment_failed: cannot resolve project",
+			"customer_id", customerID, "error", err.Error())
+		return nil
+	}
+
+	// Build the detail JSON. Fields are chosen so the admin page
+	// can render a useful summary without re-fetching from Stripe.
+	detail := map[string]any{
+		"invoice_id":        invoice.ID,
+		"attempt_count":     invoice.AttemptCount,
+		"amount_due":        invoice.AmountDue,
+		"amount_remaining":  invoice.AmountRemaining,
+		"hosted_invoice":    invoice.HostedInvoiceURL,
+		"invoice_pdf":       invoice.InvoicePDF,
+		"billing_reason":    string(invoice.BillingReason),
+		"collection_method": string(invoice.CollectionMethod),
+	}
+	if invoice.NextPaymentAttempt != 0 {
+		detail["next_payment_attempt"] = invoice.NextPaymentAttempt
+	}
+	detailJSON, err := json.Marshal(detail)
+	if err != nil {
+		return fmt.Errorf("marshal payment_failed detail: %w", err)
+	}
+
+	be := &store.BillingEvent{
+		EventID:          event.ID,
+		ProjectID:        p.ProjectID,
+		StripeCustomerID: customerID,
+		Kind:             store.BillingEventKindStripePaymentFailed,
+		Severity:         store.BillingEventSeverityMedium,
+		StripeObjectID:   invoice.ID,
+		AmountCents:      invoice.AmountDue,
+		Currency:         strings.ToLower(string(invoice.Currency)),
+		DetailJSON:       string(detailJSON),
+		ReceivedAt:       time.Now().UTC(),
+	}
+	if err := h.Store.CreateBillingEvent(context.Background(), be); err != nil {
+		return fmt.Errorf("create billing event (payment_failed): %w", err)
+	}
+	logger.Info("invoice.payment_failed: billing event recorded",
+		"project_id", p.ProjectID,
+		"invoice_id", invoice.ID,
+		"attempt_count", invoice.AttemptCount)
+	return nil
+}
+
+// handleChargeDisputeCreated lands a billing_events row when a
+// customer initiates a chargeback through their card issuer. Often a
+// fraud signal (stolen-card-used-on-Mesedi pattern), so this is
+// marked HIGH severity by default; the dispute reason refines that
+// (#261).
+//
+// The Stripe Dispute object on the webhook contains the charge as a
+// string ID only; we fetch the Charge once to resolve the customer.
+// One additional Stripe round-trip per dispute is fine for the
+// volumes we expect — disputes are rare events.
+//
+// We do NOT take automated remediation here (no auto-suspend, no
+// auto-refund). Disputes need human review: the operator on the
+// admin/billing-events page can decide whether to (a) accept and
+// refund, (b) submit evidence, or (c) flag the customer for closer
+// monitoring.
+func (h *Handlers) handleChargeDisputeCreated(event stripe.Event, logger *slog.Logger) error {
+	var dispute stripe.Dispute
+	if err := json.Unmarshal(event.Data.Raw, &dispute); err != nil {
+		return fmt.Errorf("unmarshal charge.dispute.created: %w", err)
+	}
+	if dispute.Charge == nil || dispute.Charge.ID == "" {
+		// Dispute without an associated charge is malformed; Stripe
+		// shouldn't emit this. Log and drop.
+		logger.Warn("charge.dispute.created: dispute has no charge; dropping",
+			"dispute_id", dispute.ID)
+		return nil
+	}
+
+	// Resolve customer via the underlying charge. The webhook does
+	// not expand the charge's customer for us, so we fetch.
+	ch, err := stripecharge.Get(dispute.Charge.ID, nil)
+	if err != nil {
+		// Stripe-side failure to fetch the charge. Return the error
+		// so Stripe redelivers the webhook; this is a transient
+		// integration problem, not a malformed event.
+		return fmt.Errorf("fetch charge %s for dispute %s: %w",
+			dispute.Charge.ID, dispute.ID, err)
+	}
+	if ch.Customer == nil || ch.Customer.ID == "" {
+		// Charge without a customer (one-off Payment Intent paid by
+		// a guest card, etc.). Nothing to attribute to a Mesedi
+		// project. Log and drop.
+		logger.Warn("charge.dispute.created: charge has no customer; dropping",
+			"dispute_id", dispute.ID, "charge_id", dispute.Charge.ID)
+		return nil
+	}
+	customerID := ch.Customer.ID
+	p, err := h.Store.GetProjectByStripeCustomerID(context.Background(), customerID)
+	if err != nil {
+		logger.Warn("charge.dispute.created: cannot resolve project",
+			"customer_id", customerID,
+			"dispute_id", dispute.ID,
+			"error", err.Error())
+		return nil
+	}
+
+	// Severity: HIGH for fraud-flavored reasons (likely stolen-card
+	// use of Mesedi), MEDIUM for everything else (genuine dispute
+	// over service, subscription confusion, etc.).
+	severity := store.BillingEventSeverityMedium
+	switch dispute.Reason {
+	case stripe.DisputeReasonFraudulent, stripe.DisputeReasonUnrecognized:
+		severity = store.BillingEventSeverityHigh
+	}
+
+	detail := map[string]any{
+		"dispute_id":     dispute.ID,
+		"charge_id":      dispute.Charge.ID,
+		"reason":         string(dispute.Reason),
+		"status":         string(dispute.Status),
+		"amount":         dispute.Amount,
+		"currency":       string(dispute.Currency),
+		"is_refundable":  dispute.IsChargeRefundable,
+		"network_reason": dispute.NetworkReasonCode,
+	}
+	if dispute.EvidenceDetails != nil {
+		detail["evidence_due_by"] = dispute.EvidenceDetails.DueBy
+		detail["has_evidence"] = dispute.EvidenceDetails.HasEvidence
+		detail["submission_count"] = dispute.EvidenceDetails.SubmissionCount
+	}
+	detailJSON, err := json.Marshal(detail)
+	if err != nil {
+		return fmt.Errorf("marshal dispute detail: %w", err)
+	}
+
+	be := &store.BillingEvent{
+		EventID:          event.ID,
+		ProjectID:        p.ProjectID,
+		StripeCustomerID: customerID,
+		Kind:             store.BillingEventKindStripeDispute,
+		Severity:         severity,
+		StripeObjectID:   dispute.ID,
+		AmountCents:      dispute.Amount,
+		Currency:         strings.ToLower(string(dispute.Currency)),
+		DetailJSON:       string(detailJSON),
+		ReceivedAt:       time.Now().UTC(),
+	}
+	if err := h.Store.CreateBillingEvent(context.Background(), be); err != nil {
+		return fmt.Errorf("create billing event (dispute): %w", err)
+	}
+	logger.Warn("charge.dispute.created: billing event recorded",
+		"project_id", p.ProjectID,
+		"dispute_id", dispute.ID,
+		"reason", string(dispute.Reason),
+		"severity", severity)
+	return nil
 }
 
 // handleInvoiceUpcoming pushes the project's accumulated overage onto

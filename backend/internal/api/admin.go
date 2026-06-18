@@ -199,6 +199,12 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/storage", h.HandleAdminStorage)
 	mux.HandleFunc("GET /admin/abuse", h.HandleAdminListAbuseSignals)
 	mux.HandleFunc("POST /admin/abuse/{id}/resolve", h.HandleAdminResolveAbuseSignal)
+	// #261 Stripe webhook billing-event signals (chargebacks +
+	// dunning). Read-only list + resolve-with-note. Backs the
+	// /security page commitment of fraud/dunning surfacing in
+	// admin without polling Stripe.
+	mux.HandleFunc("GET /admin/billing-events", h.HandleAdminListBillingEvents)
+	mux.HandleFunc("POST /admin/billing-events/{id}/resolve", h.HandleAdminResolveBillingEvent)
 	// API keys management (migration 015).
 	mux.HandleFunc("GET /admin/api-keys", h.HandleAdminListAPIKeys)
 	mux.HandleFunc("POST /admin/api-keys", h.HandleAdminCreateAPIKey)
