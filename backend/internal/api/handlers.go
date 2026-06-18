@@ -369,6 +369,18 @@ func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request)
 	}
 	exec.ProjectID = authProjectID
 
+	// Stamp the authenticated API key onto the execution (#255). This
+	// is the only place the column is set; the SDK never supplies it
+	// (the api_key_id field on the wire is server-stamped and any
+	// body-supplied value is overwritten here). Without this, the
+	// Terms commitment to "share the information we have about the
+	// key's recent use" on a compromise report cannot be honored
+	// per-key, only per-project.
+	if authKeyID, hasKey := APIKeyIDFromContext(r.Context()); hasKey && authKeyID != "" {
+		k := authKeyID
+		exec.APIKeyID = &k
+	}
+
 	if exec.Status == "" {
 		exec.Status = events.StatusStarted
 	}

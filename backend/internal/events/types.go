@@ -151,6 +151,15 @@ type Execution struct {
 	// "not supplied"; non-nil pointer to "" = "supplied as empty
 	// string" (treated as a deliberate, distinct value).
 	TenantID *string `json:"tenant_id,omitempty"`
+	// APIKeyID records which API key authenticated the request that
+	// created this execution (#255). Stamped server-side from the auth
+	// middleware context; any value the SDK sends in the request body
+	// is overwritten in HandleCreateExecution. Surfaced on reads so the
+	// admin "key recent use" report (#257) can scope a forensic audit
+	// to a single key after a compromise. nil for executions written
+	// before this column shipped (cannot reconstruct attribution
+	// historically; see migration 035 design notes).
+	APIKeyID *string `json:"api_key_id,omitempty"`
 	// PausedAt is the timestamp at which the execution entered the
 	// currently-active human-in-the-loop pause cycle (Mesedi #18).
 	// nil when the execution is not paused. Cleared on resume.

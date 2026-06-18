@@ -1283,14 +1283,15 @@ func (s *PostgresStore) CreateExecution(ctx context.Context, e *events.Execution
 			started_at, ended_at, duration_ms,
 			total_tokens_in, total_tokens_out, estimated_cost_usd,
 			input_summary, output_summary, crash_signature,
-			sdk_version, sdk_language, tenant_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			sdk_version, sdk_language, tenant_id, api_key_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 	`,
 		e.ExecutionID, e.ProjectID, nullStringPtr(e.ParentExecutionID), e.Status,
 		e.StartedAt, nullTime(e.EndedAt), nullInt64(e.DurationMs),
 		nullInt(e.TotalTokensIn), nullInt(e.TotalTokensOut), nullFloat(e.EstimatedCostUSD),
 		nullString(e.InputSummary), nullString(e.OutputSummary), nullString(e.CrashSignature),
 		nullString(e.SDKVersion), nullString(e.SDKLanguage), nullStringPtr(e.TenantID),
+		nullStringPtr(e.APIKeyID),
 	)
 	if err != nil {
 		return fmt.Errorf("insert execution: %w", err)
