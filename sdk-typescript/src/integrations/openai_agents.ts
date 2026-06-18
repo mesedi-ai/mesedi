@@ -38,8 +38,9 @@
  *     version this integration was written against. For
  *     Anthropic-backed runs use the existing
  *     `instrumentAnthropic()` patch; an OpenAI-backed equivalent
- *     is on the roadmap.
- *   - Streaming hooks (`Runner.runStreamed`). Covered in a v2 slice.
+ *     is not currently provided.
+ *   - Streaming hooks (`Runner.runStreamed`). Not currently
+ *     instrumented.
  */
 
 import { getClient } from "../client.js";

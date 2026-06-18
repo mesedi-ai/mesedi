@@ -48,9 +48,8 @@ Out of scope for v1:
     parallel to it.
   - LangGraph ``interrupt()``. The HITL lifecycle helpers
     (``mesedi.pause_for_human``, ``mesedi.request_human_intervention``)
-    cover the request/response capture cleanly already; v2 will add
-    automatic bridging when interrupt() is raised inside a wrapped
-    graph.
+    cover the request/response capture cleanly already; bridging
+    from interrupt() to those helpers must be done by the caller.
 """
 
 from __future__ import annotations

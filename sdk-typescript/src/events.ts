@@ -49,8 +49,8 @@ export const EventType = {
   // attribution can break down per MCP server.
   MCP_CALL: "mcp_call",
   // Mesedi #9: external evaluator score (Ragas / Promptfoo / HHEM
-  // / custom). Ingestion-only at v1; Mesedi #14 aggregates these
-  // in Tier 3.
+  // / custom). Ingestion-only; Mesedi #14 aggregates these into
+  // grounding_failure clusters.
   EVAL_SCORE: "eval_score",
   // Mesedi #15: external memory store read/write/search.
   MEMORY_OPERATION: "memory_operation",

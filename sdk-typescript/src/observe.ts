@@ -322,7 +322,7 @@ export interface EvalScoreOptions {
  *
  * Use this when you run Ragas, Promptfoo, Vectara HHEM, or a custom
  * judge against an execution's output and want Mesedi to track the
- * score over time. Mesedi #14 (Tier 3) aggregates these into
+ * score over time. Mesedi #14 aggregates these into
  * grounding_failure clusters when scores trend below threshold.
  *
  * Outside `wrap()`: silent no-op.

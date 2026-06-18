@@ -498,8 +498,8 @@ def emit_eval_score(
     Use this when you run Ragas, Promptfoo, Vectara HHEM, a custom
     LLM-judge, or any other evaluator against an execution's output
     and want Mesedi to track the score over time. Mesedi #14
-    (grounding_failure, Tier 3) aggregates these events across
-    executions to fire alerts when scores trend below threshold.
+    (grounding_failure) aggregates these events across executions
+    to fire alerts when scores trend below threshold.
 
     Typical caller pattern (Ragas faithfulness)::
 

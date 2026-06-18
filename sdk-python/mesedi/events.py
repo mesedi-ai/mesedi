@@ -52,8 +52,8 @@ class EventType:
     # cost / failure attribution can break down by MCP server.
     MCP_CALL:             ClassVar[str] = "mcp_call"
     # Mesedi #9: external evaluator score (Ragas / Promptfoo / HHEM
-    # / custom judge). Ingestion-only at v1; Mesedi #14 aggregates
-    # these into grounding_failure clusters in Tier 3.
+    # / custom judge). Ingestion-only; Mesedi #14 aggregates these
+    # into grounding_failure clusters.
     EVAL_SCORE:           ClassVar[str] = "eval_score"
     # Mesedi #15: external memory store read/write/search.
     MEMORY_OPERATION:     ClassVar[str] = "memory_operation"
