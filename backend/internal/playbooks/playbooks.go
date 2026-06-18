@@ -38,12 +38,16 @@
 //	  system_prompt_inject, jailbreak_dan, developer_mode,
 //	  role_override, ignore_instructions.
 //
-//	- crashes/<hash>, NO PLAYBOOK. Crash signatures are SHA-256
-//	  hashes of exception class + stack; we can't enumerate them
-//	  ahead of time. Crashes need actual debugging, not a generic
-//	  playbook (per the repair-tier roadmap, crashes is
-//	  recommendation-only at best, and recommendations require
-//	  more context than a static playbook can provide).
+//	- crashes/<empty-sig>, CATCH-ALL. Crash signatures are SHA-256
+//	  hashes of exception class + stack and cannot be enumerated
+//	  ahead of time, so there is no per-signature playbook. The
+//	  class-level catch-all (crashes/_default.md, #259) walks the
+//	  reader through the debugging framework (find the signature,
+//	  inspect the last event before the crash, compare inputs
+//	  across executions) and through the common crash families
+//	  (parse failure, credentials, OOM, recursion, dependency).
+//	  Per-execution LLM root-cause analysis handles the precise
+//	  case; the static playbook is the always-available baseline.
 //
 // Lookup is O(N) over the patterns table for N ≈ 20 entries. Not
 // worth indexing. Re-evaluate if the table grows past 200.
@@ -159,10 +163,19 @@ var patterns = []pattern{
 	{"hitl_timeout", "", "hitl_timeout/_default.md"},
 	{"hitl_rejection_spike", "", "hitl_rejection_spike/_default.md"},
 
-	// ── crashes, INTENTIONALLY NO ENTRIES ──────────────────────
-	// Crash signatures are exception-class + stack-trace hashes
-	// that can't be enumerated ahead of time. Crashes need actual
-	// debugging, not a generic remediation playbook.
+	// ── crashes ────────────────────────────────────────────────
+	// Catch-all generic crashes playbook (#259). Earlier versions
+	// of this package intentionally left crashes without a playbook
+	// because crash signatures are SHA-256 hashes of exception
+	// class + stack and can't be enumerated as static signature
+	// prefixes. That reasoning still stands for per-signature
+	// playbooks; we now ship a class-level catch-all that walks
+	// customers through the debugging framework (find the signature,
+	// inspect the last event before the crash, compare inputs
+	// across executions) rather than pretending to know the
+	// specifics. The per-execution LLM root-cause analysis handles
+	// the precise case.
+	{"crashes", "", "crashes/_default.md"},
 }
 
 // Resolve maps a (failure_class, signature) pair to a content path
