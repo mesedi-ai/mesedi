@@ -699,6 +699,9 @@ func main() {
 	mux.Handle("OPTIONS /admin/api-keys", adminHandler)
 	mux.Handle("DELETE /admin/api-keys/{id}", adminHandler)
 	mux.Handle("OPTIONS /admin/api-keys/{id}", adminHandler)
+	// "Mark key compromised" admin action.
+	mux.Handle("POST /admin/api-keys/{id}/mark-compromised", adminHandler)
+	mux.Handle("OPTIONS /admin/api-keys/{id}/mark-compromised", adminHandler)
 	mux.Handle("GET /admin/whoami", adminHandler)
 	mux.Handle("OPTIONS /admin/whoami", adminHandler)
 	// Closed-project audit search (#221, migration 031). R1 + R2:

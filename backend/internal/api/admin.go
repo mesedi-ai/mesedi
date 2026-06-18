@@ -209,6 +209,10 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/api-keys", h.HandleAdminListAPIKeys)
 	mux.HandleFunc("POST /admin/api-keys", h.HandleAdminCreateAPIKey)
 	mux.HandleFunc("DELETE /admin/api-keys/{id}", h.HandleAdminRevokeAPIKey)
+	// "Mark key compromised" admin action. Admin-scope keys only;
+	// records abuse signal, suspends project, revokes key, returns
+	// recent-use report for the operator to email to the customer.
+	mux.HandleFunc("POST /admin/api-keys/{id}/mark-compromised", h.HandleAdminMarkKeyCompromised)
 	mux.HandleFunc("GET /admin/whoami", h.HandleAdminWhoami)
 	// #221 closed-project audit search. R1 takeover forensics + R2
 	// customer-support response. Read-only; rows are written by the

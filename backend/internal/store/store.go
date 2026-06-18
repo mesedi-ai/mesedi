@@ -781,6 +781,15 @@ type Store interface {
 	ListRequestLog(ctx context.Context, filter RequestLogFilter) ([]*RequestLog, error)
 	DeleteRequestLogOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
 
+	// GetAPIKeyByID + ListExecutionsByAPIKey serve the admin "Mark
+	// key compromised" action (#257). The endpoint checks scope via
+	// GetAPIKeyByID before suspending the project; the recent-use
+	// report combines ListExecutionsByAPIKey with ListRequestLog so
+	// the customer sees both run-creation activity and arbitrary
+	// URL traffic from the leaked key.
+	GetAPIKeyByID(ctx context.Context, keyID string) (*APIKey, error)
+	ListExecutionsByAPIKey(ctx context.Context, keyID string, t1, t2 time.Time, limit int) ([]*events.Execution, error)
+
 	// CreateMagicLinkToken + GetMagicLinkTokenByHash + MarkMagicLinkTokenUsed
 	// back the magic-link sign-in feature (#196 commit 2). See
 	// store/magic_link_tokens.go for contracts.
