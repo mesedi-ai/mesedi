@@ -38,8 +38,8 @@ The remediation pattern here is different from the higher-tier injection pattern
 
 - **Output-side validation.** If the model produces a response that deviates from its documented system prompt, wrong format, ignored a safety constraint, addressed a topic outside its scope, flag the response regardless of what triggered it. This catches the cases where injection succeeded without explicitly using the ignore-instructions phrasing.
 
-- **For high-stakes products, run a separate verifier.** A cheaper model that re-reads the user input + assistant response and asks "did the assistant comply with its documented system prompt?" Mesedi v2 surfaces this pattern as a Tier 2 capability.
+- **For high-stakes products, run a separate verifier.** A cheaper model that re-reads the user input + assistant response and asks "did the assistant comply with its documented system prompt?" This is a customer-side check today; Mesedi captures the prompt-injection signal but does not run the secondary verification itself.
 
 ## What this does NOT mean
 
-If your product handles user corrections, technical writing, document review, or any conversation pattern where users routinely refer back to prior content, you'll see this signature fire constantly. The high false-positive rate is by design, Mesedi wants the recall. Use it as one input, not the only input. Per-project tuning in v2 will let you opt out for projects where this pattern is mostly noise.
+If your product handles user corrections, technical writing, document review, or any conversation pattern where users routinely refer back to prior content, you'll see this signature fire constantly. The high false-positive rate is by design, Mesedi wants the recall. Use it as one input among others, not the sole signal. For projects where this pattern is mostly noise, treat the failure_group volume as expected and combine the Mesedi signal with project-specific heuristics rather than acting on it alone.

@@ -52,4 +52,4 @@ Leading indicators:
 
 ## A note on the threshold calibration
 
-The 40 percent and 30 percent thresholds are intentionally conservative for v1 to avoid false positives at the cost of slower detection. A project running at 20 percent rejections steady-state will not trip the detector; a project that spikes from 10 percent to 50 percent inside an hour will. The thresholds can be tuned per-project in a future release. If you suspect a regression that did not trigger the detector, look at the project's rolling rejection rate directly in the dashboard.
+The 40 percent and 30 percent thresholds are intentionally conservative to avoid false positives at the cost of slower detection. A project running at 20 percent rejections steady-state will not trip the detector; a project that spikes from 10 percent to 50 percent inside an hour will. The thresholds use Mesedi-wide defaults today and are not per-project tunable. If you suspect a regression that did not trigger the detector, look at the project's rolling rejection rate directly in the dashboard and treat the rolling-rate trend as the authoritative signal.

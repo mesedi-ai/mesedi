@@ -38,4 +38,4 @@ The remediation is less about blocking the phrase (too many false positives) and
 
 ## What this does NOT mean
 
-By far the most likely innocent source of this signal is collaborative writing, structured prompting, and any product where users genuinely need to declare an assistant role. The detector's Tier-3 classification already reflects this, false positives are expected. If your project's normal traffic produces this signature at high volume, that's a per-project tuning issue (Mesedi v2 will let you opt out), not a flood of attacks.
+By far the most likely innocent source of this signal is collaborative writing, structured prompting, and any product where users genuinely need to declare an assistant role. The detector's Tier-3 classification already reflects this, false positives are expected. If your project's normal traffic produces this signature at high volume, treat the failure_group as expected noise rather than active attacks; combine with project-specific heuristics rather than acting on the Mesedi signal alone.

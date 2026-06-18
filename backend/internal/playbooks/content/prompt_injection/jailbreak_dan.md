@@ -32,4 +32,4 @@ DAN attempts mostly bounce off frontier model safety on their own, so the remedi
 
 ## What this does NOT mean
 
-DAN appears legitimately in academic security research, in red-team prompts you yourself wrote to test your defenses, and in agents whose purpose is to study or demonstrate jailbreaks. Same per-project tuning caveat as the other injection patterns, Mesedi v2 will let you opt out.
+DAN appears legitimately in academic security research, in red-team prompts you yourself wrote to test your defenses, and in agents whose purpose is to study or demonstrate jailbreaks. The detector fires on every match today regardless of project context; if your application has a legitimate use case for this signature, treat the high-volume failure_group as expected noise and use it as one signal among others, not the sole one.

@@ -22,7 +22,7 @@ Three concrete failure modes:
 
 ## What this does NOT catch
 
-Semantic drift that preserves lexical similarity. If your prompts shift from "what does this policy require" to "what is the policy's requirement," the two sentences have nearly-identical 3-gram bags, high cosine similarity, no drift detected. Semantic-but-lexically-similar drift requires embedding-based detection, which is on the v2 roadmap once Mesedi has an embeddings substrate.
+Semantic drift that preserves lexical similarity. If your prompts shift from "what does this policy require" to "what is the policy's requirement," the two sentences have nearly-identical 3-gram bags, high cosine similarity, no drift detected. Semantic-but-lexically-similar drift requires embedding-based detection, which the current lexical detector does not perform. If you suspect this kind of drift in your project, run your own embedding pipeline against execution prompts as a complement to the Mesedi signal.
 
 The detector also doesn't tell you WHAT changed lexically, only that the distribution diverged. The diagnostic step is on you (and that's the next paragraph).
 

@@ -30,4 +30,4 @@ A useful instrumentation pattern: when your normalizer fires and strips a tag, e
 
 ## What this does NOT mean
 
-If your application legitimately produces text containing these tags (a code-generation product, an LLM tutorial, a security tool that shows users injection examples), this detector will fire on every execution and the failure-group count will be misleading. In that case the right fix is per-project pattern config, Mesedi v2 will support per-project rule tuning so legitimate uses can opt out of specific patterns. Until then, treat the high-count failure group as expected noise rather than active attack.
+If your application legitimately produces text containing these tags (a code-generation product, an LLM tutorial, a security tool that shows users injection examples), this detector will fire on every execution and the failure-group count will be misleading. In that case, treat the high-count failure group as expected noise rather than active attack, and combine the Mesedi signal with project-specific heuristics rather than acting on it alone.

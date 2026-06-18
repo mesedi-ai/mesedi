@@ -40,4 +40,4 @@ After deploying the fix, the `tool_schema_drift` failure_group should stop accum
 
 ## A note on the detection threshold
 
-The detector requires at least 10 prior successful calls to the same tool to establish a baseline before it fires. This avoids false positives on tools that are new to the project or rarely called. The 2/3 majority threshold means a single odd-shaped call does not trip the detector; it requires the new shape to become dominant before firing. Both thresholds can be tuned per-project in a future release.
+The detector requires at least 10 prior successful calls to the same tool to establish a baseline before it fires. This avoids false positives on tools that are new to the project or rarely called. The 2/3 majority threshold means a single odd-shaped call does not trip the detector; it requires the new shape to become dominant before firing. Both thresholds use Mesedi-wide defaults today and are not per-project tunable.

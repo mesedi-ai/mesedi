@@ -28,8 +28,8 @@ Two categories of fix:
 
 - **Strip system-boundary markers from user input at ingest.** A 5-line regex deletes `<system>`, `<|system|>`, and leading `system:` (and the equivalent for any other roles your template uses: `assistant`, `function`, `tool`). Apply this before the text reaches the prompt-construction layer. This is belt-and-suspenders even when you're using structured APIs.
 
-A third measure for high-stakes deployments: after the model produces a response, run a separate verifier model (cheaper, simpler) that re-reads the original user input plus the response and asks "did this response deviate from the documented system prompt?" Flag deviations for human review. Mesedi v2's Tier 2 capabilities include this pattern as a built-in.
+A third measure for high-stakes deployments: after the model produces a response, run a separate verifier model (cheaper, simpler) that re-reads the original user input plus the response and asks "did this response deviate from the documented system prompt?" Flag deviations for human review. This is a customer-side check today; Mesedi captures the system-prompt-injection signal but does not run the secondary verification itself.
 
 ## What this does NOT mean
 
-If you're building a developer tool, an LLM educational product, or a security-research interface, your users may legitimately need to type these tokens. Same caveat as `instruction_tag`, per-project pattern config in Mesedi v2 will let you opt out. Until then, treat this failure group as expected noise.
+If you're building a developer tool, an LLM educational product, or a security-research interface, your users may legitimately need to type these tokens. Same caveat as `instruction_tag`: treat this failure_group as expected noise for projects where the pattern is legitimate, and combine the Mesedi signal with project-specific heuristics rather than acting on it alone.

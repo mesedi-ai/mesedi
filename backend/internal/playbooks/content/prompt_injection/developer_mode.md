@@ -28,7 +28,7 @@ Same posture as the DAN playbook, the model usually handles this, the remediatio
 
 - **Rate-limit on injection-pattern bursts.** When several injection patterns fire within a short window from the same user/session, increase response latency or require additional auth. The asymmetry is on your side: a one-second delay costs you nothing and costs an iterating attacker their iteration speed.
 
-- **Audit the request rate of legitimate developers in your product.** If you have a developer-tool product where "developer mode" is a legitimate concept, the signature will fire constantly and the failure-group count is meaningless. Per-project tuning (Mesedi v2) will let you opt out for those projects.
+- **Audit the request rate of legitimate developers in your product.** If you have a developer-tool product where "developer mode" is a legitimate concept, the signature will fire constantly and the failure-group count is meaningless. For those projects, treat the high-volume failure_group as expected noise and combine the Mesedi signal with project-specific heuristics rather than acting on it alone.
 
 ## What this does NOT mean
 
