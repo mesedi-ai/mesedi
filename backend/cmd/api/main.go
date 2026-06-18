@@ -667,6 +667,11 @@ func main() {
 	mux.Handle("OPTIONS /admin/abuse", adminHandler)
 	mux.Handle("POST /admin/abuse/{id}/resolve", adminHandler)
 	mux.Handle("OPTIONS /admin/abuse/{id}/resolve", adminHandler)
+	// Stripe webhook billing-event signals: chargebacks + dunning.
+	mux.Handle("GET /admin/billing-events", adminHandler)
+	mux.Handle("OPTIONS /admin/billing-events", adminHandler)
+	mux.Handle("POST /admin/billing-events/{id}/resolve", adminHandler)
+	mux.Handle("OPTIONS /admin/billing-events/{id}/resolve", adminHandler)
 	// API key management (migration 015).
 	mux.Handle("GET /admin/api-keys", adminHandler)
 	mux.Handle("POST /admin/api-keys", adminHandler)
