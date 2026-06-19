@@ -104,7 +104,7 @@ class Execution:
     total_tokens_out: Optional[int] = None
     estimated_cost_usd: Optional[float] = None
     sdk_language: str = "python"
-    sdk_version: str = "0.0.1"
+    sdk_version: str = "0.3.0"
     crash_signature: Optional[str] = None
     # Mesedi #5: optional per-execution tenant identifier from the
     # host SaaS application. When set, it surfaces in the
