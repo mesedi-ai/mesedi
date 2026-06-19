@@ -9,5 +9,5 @@
     "noUnusedParameters": false
   },
   "include": ["src/**/*", "sandbox/**/*"],
-  "exclude": ["node_modules", "dist", "dist-sandbox"]
+  "exclude": ["node_modules", "dist", "dist-sandbox", "src/**/*.test.ts"]
 }
