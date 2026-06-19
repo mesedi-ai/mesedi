@@ -76,6 +76,7 @@ func NewAuthChain(logger *slog.Logger, s store.Store, detector *AbuseDetector) M
 		schemaVersionMiddleware(),
 		oversizedPayloadMiddleware(detector),
 		rateLimitMiddleware(logger, detector),
+		decompressMiddleware(),
 	)
 }
 
