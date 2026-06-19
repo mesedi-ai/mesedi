@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -101,26 +102,82 @@ func TestDecompressMiddleware_ZstdEncodingDecompressed(t *testing.T) {
 	}
 }
 
+// TestDecompressMiddleware_GzipEncodingDecompressed covers the gzip
+// happy path. The TypeScript SDK ships gzip (Node's built-in zlib)
+// rather than zstd to avoid adding a WASM runtime dependency to the
+// SDK download. Backend recognizes both Content-Encoding values
+// through the same middleware path.
+func TestDecompressMiddleware_GzipEncodingDecompressed(t *testing.T) {
+	original := []byte(`{"hello":"world","events":[{"id":1},{"id":2}]}`)
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	if _, err := gw.Write(original); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	compressed := buf.Bytes()
+
+	var receivedBody []byte
+	var receivedEncoding string
+	var receivedLength int64
+
+	handler := decompressMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		receivedBody = b
+		receivedEncoding = r.Header.Get("Content-Encoding")
+		receivedLength = r.ContentLength
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/events", bytes.NewReader(compressed))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", EncodingGzip)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Equal(receivedBody, original) {
+		t.Fatalf("body mismatch:\n  got:  %q\n  want: %q", receivedBody, original)
+	}
+	if receivedEncoding != "" {
+		t.Fatalf("expected Content-Encoding to be stripped after decompression, got %q", receivedEncoding)
+	}
+	if receivedLength != -1 {
+		t.Fatalf("expected ContentLength=-1 after decompression, got %d", receivedLength)
+	}
+}
+
 // TestDecompressMiddleware_UnsupportedEncoding covers the case where
 // a client declares an encoding this backend does not implement. The
-// middleware must reject up front with 415 so the caller learns the
-// negotiated surface explicitly instead of silently mis-reading bytes.
+// middleware must reject up front with 415 and name both supported
+// encodings (zstd, gzip) so the caller learns the full negotiated
+// surface instead of silently mis-reading bytes.
 func TestDecompressMiddleware_UnsupportedEncoding(t *testing.T) {
 	handler := decompressMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler should not be reached when encoding is unsupported")
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader("ignored"))
-	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Content-Encoding", "br") // Brotli, not implemented here
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("expected 415, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), SupportedRequestEncoding) {
-		t.Fatalf("expected error to name the supported encoding %q, got: %s",
-			SupportedRequestEncoding, rec.Body.String())
+	if !strings.Contains(rec.Body.String(), EncodingZstd) {
+		t.Fatalf("expected error to name %q, got: %s", EncodingZstd, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), EncodingGzip) {
+		t.Fatalf("expected error to name %q, got: %s", EncodingGzip, rec.Body.String())
 	}
 }
 
