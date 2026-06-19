@@ -1,11 +1,13 @@
 # Mesedi TypeScript SDK
 
-**Status:** v0.2.0. Live on npm.
+**Status:** v0.3.0. Live on npm.
 
 The TypeScript companion to `sdk-python/`. Feature parity for the v1
 surface (`configure()`, `wrap()`, `tool()`, async event shipper,
-fail-open posture), built on Node 18+ native `fetch` and
-`AsyncLocalStorage`. **Zero runtime dependencies.**
+fail-open posture), built on Node 18+ native `fetch`,
+`AsyncLocalStorage`, and `node:zlib` for opt-in gzip compression of
+request bodies above 1 KB. **Zero runtime dependencies.** Compresses
+or not transparently; small calls ship uncompressed as before.
 
 ## Install
 
@@ -45,7 +47,7 @@ await flush();
 For each `wrap()`-decorated call:
 
 - **On entry:** `POST /executions` (status=started, sdk_language=typescript,
-  sdk_version=0.2.0).
+  sdk_version=0.3.0).
 - **On normal return:** `PATCH /executions/{id}` (status=completed,
   duration_ms, ended_at).
 - **On thrown error:** `PATCH /executions/{id}` (status=crashed,

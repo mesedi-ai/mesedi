@@ -1,11 +1,21 @@
 /**
  * MesediClient, HTTP client + async event shipper for Node.
  *
- * Zero runtime dependencies: uses Node 18+ native `fetch` for HTTP
- * and the event loop for async dispatch. No background threads (Node
- * doesn't have them in the Python sense); instead a `setInterval`
- * timer drains the queue periodically, and a `process.on("exit")`
- * handler flushes any remaining items at shutdown.
+ * Zero runtime dependencies: uses Node 18+ native `fetch` for HTTP,
+ * `AsyncLocalStorage` for async context (in wrap()/tool()), and
+ * `node:zlib` for opt-in gzip compression of request bodies above 1
+ * KB. Below the threshold requests ship uncompressed exactly as
+ * v0.2.0 did. No background threads (Node doesn't have them in the
+ * Python sense); instead a `setInterval` timer drains the queue
+ * periodically, and a `process.on("exit")` handler flushes any
+ * remaining items at shutdown.
+ *
+ * Why gzip (and why the Python SDK uses zstd): JavaScript zstd
+ * encoders are heavy (WASM, ~750 KB, async init) and would break
+ * this SDK's tiny-install posture. Node ships gzip synchronously in
+ * its standard library, so gzip lets us compress with no new
+ * dependency and zero install-size cost. The backend accepts both
+ * encodings through the same middleware path.
  *
  * Auth: bearer token (`mesedi_sk_...`). Wire-format version pinned
  * at "1" today; future breaking changes bump SCHEMA_VERSION and the
@@ -14,9 +24,11 @@
  * Fail-open: every observation HTTP call wraps its promise in a
  * try/catch, backend errors are logged via console.warn (configurable
  * via a logger injection in a future polish slice) but NEVER bubble
- * back to the wrapped agent code.
+ * back to the wrapped agent code. Compression also fails open: if
+ * the encoder throws, the body ships uncompressed instead.
  */
 
+import { maybeCompress } from "./compress.js";
 import {
   Event,
   Execution,
@@ -261,6 +273,11 @@ export class MesediClient {
     body: unknown,
     description: string,
   ): Promise<void> {
+    // Serialize once, outside the retry loop, so retries do not
+    // repeat the JSON.stringify or compression cost.
+    const rawBody = new TextEncoder().encode(JSON.stringify(body));
+    const { body: finalBody, extraHeaders } = maybeCompress(rawBody);
+
     const backoffs = [100, 500, 2000];
     let lastErr: unknown = null;
     for (let attempt = 0; attempt <= backoffs.length; attempt++) {
@@ -273,8 +290,9 @@ export class MesediClient {
             Authorization: `Bearer ${this.apiKey}`,
             "Content-Type": "application/json",
             "X-Mesedi-Schema-Version": SCHEMA_VERSION,
+            ...extraHeaders,
           },
-          body: JSON.stringify(body),
+          body: finalBody,
           signal: controller.signal,
         });
         clearTimeout(timer);
