@@ -38,6 +38,7 @@ to drop a few events than to leak unbounded memory on a backend outage.
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import queue
 import threading
@@ -47,6 +48,7 @@ from typing import Any, List, Optional, Union
 
 import httpx
 
+from mesedi._compress import maybe_compress
 from mesedi.events import Event, Execution
 
 logger = logging.getLogger("mesedi.shipper")
@@ -261,14 +263,28 @@ class EventShipper:
     ) -> None:
         """Issue one HTTP call with up-to-3 retries on transient failure.
 
+        Serializes the JSON body manually so we can opportunistically
+        compress it with zstd before handing it to httpx. Bodies below
+        the compression threshold ship uncompressed; bodies at or above
+        carry a ``Content-Encoding: zstd`` header the backend
+        middleware decompresses transparently. Backend without that
+        middleware (pre-v0.3.0 backends) would reject compressed
+        bodies, so this SDK release pairs with the matching backend.
+
         Returns silently on success or on permanent failure (4xx); logs
         a warning on permanent failure or exhausted retries.
         """
+        # JSON-serialize once, outside the retry loop, so retries do not
+        # repeat the compression cost.
+        serialized = json.dumps(json_body, separators=(",", ":")).encode("utf-8")
+        body, extra_headers = maybe_compress(serialized)
+        headers = {"Content-Type": "application/json", **extra_headers}
+
         backoffs = [0.1, 0.5, 2.0]
         last_err: Any = None
         for attempt in range(self._max_retries + 1):
             try:
-                r = self._http.request(method, url, json=json_body)
+                r = self._http.request(method, url, content=body, headers=headers)
                 if r.status_code < 400:
                     return  # success
                 if 400 <= r.status_code < 500:

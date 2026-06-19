@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mesedi"
-version = "0.2.0"
+version = "0.3.0"
 description = "Mesedi SDK — guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -38,6 +38,7 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.24",
+    "zstandard>=0.22",
 ]
 
 [project.optional-dependencies]
