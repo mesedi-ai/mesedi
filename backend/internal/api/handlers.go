@@ -3419,6 +3419,15 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		// by severity.ParseFilter, but we explicitly validate here so
 		// a typo doesn't silently produce a fire-on-nothing webhook.
 		SeverityFilter string `json:"severity_filter,omitempty"`
+		// RecurrenceMode picks whether (and how) the webhook fires on
+		// recurrences of an existing failure group (#249). One of
+		// "off" | "every_event" | "throttled". Empty/omitted defaults
+		// to "off" so legacy clients see the pre-#249 behavior.
+		RecurrenceMode string `json:"recurrence_mode,omitempty"`
+		// RecurrenceWindowSeconds is required only when
+		// RecurrenceMode is "throttled". Below the 60s floor the
+		// dispatcher promotes the value to 60.
+		RecurrenceWindowSeconds int `json:"recurrence_window_seconds,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
@@ -3473,6 +3482,38 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		enabled = *body.Enabled
 	}
 
+	// Validate recurrence_mode (#249). Empty input defaults to "off"
+	// for forward-compatibility with legacy clients.
+	recurrenceMode := strings.TrimSpace(body.RecurrenceMode)
+	if recurrenceMode == "" {
+		recurrenceMode = store.RecurrenceModeOff
+	}
+	switch recurrenceMode {
+	case store.RecurrenceModeOff, store.RecurrenceModeEveryEvent, store.RecurrenceModeThrottled:
+		// ok
+	default:
+		writeError(w, http.StatusBadRequest,
+			"recurrence_mode must be one of: "+
+				store.RecurrenceModeOff+", "+
+				store.RecurrenceModeEveryEvent+", "+
+				store.RecurrenceModeThrottled)
+		return
+	}
+	recurrenceWindowSeconds := body.RecurrenceWindowSeconds
+	if recurrenceMode == store.RecurrenceModeThrottled {
+		if recurrenceWindowSeconds < store.RecurrenceMinWindowSeconds {
+			writeError(w, http.StatusBadRequest,
+				"recurrence_window_seconds must be at least "+
+					strconv.Itoa(store.RecurrenceMinWindowSeconds)+
+					" when recurrence_mode is \"throttled\"")
+			return
+		}
+	} else {
+		// Window is meaningless for off and every_event; zero it out
+		// so storage stays clean.
+		recurrenceWindowSeconds = 0
+	}
+
 	// Generate webhook_id + secret. webhook_id is a short stable
 	// identifier for client-side reference; secret is 32 bytes of
 	// random entropy hex-encoded (256-bit HMAC key, industry-standard
@@ -3489,14 +3530,16 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rec := &store.ProjectWebhook{
-		WebhookID:      webhookID,
-		ProjectID:      authProjectID,
-		Name:           body.Name,
-		URL:            body.URL,
-		Secret:         secret,
-		EnabledClasses: body.EnabledClasses,
-		Enabled:        enabled,
-		SeverityFilter: body.SeverityFilter,
+		WebhookID:               webhookID,
+		ProjectID:               authProjectID,
+		Name:                    body.Name,
+		URL:                     body.URL,
+		Secret:                  secret,
+		EnabledClasses:          body.EnabledClasses,
+		Enabled:                 enabled,
+		SeverityFilter:          body.SeverityFilter,
+		RecurrenceMode:          recurrenceMode,
+		RecurrenceWindowSeconds: recurrenceWindowSeconds,
 	}
 	if err := h.Store.CreateProjectWebhook(r.Context(), rec); err != nil {
 		writeError(w, http.StatusInternalServerError, "persist webhook: "+err.Error())
@@ -3510,28 +3553,34 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		"enabled", enabled,
 		"class_filter_count", len(body.EnabledClasses),
 		"severity_filter", body.SeverityFilter,
+		"recurrence_mode", recurrenceMode,
+		"recurrence_window_seconds", recurrenceWindowSeconds,
 	)
 	// #207 audit log: webhook create. URL captured because rotating
 	// a delivery target is a meaningful security event the customer
 	// will want to verify against their own change-management.
 	h.recordAuditEvent(r, AuditWebhookCreate, "webhook", webhookID, map[string]any{
-		"name":            body.Name,
-		"url":             body.URL,
-		"enabled":         enabled,
-		"enabled_classes": body.EnabledClasses,
-		"severity_filter": body.SeverityFilter,
+		"name":                      body.Name,
+		"url":                       body.URL,
+		"enabled":                   enabled,
+		"enabled_classes":           body.EnabledClasses,
+		"severity_filter":           body.SeverityFilter,
+		"recurrence_mode":           recurrenceMode,
+		"recurrence_window_seconds": recurrenceWindowSeconds,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":              true,
-		"webhook_id":      webhookID,
-		"url":             body.URL,
-		"name":            body.Name,
-		"enabled_classes": body.EnabledClasses,
-		"enabled":         enabled,
-		"severity_filter": body.SeverityFilter,
-		"secret":          secret,
-		"warning":         "Store this secret now, it will never be shown again. Use it to verify the X-Mesedi-Signature header on inbound webhook deliveries.",
+		"ok":                        true,
+		"webhook_id":                webhookID,
+		"url":                       body.URL,
+		"name":                      body.Name,
+		"enabled_classes":           body.EnabledClasses,
+		"enabled":                   enabled,
+		"severity_filter":           body.SeverityFilter,
+		"recurrence_mode":           recurrenceMode,
+		"recurrence_window_seconds": recurrenceWindowSeconds,
+		"secret":                    secret,
+		"warning":                   "Store this secret now, it will never be shown again. Use it to verify the X-Mesedi-Signature header on inbound webhook deliveries.",
 	})
 }
 

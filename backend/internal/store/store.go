@@ -342,6 +342,54 @@ type ProjectWebhook struct {
 	// parses via severity.ParseFilter and skips delivery when the
 	// event severity is not in the filter.
 	SeverityFilter string `json:"severity_filter"`
+	// RecurrenceMode controls whether the webhook fires on recurrences
+	// of an existing failure group. One of:
+	//   "off"         — only fire on new failure groups (default; matches
+	//                   pre-#249 behavior for every legacy webhook).
+	//   "every_event" — fire on every recurrence with no throttling.
+	//   "throttled"   — fire on the first recurrence in each rolling
+	//                   window of RecurrenceWindowSeconds, suppress
+	//                   further recurrences until the window elapses.
+	// The dispatcher treats unknown values as "off" so a malformed
+	// row never spams or silently breaks a customer's pipeline.
+	RecurrenceMode string `json:"recurrence_mode"`
+	// RecurrenceWindowSeconds is non-zero only when RecurrenceMode is
+	// "throttled". The dispatcher floors any value below 60 to 60 so
+	// a misconfigured row cannot turn into an every_event firehose by
+	// accident.
+	RecurrenceWindowSeconds int `json:"recurrence_window_seconds"`
+}
+
+// WebhookRecurrenceConsts captures the allowed values of
+// ProjectWebhook.RecurrenceMode in one place so handler validation
+// and dispatcher branch logic stay in sync. The default for any
+// new or legacy row is RecurrenceModeOff.
+const (
+	RecurrenceModeOff        = "off"
+	RecurrenceModeEveryEvent = "every_event"
+	RecurrenceModeThrottled  = "throttled"
+
+	// RecurrenceMinWindowSeconds is the floor the dispatcher applies
+	// when a "throttled" row carries a window below this value. Below
+	// 60s, "throttled" approaches "every_event" but with extra DB
+	// round-trips per fire, so we collapse the two semantically.
+	RecurrenceMinWindowSeconds = 60
+)
+
+// WebhookRecurrenceState is one row of the webhook_recurrence_state
+// table — the last time a given webhook fired for a specific failure
+// group. The dispatcher reads this row to decide whether the
+// throttled-mode window has elapsed; upserts it on every successful
+// fire so the next decision has the right baseline.
+//
+// Rows are scoped to (webhook_id, group_id) and cascade-deleted with
+// the parent webhook. There is no separate retention job; rows are
+// cheap (one timestamp) and bounded by the lifetime of the parent
+// webhook's group population.
+type WebhookRecurrenceState struct {
+	WebhookID    string    `json:"webhook_id"`
+	GroupID      string    `json:"group_id"`
+	LastFiredAt  time.Time `json:"last_fired_at"`
 }
 
 // ProjectClassSeverity is the per-project override of the hardcoded
@@ -1046,6 +1094,20 @@ type Store interface {
 	// secret before dispatching. Returns ErrNotFound if absent or if
 	// the webhook belongs to a different project.
 	GetProjectWebhook(ctx context.Context, webhookID, projectID string) (*ProjectWebhook, error)
+
+	// Webhook recurrence state (#249).
+	// GetWebhookRecurrenceLastFired returns the last-fired timestamp
+	// for (webhook, group). Returns ErrNotFound when no row exists yet
+	// for the pair, which the dispatcher treats as "window elapsed" so
+	// the first recurrence ping always goes out. Used only by the
+	// throttled recurrence path; off / every_event paths skip this
+	// lookup entirely.
+	GetWebhookRecurrenceLastFired(ctx context.Context, webhookID, groupID string) (time.Time, error)
+	// UpsertWebhookRecurrenceLastFired records the timestamp of the
+	// most recent fire for (webhook, group). Called from the dispatcher
+	// on every successful fire so the next throttle check observes the
+	// right baseline.
+	UpsertWebhookRecurrenceLastFired(ctx context.Context, webhookID, groupID string, t time.Time) error
 
 	// Webhook delivery log (slice 2 dispatcher).
 	// RecordWebhookDelivery persists one delivery attempt row. The

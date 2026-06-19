@@ -1250,15 +1250,26 @@ func (s *SQLiteStore) CreateProjectWebhook(ctx context.Context, wh *ProjectWebho
 		enabled = 1
 	}
 
+	recurrenceMode := wh.RecurrenceMode
+	if recurrenceMode == "" {
+		recurrenceMode = RecurrenceModeOff
+	}
+	var windowSeconds sql.NullInt64
+	if recurrenceMode == RecurrenceModeThrottled && wh.RecurrenceWindowSeconds > 0 {
+		windowSeconds = sql.NullInt64{Int64: int64(wh.RecurrenceWindowSeconds), Valid: true}
+	}
+
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO project_webhooks (
 			webhook_id, project_id, name, url, secret,
-			enabled_classes, enabled, created_at, severity_filter
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled_classes, enabled, created_at, severity_filter,
+			recurrence_mode, recurrence_window_seconds
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		wh.WebhookID, wh.ProjectID, wh.Name, wh.URL, wh.Secret,
 		classesJSON, enabled, wh.CreatedAt.UTC().Format(time.RFC3339),
 		wh.SeverityFilter,
+		recurrenceMode, windowSeconds,
 	)
 	if err != nil {
 		return fmt.Errorf("insert project_webhook: %w", err)
@@ -1275,7 +1286,8 @@ func (s *SQLiteStore) ListProjectWebhooksForProject(
 ) ([]*ProjectWebhook, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT webhook_id, project_id, name, url,
-		       enabled_classes, enabled, created_at, severity_filter
+		       enabled_classes, enabled, created_at, severity_filter,
+		       recurrence_mode, recurrence_window_seconds
 		FROM project_webhooks
 		WHERE project_id = ?
 		ORDER BY created_at DESC
@@ -1291,14 +1303,19 @@ func (s *SQLiteStore) ListProjectWebhooksForProject(
 		var classesJSON sql.NullString
 		var createdAt string
 		var enabled int
+		var windowSeconds sql.NullInt64
 		if err := rows.Scan(
 			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL,
 			&classesJSON, &enabled, &createdAt, &wh.SeverityFilter,
+			&wh.RecurrenceMode, &windowSeconds,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_webhook: %w", err)
 		}
 		wh.Enabled = enabled != 0
 		wh.EnabledClasses = parseEnabledClasses(classesJSON)
+		if windowSeconds.Valid {
+			wh.RecurrenceWindowSeconds = int(windowSeconds.Int64)
+		}
 		if t, perr := time.Parse(time.RFC3339, createdAt); perr == nil {
 			wh.CreatedAt = t
 		}
@@ -1317,7 +1334,8 @@ func (s *SQLiteStore) ListEnabledProjectWebhooks(
 ) ([]*ProjectWebhook, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT webhook_id, project_id, name, url, secret,
-		       enabled_classes, enabled, created_at, severity_filter
+		       enabled_classes, enabled, created_at, severity_filter,
+		       recurrence_mode, recurrence_window_seconds
 		FROM project_webhooks
 		WHERE project_id = ? AND enabled = 1
 		ORDER BY created_at ASC
@@ -1333,14 +1351,19 @@ func (s *SQLiteStore) ListEnabledProjectWebhooks(
 		var classesJSON sql.NullString
 		var createdAt string
 		var enabled int
+		var windowSeconds sql.NullInt64
 		if err := rows.Scan(
 			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
 			&classesJSON, &enabled, &createdAt, &wh.SeverityFilter,
+			&wh.RecurrenceMode, &windowSeconds,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_webhook: %w", err)
 		}
 		wh.Enabled = enabled != 0
 		wh.EnabledClasses = parseEnabledClasses(classesJSON)
+		if windowSeconds.Valid {
+			wh.RecurrenceWindowSeconds = int(windowSeconds.Int64)
+		}
 		if t, perr := time.Parse(time.RFC3339, createdAt); perr == nil {
 			wh.CreatedAt = t
 		}
@@ -1385,14 +1408,17 @@ func (s *SQLiteStore) GetProjectWebhook(
 	var classesJSON sql.NullString
 	var createdAt string
 	var enabled int
+	var windowSeconds sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT webhook_id, project_id, name, url, secret,
-		       enabled_classes, enabled, created_at, severity_filter
+		       enabled_classes, enabled, created_at, severity_filter,
+		       recurrence_mode, recurrence_window_seconds
 		FROM project_webhooks
 		WHERE webhook_id = ? AND project_id = ?
 	`, webhookID, projectID).Scan(
 		&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
 		&classesJSON, &enabled, &createdAt, &wh.SeverityFilter,
+		&wh.RecurrenceMode, &windowSeconds,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1402,10 +1428,63 @@ func (s *SQLiteStore) GetProjectWebhook(
 	}
 	wh.Enabled = enabled != 0
 	wh.EnabledClasses = parseEnabledClasses(classesJSON)
+	if windowSeconds.Valid {
+		wh.RecurrenceWindowSeconds = int(windowSeconds.Int64)
+	}
 	if t, perr := time.Parse(time.RFC3339, createdAt); perr == nil {
 		wh.CreatedAt = t
 	}
 	return &wh, nil
+}
+
+// GetWebhookRecurrenceLastFired returns when this webhook last fired
+// for this failure group. Returns ErrNotFound if there is no row yet
+// (the dispatcher treats that as "the window has elapsed" so the
+// first recurrence ping always goes out).
+func (s *SQLiteStore) GetWebhookRecurrenceLastFired(
+	ctx context.Context,
+	webhookID, groupID string,
+) (time.Time, error) {
+	var ts string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT last_fired_at FROM webhook_recurrence_state
+		WHERE webhook_id = ? AND group_id = ?
+	`, webhookID, groupID).Scan(&ts)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, ErrNotFound
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("get webhook_recurrence_state: %w", err)
+	}
+	t, perr := time.Parse(time.RFC3339, ts)
+	if perr != nil {
+		return time.Time{}, fmt.Errorf("parse last_fired_at: %w", perr)
+	}
+	return t, nil
+}
+
+// UpsertWebhookRecurrenceLastFired records or updates the timestamp
+// of the most recent fire for (webhook, group). Called from the
+// dispatcher on every successful fire so the next throttle check
+// observes the right baseline.
+func (s *SQLiteStore) UpsertWebhookRecurrenceLastFired(
+	ctx context.Context,
+	webhookID, groupID string,
+	t time.Time,
+) error {
+	if webhookID == "" || groupID == "" {
+		return fmt.Errorf("webhook_id and group_id required")
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO webhook_recurrence_state (webhook_id, group_id, last_fired_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(webhook_id, group_id) DO UPDATE SET
+			last_fired_at = excluded.last_fired_at
+	`, webhookID, groupID, t.UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("upsert webhook_recurrence_state: %w", err)
+	}
+	return nil
 }
 
 // RecordWebhookDelivery persists one delivery-attempt row. DeliveryID
