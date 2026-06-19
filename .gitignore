@@ -51,6 +51,11 @@ NOTES.md
 PRICING.md
 INTERNAL_*.md
 
+# Scratch commit-message drafts (legacy pattern: .c-msg-<topic>.txt).
+# Local-only working files; delete after the commit ships.
+# Critical to ignore here because this repo is going public.
+.c-msg-*.txt
+
 # Sibling Mesedi-org repos nested for local workspace organization.
 # Each has its own .git and own GitHub remote, not tracked by this repo.
 /web-extract/
