@@ -29,14 +29,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"net/http"
 	"strings"
 	"time"
@@ -45,6 +48,11 @@ import (
 
 	"mesedi/backend/internal/store"
 )
+
+// totpQRPixelSize is the QR image edge length returned to the
+// dashboard. 256px gives a visually crisp render at the standard
+// 192px CSS slot without forcing the customer to enlarge to scan.
+const totpQRPixelSize = 256
 
 const (
 	// totpIssuer is the label that shows up in the customer's
@@ -139,12 +147,21 @@ func (h *Handlers) HandleTOTPStatus(w http.ResponseWriter, r *http.Request) {
 // ────────────────────────────────────────────────────────────────────
 
 // TOTPSetupInitResponse is the wire shape for the first enrollment
-// step. The dashboard renders OtpAuthURL as a QR code for the
+// step. The dashboard renders QRPNGBase64 as an <img> for the
 // customer to scan; SecretBase32 is the same secret in human-
 // transcribable form for app variants that take the secret directly.
+// OtpAuthURL is included as a fallback / debugging aid (e.g. deep-
+// link from a help doc) but the dashboard does not render it.
+//
+// Generating the QR server-side rather than in the dashboard keeps the
+// frontend free of a QR-library dependency (one less supply-chain
+// surface), and the otpauth URL embedded in the image is the same
+// public-by-design value the dashboard already knows — we are not
+// leaking anything new.
 type TOTPSetupInitResponse struct {
 	SecretBase32 string `json:"secret_base32"`
 	OtpAuthURL   string `json:"otpauth_url"`
+	QRPNGBase64  string `json:"qr_png_base64"`
 	Issuer       string `json:"issuer"`
 }
 
@@ -185,9 +202,24 @@ func (h *Handlers) HandleTOTPSetupInit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "generate totp secret: "+err.Error())
 		return
 	}
+	// Render the otpauth URL as a PNG QR code and base64-encode for
+	// data: URL embedding in the dashboard. If rendering fails we
+	// surface a 500 rather than ship a half-broken init — the
+	// dashboard relies on the QR for the primary scan UX.
+	img, err := key.Image(totpQRPixelSize, totpQRPixelSize)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "render qr image: "+err.Error())
+		return
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		writeError(w, http.StatusInternalServerError, "encode qr png: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, TOTPSetupInitResponse{
 		SecretBase32: key.Secret(),
 		OtpAuthURL:   key.URL(),
+		QRPNGBase64:  base64.StdEncoding.EncodeToString(buf.Bytes()),
 		Issuer:       totpIssuer,
 	})
 }
