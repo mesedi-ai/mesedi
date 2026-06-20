@@ -1647,15 +1647,21 @@ func (s *PostgresStore) ListActiveExecutionsByProject(ctx context.Context, proje
 }
 
 func (s *PostgresStore) ListExecutionsByFailureGroup(ctx context.Context, groupID string, limit, offset int) ([]*events.Execution, error) {
+	// JOIN through execution_failure_groups so we surface executions
+	// whose PRIMARY classification went to a different group but
+	// where this group was a SECONDARY classification. See sqlite.go
+	// counterpart and migration 039 for the rationale.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
-			execution_id, project_id, status,
-			started_at, ended_at,
-			duration_ms, total_tokens_in, total_tokens_out,
-			estimated_cost_usd, sdk_language, sdk_version, crash_signature
-		FROM executions
-		WHERE failure_group_id = $1
-		ORDER BY started_at DESC
+			e.execution_id, e.project_id, e.status,
+			e.started_at, e.ended_at,
+			e.duration_ms, e.total_tokens_in, e.total_tokens_out,
+			e.estimated_cost_usd, e.sdk_language, e.sdk_version, e.crash_signature
+		FROM executions e
+		INNER JOIN execution_failure_groups efg
+			ON efg.execution_id = e.execution_id
+		WHERE efg.group_id = $1
+		ORDER BY e.started_at DESC
 		LIMIT $2 OFFSET $3
 	`, groupID, limit, offset)
 	if err != nil {
@@ -1886,27 +1892,51 @@ func (s *PostgresStore) groupExecutionInternalPg(
 	ctx context.Context,
 	executionID, projectID, failureClass, signature string,
 ) (isNew bool, err error) {
+	// See sqlite.go groupExecutionInternal for the design rationale
+	// behind the migration 039 link-table refactor. This is the
+	// Postgres twin of that function — same algorithm, $N-placeholder
+	// SQL, BOOLEAN for is_primary.
 	if executionID == "" || projectID == "" || failureClass == "" || signature == "" {
 		return false, fmt.Errorf("executionID, projectID, failureClass, signature all required")
 	}
 
-	var existing sql.NullString
+	var primaryExisting sql.NullString
 	err = s.db.QueryRowContext(
 		ctx,
 		`SELECT failure_group_id FROM executions WHERE execution_id = $1`,
 		executionID,
-	).Scan(&existing)
+	).Scan(&primaryExisting)
 	if err == sql.ErrNoRows {
 		return false, ErrNotFound
 	}
 	if err != nil {
 		return false, fmt.Errorf("read execution failure_group_id: %w", err)
 	}
-	if existing.Valid && existing.String != "" {
-		return false, nil
-	}
 
 	groupID := deriveGroupID(projectID, failureClass, signature)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Membership insert with (execution_id, group_id) PK + ON
+	// CONFLICT DO NOTHING gives true idempotency: a repeated call
+	// with the same args is a no-op rather than a double-count.
+	isPrimary := !primaryExisting.Valid || primaryExisting.String == ""
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO execution_failure_groups (
+			execution_id, group_id, is_primary, classified_at
+		)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT(execution_id, group_id) DO NOTHING
+	`, executionID, groupID, isPrimary, now)
+	if err != nil {
+		return false, fmt.Errorf("link execution to failure_group: %w", err)
+	}
+	inserted, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rows affected on membership insert: %w", err)
+	}
+	if inserted == 0 {
+		return false, nil
+	}
 
 	var existedBefore int
 	err = s.db.QueryRowContext(
@@ -1918,8 +1948,6 @@ func (s *PostgresStore) groupExecutionInternalPg(
 		return false, fmt.Errorf("probe failure_group existence: %w", err)
 	}
 	isNew = err == sql.ErrNoRows
-
-	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO failure_groups (
@@ -1938,14 +1966,16 @@ func (s *PostgresStore) groupExecutionInternalPg(
 		return false, fmt.Errorf("upsert failure_group: %w", err)
 	}
 
-	_, err = s.db.ExecContext(
-		ctx,
-		`UPDATE executions SET failure_group_id = $1 WHERE execution_id = $2`,
-		groupID,
-		executionID,
-	)
-	if err != nil {
-		return false, fmt.Errorf("link execution to failure_group: %w", err)
+	if isPrimary {
+		_, err = s.db.ExecContext(
+			ctx,
+			`UPDATE executions SET failure_group_id = $1 WHERE execution_id = $2`,
+			groupID,
+			executionID,
+		)
+		if err != nil {
+			return false, fmt.Errorf("set primary failure_group on execution: %w", err)
+		}
 	}
 
 	s.logger.Info("execution grouped",
@@ -1954,6 +1984,7 @@ func (s *PostgresStore) groupExecutionInternalPg(
 		"failure_class", failureClass,
 		"signature", signature,
 		"is_new_group", isNew,
+		"is_primary", isPrimary,
 	)
 	return isNew, nil
 }

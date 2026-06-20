@@ -2072,12 +2072,19 @@ func (s *SQLiteStore) ListActiveExecutionsByProject(
 	return scanExecutionRows(rows)
 }
 
-// ListExecutionsByFailureGroup returns executions whose failure_group_id
-// matches groupID, sorted by started_at DESC. Caller is expected to have
-// already verified that the group belongs to the auth context's project
-// (this method does not enforce project scoping, the failure_group_id
-// column on executions IS already scoped to a project by virtue of the
-// failure_groups foreign key, but we never reach into that here).
+// ListExecutionsByFailureGroup returns executions classified into
+// groupID, sorted by started_at DESC. Joins through the
+// execution_failure_groups link table so executions whose PRIMARY
+// classification was a different group still surface here when this
+// group was a SECONDARY classification on them. Before migration 039
+// this query was a direct equality scan on executions.failure_group_id,
+// which silently dropped every execution whose primary detector ran
+// first and claimed the slot — that's the bug that motivated 039.
+//
+// Caller is expected to have already verified the group belongs to
+// the auth context's project; this method does not enforce project
+// scoping (the failure_groups foreign key on the link table provides
+// it transitively).
 func (s *SQLiteStore) ListExecutionsByFailureGroup(
 	ctx context.Context,
 	groupID string,
@@ -2085,13 +2092,15 @@ func (s *SQLiteStore) ListExecutionsByFailureGroup(
 ) ([]*events.Execution, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
-			execution_id, project_id, status,
-			started_at, ended_at,
-			duration_ms, total_tokens_in, total_tokens_out,
-			estimated_cost_usd, sdk_language, sdk_version, crash_signature
-		FROM executions
-		WHERE failure_group_id = ?
-		ORDER BY started_at DESC
+			e.execution_id, e.project_id, e.status,
+			e.started_at, e.ended_at,
+			e.duration_ms, e.total_tokens_in, e.total_tokens_out,
+			e.estimated_cost_usd, e.sdk_language, e.sdk_version, e.crash_signature
+		FROM executions e
+		INNER JOIN execution_failure_groups efg
+			ON efg.execution_id = e.execution_id
+		WHERE efg.group_id = ?
+		ORDER BY e.started_at DESC
 		LIMIT ? OFFSET ?
 	`, groupID, limit, offset)
 	if err != nil {
@@ -2381,33 +2390,65 @@ func (s *SQLiteStore) groupExecutionInternal(
 		return false, fmt.Errorf("executionID, projectID, failureClass, signature all required")
 	}
 
-	// Idempotency check: skip if already grouped (any class).
-	var existing sql.NullString
+	// Confirm the execution row exists before doing any work. The
+	// detector chain is supposed to only call this for executions
+	// the handler just observed reach terminal status, but defensive
+	// against caller bugs.
+	var primaryExisting sql.NullString
 	err = s.db.QueryRowContext(
 		ctx,
 		`SELECT failure_group_id FROM executions WHERE execution_id = ?`,
 		executionID,
-	).Scan(&existing)
+	).Scan(&primaryExisting)
 	if err == sql.ErrNoRows {
 		return false, ErrNotFound
 	}
 	if err != nil {
 		return false, fmt.Errorf("read execution failure_group_id: %w", err)
 	}
-	if existing.Valid && existing.String != "" {
-		return false, nil // already grouped; no-op (and not new from this caller's perspective)
-	}
 
 	groupID := deriveGroupID(projectID, failureClass, signature)
+	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Newness probe: does the failure_group already exist? If not, this
-	// call is about to create it and we'll report isNew=true to the
-	// caller so it can fire webhook escalation. Racy under concurrent
-	// writers for the same signature, both observers could see "not
-	// found" and both report isNew=true. For v1 with low concurrency the
-	// worst case is duplicate webhook deliveries, not data corruption.
-	// Production hardening (RETURNING-clause or transactional upsert)
-	// is deferred.
+	// Try to record the membership row first. PK is
+	// (execution_id, group_id) so a second call with the same
+	// arguments is a true no-op rather than a double-count. The
+	// is_primary flag is set ONLY when no primary exists yet on the
+	// execution row — preserving the v002 semantic that the first
+	// detector wins the "primary" slot, while letting every later
+	// detector record itself as a non-primary classification.
+	isPrimary := !primaryExisting.Valid || primaryExisting.String == ""
+	isPrimaryInt := 0
+	if isPrimary {
+		isPrimaryInt = 1
+	}
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO execution_failure_groups (
+			execution_id, group_id, is_primary, classified_at
+		)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(execution_id, group_id) DO NOTHING
+	`, executionID, groupID, isPrimaryInt, now)
+	if err != nil {
+		return false, fmt.Errorf("link execution to failure_group: %w", err)
+	}
+	inserted, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rows affected on membership insert: %w", err)
+	}
+	if inserted == 0 {
+		// Already linked; not new from this caller's perspective and
+		// no counter updates are warranted (would double-count).
+		return false, nil
+	}
+
+	// Newness probe: does the failure_group itself already exist? If
+	// not, this call is about to create it and we'll report
+	// isNew=true so the handler can fire webhook escalation. Racy
+	// under concurrent writers for the same signature — both
+	// observers could see "not found" and both report isNew=true.
+	// For v1 with low concurrency the worst case is duplicate
+	// webhook deliveries, not data corruption.
 	var existedBefore int
 	err = s.db.QueryRowContext(
 		ctx,
@@ -2419,9 +2460,12 @@ func (s *SQLiteStore) groupExecutionInternal(
 	}
 	isNew = err == sql.ErrNoRows
 
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// Upsert: insert on first-ever match, increment counters on subsequent.
+	// Upsert the failure_groups row: insert on first-ever match,
+	// increment counters on subsequent matches. Counters are
+	// incremented exactly once per (execution, group) pair because
+	// of the INSERT OR IGNORE guard above — so affected_executions
+	// continues to mean "distinct executions classified into this
+	// group," matching v002's invariant.
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO failure_groups (
 			group_id, project_id, failure_class, signature,
@@ -2439,14 +2483,20 @@ func (s *SQLiteStore) groupExecutionInternal(
 		return false, fmt.Errorf("upsert failure_group: %w", err)
 	}
 
-	_, err = s.db.ExecContext(
-		ctx,
-		`UPDATE executions SET failure_group_id = ? WHERE execution_id = ?`,
-		groupID,
-		executionID,
-	)
-	if err != nil {
-		return false, fmt.Errorf("link execution to failure_group: %w", err)
+	// Claim the primary slot if no detector has yet. Skipping when
+	// already populated preserves the historical "first detector
+	// wins the primary classification" behavior the dashboard's
+	// executions detail page still renders.
+	if isPrimary {
+		_, err = s.db.ExecContext(
+			ctx,
+			`UPDATE executions SET failure_group_id = ? WHERE execution_id = ?`,
+			groupID,
+			executionID,
+		)
+		if err != nil {
+			return false, fmt.Errorf("set primary failure_group on execution: %w", err)
+		}
 	}
 
 	s.logger.Info("execution grouped",
@@ -2455,6 +2505,7 @@ func (s *SQLiteStore) groupExecutionInternal(
 		"failure_class", failureClass,
 		"signature", signature,
 		"is_new_group", isNew,
+		"is_primary", isPrimary,
 	)
 	return isNew, nil
 }
