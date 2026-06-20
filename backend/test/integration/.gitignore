@@ -1,0 +1,12 @@
+# Per-developer virtual environment — recreate locally, never commit.
+.venv/
+
+# Binary cache produced by conftest._build_binary(). go build is
+# already incremental, but keeping the artifact out of git avoids
+# committing a multi-MB Mach-O / ELF on every machine.
+.build/
+
+# Pytest + Python caches.
+.pytest_cache/
+__pycache__/
+*.pyc

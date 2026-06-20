@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -379,9 +380,20 @@ var emailVerifyExemptPaths = map[string]struct{}{
 // itself depends on (see emailVerifyExemptPaths). Best-effort on
 // transient errors: a DB hiccup must not lock a verified customer
 // out, so we fail open in that case (the next request retries).
+//
+// Integration-test bypass: when MESEDI_DISABLE_EMAIL_VERIFY_GATE=1,
+// the gate skips for every path. This exists so the backend
+// integration suite (backend/test/integration/) can drive the SDK
+// against a freshly-signed-up project without juggling the email
+// verification token out of the SQLite DB. The bypass is
+// env-var-only — never set in production, and the gate is the
+// default for any binary started without that explicit opt-out.
 func requireEmailVerified(
 	w http.ResponseWriter, r *http.Request, s store.Store, projectID string,
 ) bool {
+	if os.Getenv("MESEDI_DISABLE_EMAIL_VERIFY_GATE") == "1" {
+		return true
+	}
 	if _, exempt := emailVerifyExemptPaths[r.URL.Path]; exempt {
 		return true
 	}
