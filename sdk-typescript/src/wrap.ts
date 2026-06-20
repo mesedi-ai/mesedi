@@ -132,7 +132,7 @@ export function wrap<TArgs extends unknown[], TResult>(
       status: Status.STARTED,
       started_at: utcNowRfc3339(),
       sdk_language: "typescript",
-      sdk_version: "0.3.0",
+      sdk_version: "0.4.0",
       // Optional tenant_id flows through to the wire body via
       // executionStartPayload's omitempty-style assignment.
       ...(opts.tenant_id !== undefined ? { tenant_id: opts.tenant_id } : {}),

@@ -29,6 +29,7 @@
  */
 
 import { maybeCompress } from "./compress.js";
+import { DEFAULT_MAX_PAYLOAD_BYTES, maybeTruncate } from "./truncate.js";
 import {
   Event,
   Execution,
@@ -61,6 +62,14 @@ export interface ConfigureOptions {
   batchSize?: number;
   /** Max queue depth before drop-on-full kicks in. Default 10_000. */
   maxQueue?: number;
+  /**
+   * Per-event payload cap in bytes (#243). Events whose serialized
+   * payload exceeds this size have their longest string fields
+   * smart-truncated to fit, with marker fields stamped so downstream
+   * readers know what happened. Default 32 KB; pass 0 (or negative)
+   * to disable truncation entirely.
+   */
+  maxPayloadBytes?: number;
 }
 
 /**
@@ -80,6 +89,7 @@ export class MesediClient {
   private readonly flushIntervalMs: number;
   private readonly batchSize: number;
   private readonly maxQueue: number;
+  private readonly maxPayloadBytes: number;
 
   private queue: ShipItem[] = [];
   private pendingEvents: Event[] = [];
@@ -110,6 +120,7 @@ export class MesediClient {
     this.flushIntervalMs = opts.flushIntervalMs ?? 250;
     this.batchSize = opts.batchSize ?? 100;
     this.maxQueue = opts.maxQueue ?? 10_000;
+    this.maxPayloadBytes = opts.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES;
 
     // Start the periodic flush timer. unref() so it doesn't keep the
     // event loop alive on its own, the process can exit when the
@@ -132,6 +143,14 @@ export class MesediClient {
   }
 
   submitEvent(event: Event): void {
+    // Apply the per-event payload cap (#243) BEFORE the event enters
+    // the queue. Truncating here keeps the queue's memory footprint
+    // bounded even when a customer accidentally captures a multi-MB
+    // blob; downstream retries reuse the already-trimmed payload
+    // instead of re-running truncation on every attempt.
+    if (this.maxPayloadBytes > 0) {
+      event.payload = maybeTruncate(event.payload, this.maxPayloadBytes);
+    }
     this.enqueue({ kind: "event", body: event });
   }
 

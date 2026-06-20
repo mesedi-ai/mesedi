@@ -1,6 +1,6 @@
 # Mesedi TypeScript SDK
 
-**Status:** v0.3.0. Live on npm.
+**Status:** v0.4.0. Live on npm.
 
 The TypeScript companion to `sdk-python/`. Feature parity for the v1
 surface (`configure()`, `wrap()`, `tool()`, async event shipper,
@@ -47,7 +47,7 @@ await flush();
 For each `wrap()`-decorated call:
 
 - **On entry:** `POST /executions` (status=started, sdk_language=typescript,
-  sdk_version=0.3.0).
+  sdk_version=0.4.0).
 - **On normal return:** `PATCH /executions/{id}` (status=completed,
   duration_ms, ended_at).
 - **On thrown error:** `PATCH /executions/{id}` (status=crashed,
