@@ -73,16 +73,23 @@ func DetectTokenWaste(payloads []json.RawMessage) (signature string, detected bo
 	}
 	counts := map[string]int{}
 	for _, raw := range payloads {
+		// Field name is `user_message` to match what the SDK's
+		// instrument_anthropic ships (the LAST user-role message in
+		// the conversation). The detector originally read
+		// `user_prompt` which no SDK ever emitted, so the field was
+		// always empty and token_waste silently no-op'd on every
+		// real customer execution. Caught by the integration suite
+		// (backend/test/integration/test_detectors.py::test_token_waste).
 		var p struct {
-			UserPrompt string `json:"user_prompt"`
+			UserMessage string `json:"user_message"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			continue
 		}
-		if p.UserPrompt == "" {
+		if p.UserMessage == "" {
 			continue
 		}
-		prefix := p.UserPrompt
+		prefix := p.UserMessage
 		if len(prefix) > prefixWindowChars {
 			prefix = prefix[:prefixWindowChars]
 		}

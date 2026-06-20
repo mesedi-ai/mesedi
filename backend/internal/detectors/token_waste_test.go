@@ -1,6 +1,6 @@
 // Tests for the token_waste detector. Coverage targets:
-//   - Three identical user_prompts fire detection.
-//   - Two identical user_prompts (under threshold) do NOT fire.
+//   - Three identical user_messages fire detection.
+//   - Two identical user_messages (under threshold) do NOT fire.
 //   - Different short suffixes on the same long prefix still cluster
 //     (this is the actual production accumulation pattern).
 //   - Empty / malformed payloads no-op cleanly.
@@ -14,7 +14,11 @@ import (
 )
 
 func userPrompt(text string) json.RawMessage {
-	return json.RawMessage(`{"user_prompt":` + jsonString(text) + `}`)
+	// Field name is `user_message` to match what the SDK ships;
+	// changed alongside the detector when the integration suite
+	// caught the user_prompt/user_message mismatch. Helper name kept
+	// as userPrompt for callsite churn-minimization.
+	return json.RawMessage(`{"user_message":` + jsonString(text) + `}`)
 }
 
 // jsonString escapes a Go string into a JSON string literal.
@@ -134,7 +138,7 @@ func Test_TokenWaste_EmptyInputs(t *testing.T) {
 			userPrompt("only twice"),
 			userPrompt("only twice"),
 		}},
-		{"no user_prompt field", []json.RawMessage{
+		{"no user_message field", []json.RawMessage{
 			json.RawMessage(`{"system_prompt":"foo"}`),
 			json.RawMessage(`{"system_prompt":"foo"}`),
 			json.RawMessage(`{"system_prompt":"foo"}`),

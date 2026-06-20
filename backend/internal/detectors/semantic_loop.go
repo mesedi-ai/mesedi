@@ -118,10 +118,16 @@ func DetectSemanticLoop(payloads []json.RawMessage) (signature string, detected 
 	return "semantic_loop:" + best.hash, true
 }
 
-// extractState pulls the `state` field from a checkpoint payload. The
-// CheckpointPayload struct defines `State` as json.RawMessage, so the
-// field is always JSON-encoded text. Returns nil when the payload
-// can't be parsed or the state field is absent.
+// extractState pulls the `metadata` field from a checkpoint payload.
+// Returns nil when the payload can't be parsed or the field is absent.
+//
+// Field name is `metadata` to match what the SDK's checkpoint()
+// helper ships (mesedi.checkpoint(name, **kwargs) serializes the
+// kwargs under "metadata"). The detector originally read "state"
+// which no SDK ever emitted, so extractState always returned nil
+// and semantic_loop silently no-op'd on every real customer
+// execution. Caught by the integration suite (backend/test/
+// integration/test_detectors.py::test_semantic_loop).
 func extractState(payload json.RawMessage) json.RawMessage {
 	if len(payload) == 0 {
 		return nil
@@ -130,7 +136,7 @@ func extractState(payload json.RawMessage) json.RawMessage {
 	if err := json.Unmarshal(payload, &pm); err != nil {
 		return nil
 	}
-	return pm["state"]
+	return pm["metadata"]
 }
 
 // canonicalHash produces a stable SHA-256 hex string for the given

@@ -33,9 +33,15 @@ import (
 // secret-bearing fields means extending this map.
 var scanFieldKeys = map[events.EventType][]string{
 	events.EventTypeLLMCall: {
+		// Field names match what the SDK's instrument_anthropic
+		// ships. Previously listed `user_prompt` and `response`
+		// which no SDK ever emitted, so DLP scanned nothing on
+		// llm_call events and data_leakage silently no-op'd. Caught
+		// by the integration suite (backend/test/integration/
+		// test_detectors.py::test_data_leakage).
 		"system_prompt",
-		"user_prompt",
-		"response",
+		"user_message",
+		"response_text",
 	},
 	events.EventTypeToolCall: {
 		// arguments and return_value are json.RawMessage on the payload

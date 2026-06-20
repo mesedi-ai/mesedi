@@ -19,7 +19,11 @@ import (
 )
 
 func cp(state string) json.RawMessage {
-	return json.RawMessage(`{"state":` + state + `}`)
+	// Field name is `metadata` to match what the SDK ships;
+	// changed alongside the detector when the integration suite
+	// caught the state/metadata mismatch. Helper name kept as cp
+	// (short for checkpoint) for callsite churn-minimization.
+	return json.RawMessage(`{"metadata":` + state + `}`)
 }
 
 func Test_SemanticLoop_FiresAtThreshold(t *testing.T) {
