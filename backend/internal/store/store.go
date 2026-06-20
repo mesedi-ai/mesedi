@@ -885,6 +885,32 @@ type Store interface {
 	UpdateSessionProjectID(ctx context.Context, tokenHash, newProjectID string) error
 	DeleteExpiredSessions(ctx context.Context, asOf time.Time) (int, error)
 
+	// User TOTP, backup codes, pending 2FA tokens, and session
+	// passed_2fa flag — back the customer-facing two-factor
+	// authentication feature (#252). See store/user_totp.go for the
+	// per-method contracts and migrations/038_user_totp.sql for the
+	// schema rationale. UpsertUserTOTP runs at enrollment;
+	// GetUserTOTP runs on every dashboard auth check to determine
+	// whether 2FA is enforced for the user; DeleteUserTOTP +
+	// DeleteBackupCodesForUser run together on disable; backup-code
+	// methods power the lost-phone fallback path. SetSessionPassed2FA
+	// upgrades the session flag atomically at enrollment-time and at
+	// successful /auth/2fa-verify so the customer is not kicked out
+	// by their own action.
+	UpsertUserTOTP(ctx context.Context, t *UserTOTP) error
+	GetUserTOTP(ctx context.Context, userID string) (*UserTOTP, error)
+	DeleteUserTOTP(ctx context.Context, userID string) error
+	TouchUserTOTP(ctx context.Context, userID string, lastUsedAt time.Time) error
+	CreateBackupCodes(ctx context.Context, codes []*BackupCode) error
+	ConsumeBackupCode(ctx context.Context, userID, codeHash string, usedAt time.Time) error
+	DeleteBackupCodesForUser(ctx context.Context, userID string) error
+	CountUnusedBackupCodes(ctx context.Context, userID string) (int, error)
+	CreatePending2FAToken(ctx context.Context, t *Pending2FAToken) error
+	GetPending2FAToken(ctx context.Context, tokenHash string) (*Pending2FAToken, error)
+	MarkPending2FATokenUsed(ctx context.Context, tokenHash string, usedAt time.Time) error
+	DeleteExpiredPending2FATokens(ctx context.Context, asOf time.Time) (int, error)
+	SetSessionPassed2FA(ctx context.Context, tokenHash string) error
+
 	// ListAnalyzedFailureGroupsByProject powers the per-project
 	// failure-group breakdown on the admin AI analyses page (#211).
 	// Pass limit=0 for the default cap (200 rows).

@@ -17,14 +17,23 @@ import (
 // Lookups happen by computing the hash of the incoming cookie and
 // querying on TokenHash.
 type Session struct {
-	TokenHash   string    `json:"-"`
-	UserID      string    `json:"user_id"`
-	ProjectID   string    `json:"project_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	LastUsedAt  time.Time `json:"last_used_at"`
-	UserAgent   string    `json:"user_agent,omitempty"`
-	IPAddress   string    `json:"ip_address,omitempty"`
+	TokenHash       string    `json:"-"`
+	UserID          string    `json:"user_id"`
+	ProjectID       string    `json:"project_id"`
+	CreatedAt       time.Time `json:"created_at"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	LastUsedAt      time.Time `json:"last_used_at"`
+	UserAgent       string    `json:"user_agent,omitempty"`
+	IPAddress       string    `json:"ip_address,omitempty"`
+	// PassedTwoFactor (#252) is true iff the session was minted via
+	// the /auth/2fa-verify path OR was upgraded by HandleTOTPSetupVerify
+	// at enrollment time. Auth middleware compares this against the
+	// user's TOTP enrollment state: if the user has TOTP enabled but
+	// this is false, the request is rejected and the customer is
+	// redirected to the 2FA prompt. Pre-#252 sessions default to false
+	// (migration 038 sets passed_2fa = 0); users who don't have TOTP
+	// enabled are not affected.
+	PassedTwoFactor bool `json:"passed_2fa"`
 }
 
 // SessionLister is the optional Store interface for session CRUD.
@@ -101,17 +110,21 @@ func (s *SQLiteStore) CreateSession(ctx context.Context, sess *Session) error {
 	if sess.ExpiresAt.IsZero() {
 		return errors.New("session expires_at must be set by caller (no implicit TTL at the store layer)")
 	}
+	passed := 0
+	if sess.PassedTwoFactor {
+		passed = 1
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions (
 			token_hash, user_id, project_id,
 			created_at, expires_at, last_used_at,
-			user_agent, ip_address
+			user_agent, ip_address, passed_2fa
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		sess.TokenHash, sess.UserID, sess.ProjectID,
 		sess.CreatedAt.UTC(), sess.ExpiresAt.UTC(), sess.LastUsedAt.UTC(),
-		sess.UserAgent, sess.IPAddress,
+		sess.UserAgent, sess.IPAddress, passed,
 	)
 	if err != nil {
 		return fmt.Errorf("insert session: %w", err)
@@ -127,16 +140,17 @@ func (s *SQLiteStore) GetSessionByTokenHash(ctx context.Context, tokenHash strin
 	row := s.db.QueryRowContext(ctx, `
 		SELECT token_hash, user_id, project_id,
 		       created_at, expires_at, last_used_at,
-		       user_agent, ip_address
+		       user_agent, ip_address, passed_2fa
 		FROM sessions
 		WHERE token_hash = ?
 	`, tokenHash)
 	sess := &Session{}
 	var ua, ip sql.NullString
+	var passed int
 	if err := row.Scan(
 		&sess.TokenHash, &sess.UserID, &sess.ProjectID,
 		&sess.CreatedAt, &sess.ExpiresAt, &sess.LastUsedAt,
-		&ua, &ip,
+		&ua, &ip, &passed,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -149,6 +163,7 @@ func (s *SQLiteStore) GetSessionByTokenHash(ctx context.Context, tokenHash strin
 	if ip.Valid {
 		sess.IPAddress = ip.String
 	}
+	sess.PassedTwoFactor = passed != 0
 	return sess, nil
 }
 
@@ -189,7 +204,7 @@ func (s *SQLiteStore) ListSessionsForUser(ctx context.Context, userID string, no
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT token_hash, user_id, project_id,
 		       created_at, expires_at, last_used_at,
-		       user_agent, ip_address
+		       user_agent, ip_address, passed_2fa
 		FROM sessions
 		WHERE user_id = ? AND expires_at > ?
 		ORDER BY last_used_at DESC
@@ -203,10 +218,11 @@ func (s *SQLiteStore) ListSessionsForUser(ctx context.Context, userID string, no
 	for rows.Next() {
 		sess := &Session{}
 		var ua, ip sql.NullString
+		var passed int
 		if err := rows.Scan(
 			&sess.TokenHash, &sess.UserID, &sess.ProjectID,
 			&sess.CreatedAt, &sess.ExpiresAt, &sess.LastUsedAt,
-			&ua, &ip,
+			&ua, &ip, &passed,
 		); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
@@ -216,6 +232,7 @@ func (s *SQLiteStore) ListSessionsForUser(ctx context.Context, userID string, no
 		if ip.Valid {
 			sess.IPAddress = ip.String
 		}
+		sess.PassedTwoFactor = passed != 0
 		out = append(out, sess)
 	}
 	return out, rows.Err()
@@ -266,13 +283,13 @@ func (s *PostgresStore) CreateSession(ctx context.Context, sess *Session) error 
 		INSERT INTO sessions (
 			token_hash, user_id, project_id,
 			created_at, expires_at, last_used_at,
-			user_agent, ip_address
+			user_agent, ip_address, passed_2fa
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`,
 		sess.TokenHash, sess.UserID, sess.ProjectID,
 		sess.CreatedAt.UTC(), sess.ExpiresAt.UTC(), sess.LastUsedAt.UTC(),
-		sess.UserAgent, sess.IPAddress,
+		sess.UserAgent, sess.IPAddress, sess.PassedTwoFactor,
 	)
 	if err != nil {
 		return fmt.Errorf("insert session (postgres): %w", err)
@@ -288,7 +305,7 @@ func (s *PostgresStore) GetSessionByTokenHash(ctx context.Context, tokenHash str
 	row := s.db.QueryRowContext(ctx, `
 		SELECT token_hash, user_id, project_id,
 		       created_at, expires_at, last_used_at,
-		       user_agent, ip_address
+		       user_agent, ip_address, passed_2fa
 		FROM sessions
 		WHERE token_hash = $1
 	`, tokenHash)
@@ -297,7 +314,7 @@ func (s *PostgresStore) GetSessionByTokenHash(ctx context.Context, tokenHash str
 	if err := row.Scan(
 		&sess.TokenHash, &sess.UserID, &sess.ProjectID,
 		&sess.CreatedAt, &sess.ExpiresAt, &sess.LastUsedAt,
-		&ua, &ip,
+		&ua, &ip, &sess.PassedTwoFactor,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -350,7 +367,7 @@ func (s *PostgresStore) ListSessionsForUser(ctx context.Context, userID string, 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT token_hash, user_id, project_id,
 		       created_at, expires_at, last_used_at,
-		       user_agent, ip_address
+		       user_agent, ip_address, passed_2fa
 		FROM sessions
 		WHERE user_id = $1 AND expires_at > $2
 		ORDER BY last_used_at DESC
@@ -367,7 +384,7 @@ func (s *PostgresStore) ListSessionsForUser(ctx context.Context, userID string, 
 		if err := rows.Scan(
 			&sess.TokenHash, &sess.UserID, &sess.ProjectID,
 			&sess.CreatedAt, &sess.ExpiresAt, &sess.LastUsedAt,
-			&ua, &ip,
+			&ua, &ip, &sess.PassedTwoFactor,
 		); err != nil {
 			return nil, fmt.Errorf("scan session (postgres): %w", err)
 		}
