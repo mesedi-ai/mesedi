@@ -39,12 +39,12 @@ const totpKeyLen = 32
 // totpNonceLen is the GCM standard nonce length (96 bits / 12 bytes).
 const totpNonceLen = 12
 
-// parseTOTPEncryptionKey decodes the hex-encoded key from the Fly
+// ParseTOTPEncryptionKey decodes the hex-encoded key from the Fly
 // secret into raw bytes. Returns a clear error if the key is the
 // wrong length or contains non-hex characters so the operator sees a
 // boot-time misconfiguration loudly instead of silently running with
 // a broken encryption path.
-func parseTOTPEncryptionKey(hexKey string) ([]byte, error) {
+func ParseTOTPEncryptionKey(hexKey string) ([]byte, error) {
 	if hexKey == "" {
 		return nil, errors.New("totp encryption key is empty (MESEDI_TOTP_ENCRYPTION_KEY)")
 	}

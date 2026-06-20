@@ -108,6 +108,11 @@ type runtimeConfig struct {
 	// string (32+ bytes base64) on both the backend (Fly) and the
 	// dashboard server (Cloudflare Workers).
 	SigninSecret string
+	// TOTPEncryptionKey is the AES-256-GCM key used to seal customer
+	// TOTP secrets at rest (#252). Hex-encoded, 64 chars. Empty
+	// disables the 2FA endpoints (they 503). Loaded from
+	// MESEDI_TOTP_ENCRYPTION_KEY.
+	TOTPEncryptionKey string
 }
 
 // bootstrapDevProject creates a default "dev" project and a fixed test
@@ -354,6 +359,25 @@ func main() {
 		logger.Info("signin endpoint enabled (#196)")
 	} else {
 		logger.Info("signin endpoint disabled (MESEDI_SIGNIN_SECRET unset; SSO login will 503)")
+	}
+
+	// #252 customer-facing 2FA. The encryption key seals customer
+	// TOTP secrets at rest with AES-256-GCM. An invalid key surfaces
+	// as a startup fatal: a 2FA deploy with a broken key is worse
+	// than a 2FA-disabled deploy because customers would think their
+	// secrets are safe when they aren't.
+	if cfg.TOTPEncryptionKey != "" {
+		raw, perr := api.ParseTOTPEncryptionKey(cfg.TOTPEncryptionKey)
+		if perr != nil {
+			logger.Error("totp: encryption key invalid (2fa endpoints will 503)",
+				"error", perr.Error(),
+			)
+		} else {
+			handlers.TOTPEncryptionKey = raw
+			logger.Info("2fa endpoints enabled (#252)")
+		}
+	} else {
+		logger.Info("2fa endpoints disabled (MESEDI_TOTP_ENCRYPTION_KEY unset; /me/2fa/* will 503)")
 	}
 
 	// Mesedi #22 — OpenTelemetry parallel emission. Initialize the
@@ -792,6 +816,7 @@ func loadConfig() runtimeConfig {
 		StripeSecretKeyTest:     envString("MESEDI_STRIPE_SECRET_KEY_TEST", ""),
 		StripeWebhookSecret:     envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),
 		StripeWebhookSecretTest: envString("MESEDI_STRIPE_WEBHOOK_SECRET_TEST", ""),
+		TOTPEncryptionKey:       envString("MESEDI_TOTP_ENCRYPTION_KEY", ""),
 		// Prefer the new TEAM env var; fall back to the legacy PRO one
 		// so an in-flight deploy with the old secret still works. Once
 		// every deployment has migrated to MESEDI_STRIPE_TEAM_PRICE_ID

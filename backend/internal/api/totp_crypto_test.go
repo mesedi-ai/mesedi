@@ -11,7 +11,7 @@ import (
 const validKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 func TestParseTOTPEncryptionKey_Valid(t *testing.T) {
-	raw, err := parseTOTPEncryptionKey(validKey)
+	raw, err := ParseTOTPEncryptionKey(validKey)
 	if err != nil {
 		t.Fatalf("expected valid key to parse, got: %v", err)
 	}
@@ -21,7 +21,7 @@ func TestParseTOTPEncryptionKey_Valid(t *testing.T) {
 }
 
 func TestParseTOTPEncryptionKey_EmptyRejected(t *testing.T) {
-	if _, err := parseTOTPEncryptionKey(""); err == nil {
+	if _, err := ParseTOTPEncryptionKey(""); err == nil {
 		t.Fatal("expected empty key to be rejected; operator must see misconfiguration loudly")
 	}
 }
@@ -29,20 +29,20 @@ func TestParseTOTPEncryptionKey_EmptyRejected(t *testing.T) {
 func TestParseTOTPEncryptionKey_WrongLengthRejected(t *testing.T) {
 	// 32 hex chars = 16 bytes, half what AES-256 needs.
 	short := "0123456789abcdef0123456789abcdef"
-	if _, err := parseTOTPEncryptionKey(short); err == nil {
+	if _, err := ParseTOTPEncryptionKey(short); err == nil {
 		t.Fatal("expected short key to be rejected")
 	}
 }
 
 func TestParseTOTPEncryptionKey_NonHexRejected(t *testing.T) {
 	bogus := strings.Repeat("z", 64) // 64 chars but not valid hex
-	if _, err := parseTOTPEncryptionKey(bogus); err == nil {
+	if _, err := ParseTOTPEncryptionKey(bogus); err == nil {
 		t.Fatal("expected non-hex key to be rejected")
 	}
 }
 
 func TestEncryptDecryptTOTPSecret_RoundTrip(t *testing.T) {
-	key, err := parseTOTPEncryptionKey(validKey)
+	key, err := ParseTOTPEncryptionKey(validKey)
 	if err != nil {
 		t.Fatalf("parse key: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestEncryptTOTPSecret_DifferentNoncesPerCall(t *testing.T) {
 	// produce different ciphertexts (each call mints a fresh nonce).
 	// Otherwise an observer who sees two encrypted rows for the same
 	// secret could correlate them.
-	key, _ := parseTOTPEncryptionKey(validKey)
+	key, _ := ParseTOTPEncryptionKey(validKey)
 	plaintext := []byte("JBSWY3DPEHPK3PXP")
 	a, _ := encryptTOTPSecret(key, plaintext)
 	b, _ := encryptTOTPSecret(key, plaintext)
@@ -85,7 +85,7 @@ func TestDecryptTOTPSecret_TamperingRejected(t *testing.T) {
 	// error (GCM tag check). This is what makes "encrypted at rest"
 	// meaningful — an attacker with DB access cannot silently swap
 	// in a different TOTP secret.
-	key, _ := parseTOTPEncryptionKey(validKey)
+	key, _ := ParseTOTPEncryptionKey(validKey)
 	plaintext := []byte("JBSWY3DPEHPK3PXP")
 	ciphertext, _ := encryptTOTPSecret(key, plaintext)
 	ciphertext[totpNonceLen] ^= 0x01 // flip first byte AFTER the nonce
@@ -95,9 +95,9 @@ func TestDecryptTOTPSecret_TamperingRejected(t *testing.T) {
 }
 
 func TestDecryptTOTPSecret_WrongKeyRejected(t *testing.T) {
-	key1, _ := parseTOTPEncryptionKey(validKey)
+	key1, _ := ParseTOTPEncryptionKey(validKey)
 	otherHex := strings.Repeat("ab", 32)
-	key2, _ := parseTOTPEncryptionKey(otherHex)
+	key2, _ := ParseTOTPEncryptionKey(otherHex)
 	plaintext := []byte("JBSWY3DPEHPK3PXP")
 	ciphertext, _ := encryptTOTPSecret(key1, plaintext)
 	if _, err := decryptTOTPSecret(key2, ciphertext); err == nil {
@@ -106,7 +106,7 @@ func TestDecryptTOTPSecret_WrongKeyRejected(t *testing.T) {
 }
 
 func TestDecryptTOTPSecret_TooShortPayloadRejected(t *testing.T) {
-	key, _ := parseTOTPEncryptionKey(validKey)
+	key, _ := ParseTOTPEncryptionKey(validKey)
 	short, _ := hex.DecodeString("aabb")
 	if _, err := decryptTOTPSecret(key, short); err == nil {
 		t.Fatal("expected too-short payload to be rejected (cannot carry a nonce)")

@@ -105,6 +105,13 @@ type Handlers struct {
 	// disables the endpoint entirely (returns 503), which is the
 	// safe default in local dev where SSO is not configured.
 	SigninSecret string
+	// TOTPEncryptionKey is the 32-byte AES-256-GCM key used to seal
+	// customer TOTP secrets at rest (#252). Loaded from
+	// MESEDI_TOTP_ENCRYPTION_KEY (64 hex chars). Nil/empty disables
+	// the 2FA endpoints — they return 503 — so a local-dev deploy
+	// without the key set degrades gracefully rather than crashing.
+	// See totp_crypto.go for the encrypt/decrypt helpers.
+	TOTPEncryptionKey []byte
 }
 
 // New constructs the Handlers value. Done as a constructor (rather than
@@ -165,6 +172,11 @@ func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
 	// secret. See signin.go's file-level doc comment for the full
 	// trust model.
 	mux.HandleFunc("POST /signin", h.HandleSignin)
+	// #252 two-factor verify completes a paused signin after the
+	// customer enters their 6-digit code on the prompt page. Same
+	// shared-secret model as /signin (the dashboard Worker is the
+	// only legitimate caller).
+	mux.HandleFunc("POST /auth/2fa-verify", h.HandleTwoFactorVerify)
 	// Magic-link sign-in (#196 commit 2). /start mints a token + emails;
 	// /verify is server-to-server (dashboard calls it from its handoff
 	// route after the customer clicks the email link).
@@ -206,6 +218,13 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// #232 — dashboard polls this once per layout mount to decide
 	// whether to render the email-verification interstitial.
 	mux.HandleFunc("GET /me/email-verification-status", h.HandleEmailVerificationStatus)
+
+	// #252 customer-facing TOTP / two-factor authentication.
+	mux.HandleFunc("GET /me/2fa/status", h.HandleTOTPStatus)
+	mux.HandleFunc("POST /me/2fa/setup-init", h.HandleTOTPSetupInit)
+	mux.HandleFunc("POST /me/2fa/setup-verify", h.HandleTOTPSetupVerify)
+	mux.HandleFunc("POST /me/2fa/disable", h.HandleTOTPDisable)
+	mux.HandleFunc("POST /me/2fa/regenerate-codes", h.HandleTOTPRegenerateBackupCodes)
 	mux.HandleFunc("PATCH /executions/{id}", h.HandleUpdateExecution)
 	mux.HandleFunc("POST /events", h.HandleIngestEvents)
 	// Phase 3b, read-side execution surface for the dashboard.

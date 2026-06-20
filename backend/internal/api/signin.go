@@ -101,6 +101,16 @@ type SigninResponse struct {
 	// the sessions table as an RFC 3339 string. Lets the Worker set
 	// the cookie Max-Age without re-deriving the TTL on its side.
 	SessionExpiresAt string `json:"session_expires_at,omitempty"`
+	// NeedsTOTP (#252) is true when the user has 2FA enabled and
+	// the signin path is pausing for the customer to enter their
+	// authenticator-app code. When true, SessionToken is empty and
+	// PendingToken / PendingTokenExpiresAt are populated; the
+	// dashboard Worker should redirect to the 6-digit-code prompt
+	// page and POST {pending_token, code} to /auth/2fa-verify when
+	// the customer submits.
+	NeedsTOTP             bool   `json:"needs_2fa,omitempty"`
+	PendingToken          string `json:"pending_2fa_token,omitempty"`
+	PendingTokenExpiresAt string `json:"pending_2fa_expires_at,omitempty"`
 }
 
 // signinHeaderSecret is the name of the request header the dashboard
@@ -256,6 +266,59 @@ func (h *Handlers) HandleSignin(w http.ResponseWriter, r *http.Request) {
 	if err := h.Store.CreateAuditEvent(r.Context(), auditEvent); err != nil {
 		h.Logger.Warn("signin: audit log write failed (signin still succeeded)",
 			"error", err.Error(), "email", email, "project_id", project.ProjectID)
+	}
+
+	// 6c. #252 two-factor fork. If this user has TOTP enabled, do NOT
+	//     mint a session yet. Instead generate a short-lived pending
+	//     token, persist it, and return needs_2fa=true with the raw
+	//     token. The dashboard Worker redirects the customer to the
+	//     6-digit-code prompt; the customer's code then completes the
+	//     signin via POST /auth/2fa-verify. We still mint the API
+	//     key + create the audit event above because at this point
+	//     the identity is verified (SSO or magic link); we just
+	//     gate the SESSION (the long-lived browser cookie) behind
+	//     the second factor.
+	if _, totpErr := h.Store.GetUserTOTP(r.Context(), email); totpErr == nil {
+		rawPending, pendingRow, mintErr := mintPending2FAToken(email, now)
+		if mintErr != nil {
+			h.Logger.Error("signin: mint pending 2fa token failed",
+				"error", mintErr.Error(), "email", email)
+			writeError(w, http.StatusInternalServerError,
+				"failed to mint pending 2fa token: "+mintErr.Error())
+			return
+		}
+		if perr := h.Store.CreatePending2FAToken(r.Context(), pendingRow); perr != nil {
+			h.Logger.Error("signin: persist pending 2fa token failed",
+				"error", perr.Error(), "email", email)
+			writeError(w, http.StatusInternalServerError,
+				"failed to persist pending 2fa token: "+perr.Error())
+			return
+		}
+		h.Logger.Info("signin paused for 2fa",
+			"project_id", project.ProjectID,
+			"email", email,
+			"source", source,
+		)
+		writeJSON(w, http.StatusCreated, SigninResponse{
+			OK:                    true,
+			ProjectID:             project.ProjectID,
+			ProjectName:           project.Name,
+			KeyPrefix:             prefix,
+			NeedsTOTP:             true,
+			PendingToken:          rawPending,
+			PendingTokenExpiresAt: pendingRow.ExpiresAt.UTC().Format(time.RFC3339Nano),
+			Warning: "Two-factor authentication is enabled. Enter your 6-digit code to finish signing in.",
+		})
+		return
+	} else if !errors.Is(totpErr, store.ErrNotFound) {
+		// Unexpected DB error reading user_totp. Logging and falling
+		// through to the normal session mint is the safer call: a
+		// transient DB hiccup must NOT silently invalidate 2FA, but
+		// it also MUST NOT block sign-in altogether (the customer
+		// would be left unable to recover). The next successful
+		// signin lookup will gate again.
+		h.Logger.Warn("signin: GetUserTOTP failed (allowing without 2fa for this request)",
+			"error", totpErr.Error(), "email", email)
 	}
 
 	// 6b. #213 Batch 2: also create a real session row + return its
