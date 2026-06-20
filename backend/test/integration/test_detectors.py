@@ -217,3 +217,124 @@ def test_tool_schema_drift(backend: Backend, configured_sdk):
     skipped — see skip reason. The detector code is fine; the test
     needs a more realistic two-phase setup."""
     pass
+
+
+# ──────────────────────────────────────────────────────────────────────
+# tool_failures
+# ──────────────────────────────────────────────────────────────────────
+
+def test_tool_failures(backend: Backend, configured_sdk):
+    """A @mesedi.tool that raises records a tool_call event with a
+    failure outcome and fires the tool_failures detector. Signature
+    is the tool name so SREs see one cluster per failing tool."""
+    mesedi = configured_sdk
+
+    @mesedi.tool
+    def flaky_upstream():
+        raise RuntimeError("inttest tool failure")
+
+    @mesedi.wrap
+    def agent_with_failing_tool():
+        try:
+            flaky_upstream()
+        except RuntimeError:
+            pass
+
+    agent_with_failing_tool()
+    mesedi.flush(timeout=5.0)
+
+    # Signature is the tool name (or contains it). Don't pin the
+    # exact format — assert on the class only.
+    await_failure_group(backend, failure_class="tool_failures")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# validator_failures
+# ──────────────────────────────────────────────────────────────────────
+
+def test_validator_failures(backend: Backend, configured_sdk):
+    """mesedi.validator_result(passed=False) records a failing
+    validator_result event and fires the validator_failures detector
+    at terminal status."""
+    mesedi = configured_sdk
+
+    @mesedi.wrap
+    def agent_with_failing_validator():
+        mesedi.validator_result(
+            name="quality_check",
+            passed=False,
+            message="seeded failure",
+        )
+
+    agent_with_failing_validator()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(backend, failure_class="validator_failures")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# sandbox_escape
+# ──────────────────────────────────────────────────────────────────────
+
+def test_sandbox_escape(backend: Backend, configured_sdk):
+    """Tool call whose path argument contains a directory-traversal
+    pattern → sandbox_escape detector should fire on the tool_call
+    argument payload alone, regardless of what the tool does."""
+    mesedi = configured_sdk
+
+    @mesedi.tool
+    def read_local_file(path: str):
+        return {"path": path, "bytes_read": 0}
+
+    @mesedi.wrap
+    def agent_attempts_escape():
+        read_local_file("../../../../../../etc/passwd")
+
+    agent_attempts_escape()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="sandbox_escape",
+        signature_prefix="sandbox_escape:",
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# identical_call_loop
+# ──────────────────────────────────────────────────────────────────────
+
+@needs_anthropic
+def test_identical_call_loop(backend: Backend, configured_sdk):
+    """Three llm_call events with identical (model, user_message)
+    hash within one execution → identical_call_loop detector should
+    fire under the loops failure class.
+
+    Currently FAILS because identical_call_loop is structurally
+    suppressed by token_waste in the detector chain ordering — same
+    class of bug as the time_budget greedy-claim we already fixed.
+    Left failing on purpose so the issue stays visible until Robert
+    decides how to resolve."""
+    from anthropic import Anthropic
+
+    mesedi = configured_sdk
+    client = Anthropic()
+    prompt = "In one short sentence, name a color."
+
+    @mesedi.wrap
+    def looping_agent():
+        for _ in range(3):
+            client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=16,
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+    looping_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="loops",
+        signature_prefix="identical_call_",
+    )
