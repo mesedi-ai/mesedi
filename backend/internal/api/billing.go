@@ -241,8 +241,19 @@ func normalizeTier(tier string) string {
 // environment variables in main; passed into api.New so handler
 // methods can access it via h.Stripe.
 //
-// SecretKey: the test/live secret API key. Begins with "sk_test_" or
-// "sk_live_". Set via MESEDI_STRIPE_SECRET_KEY.
+// SecretKey: the LIVE secret API key. Begins with "sk_live_" (or
+// "sk_test_" in pure-dev deployments without a live key yet). Set via
+// MESEDI_STRIPE_SECRET_KEY. Used for every Stripe call on live-mode
+// events and for the customer-facing endpoints (portal, etc.).
+//
+// SecretKeyTest (#262 follow-on): optional test-mode secret API key
+// (`sk_test_...`). When set together with WebhookSecretTest, the
+// webhook handler swaps the global stripe.Key to this value for the
+// duration of a test-mode event dispatch so callbacks like
+// `charge.Get(...)` can read test-mode objects. When unset, test-mode
+// events still pass signature validation but Stripe callbacks 401
+// (live keys cannot query test objects). Set via
+// MESEDI_STRIPE_SECRET_KEY_TEST.
 //
 // WebhookSecret: the signing secret for the configured LIVE webhook
 // endpoint. Begins with "whsec_". Set via MESEDI_STRIPE_WEBHOOK_SECRET.
@@ -267,6 +278,7 @@ func normalizeTier(tier string) string {
 // 503; this lets the backend run in local-dev without Stripe configured.
 type StripeConfig struct {
 	SecretKey         string
+	SecretKeyTest     string
 	WebhookSecret     string
 	WebhookSecretTest string
 	TeamPriceID       string
@@ -311,11 +323,35 @@ func constructStripeEvent(body []byte, sig string, liveSecret, testSecret string
 }
 
 // applyKey sets the package-global stripe.Key once per request from
-// the configured SecretKey. The Stripe Go SDK uses a global for the
-// default backend; setting it on each call is cheap and safe (no
+// the configured LIVE SecretKey. The Stripe Go SDK uses a global for
+// the default backend; setting it on each call is cheap and safe (no
 // hidden mutation across goroutines beyond the assignment itself,
-// which is a same-value write after the first call).
+// which is a same-value write after the first call). Use
+// applyKeyForLivemode below when the call is dispatched from a
+// webhook so test-mode events get the test-mode key.
 func (c StripeConfig) applyKey() {
+	stripe.Key = c.SecretKey
+}
+
+// applyKeyForLivemode sets stripe.Key to the right secret based on
+// the event's livemode (#262 follow-on). When livemode=true, uses
+// SecretKey (live). When livemode=false AND SecretKeyTest is set,
+// uses the test key so callbacks like charge.Get can read test-mode
+// objects. When livemode=false but SecretKeyTest is empty, falls back
+// to SecretKey — those callbacks will 401, but signature validation
+// already succeeded so the receive log line is still useful.
+//
+// Race note: stripe.Key is a package global; concurrent live + test
+// webhook deliveries can race here. At our webhook volume (single-
+// digit per minute) this is acceptable. Worst-case outcome of a race
+// is one Stripe callback uses the wrong key and gets 401, which the
+// existing error paths log gracefully. A proper fix (per-call
+// backend) is filed as a post-launch task.
+func (c StripeConfig) applyKeyForLivemode(livemode bool) {
+	if !livemode && c.SecretKeyTest != "" {
+		stripe.Key = c.SecretKeyTest
+		return
+	}
 	stripe.Key = c.SecretKey
 }
 
@@ -1040,6 +1076,15 @@ func (h *Handlers) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		"stripe_livemode", event.Livemode,
 	)
 	logger.Info("stripe webhook received")
+
+	// #262 follow-on: swap the package-global stripe.Key to the
+	// right secret BEFORE dispatch so per-handler applyKey() calls
+	// observe the correct value. defer restores the live key so any
+	// concurrent non-webhook code path sees the expected default.
+	// See StripeConfig.applyKeyForLivemode for the race-acceptance
+	// rationale.
+	h.Stripe.applyKeyForLivemode(event.Livemode)
+	defer h.Stripe.applyKey()
 
 	if err := h.dispatchStripeEvent(r.Context(), event, logger); err != nil { //nolint:contextcheck
 		// Logged at the dispatch site; respond 200 anyway so Stripe

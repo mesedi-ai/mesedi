@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stripe/stripe-go/v82"
 )
 
 // signStripePayload mints a valid Stripe-Signature header value for
@@ -121,5 +123,61 @@ func TestConstructStripeEvent_TestSecretUnsetIsSilentFallback(t *testing.T) {
 	}
 	if matched != "" {
 		t.Fatalf("expected empty matched label on failure, got %q", matched)
+	}
+}
+
+// TestApplyKeyForLivemode_LivemodeTrueUsesLiveSecret covers the
+// dominant case: a live-mode event picks the live API key even when a
+// test key is configured. The webhook handler can callback to Stripe
+// for live objects (charges, customers) with the right credential.
+func TestApplyKeyForLivemode_LivemodeTrueUsesLiveSecret(t *testing.T) {
+	prev := stripe.Key
+	defer func() { stripe.Key = prev }()
+
+	cfg := StripeConfig{
+		SecretKey:     "sk_live_unit_test",
+		SecretKeyTest: "sk_test_unit_test",
+	}
+	cfg.applyKeyForLivemode(true)
+	if stripe.Key != "sk_live_unit_test" {
+		t.Fatalf("expected live key, got %q", stripe.Key)
+	}
+}
+
+// TestApplyKeyForLivemode_LivemodeFalseUsesTestSecret covers the
+// #262 follow-on case: a test-mode event with a configured test API
+// key picks the test key so callbacks like charge.Get can read
+// test-mode objects.
+func TestApplyKeyForLivemode_LivemodeFalseUsesTestSecret(t *testing.T) {
+	prev := stripe.Key
+	defer func() { stripe.Key = prev }()
+
+	cfg := StripeConfig{
+		SecretKey:     "sk_live_unit_test",
+		SecretKeyTest: "sk_test_unit_test",
+	}
+	cfg.applyKeyForLivemode(false)
+	if stripe.Key != "sk_test_unit_test" {
+		t.Fatalf("expected test key, got %q", stripe.Key)
+	}
+}
+
+// TestApplyKeyForLivemode_TestSecretUnsetFallsBackToLive covers
+// backwards compatibility: when no test API key is configured, a
+// test-mode event still ships using the live key. Signature
+// validation already succeeded, so the receive log is useful; only
+// the Stripe API callbacks 401 (handled gracefully by existing error
+// paths).
+func TestApplyKeyForLivemode_TestSecretUnsetFallsBackToLive(t *testing.T) {
+	prev := stripe.Key
+	defer func() { stripe.Key = prev }()
+
+	cfg := StripeConfig{
+		SecretKey:     "sk_live_unit_test",
+		SecretKeyTest: "",
+	}
+	cfg.applyKeyForLivemode(false)
+	if stripe.Key != "sk_live_unit_test" {
+		t.Fatalf("expected live key fallback when test key unset, got %q", stripe.Key)
 	}
 }

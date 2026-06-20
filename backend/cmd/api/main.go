@@ -71,6 +71,12 @@ type runtimeConfig struct {
 	// Stripe billing config (#120). Any of these may be empty in
 	// local dev, the billing endpoints respond 503 when missing.
 	StripeSecretKey         string
+	// StripeSecretKeyTest (#262 follow-on): optional test-mode API
+	// secret. Pairs with StripeWebhookSecretTest so test-mode events
+	// not only validate signature but also let handlers call back to
+	// Stripe (e.g., charge.Get to enrich a dispute) without hitting
+	// 401 on a live key against a test-mode object.
+	StripeSecretKeyTest     string
 	StripeWebhookSecret     string
 	// StripeWebhookSecretTest (#262): optional second webhook signing
 	// secret so test-mode events from the Stripe Dashboard validate
@@ -289,6 +295,7 @@ func main() {
 	privateMux := http.NewServeMux()
 	stripeCfg := api.StripeConfig{
 		SecretKey:         cfg.StripeSecretKey,
+		SecretKeyTest:     cfg.StripeSecretKeyTest,
 		WebhookSecret:     cfg.StripeWebhookSecret,
 		WebhookSecretTest: cfg.StripeWebhookSecretTest,
 		TeamPriceID:       cfg.StripeTeamPriceID,
@@ -296,6 +303,7 @@ func main() {
 	logger.Info("stripe billing configured",
 		"configured", stripeCfg.Configured(),
 		"webhook_test_secret_set", cfg.StripeWebhookSecretTest != "",
+		"api_test_key_set", cfg.StripeSecretKeyTest != "",
 	)
 
 	// 5xx alert webhook (#130). When set, the request-log middleware
@@ -781,6 +789,7 @@ func loadConfig() runtimeConfig {
 		DBURLPostgres:       envString("MESEDI_DB_URL_POSTGRES", ""),
 		DashboardURL:        envString("MESEDI_DASHBOARD_URL", ""),
 		StripeSecretKey:         envString("MESEDI_STRIPE_SECRET_KEY", ""),
+		StripeSecretKeyTest:     envString("MESEDI_STRIPE_SECRET_KEY_TEST", ""),
 		StripeWebhookSecret:     envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),
 		StripeWebhookSecretTest: envString("MESEDI_STRIPE_WEBHOOK_SECRET_TEST", ""),
 		// Prefer the new TEAM env var; fall back to the legacy PRO one
