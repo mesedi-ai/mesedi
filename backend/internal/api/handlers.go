@@ -720,33 +720,6 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		h.maybeFireWebhook(r, authProjectID, store.FailureClassCrashes, patch.CrashSignature, isNew, err)
 	}
 
-	// Phase 3b sub-slice 10: time-budget detector. Any terminal execution
-	// whose duration exceeded the threshold gets grouped as loops/time-budget.
-	// Runs AFTER the crash check so a crashed-and-slow execution is
-	// classified as crashes (the idempotency check in the store short-
-	// circuits this call). The threshold is hardcoded at 1s for v0.0.1;
-	// production default will be 60s, configurable per-project later.
-	//
-	// Mesedi #18: subtract accumulated paused time so a HITL wait
-	// does not falsely trip the time budget. effectiveDurationMs
-	// reflects the agent's actual working time (wall-clock minus
-	// all paused intervals). The variable is initialized at the top
-	// of the handler so the value is consistent across every
-	// subsequent detector that needs duration-without-pauses.
-	if isTerminalStatus(patch.Status) && effectiveDurationMs > 1000 {
-		isNew, err := h.Store.GroupTimeBudgetExceedance(r.Context(), executionID, authProjectID, effectiveDurationMs)
-		if err != nil {
-			h.Logger.Warn("time-budget grouping failed (continuing)",
-				"execution_id", executionID,
-				"effective_duration_ms", effectiveDurationMs,
-				"wall_clock_duration_ms", patch.DurationMs,
-				"total_paused_ms", totalPausedMs,
-				"error", err.Error(),
-			)
-		}
-		h.maybeFireWebhook(r, authProjectID, store.FailureClassLoops, store.TimeBudgetSignature(effectiveDurationMs), isNew, err)
-	}
-
 	// Phase 3b sub-slice 11: step-count detector. Any terminal execution
 	// with > 10 events gets grouped as loops/step-count. Runs after the
 	// crash and time-budget checks, so it's the lowest-priority
@@ -1439,6 +1412,44 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					)
 				}
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocitySignature(effectiveCost), isNew, gErr)
+			}
+
+			// Time-budget detector. Catch-all for executions that ran
+			// long without a more specific cause. MOVED HERE from the
+			// top of the chain (where it ran at line 737 with a 1s
+			// threshold) because the original placement greedy-claimed
+			// every execution > 1s and the failure_group_id idempotency
+			// short-circuit then silently suppressed ~7 more specific
+			// detectors (token_waste, semantic_loop, tool_schema_drift,
+			// data_leakage, cascading_failure, prompt_injection,
+			// cost_velocity). Real customer agents that take >1s of
+			// wall-clock are normal — they should be classified by the
+			// specific failure they experienced, not by a generic
+			// "slow" bucket. Time-budget is now the second-to-last
+			// detector in the chain, falling through only when no
+			// specific detector claimed the execution.
+			//
+			// Threshold raised from 1s (v0.0.1 demo placeholder) to
+			// 60s — the production default the original placeholder
+			// comment intended. Real "agent stuck running" alerts
+			// belong in the minute+ range, not the second range.
+			//
+			// Mesedi #18: subtract accumulated paused time so a HITL
+			// wait does not falsely trip the time budget.
+			// effectiveDurationMs reflects the agent's actual working
+			// time (wall-clock minus all paused intervals).
+			if isTerminalStatus(patch.Status) && effectiveDurationMs >= 60_000 {
+				isNew, err := h.Store.GroupTimeBudgetExceedance(r.Context(), executionID, authProjectID, effectiveDurationMs)
+				if err != nil {
+					h.Logger.Warn("time-budget grouping failed (continuing)",
+						"execution_id", executionID,
+						"effective_duration_ms", effectiveDurationMs,
+						"wall_clock_duration_ms", patch.DurationMs,
+						"total_paused_ms", totalPausedMs,
+						"error", err.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassLoops, store.TimeBudgetSignature(effectiveDurationMs), isNew, err)
 			}
 
 			// Drift v2, lexical signal. Char-3-gram cosine distance
