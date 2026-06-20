@@ -49,6 +49,7 @@ from typing import Any, List, Optional, Union
 import httpx
 
 from mesedi._compress import maybe_compress
+from mesedi._truncate import DEFAULT_MAX_PAYLOAD_BYTES, maybe_truncate
 from mesedi.events import Event, Execution
 
 logger = logging.getLogger("mesedi.shipper")
@@ -84,12 +85,19 @@ class EventShipper:
         batch_size: int = 100,
         max_queue: int = 10_000,
         max_retries: int = 3,
+        max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
     ):
         self._http = http
         self._flush_interval = flush_interval_ms / 1000.0
         self._batch_size = batch_size
         self._max_queue = max_queue
         self._max_retries = max_retries
+        # #243 per-event payload cap. Zero or negative disables
+        # truncation entirely; positive caps the serialized byte
+        # count of each event's payload field before it joins the
+        # queue. Applied at submit_event time so the queue stays
+        # bounded even when a customer submits a multi-MB event.
+        self._max_payload_bytes = max_payload_bytes
 
         self._queue: "queue.Queue[_Item]" = queue.Queue(maxsize=max_queue)
         self._stop = threading.Event()
@@ -112,6 +120,14 @@ class EventShipper:
         self._submit(_Item(kind="update_execution", body=execution))
 
     def submit_event(self, event: Event) -> None:
+        # Apply the per-event payload cap (#243) BEFORE the event
+        # enters the queue. Truncating here keeps the queue's memory
+        # footprint bounded even when a customer accidentally
+        # captures a multi-MB blob; downstream retries reuse the
+        # already-trimmed payload instead of re-running truncation
+        # on every attempt.
+        if self._max_payload_bytes > 0:
+            event.payload = maybe_truncate(event.payload, self._max_payload_bytes)
         self._submit(_Item(kind="event", body=event))
 
     def _submit(self, item: _Item) -> None:

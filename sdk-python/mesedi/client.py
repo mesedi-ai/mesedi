@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from mesedi._shipper import EventShipper
+from mesedi._truncate import DEFAULT_MAX_PAYLOAD_BYTES
 from mesedi.events import Event, Execution
 
 DEFAULT_BASE_URL = "https://api.mesedi.ai"
@@ -63,6 +64,7 @@ class MesediClient:
         flush_interval_ms: int = 250,
         batch_size: int = 100,
         max_queue: int = 10_000,
+        max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
     ):
         if not api_key:
             raise ValueError("api_key is required")
@@ -91,6 +93,7 @@ class MesediClient:
             flush_interval_ms=flush_interval_ms,
             batch_size=batch_size,
             max_queue=max_queue,
+            max_payload_bytes=max_payload_bytes,
         )
 
     # ── context-manager sugar ─────────────────────────────────────────
