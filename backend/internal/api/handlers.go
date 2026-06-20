@@ -1941,6 +1941,29 @@ func buildFailureGroupAnalysisPrompt(
 	return sb.String()
 }
 
+// MaxEventPayloadBytes caps the JSON-serialized byte count of a
+// single event's Payload field at the ingest boundary (#243).
+// Defense-in-depth against SDKs that did not (or could not) apply
+// the same cap client-side: pre-v0.4 SDKs, direct curl/custom HTTP
+// integrations, and the rare case of a customer deliberately
+// disabling SDK-side truncation. Matches the SDK default
+// `DEFAULT_MAX_PAYLOAD_BYTES`; the SDK should always reach this
+// before the backend does, but the backend still enforces so a
+// single oversized event from any source cannot bloat the
+// executions / events tables.
+//
+// Per-event, not per-batch: a legitimate 100-event batch with
+// 32 KB payloads each totals ~3.2 MB on the wire, which is fine.
+const MaxEventPayloadBytes = 32 * 1024
+
+// payloadOverCap returns true iff the event's serialized payload
+// exceeds the backend's hard cap. Extracted as a tiny named helper so
+// the unit test can drive it without standing up the full ingest
+// handler.
+func payloadOverCap(evt *events.Event) bool {
+	return len(evt.Payload) > MaxEventPayloadBytes
+}
+
 // HandleIngestEvents accepts a batch of Events. Batching is required ,
 // the SDK buffers events client-side and flushes in groups of ~100, so
 // the ingest path is array-shaped from day one. A single-event POST is
@@ -1971,6 +1994,24 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 				"event_id", evt.EventID,
 				"execution_id", evt.ExecutionID,
 				"event_type", evt.EventType,
+			)
+			continue
+		}
+		// #243 per-event size cap. SDK-side truncation should keep
+		// every payload well under this floor; reaching it implies
+		// an older SDK or a custom integration that bypassed the
+		// truncation helper. We reject the individual event and
+		// continue so a single oversized event in a batch does not
+		// poison the rest of the batch.
+		if payloadOverCap(evt) {
+			rejected++
+			h.Logger.Warn("event rejected: payload exceeds cap",
+				"event_index", i,
+				"event_id", evt.EventID,
+				"execution_id", evt.ExecutionID,
+				"event_type", evt.EventType,
+				"payload_bytes", len(evt.Payload),
+				"max_bytes", MaxEventPayloadBytes,
 			)
 			continue
 		}
