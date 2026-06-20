@@ -70,8 +70,13 @@ type runtimeConfig struct {
 	DashboardURL  string
 	// Stripe billing config (#120). Any of these may be empty in
 	// local dev, the billing endpoints respond 503 when missing.
-	StripeSecretKey     string
-	StripeWebhookSecret string
+	StripeSecretKey         string
+	StripeWebhookSecret     string
+	// StripeWebhookSecretTest (#262): optional second webhook signing
+	// secret so test-mode events from the Stripe Dashboard validate
+	// against the same endpoint as live events. Empty = behavior
+	// identical to the pre-#262 single-secret path.
+	StripeWebhookSecretTest string
 	// StripeTeamPriceID is the Stripe Price ID for the $99/mo Team
 	// plan. Set via MESEDI_STRIPE_TEAM_PRICE_ID. The legacy
 	// MESEDI_STRIPE_PRO_PRICE_ID env var is also honored at startup
@@ -283,11 +288,15 @@ func main() {
 
 	privateMux := http.NewServeMux()
 	stripeCfg := api.StripeConfig{
-		SecretKey:     cfg.StripeSecretKey,
-		WebhookSecret: cfg.StripeWebhookSecret,
-		TeamPriceID:   cfg.StripeTeamPriceID,
+		SecretKey:         cfg.StripeSecretKey,
+		WebhookSecret:     cfg.StripeWebhookSecret,
+		WebhookSecretTest: cfg.StripeWebhookSecretTest,
+		TeamPriceID:       cfg.StripeTeamPriceID,
 	}
-	logger.Info("stripe billing configured", "configured", stripeCfg.Configured())
+	logger.Info("stripe billing configured",
+		"configured", stripeCfg.Configured(),
+		"webhook_test_secret_set", cfg.StripeWebhookSecretTest != "",
+	)
 
 	// 5xx alert webhook (#130). When set, the request-log middleware
 	// POSTs an alert payload to this URL on every 5xx response so the
@@ -771,8 +780,9 @@ func loadConfig() runtimeConfig {
 		DBURL:               envString("MESEDI_DB_URL", defaultDBURL),
 		DBURLPostgres:       envString("MESEDI_DB_URL_POSTGRES", ""),
 		DashboardURL:        envString("MESEDI_DASHBOARD_URL", ""),
-		StripeSecretKey:     envString("MESEDI_STRIPE_SECRET_KEY", ""),
-		StripeWebhookSecret: envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),
+		StripeSecretKey:         envString("MESEDI_STRIPE_SECRET_KEY", ""),
+		StripeWebhookSecret:     envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),
+		StripeWebhookSecretTest: envString("MESEDI_STRIPE_WEBHOOK_SECRET_TEST", ""),
 		// Prefer the new TEAM env var; fall back to the legacy PRO one
 		// so an in-flight deploy with the old secret still works. Once
 		// every deployment has migrated to MESEDI_STRIPE_TEAM_PRICE_ID

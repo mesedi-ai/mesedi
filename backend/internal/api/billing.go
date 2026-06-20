@@ -244,8 +244,18 @@ func normalizeTier(tier string) string {
 // SecretKey: the test/live secret API key. Begins with "sk_test_" or
 // "sk_live_". Set via MESEDI_STRIPE_SECRET_KEY.
 //
-// WebhookSecret: the signing secret for the configured webhook
+// WebhookSecret: the signing secret for the configured LIVE webhook
 // endpoint. Begins with "whsec_". Set via MESEDI_STRIPE_WEBHOOK_SECRET.
+//
+// WebhookSecretTest (#262): optional second signing secret for a
+// test-mode Stripe webhook endpoint. When set, the webhook handler
+// tries the live secret first and falls back to this one on signature
+// failure, so a single endpoint URL can receive both live and
+// test-mode events. Lets us exercise charge.dispute.created and
+// invoice.payment_failed (added by `adf09be`) from the Stripe test
+// dashboard without ever firing real disputes or payment failures.
+// Empty / unset = behavior identical to the pre-#262 single-secret
+// path. Set via MESEDI_STRIPE_WEBHOOK_SECRET_TEST.
 //
 // TeamPriceID: the Stripe Price ID for the $99/mo Team plan. Begins
 // with "price_". Set via MESEDI_STRIPE_TEAM_PRICE_ID; the legacy
@@ -256,16 +266,48 @@ func normalizeTier(tier string) string {
 // If any of the three is empty the billing endpoints respond with
 // 503; this lets the backend run in local-dev without Stripe configured.
 type StripeConfig struct {
-	SecretKey     string
-	WebhookSecret string
-	TeamPriceID   string
+	SecretKey         string
+	WebhookSecret     string
+	WebhookSecretTest string
+	TeamPriceID       string
 }
 
 // Configured returns true iff all three required Stripe values are
 // present. When false, billing endpoints return 503 with a clear
-// message instead of crashing on missing config.
+// message instead of crashing on missing config. WebhookSecretTest is
+// not part of the required set — it stays optional so the live-only
+// deployment path is unchanged.
 func (c StripeConfig) Configured() bool {
 	return c.SecretKey != "" && c.WebhookSecret != "" && c.TeamPriceID != ""
+}
+
+// constructStripeEvent validates a Stripe webhook signature against
+// the live secret first and falls back to the test secret if
+// configured (#262). Returns the parsed event, a short label
+// describing which secret matched (`"live"` or `"test"`) for logging,
+// and any final error. When the test secret is unset, behavior is
+// identical to the pre-#262 single-secret path.
+//
+// Both arms set IgnoreAPIVersionMismatch so a Stripe API version
+// drift between the webhook endpoint and our pinned stripe-go does
+// not reject events on fields we know are stable.
+func constructStripeEvent(body []byte, sig string, liveSecret, testSecret string) (stripe.Event, string, error) {
+	opts := webhook.ConstructEventOptions{IgnoreAPIVersionMismatch: true}
+
+	event, err := webhook.ConstructEventWithOptions(body, sig, liveSecret, opts)
+	if err == nil {
+		return event, "live", nil
+	}
+	if testSecret == "" {
+		return event, "", err
+	}
+	event, terr := webhook.ConstructEventWithOptions(body, sig, testSecret, opts)
+	if terr == nil {
+		return event, "test", nil
+	}
+	// Both failed; surface the LIVE error as canonical so existing log
+	// scraping tooling sees the same message shape it did pre-#262.
+	return event, "", err
 }
 
 // applyKey sets the package-global stripe.Key once per request from
@@ -972,14 +1014,16 @@ func (h *Handlers) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use ConstructEventWithOptions with IgnoreAPIVersionMismatch so a
+	// Try LIVE secret first, then fall back to TEST secret if
+	// configured (#262). The two-step path lets a single endpoint URL
+	// receive both live and test-mode events from Stripe; live
+	// traffic dominates so we pay the second signature check only
+	// for the rarer test events. Uses IgnoreAPIVersionMismatch so a
 	// newer Stripe API version on the webhook endpoint (e.g. dahlia)
 	// doesn't reject events when stripe-go is pinned to an older one
 	// (e.g. basil). The fields we read (id, type, data.object) are
 	// stable across these versions.
-	event, err := webhook.ConstructEventWithOptions(body, sig, h.Stripe.WebhookSecret, webhook.ConstructEventOptions{
-		IgnoreAPIVersionMismatch: true,
-	})
+	event, matched, err := constructStripeEvent(body, sig, h.Stripe.WebhookSecret, h.Stripe.WebhookSecretTest)
 	if err != nil {
 		// Invalid signature is the normal case for misconfigured
 		// secrets or replay attempts; return 400 (not 401, which
@@ -989,7 +1033,12 @@ func (h *Handlers) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger := h.Logger.With("stripe_event_id", event.ID, "stripe_event_type", string(event.Type))
+	logger := h.Logger.With(
+		"stripe_event_id", event.ID,
+		"stripe_event_type", string(event.Type),
+		"secret_matched", matched,
+		"stripe_livemode", event.Livemode,
+	)
 	logger.Info("stripe webhook received")
 
 	if err := h.dispatchStripeEvent(r.Context(), event, logger); err != nil { //nolint:contextcheck
