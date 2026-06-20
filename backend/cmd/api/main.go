@@ -568,6 +568,13 @@ func main() {
 	// should still be able to click Sign Out without a 401.
 	mux.Handle("POST /auth/logout", signupHandler)
 	mux.Handle("OPTIONS /auth/logout", signupHandler)
+	// #252 — server-to-server 2FA verify. Same shape as /signin:
+	// shared secret in X-Mesedi-Signin-Secret, called by the
+	// dashboard Worker after the customer enters their authenticator
+	// code on /login/2fa. Lives on signupHandler so it bypasses the
+	// bearer-token auth chain (the Worker has no customer key here).
+	mux.Handle("POST /auth/2fa-verify", signupHandler)
+	mux.Handle("OPTIONS /auth/2fa-verify", signupHandler)
 	// #232 email-verification confirm + resend. Public from the HTTP
 	// layer (the customer may not be signed in when they click the
 	// link in their welcome email). Authenticity is provided by the
@@ -662,6 +669,18 @@ func main() {
 	// Task #262, per-project data retention configuration.
 	mux.Handle("GET /me/retention", privateHandler)
 	mux.Handle("PUT /me/retention", privateHandler)
+	// #252 — customer-facing 2FA / TOTP. All five live on
+	// privateHandler because they manage the calling customer's own
+	// authenticator-app enrollment and need the session cookie.
+	// Without these explicit forwards the routes registered on the
+	// privateMux inside RegisterRoutes would 404 at the outer mux
+	// before ever reaching the auth chain (same pattern as the
+	// billing-payment-method bug noted at #187).
+	mux.Handle("GET /me/2fa/status", privateHandler)
+	mux.Handle("POST /me/2fa/setup-init", privateHandler)
+	mux.Handle("POST /me/2fa/setup-verify", privateHandler)
+	mux.Handle("POST /me/2fa/disable", privateHandler)
+	mux.Handle("POST /me/2fa/regenerate-codes", privateHandler)
 	// Task #263, Team / multi-seat. Admin endpoints under
 	// /me/organization/* go through privateHandler (project API key
 	// auth + admin-role guard inside the handler). Public accept
