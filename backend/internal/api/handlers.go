@@ -260,6 +260,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Task #276, per-project time_budget detector threshold (ms).
 	mux.HandleFunc("GET /me/time-budget-config", h.HandleGetTimeBudgetConfig)
 	mux.HandleFunc("PUT /me/time-budget-config", h.HandleSetTimeBudgetConfig)
+	mux.HandleFunc("GET /me/cost-velocity-config", h.HandleGetCostVelocityConfig)
+	mux.HandleFunc("PUT /me/cost-velocity-config", h.HandleSetCostVelocityConfig)
 	// Task #270.a, per-project tool_schema_drift return_value byte cap.
 	mux.HandleFunc("GET /me/tool-return-value-config", h.HandleGetToolReturnValueConfig)
 	mux.HandleFunc("PUT /me/tool-return-value-config", h.HandleSetToolReturnValueConfig)
@@ -1490,20 +1492,54 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			}
 
 			// Sub-slice 16: cost-velocity detector. Any execution whose
-			// resolved cost exceeds the v0.0.1 absolute threshold gets
+			// resolved cost exceeds the per-project threshold gets
 			// grouped as cost_velocity with a cost-bucketed signature.
-			// Production version (Phase 5+) compares against a project
-			// rolling baseline rather than an absolute value.
+			//
+			// Migration 043: threshold is per-project. Default 1.00 USD
+			// (raised from the broken $0.001 v0.0.1 floor that fired
+			// on every real execution). Cost-sensitive customers can
+			// lower it (e.g. $0.10); batch customers can raise it.
+			// Falls back to the package default on store error so a
+			// transient DB blip never silences the detector, with a
+			// durable audit_event so persistent failures surface in
+			// the dashboard config-fallback chip.
+			//
+			// Wave 0.2 will add a parallel rate-based ($/min) detector
+			// alongside this absolute-magnitude one — both can fire,
+			// they answer different questions (single expensive call
+			// vs sustained burn rate).
 			if effectiveCost > 0 {
-				isNew, gErr := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost)
-				if gErr != nil {
-					h.Logger.Warn("cost-velocity grouping failed (continuing)",
+				costThresholdUSD := store.DefaultCostVelocityThresholdUSD
+				if cvUSD, cvErr := h.Store.GetProjectCostVelocityThresholdUSD(r.Context(), authProjectID); cvErr == nil {
+					costThresholdUSD = cvUSD
+				} else {
+					h.Logger.Warn("get cost_velocity_threshold_usd failed; using default",
 						"execution_id", executionID,
-						"cost_usd", effectiveCost,
-						"error", gErr.Error(),
+						"project_id", authProjectID,
+						"error", cvErr.Error(),
+					)
+					h.recordAuditEventForProject(
+						r.Context(),
+						authProjectID, "system",
+						"config_fallback", "project_config", "cost_velocity_threshold_usd",
+						map[string]any{
+							"error":          cvErr.Error(),
+							"fallback_value": costThresholdUSD,
+						},
 					)
 				}
-				h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocitySignature(effectiveCost), isNew, gErr)
+				if effectiveCost >= costThresholdUSD {
+					isNew, gErr := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost)
+					if gErr != nil {
+						h.Logger.Warn("cost-velocity grouping failed (continuing)",
+							"execution_id", executionID,
+							"cost_usd", effectiveCost,
+							"threshold_usd", costThresholdUSD,
+							"error", gErr.Error(),
+						)
+					}
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocitySignature(effectiveCost), isNew, gErr)
+				}
 			}
 
 			// Time-budget detector. Catch-all for executions that ran
@@ -3250,6 +3286,106 @@ func (h *Handlers) HandleSetTimeBudgetConfig(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"threshold_ms": body.ThresholdMs,
+	})
+}
+
+// HandleGetCostVelocityConfig returns the per-project cost_velocity
+// detector threshold (migration 043) in USD. Default 1.00 mirrors
+// the post-Wave-0 sensible default, raised from the broken v0.0.1
+// hardcoded $0.001 that fired on every real execution. Cost-sensitive
+// customers often lower it; batch / tolerant customers often raise it.
+//
+// Response shape matches HandleGetTimeBudgetConfig /
+// HandleGetProviderIncidentConfig so the dashboard can use one
+// shared pattern for per-project threshold tiles.
+//
+// Response:
+//
+//	{
+//	  "project_id": "...",
+//	  "threshold_usd": 1.00
+//	}
+func (h *Handlers) HandleGetCostVelocityConfig(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	n, err := h.Store.GetProjectCostVelocityThresholdUSD(r.Context(), authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("get cost_velocity config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load cost_velocity config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id":    authProjectID,
+		"threshold_usd": n,
+	})
+}
+
+// HandleSetCostVelocityConfig updates the per-project cost_velocity
+// threshold. Body:
+//
+//	{"threshold_usd": 0.50}
+//
+// Validation: threshold_usd must be in [0.01, 10000.00]. The floor
+// prevents fires-on-every-execution storage abuse (a customer
+// setting threshold near zero would create a failure_group for
+// every execution). The ceiling prevents typo / float overflow.
+//
+// NOT tier-capped: cost_velocity threshold is the customer's alarm
+// sensitivity, not a Mesedi-side cost vector. Same reasoning as
+// provider_incident_min_tenants (see tier_caps.go).
+func (h *Handlers) HandleSetCostVelocityConfig(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	var body struct {
+		ThresholdUSD float64 `json:"threshold_usd"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	const (
+		minThresholdUSD = 0.01
+		maxThresholdUSD = 10_000.00
+	)
+	if body.ThresholdUSD < minThresholdUSD {
+		writeError(w, http.StatusBadRequest,
+			"threshold_usd must be >= 0.01 (lower values would fire on every execution and create storage abuse)")
+		return
+	}
+	if body.ThresholdUSD > maxThresholdUSD {
+		writeError(w, http.StatusBadRequest,
+			"threshold_usd must be <= 10000.00")
+		return
+	}
+	if err := h.Store.SetProjectCostVelocityThresholdUSD(
+		r.Context(), authProjectID, body.ThresholdUSD,
+	); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("set cost_velocity config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not update cost_velocity config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"threshold_usd": body.ThresholdUSD,
 	})
 }
 

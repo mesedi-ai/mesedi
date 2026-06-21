@@ -1250,6 +1250,24 @@ type Store interface {
 	// validates >= 1 before invoking; store accepts what's passed.
 	SetProjectTimeBudgetMs(ctx context.Context, projectID string, thresholdMs int) error
 
+	// GetProjectCostVelocityThresholdUSD returns the per-project
+	// cost_velocity detector threshold in USD. Migration 043 added
+	// the column with default 1.00 (one dollar per execution),
+	// raised from the broken v0.0.1 hardcoded floor of $0.001 that
+	// fired on every real agent call. Cost-sensitive customers can
+	// lower it (e.g. $0.10); batch-processing customers can raise
+	// it (e.g. $100). The handler enforces a global floor of $0.01
+	// to prevent fires-on-every-execution abuse and a ceiling of
+	// $10,000 to prevent typo / overflow. NOT tier-capped — alarm
+	// sensitivity is not a Mesedi-side cost vector (see tier_caps.go
+	// for the principle and provider_incident_min_tenants for the
+	// precedent).
+	GetProjectCostVelocityThresholdUSD(ctx context.Context, projectID string) (float64, error)
+	// SetProjectCostVelocityThresholdUSD writes the threshold in
+	// USD. Handler validates [0.01, 10000.00] before invoking;
+	// store accepts what's passed.
+	SetProjectCostVelocityThresholdUSD(ctx context.Context, projectID string, thresholdUSD float64) error
+
 	// GetProjectToolReturnValueMaxBytes returns the per-project cap
 	// on tool_call return_value size (bytes) for the
 	// tool_schema_drift detector's fingerprint computation.

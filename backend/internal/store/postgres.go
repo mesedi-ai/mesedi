@@ -2788,10 +2788,11 @@ func (s *PostgresStore) GroupPromptInjection(ctx context.Context, executionID, p
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassInjection, patternName)
 }
 
+// GroupCostVelocity is the Postgres twin of the SQLite method of the
+// same name. Caller is responsible for the per-project threshold
+// check (see HandleUpdateExecution + GetProjectCostVelocityThresholdUSD);
+// the store layer just writes the cluster.
 func (s *PostgresStore) GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64) (isNew bool, err error) {
-	if costUSD < costVelocityThresholdUSD {
-		return false, nil
-	}
 	signature := CostVelocitySignature(costUSD)
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCostVelocity, signature)
 }

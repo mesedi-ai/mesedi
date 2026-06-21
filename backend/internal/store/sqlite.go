@@ -3592,16 +3592,23 @@ func (s *SQLiteStore) GroupPromptInjection(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassInjection, patternName)
 }
 
-// costVelocityThresholdUSD is the absolute cost threshold at which an
-// execution is flagged as cost_velocity. Artificially low for v0.0.1
-// demo visibility, production would either raise this OR move to a
-// baseline-relative detector (Phase 5+).
-const costVelocityThresholdUSD = 0.001
+// DefaultCostVelocityThresholdUSD is the fallback threshold used when
+// the handler cannot read the per-project value (migration 043 +
+// HandleSetCostVelocityConfig). $1.00 captures "this execution was
+// unusually expensive" without flooding on routine LLM calls (median
+// real-world cost sits in the $0.001 - $0.10 range). Was 0.001 in
+// v0.0.1 with a self-confessed "production would either raise this
+// OR move to baseline-relative (Phase 5+)" comment; Phase 5+ never
+// shipped, the floor remained, and every real execution tripped the
+// detector. Exported so handlers + tests can reference the single
+// source of truth.
+const DefaultCostVelocityThresholdUSD = 1.00
 
 // CostVelocitySignature buckets execution cost into order-of-magnitude
-// signatures so high-cost runs cluster sensibly. The lowest bucket
-// (cost_$0.001+) matches the threshold; anything cheaper is filtered
-// upstream in the handler.
+// signatures so high-cost runs cluster sensibly. Independent of the
+// per-project threshold: a customer who lowers their threshold to
+// $0.05 will see "cost_$0.01+" signatures fire; a customer at the
+// default $1.00 will see "cost_$1+" and "cost_$10+" most often.
 func CostVelocitySignature(costUSD float64) string {
 	switch {
 	case costUSD < 0.01:
@@ -3622,14 +3629,17 @@ func CostVelocitySignature(costUSD float64) string {
 // idempotency contract, if the execution is already in a higher-
 // priority group (crash, loop, tool/validator failure), this is a
 // no-op.
+//
+// The caller (HandleUpdateExecution) is responsible for the
+// threshold check using the per-project value from
+// GetProjectCostVelocityThresholdUSD. The store layer no longer
+// enforces a threshold — the policy lives in the handler, the
+// storage in the store. Mirrors the time_budget pattern.
 func (s *SQLiteStore) GroupCostVelocity(
 	ctx context.Context,
 	executionID, projectID string,
 	costUSD float64,
 ) (isNew bool, err error) {
-	if costUSD < costVelocityThresholdUSD {
-		return false, nil
-	}
 	signature := CostVelocitySignature(costUSD)
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassCostVelocity, signature)
 }
