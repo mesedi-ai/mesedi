@@ -252,6 +252,11 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Task #262, per-project data retention.
 	mux.HandleFunc("GET /me/retention", h.HandleGetRetention)
 	mux.HandleFunc("PUT /me/retention", h.HandleSetRetention)
+	// Task #271 migration 040, per-project provider_incident
+	// detector threshold (default 2, single-tenant customers
+	// typically set to 1).
+	mux.HandleFunc("GET /me/provider-incident-config", h.HandleGetProviderIncidentConfig)
+	mux.HandleFunc("PUT /me/provider-incident-config", h.HandleSetProviderIncidentConfig)
 	// Task #263, Team / multi-seat. Admin-gated endpoints for
 	// managing the org + members + invites under the auth project's
 	// tenant_id. resolveAdminContext() guards each handler.
@@ -1186,7 +1191,35 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				if p.Provider == "" || p.ErrorClass == "" {
 					continue
 				}
+				// Drop customer-side error classes
+				// (invalid_api_key, client_error, unknown) from
+				// provider_incident aggregation. They get stored
+				// on the llm_call event for observability but a
+				// rate of bad-key errors across tenants is not a
+				// provider outage — it's customer key rotation
+				// failures. The PROVIDER_SIDE_ERROR_CLASSES set
+				// matches what the SDK ships in mesedi/errors.py
+				// and src/errors.ts.
+				if !detectors.IsProviderSideErrorClass(p.ErrorClass) {
+					continue
+				}
 				seen[[2]string{p.Provider, p.ErrorClass}] = struct{}{}
+			}
+			// Per-project threshold (#270/#271 migration 040).
+			// Default 2 matches the historical hardcoded constant;
+			// single-tenant customers set this to 1 in their
+			// project settings so any provider error from a single
+			// agent fires the detector.
+			threshold, tErr := h.Store.GetProjectProviderIncidentMinTenants(
+				r.Context(), authProjectID,
+			)
+			if tErr != nil {
+				h.Logger.Warn("get provider_incident_min_tenants failed; using default",
+					"execution_id", executionID,
+					"project_id", authProjectID,
+					"error", tErr.Error(),
+				)
+				threshold = detectors.MinTenantsForProviderIncident
 			}
 			// Look back 15 minutes — long enough to span a
 			// rolling provider blip, short enough to keep the
@@ -1209,7 +1242,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					continue
 				}
 				if sig, fired := detectors.DetectProviderIncident(
-					provider, errClass, count, detectors.MinTenantsForProviderIncident,
+					provider, errClass, count, threshold,
 				); fired {
 					isNew, gErr := h.Store.GroupProviderIncident(r.Context(), executionID, authProjectID, sig)
 					if gErr != nil {
@@ -2946,6 +2979,87 @@ func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
 		"tier":             p.Tier,
 		"max_days":         maxDays,
 		"allow_indefinite": allowIndefinite,
+	})
+}
+
+// HandleGetProviderIncidentConfig returns the per-project
+// provider_incident detector configuration (migration 040). Default
+// 2 mirrors the historical hardcoded constant. Single-tenant
+// customers should set min_tenants to 1 so any provider error
+// fires the detector.
+//
+// Response:
+//
+//	{
+//	  "ok": true,
+//	  "min_tenants": 2
+//	}
+func (h *Handlers) HandleGetProviderIncidentConfig(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	n, err := h.Store.GetProjectProviderIncidentMinTenants(r.Context(), authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("get provider_incident config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load provider_incident config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":          true,
+		"min_tenants": n,
+	})
+}
+
+// HandleSetProviderIncidentConfig updates the per-project
+// provider_incident threshold. Body:
+//
+//	{"min_tenants": 1}
+//
+// Validation: min_tenants must be >= 1. Higher values are accepted
+// without an upper cap — a 1000-tenant customer might want a
+// threshold of 10 before a single provider blip pages on-call.
+func (h *Handlers) HandleSetProviderIncidentConfig(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	var body struct {
+		MinTenants int `json:"min_tenants"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.MinTenants < 1 {
+		writeError(w, http.StatusBadRequest, "min_tenants must be >= 1")
+		return
+	}
+	if err := h.Store.SetProjectProviderIncidentMinTenants(
+		r.Context(), authProjectID, body.MinTenants,
+	); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("set provider_incident config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not update provider_incident config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":          true,
+		"min_tenants": body.MinTenants,
 	})
 }
 

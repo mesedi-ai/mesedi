@@ -1226,6 +1226,19 @@ type Store interface {
 	// nightly retention scheduler deletes executions older than that
 	// many days; FK CASCADE constraints handle events,
 	// failure_groups, and webhook_deliveries.
+	// GetProjectProviderIncidentMinTenants returns the per-project
+	// minimum-tenants threshold for the provider_incident detector.
+	// Migration 040 added the column with default 2 (the historical
+	// hardcoded constant), so projects predating the migration also
+	// resolve cleanly through this read. A single-tenant customer
+	// can set this to 1 so any provider error from a single agent
+	// fires the detector.
+	GetProjectProviderIncidentMinTenants(ctx context.Context, projectID string) (int, error)
+	// SetProjectProviderIncidentMinTenants writes the threshold.
+	// Handler validates >= 1 before invoking; store accepts what's
+	// passed.
+	SetProjectProviderIncidentMinTenants(ctx context.Context, projectID string, minTenants int) error
+
 	GetProjectRetentionDays(ctx context.Context, projectID string) (*int, error)
 	// SetProjectRetentionDays writes nil for indefinite or a positive
 	// int for a finite window. Handlers validate the value before

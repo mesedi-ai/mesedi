@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 
 import pytest
+import requests
 
 from conftest import Backend, await_failure_group
 
@@ -480,17 +481,93 @@ def test_time_budget(backend: Backend, configured_sdk):
     pass
 
 
-@pytest.mark.skip(
-    reason=(
-        "provider_incident reads llm_call events for provider-side "
-        "5xx errors. Anthropic does not return 5xx on demand, so "
-        "this needs direct mesedi.MesediClient.submit_event "
-        "injection of a synthetic llm_call event with an error "
-        "payload. Pending a dedicated SDK-injection helper."
-    )
-)
 def test_provider_incident(backend: Backend, configured_sdk):
-    pass
+    """End-to-end test for the provider_incident detector against
+    the v0.5.0 SDK.
+
+    Setup:
+        - Lower the project's provider_incident_min_tenants to 1
+          via the new PUT /me/provider-incident-config endpoint, so
+          a single tenant's error trips the detector. (Default 2
+          would require a second tenant; the integration suite
+          runs single-tenant.)
+        - Instrument a fake Messages class whose create() raises an
+          exception whose class name matches Anthropic's
+          RateLimitError. The SDK's classify_anthropic_exception()
+          keys off type(exc).__name__, so the fake exception maps
+          to the canonical error_class="rate_limited" without
+          needing the anthropic package installed.
+
+    Assertion:
+        - failure_group with class=provider_incident and signature
+          provider_incident:anthropic:rate_limited appears within
+          the timeout.
+
+    This exercises the full real path: customer code calls the
+    Anthropic client, SDK catches the exception, classifies it,
+    ships the llm_call event with provider/error_class/http_status
+    fields, backend reads those fields, filters to provider-side
+    classes, counts distinct tenants, fires the detector when the
+    count meets the per-project threshold.
+    """
+    mesedi = configured_sdk
+
+    # Set per-project threshold to 1 so a single tenant fires.
+    resp = requests.put(
+        f"{backend.base_url}/me/provider-incident-config",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"min_tenants": 1},
+        timeout=5.0,
+    )
+    assert resp.status_code == 200, (
+        f"failed to set provider_incident_min_tenants: "
+        f"status={resp.status_code} body={resp.text}"
+    )
+
+    # Fake Anthropic Messages class whose create() always raises a
+    # fake RateLimitError. We construct the exception class
+    # dynamically so its __name__ matches what
+    # classify_anthropic_exception() looks up in its map. Also
+    # attach a status_code attribute so extract_http_status returns
+    # 429, exercising the http_status capture path.
+    class _FakeMessages:
+        def create(self, **kwargs):
+            err_cls = type("RateLimitError", (Exception,), {})
+            exc = err_cls("simulated rate limit (integration test)")
+            exc.status_code = 429
+            raise exc
+
+    # Instrument the fake class so SDK error-capture runs on it.
+    # instrument_anthropic is idempotent per class, so this is
+    # safe to call alongside the session-level instrumentation of
+    # the real anthropic.Messages.
+    mesedi.instrument_anthropic(messages_class=_FakeMessages)
+    fake_client = _FakeMessages()
+
+    @mesedi.wrap
+    def rate_limited_agent():
+        try:
+            fake_client.create(
+                model="claude-haiku-4-5",
+                max_tokens=16,
+                messages=[{"role": "user", "content": "hello"}],
+            )
+        except Exception:
+            # SDK has already recorded the failure event in its
+            # except handler; the agent's catch keeps the
+            # execution alive so it terminates with status=completed
+            # rather than crashed (provider_incident is independent
+            # of crash detection).
+            pass
+
+    rate_limited_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="provider_incident",
+        signature_prefix="provider_incident:anthropic:rate_limited",
+    )
 
 
 @pytest.mark.skip(

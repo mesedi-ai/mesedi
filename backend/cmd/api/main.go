@@ -669,6 +669,9 @@ func main() {
 	// Task #262, per-project data retention configuration.
 	mux.Handle("GET /me/retention", privateHandler)
 	mux.Handle("PUT /me/retention", privateHandler)
+	// Task #271, per-project provider_incident detector threshold.
+	mux.Handle("GET /me/provider-incident-config", privateHandler)
+	mux.Handle("PUT /me/provider-incident-config", privateHandler)
 	// #252 — customer-facing 2FA / TOTP. All five live on
 	// privateHandler because they manage the calling customer's own
 	// authenticator-app enrollment and need the session cookie.
