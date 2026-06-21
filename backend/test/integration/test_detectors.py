@@ -204,18 +204,350 @@ def test_data_leakage(backend: Backend, configured_sdk):
 
 @pytest.mark.skip(
     reason=(
-        "DetectSchemaDrift requires minHistoryCalls=10 historical "
-        "successful calls of the same tool on the project before it "
-        "can fire (it needs a stable majority shape to compare "
-        "against). A real test must seed 10+ baseline calls in one "
-        "or more prior executions, then make a single drift call in "
-        "the test execution. TODO: rewrite as a two-phase scenario."
+        "tool_schema_drift is structurally unreachable via the real "
+        "SDK as currently shipped. DetectSchemaDrift reads the "
+        "`return_value` field of tool_call payloads and runs "
+        "ReturnShapeHash on it (json.Unmarshal + structural fingerprint). "
+        "The SDK's @mesedi.tool decorator ships `result_summary` = "
+        "repr(result) truncated to a string — wrong field name AND "
+        "the value is a Python repr string, not valid JSON, so "
+        "ReturnShapeHash would return empty even if the field name "
+        "matched. SDK needs to ship the JSON-marshaled return value "
+        "(with truncation) under `return_value` before this test "
+        "can be re-enabled. Same class of bug as the token_waste / "
+        "semantic_loop / data_leakage field mismatches the suite "
+        "already caught; tracked as a follow-up SDK release."
     )
 )
 def test_tool_schema_drift(backend: Backend, configured_sdk):
-    """Placeholder for the tool_schema_drift detector. Currently
-    skipped — see skip reason. The detector code is fine; the test
-    needs a more realistic two-phase setup."""
+    """Two-phase scaffold preserved for when the SDK ships
+    structured return values. See skip reason for the SDK gap."""
+    mesedi = configured_sdk
+    return_shape = ["A"]
+
+    @mesedi.tool
+    def fetch_item(item_id: str):
+        if return_shape[0] == "A":
+            return {"id": item_id, "name": "widget", "price": 1.99}
+        return {
+            "item_id": item_id,
+            "label": "widget",
+            "price_cents": 199,
+            "currency": "USD",
+        }
+
+    @mesedi.wrap
+    def baseline_agent():
+        for i in range(10):
+            fetch_item(f"baseline-{i}")
+
+    @mesedi.wrap
+    def drifting_agent():
+        fetch_item("drift-1")
+
+    baseline_agent()
+    mesedi.flush(timeout=5.0)
+
+    return_shape[0] = "B"
+    drifting_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(backend, failure_class="tool_schema_drift")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# step_count
+# ──────────────────────────────────────────────────────────────────────
+
+def test_step_count(backend: Backend, configured_sdk):
+    """Step-count detector fires when an execution has more than 10
+    events. Eleven tool calls trips it. Signature is loops /
+    step_count_<bucketed-count>."""
+    mesedi = configured_sdk
+
+    @mesedi.tool
+    def noop_step():
+        return {"ok": True}
+
+    @mesedi.wrap
+    def step_heavy_agent():
+        for _ in range(11):
+            noop_step()
+
+    step_heavy_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="loops",
+        signature_prefix="step_count_",
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# similar_call_loop
+# ──────────────────────────────────────────────────────────────────────
+
+@needs_anthropic
+def test_similar_call_loop(backend: Backend, configured_sdk):
+    """Three similar (but not identical) LLM prompts in one execution
+    → similar_call_loop fires. The trigram-based detector clusters
+    near-duplicates that token_waste's exact-prefix hash misses."""
+    from anthropic import Anthropic
+
+    mesedi = configured_sdk
+    client = Anthropic()
+    # Three prompts that share most surface text but differ in a
+    # word or two. Same semantic intent, three near-duplicates.
+    prompts = [
+        "Name one color that starts with the letter B.",
+        "Name a color that begins with the letter B.",
+        "Could you name a color starting with the letter B?",
+    ]
+
+    @mesedi.wrap
+    def near_dup_agent():
+        for p in prompts:
+            client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=16,
+                messages=[{"role": "user", "content": p}],
+            )
+
+    near_dup_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="loops",
+        signature_prefix="similar_call_",
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# drift (lexical)
+# ──────────────────────────────────────────────────────────────────────
+
+@needs_anthropic
+def test_lexical_drift(backend: Backend, configured_sdk):
+    """Two-phase test for DetectLexicalDrift. The detector compares
+    the current execution's user_messages to the project's recent
+    history (last 7 days) via char-3-gram cosine distance. Phase 1
+    seeds a baseline of many similar prompts; phase 2 makes one
+    execution with a wildly different prompt and asserts drift
+    fires.
+
+    Per the production-observed signature, the threshold is 0.70 —
+    cosine distance ≥ 0.70 trips lexical_drift_0.70+."""
+    from anthropic import Anthropic
+
+    mesedi = configured_sdk
+    client = Anthropic()
+
+    # Phase 1: seed 5 baseline executions, each making 4 customer-
+    # support-themed LLM calls. The detector needs enough historical
+    # messages to compute a meaningful distance; 20 messages is
+    # comfortably above any reasonable floor.
+    support_prompts = [
+        "Summarize this customer ticket about a billing dispute.",
+        "Classify the urgency of a support ticket about login failure.",
+        "Draft a polite refund response for an upset enterprise customer.",
+        "Summarize a support ticket about feature requests.",
+    ]
+
+    @mesedi.wrap
+    def baseline_support_agent():
+        for p in support_prompts:
+            client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=16,
+                messages=[{"role": "user", "content": p}],
+            )
+
+    for _ in range(5):
+        baseline_support_agent()
+    mesedi.flush(timeout=5.0)
+
+    # Phase 2: a single execution with a wildly different prompt
+    # (lyrics from a song instead of a support ticket). Char-3-gram
+    # distance from the baseline should land well above 0.70.
+    @mesedi.wrap
+    def drift_agent():
+        client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=16,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Twinkle twinkle little star how I wonder "
+                        "what you are up above the world so high "
+                        "like a diamond in the sky."
+                    ),
+                }
+            ],
+        )
+
+    drift_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(backend, failure_class="drift", signature_prefix="lexical_drift_")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# cost_velocity
+# ──────────────────────────────────────────────────────────────────────
+
+@needs_anthropic
+def test_cost_velocity(backend: Backend, configured_sdk):
+    """Drives an execution's estimated cost above the velocity
+    threshold by making many real LLM calls. Production threshold
+    (per the observed cost_$0.001+ signature) is one-tenth of a cent
+    per execution; 10 small claude-haiku calls comfortably crosses
+    it."""
+    from anthropic import Anthropic
+
+    mesedi = configured_sdk
+    client = Anthropic()
+
+    @mesedi.wrap
+    def cost_heavy_agent():
+        for i in range(10):
+            client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=32,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"In one sentence, name an animal variant {i}.",
+                    }
+                ],
+            )
+
+    cost_heavy_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(backend, failure_class="cost_velocity")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Detectors that need richer test infrastructure than the SDK alone.
+# These are tracked here as documented skips so the gap is visible
+# when reading the suite. Each one needs either direct SDK event
+# injection (provider_incident, infrastructure_throttled,
+# hitl_timeout, hitl_rejection_spike) or multi-agent / RAG / very
+# large prompt scaffolding (cascading_failure, coordination_deadlock,
+# grounding_failure, context_overflow, time_budget). All are real
+# detectors firing in production; the gap is on the test side, not
+# the detector side.
+# ──────────────────────────────────────────────────────────────────────
+
+@pytest.mark.skip(
+    reason=(
+        "cascading_failure requires a parent execution with a "
+        "handoff event whose child execution reaches a failure "
+        "terminal status. Needs SDK multi-agent handoff support + a "
+        "child execution that crashes. Pending integration scenario."
+    )
+)
+def test_cascading_failure(backend: Backend, configured_sdk):
+    pass
+
+
+@pytest.mark.skip(
+    reason=(
+        "context_overflow requires an llm_call with cumulative "
+        "input_tokens >= 90 percent of the model's context window. "
+        "For claude-haiku-4-5 that's ~180k tokens, costing roughly "
+        "USD 0.18 per test run. Too expensive for the default "
+        "suite; pending an opt-in env flag or a stub model with a "
+        "deliberately tiny context window."
+    )
+)
+def test_context_overflow(backend: Backend, configured_sdk):
+    pass
+
+
+@pytest.mark.skip(
+    reason=(
+        "time_budget fires on terminal executions whose duration >= "
+        "60s (post v0.0.1 threshold fix). Holding the suite for 60s "
+        "per run is impractical. Pending an opt-in env flag for "
+        "slow-test mode."
+    )
+)
+def test_time_budget(backend: Backend, configured_sdk):
+    pass
+
+
+@pytest.mark.skip(
+    reason=(
+        "provider_incident reads llm_call events for provider-side "
+        "5xx errors. Anthropic does not return 5xx on demand, so "
+        "this needs direct mesedi.MesediClient.submit_event "
+        "injection of a synthetic llm_call event with an error "
+        "payload. Pending a dedicated SDK-injection helper."
+    )
+)
+def test_provider_incident(backend: Backend, configured_sdk):
+    pass
+
+
+@pytest.mark.skip(
+    reason=(
+        "infrastructure_throttled reads infrastructure_event payloads "
+        "for 429 / circuit-open signals. Needs SDK-injection of "
+        "those events. Pending."
+    )
+)
+def test_infrastructure_throttled(backend: Backend, configured_sdk):
+    pass
+
+
+@pytest.mark.skip(
+    reason=(
+        "hitl_timeout reads human_intervention event payloads. The "
+        "public SDK does not first-class expose HITL event emission "
+        "in a way the test harness can easily drive. Needs SDK-"
+        "injection or an SDK HITL helper. Pending."
+    )
+)
+def test_hitl_timeout(backend: Backend, configured_sdk):
+    pass
+
+
+@pytest.mark.skip(
+    reason=(
+        "hitl_rejection_spike reads aggregated human_intervention "
+        "rejection events. Same SDK limitation as hitl_timeout. "
+        "Pending SDK-injection helper."
+    )
+)
+def test_hitl_rejection_spike(backend: Backend, configured_sdk):
+    pass
+
+
+@pytest.mark.skip(
+    reason=(
+        "coordination_deadlock reads multi-agent handoff edges and "
+        "looks for circular waits. Needs a multi-agent topology "
+        "scaffold the test harness does not yet have. Pending."
+    )
+)
+def test_coordination_deadlock(backend: Backend, configured_sdk):
+    pass
+
+
+@pytest.mark.skip(
+    reason=(
+        "grounding_failure aggregates validator_result events that "
+        "compare an agent's answer against retrieved context. Needs "
+        "a RAG-shaped scenario (retrieval event + answer event + "
+        "validator event) the test harness does not yet build. "
+        "Pending."
+    )
+)
+def test_grounding_failure(backend: Backend, configured_sdk):
     pass
 
 
