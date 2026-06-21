@@ -25,7 +25,11 @@
 
 import { getClient } from "./client.js";
 import { currentExecutionContext, newEventId } from "./context.js";
-import { classifyAnthropicException, extractHttpStatus } from "./errors.js";
+import {
+  classifyAnthropicException,
+  extractHttpStatus,
+  extractRetryAfter,
+} from "./errors.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
 
 const MAX_SYSTEM = 1000;
@@ -215,6 +219,14 @@ export async function instrumentAnthropic(
       const httpStatus = extractHttpStatus(err);
       if (httpStatus !== undefined) {
         failurePayload.http_status = httpStatus;
+      }
+      // Provider-recommended back-off window. When present, the
+      // backend surfaces it on the provider_incident failure group
+      // so the customer's dashboard shows "back off N seconds"
+      // alongside the incident itself.
+      const retryAfter = extractRetryAfter(err);
+      if (retryAfter !== undefined) {
+        failurePayload.retry_after_seconds = retryAfter;
       }
       const event: Event = {
         event_id: eventId,

@@ -607,6 +607,164 @@ def test_provider_incident(backend: Backend, configured_sdk):
     )
 
 
+def test_provider_incident_openai(backend: Backend, configured_sdk):
+    """End-to-end test for the provider_incident detector against
+    the OpenAI integration (#271.a closeout).
+
+    Same shape as test_provider_incident but exercises the OpenAI
+    code path: instrument_openai patches the Completions class, the
+    SDK's classify_openai_exception keys off the exception class
+    name, and the canonical error_class + provider="openai" combo
+    fires the detector with a different signature.
+
+    Also exercises the insufficient_quota → QUOTA_EXHAUSTED routing
+    by attaching a body dict to the fake exception. This covers the
+    OpenAI quirk where RateLimitError is overloaded.
+    """
+    mesedi = configured_sdk
+
+    # Set per-project threshold to 1 so a single tenant fires.
+    resp = requests.put(
+        f"{backend.base_url}/me/provider-incident-config",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"min_tenants": 1},
+        timeout=5.0,
+    )
+    assert resp.status_code == 200
+
+    # Fake OpenAI Completions class whose create() raises a
+    # RateLimitError with insufficient_quota body. classify_openai_exception
+    # must route this to QUOTA_EXHAUSTED, NOT RATE_LIMITED.
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            err_cls = type("RateLimitError", (Exception,), {})
+            exc = err_cls("simulated quota exhaustion (integration test)")
+            exc.status_code = 429
+            exc.body = {
+                "error": {
+                    "code": "insufficient_quota",
+                    "message": "You exceeded your current quota",
+                }
+            }
+            # Retry-After header on a fake response shape.
+            exc.response = type("R", (), {"headers": {"retry-after": "60"}})()
+            raise exc
+
+    mesedi.instrument_openai(completions_class=_FakeCompletions)
+    fake_client = _FakeCompletions()
+
+    @mesedi.wrap
+    def quota_exhausted_agent():
+        try:
+            fake_client.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "hello"}],
+            )
+        except Exception:
+            pass
+
+    quota_exhausted_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="provider_incident",
+        signature_prefix="provider_incident:openai:quota_exhausted",
+    )
+
+
+def test_provider_incident_cohere(backend: Backend, configured_sdk):
+    """End-to-end test for provider_incident against the Cohere v2
+    integration (#271.b closeout). Same shape as Anthropic /
+    OpenAI tests; uses a fake ClientV2 class raising
+    TooManyRequestsError which classify_cohere_exception maps to
+    rate_limited."""
+    mesedi = configured_sdk
+
+    resp = requests.put(
+        f"{backend.base_url}/me/provider-incident-config",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"min_tenants": 1},
+        timeout=5.0,
+    )
+    assert resp.status_code == 200
+
+    class _FakeClientV2:
+        def chat(self, **kwargs):
+            err_cls = type("TooManyRequestsError", (Exception,), {})
+            exc = err_cls("simulated Cohere 429 (integration test)")
+            exc.status_code = 429
+            exc.response = type("R", (), {"headers": {"retry-after": "30"}})()
+            raise exc
+
+    mesedi.instrument_cohere(client_v2_class=_FakeClientV2)
+    fake_client = _FakeClientV2()
+
+    @mesedi.wrap
+    def rate_limited_cohere_agent():
+        try:
+            fake_client.chat(
+                model="command-r-plus",
+                messages=[{"role": "user", "content": "hello"}],
+            )
+        except Exception:
+            pass
+
+    rate_limited_cohere_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="provider_incident",
+        signature_prefix="provider_incident:cohere:rate_limited",
+    )
+
+
+def test_provider_incident_gemini(backend: Backend, configured_sdk):
+    """End-to-end test for provider_incident against the Gemini
+    integration (#271.c closeout). Exercises the
+    ResourceExhausted-with-quota-message routing to QUOTA_EXHAUSTED
+    that classify_gemini_exception implements."""
+    mesedi = configured_sdk
+
+    resp = requests.put(
+        f"{backend.base_url}/me/provider-incident-config",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"min_tenants": 1},
+        timeout=5.0,
+    )
+    assert resp.status_code == 200
+
+    class _FakeModel:
+        model_name = "gemini-1.5-pro"
+        system_instruction = ""
+
+        def generate_content(self, *args, **kwargs):
+            err_cls = type("ResourceExhausted", (Exception,), {})
+            exc = err_cls("429 Quota exceeded for project foo")
+            exc.status_code = 429
+            raise exc
+
+    mesedi.instrument_gemini(model_class=_FakeModel)
+    fake_model = _FakeModel()
+
+    @mesedi.wrap
+    def quota_exhausted_gemini_agent():
+        try:
+            fake_model.generate_content("hello")
+        except Exception:
+            pass
+
+    quota_exhausted_gemini_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="provider_incident",
+        signature_prefix="provider_incident:gemini:quota_exhausted",
+    )
+
+
 @pytest.mark.skip(
     reason=(
         "infrastructure_throttled reads infrastructure_event payloads "

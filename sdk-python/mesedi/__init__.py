@@ -20,6 +20,19 @@ Public API:
     mesedi.instrument_anthropic()
         Patch the Anthropic SDK to auto-emit llm_call events.
 
+    mesedi.instrument_openai()
+        Patch the OpenAI SDK (chat.completions + Responses API) to
+        auto-emit llm_call events.
+
+    mesedi.instrument_cohere()
+        Patch the Cohere SDK (Client + ClientV2 .chat) to auto-emit
+        llm_call events.
+
+    mesedi.instrument_gemini()
+        Patch the google-generativeai SDK
+        (GenerativeModel.generate_content) to auto-emit llm_call
+        events.
+
     mesedi.checkpoint(name, **metadata)
         Mark a notable point in agent execution.
 
@@ -44,6 +57,9 @@ Public API:
 """
 
 from mesedi.anthropic_integration import instrument_anthropic
+from mesedi.openai_integration import instrument_openai
+from mesedi.cohere_integration import instrument_cohere
+from mesedi.gemini_integration import instrument_gemini
 from mesedi.client import MesediClient, configure, flush, get_client
 from mesedi.events import (
     Event,
@@ -92,6 +108,9 @@ __all__ = [
     "get_client",
     "HumanInterventionHandle",
     "instrument_anthropic",
+    "instrument_cohere",
+    "instrument_gemini",
+    "instrument_openai",
     "pause_for_human",
     "request_human_intervention",
     "resume_for_agent",

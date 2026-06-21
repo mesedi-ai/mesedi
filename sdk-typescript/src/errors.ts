@@ -24,53 +24,30 @@
  * would defeat the cross-provider clustering the detectors rely on.
  */
 
-/** Closed vocabulary of canonical provider-error classes. */
-export const ErrorClass = {
-  /** Provider says you're going too fast. HTTP 429 in most APIs. */
-  RATE_LIMITED: "rate_limited",
-  /** Billing/quota cap hit. Distinct from RATE_LIMITED because
-   * remediation differs (raise quota vs. back off). */
-  QUOTA_EXHAUSTED: "quota_exhausted",
-  /** Provider had an internal 5xx failure or returned a malformed
-   * response that fails the SDK's own response validation. */
-  INTERNAL_ERROR: "internal_error",
-  /** Provider unreachable, overloaded, or circuit-open. Connection
-   * failures and explicit "service unavailable" responses both
-   * map here. */
-  SERVICE_UNAVAILABLE: "service_unavailable",
-  /** Provider took longer than its configured timeout. Includes
-   * deadline-exceeded variants. */
-  TIMEOUT: "timeout",
-  /** Auth rejection — bad/expired/revoked API key or insufficient
-   * permissions. Customer-side, reported consistently so the
-   * dashboard can surface it. */
-  INVALID_API_KEY: "invalid_api_key",
-  /** 4xx request validation failure (bad request, not-found,
-   * conflict, payload-too-large, unprocessable entity). Customer
-   * bug — the backend's provider_incident detector filters this
-   * class out. */
-  CLIENT_ERROR: "client_error",
-  /** Couldn't classify. Falls through to UNKNOWN rather than
-   * mislabeling. The backend treats UNKNOWN as non-clusterable for
-   * provider_incident purposes. */
-  UNKNOWN: "unknown",
-} as const;
+import {
+  ERROR_CLASS_NAMES,
+  PROVIDER_SIDE_ERROR_CLASS_VALUES,
+} from "./_errorClassesGenerated.js";
+
+/** Closed vocabulary of canonical provider-error classes. Values
+ * come from `spec/error_classes.yaml` via the codegen-generated
+ * `_errorClassesGenerated.ts`. Re-export here under the historical
+ * `ErrorClass` name so all consumers keep working unchanged when a
+ * new class is added to the spec.
+ *
+ * The vocabulary is deliberately closed. Free-form error strings
+ * would defeat the cross-provider clustering the detectors rely on. */
+export const ErrorClass = ERROR_CLASS_NAMES;
 
 export type ErrorClassValue = (typeof ErrorClass)[keyof typeof ErrorClass];
 
 /**
  * Frozen set of values that count as "provider-side" for the
- * provider_incident detector. The backend uses the SAME filter on
- * its side; keeping the canonical list in the SDK lets future
- * integrations stay consistent.
+ * provider_incident detector. Sourced from the spec so Python /
+ * TypeScript / Go all see the SAME membership without manual sync.
  */
-export const PROVIDER_SIDE_ERROR_CLASSES: ReadonlySet<ErrorClassValue> = new Set([
-  ErrorClass.RATE_LIMITED,
-  ErrorClass.QUOTA_EXHAUSTED,
-  ErrorClass.INTERNAL_ERROR,
-  ErrorClass.SERVICE_UNAVAILABLE,
-  ErrorClass.TIMEOUT,
-]);
+export const PROVIDER_SIDE_ERROR_CLASSES: ReadonlySet<ErrorClassValue> =
+  PROVIDER_SIDE_ERROR_CLASS_VALUES as ReadonlySet<ErrorClassValue>;
 
 /**
  * Mapping from Anthropic exception class names (string, not the
@@ -97,6 +74,16 @@ const ANTHROPIC_EXCEPTION_MAP: Record<string, ErrorClassValue> = {
   ConflictError: ErrorClass.CLIENT_ERROR,
   RequestTooLargeError: ErrorClass.CLIENT_ERROR,
   UnprocessableEntityError: ErrorClass.CLIENT_ERROR,
+  // Client construction / configuration errors — raised before any
+  // network call. Customer code bug, not a provider incident.
+  MissingDependencyError: ErrorClass.CLIENT_ERROR,
+  MutuallyExclusiveAuthError: ErrorClass.CLIENT_ERROR,
+  StreamAlreadyConsumed: ErrorClass.CLIENT_ERROR,
+  // Auth-adjacent: Bedrock / Vertex workload-identity probe failed.
+  WorkloadIdentityError: ErrorClass.INVALID_API_KEY,
+  // Internal SDK marker for transient failures the SDK's own retry
+  // loop classifies as retryable. Safe default is SERVICE_UNAVAILABLE.
+  RetryableError: ErrorClass.SERVICE_UNAVAILABLE,
   // Base classes — caught last, treated as unknown rather than
   // falsely attributed to a specific bucket.
   APIStatusError: ErrorClass.UNKNOWN,
@@ -118,6 +105,193 @@ export function classifyAnthropicException(err: unknown): ErrorClassValue {
 }
 
 /**
+ * Mapping from OpenAI SDK exception class names to canonical
+ * ErrorClass values. Keyed by name (string) for the same
+ * dependency-avoidance reason as the Anthropic map: the mesedi
+ * SDK works even if the openai package is not installed.
+ *
+ * OpenAI's hierarchy (openai>=4.0):
+ *   OpenAIError
+ *   └── APIError
+ *       ├── APIConnectionError
+ *       │   └── APIConnectionTimeoutError
+ *       └── APIStatusError → subclasses for 4xx/5xx
+ *
+ * NOTE: TypeScript SDK uses `APIConnectionTimeoutError` (different
+ * from Python's `APITimeoutError`). Both are listed below so the
+ * mapping is stable regardless of which casing the runtime presents.
+ *
+ * RateLimitError is overloaded by OpenAI to cover both true rate
+ * limiting AND insufficient_quota — classifyOpenAIException probes
+ * the body to distinguish, returning QUOTA_EXHAUSTED for the latter.
+ */
+const OPENAI_EXCEPTION_MAP: Record<string, ErrorClassValue> = {
+  RateLimitError: ErrorClass.RATE_LIMITED,
+  APIConnectionTimeoutError: ErrorClass.TIMEOUT,
+  APITimeoutError: ErrorClass.TIMEOUT,
+  APIConnectionError: ErrorClass.SERVICE_UNAVAILABLE,
+  InternalServerError: ErrorClass.INTERNAL_ERROR,
+  AuthenticationError: ErrorClass.INVALID_API_KEY,
+  PermissionDeniedError: ErrorClass.INVALID_API_KEY,
+  BadRequestError: ErrorClass.CLIENT_ERROR,
+  NotFoundError: ErrorClass.CLIENT_ERROR,
+  ConflictError: ErrorClass.CLIENT_ERROR,
+  UnprocessableEntityError: ErrorClass.CLIENT_ERROR,
+  // Base classes — caught last, treated as unknown rather than
+  // falsely attributed to a specific bucket.
+  APIStatusError: ErrorClass.UNKNOWN,
+  APIError: ErrorClass.UNKNOWN,
+  OpenAIError: ErrorClass.UNKNOWN,
+};
+
+/**
+ * Return the canonical ErrorClass for an OpenAI SDK exception.
+ *
+ * Two-step classification:
+ *   1. Look up class name in OPENAI_EXCEPTION_MAP.
+ *   2. If result is RATE_LIMITED, probe the body for
+ *      `error.code === "insufficient_quota"` — OpenAI overloads
+ *      RateLimitError to cover both true rate limit and billing-
+ *      cap exhaustion. The QUOTA_EXHAUSTED bucket needs different
+ *      remediation (raise quota vs. back off), so the detector
+ *      routes them separately.
+ *
+ * Falls back to UNKNOWN for anything not in the map.
+ */
+export function classifyOpenAIException(err: unknown): ErrorClassValue {
+  if (!(err instanceof Error) || !err.constructor.name) {
+    return ErrorClass.UNKNOWN;
+  }
+  const base = OPENAI_EXCEPTION_MAP[err.constructor.name] ?? ErrorClass.UNKNOWN;
+  if (base === ErrorClass.RATE_LIMITED && openaiIndicatesInsufficientQuota(err)) {
+    return ErrorClass.QUOTA_EXHAUSTED;
+  }
+  return base;
+}
+
+/** Mapping from Cohere TypeScript SDK exception class names to
+ * canonical ErrorClass values. cohere-ai>=7.x exposes typed errors
+ * under cohere.errors.*; older versions use a flatter hierarchy.
+ * Both are listed so the mapping is backward-compatible. */
+const COHERE_EXCEPTION_MAP: Record<string, ErrorClassValue> = {
+  TooManyRequestsError: ErrorClass.RATE_LIMITED,
+  GatewayTimeoutError: ErrorClass.TIMEOUT,
+  CohereConnectionError: ErrorClass.SERVICE_UNAVAILABLE,
+  ServiceUnavailableError: ErrorClass.SERVICE_UNAVAILABLE,
+  InternalServerError: ErrorClass.INTERNAL_ERROR,
+  NotImplementedError: ErrorClass.INTERNAL_ERROR,
+  UnauthorizedError: ErrorClass.INVALID_API_KEY,
+  ForbiddenError: ErrorClass.INVALID_API_KEY,
+  BadRequestError: ErrorClass.CLIENT_ERROR,
+  NotFoundError: ErrorClass.CLIENT_ERROR,
+  ClientClosedRequestError: ErrorClass.CLIENT_ERROR,
+  ApiError: ErrorClass.UNKNOWN,
+  CohereError: ErrorClass.UNKNOWN,
+  CohereAPIError: ErrorClass.UNKNOWN,
+};
+
+/**
+ * Return the canonical ErrorClass for a Cohere SDK exception.
+ * Falls back to UNKNOWN for anything not in the map.
+ */
+export function classifyCohereException(err: unknown): ErrorClassValue {
+  if (err instanceof Error && err.constructor.name) {
+    return COHERE_EXCEPTION_MAP[err.constructor.name] ?? ErrorClass.UNKNOWN;
+  }
+  return ErrorClass.UNKNOWN;
+}
+
+/** Mapping from Google Gemini / google.api_core.exceptions class
+ * names to canonical ErrorClass values. The @google/generative-ai
+ * TS package surfaces errors with constructor.name matching the
+ * RPC status (matching the Python google.api_core hierarchy). */
+const GEMINI_EXCEPTION_MAP: Record<string, ErrorClassValue> = {
+  ResourceExhausted: ErrorClass.RATE_LIMITED,
+  DeadlineExceeded: ErrorClass.TIMEOUT,
+  RetryError: ErrorClass.TIMEOUT,
+  ServiceUnavailable: ErrorClass.SERVICE_UNAVAILABLE,
+  Cancelled: ErrorClass.SERVICE_UNAVAILABLE,
+  Aborted: ErrorClass.SERVICE_UNAVAILABLE,
+  InternalServerError: ErrorClass.INTERNAL_ERROR,
+  DataLoss: ErrorClass.INTERNAL_ERROR,
+  Unknown: ErrorClass.INTERNAL_ERROR,
+  NotImplemented: ErrorClass.INTERNAL_ERROR,
+  Unauthenticated: ErrorClass.INVALID_API_KEY,
+  PermissionDenied: ErrorClass.INVALID_API_KEY,
+  InvalidArgument: ErrorClass.CLIENT_ERROR,
+  FailedPrecondition: ErrorClass.CLIENT_ERROR,
+  OutOfRange: ErrorClass.CLIENT_ERROR,
+  NotFound: ErrorClass.CLIENT_ERROR,
+  AlreadyExists: ErrorClass.CLIENT_ERROR,
+  GoogleAPICallError: ErrorClass.UNKNOWN,
+  GoogleAPIError: ErrorClass.UNKNOWN,
+};
+
+/**
+ * Return the canonical ErrorClass for a Gemini SDK exception.
+ *
+ * Two-step classification:
+ *   1. Look up class name in GEMINI_EXCEPTION_MAP.
+ *   2. If result is RATE_LIMITED (ResourceExhausted), probe the
+ *      exception message for substring "quota" — Google overloads
+ *      ResourceExhausted to cover both true rate-limit and
+ *      quota-exhaust.
+ *
+ * Falls back to UNKNOWN for unmapped classes.
+ */
+export function classifyGeminiException(err: unknown): ErrorClassValue {
+  if (!(err instanceof Error) || !err.constructor.name) {
+    return ErrorClass.UNKNOWN;
+  }
+  const base = GEMINI_EXCEPTION_MAP[err.constructor.name] ?? ErrorClass.UNKNOWN;
+  if (base === ErrorClass.RATE_LIMITED) {
+    const msg = (err.message ?? "").toLowerCase();
+    if (msg.includes("quota")) return ErrorClass.QUOTA_EXHAUSTED;
+  }
+  return base;
+}
+
+/** Probe an OpenAI exception's body for the insufficient_quota
+ * error code that distinguishes a billing-cap from a true rate
+ * limit. Best-effort; any missing attr / unexpected shape returns
+ * false rather than throwing. */
+function openaiIndicatesInsufficientQuota(err: Error): boolean {
+  const obj = err as Error & {
+    body?: unknown;
+    response?: { json?: () => unknown };
+  };
+  // Probe 1: direct body attr (most common in current SDK).
+  if (obj.body && typeof obj.body === "object") {
+    const e = (obj.body as { error?: unknown }).error;
+    if (
+      e && typeof e === "object" &&
+      (e as { code?: unknown }).code === "insufficient_quota"
+    ) {
+      return true;
+    }
+  }
+  // Probe 2: older SDK exposes response.json() — call only if
+  // available, swallow any parse exception.
+  if (obj.response && typeof obj.response.json === "function") {
+    try {
+      const payload = obj.response.json();
+      if (payload && typeof payload === "object") {
+        const e = (payload as { error?: unknown }).error;
+        if (
+          e && typeof e === "object" &&
+          (e as { code?: unknown }).code === "insufficient_quota"
+        ) {
+          return true;
+        }
+      }
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
  * Return the HTTP status code from an Anthropic SDK exception if
  * one is exposed, otherwise undefined. APIStatusError subclasses
  * expose `status`; base APIError and connection/timeout errors
@@ -132,6 +306,116 @@ export function extractHttpStatus(err: unknown): number | undefined {
   if (err && typeof err === "object" && "status_code" in err) {
     const status = (err as { status_code?: unknown }).status_code;
     if (typeof status === "number") return status;
+  }
+  return undefined;
+}
+
+/**
+ * Return the provider-recommended back-off window (seconds) from a
+ * provider SDK exception, or undefined when the provider did not
+ * supply one.
+ *
+ * Probes in order, returning the first successful parse:
+ *
+ *   1. `err.retryAfter` / `err.retry_after` attribute (some SDKs
+ *      expose this directly).
+ *   2. The `Retry-After` HTTP header on `err.response.headers` /
+ *      `err.headers`. Anthropic, OpenAI, Cohere, and Gemini SDKs
+ *      all surface response headers on their status-error subclasses.
+ *
+ * Per RFC 7231, the Retry-After header value may be either:
+ *   - A non-negative integer (delay-seconds), the common case.
+ *   - An HTTP-date (`Wed, 21 Oct 2026 07:28:00 GMT`), the rare case
+ *     used by some CDNs in front of providers.
+ *
+ * Both shapes are parsed. HTTP-date values that have already passed
+ * return 0 (back off but don't wait). Returns undefined on any parse
+ * failure so the caller can omit the field cleanly rather than
+ * shipping a corrupted value.
+ */
+export function extractRetryAfter(err: unknown): number | undefined {
+  if (!err || typeof err !== "object") return undefined;
+  const obj = err as Record<string, unknown>;
+
+  // Probe 1: direct attribute (camelCase OR snake_case).
+  const direct = obj.retryAfter ?? obj.retry_after;
+  const fromDirect = coerceRetryAfterValue(direct);
+  if (fromDirect !== undefined) return fromDirect;
+
+  // Probe 2: Retry-After response header.
+  const response = obj.response;
+  let headers: unknown = undefined;
+  if (response && typeof response === "object") {
+    headers = (response as Record<string, unknown>).headers;
+  }
+  if (headers === undefined) {
+    headers = obj.headers;
+  }
+  if (!headers) return undefined;
+
+  const headerValue = readHeader(headers, "retry-after");
+  return coerceRetryAfterValue(headerValue);
+}
+
+/** Best-effort read of one header value across the shapes provider
+ * SDKs hand us: Fetch-style Headers (has .get()), plain object,
+ * Map. All header lookups are case-insensitive per HTTP spec. */
+function readHeader(headers: unknown, name: string): unknown {
+  const lower = name.toLowerCase();
+  // Fetch Headers / undici Headers: .get() is case-insensitive.
+  if (
+    typeof (headers as { get?: unknown }).get === "function"
+  ) {
+    try {
+      return (headers as { get: (k: string) => string | null }).get(lower);
+    } catch {
+      // fall through to map/object probes
+    }
+  }
+  // Map.
+  if (headers instanceof Map) {
+    for (const [k, v] of headers) {
+      if (typeof k === "string" && k.toLowerCase() === lower) return v;
+    }
+    return undefined;
+  }
+  // Plain object — walk keys for case-insensitive match.
+  if (typeof headers === "object" && headers !== null) {
+    for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
+      if (k.toLowerCase() === lower) return v;
+    }
+  }
+  return undefined;
+}
+
+/** Coerce a Retry-After value (number / numeric string / HTTP-date /
+ * Date) to a non-negative integer second count. Returns undefined
+ * on any parse failure. */
+function coerceRetryAfterValue(raw: unknown): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw === "boolean") return undefined; // reject bool→number coercion
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw)) return undefined;
+    return Math.max(0, Math.floor(raw));
+  }
+  if (raw instanceof Date) {
+    const delta = (raw.getTime() - Date.now()) / 1000;
+    if (!Number.isFinite(delta)) return undefined;
+    return Math.max(0, Math.floor(delta));
+  }
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (s === "") return undefined;
+    // Numeric path first (the common case).
+    if (/^-?\d+(\.\d+)?$/.test(s)) {
+      const n = Number(s);
+      if (Number.isFinite(n)) return Math.max(0, Math.floor(n));
+      return undefined;
+    }
+    // HTTP-date path. Date.parse returns NaN on failure.
+    const ts = Date.parse(s);
+    if (Number.isNaN(ts)) return undefined;
+    return Math.max(0, Math.floor((ts - Date.now()) / 1000));
   }
   return undefined;
 }

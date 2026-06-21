@@ -17,6 +17,9 @@
  *   instrumentAnthropic(cls?),  patch @anthropic-ai/sdk's
  *                              Messages.create to emit llm_call events.
  *                              Optional `cls` for testing.
+ *   instrumentOpenAI(c?, r?),  patch openai SDK's chat.completions
+ *                              and Responses APIs to emit llm_call
+ *                              events. Optional class args for testing.
  *   flush(timeoutMs?): wait for the background shipper to
  *                              drain all events submitted so far.
  *   MesediClient: explicit client for advanced use cases.
@@ -63,6 +66,15 @@ export type {
 } from "./observe.js";
 export { instrumentAnthropic } from "./anthropic_integration.js";
 export type { MessagesClassLike } from "./anthropic_integration.js";
+export { instrumentOpenAI } from "./openai_integration.js";
+export type {
+  CompletionsClassLike,
+  ResponsesClassLike,
+} from "./openai_integration.js";
+export { instrumentCohere } from "./cohere_integration.js";
+export type { CohereClientLike } from "./cohere_integration.js";
+export { instrumentGemini } from "./gemini_integration.js";
+export type { GenerativeModelClassLike } from "./gemini_integration.js";
 export { MesediHalt, isMesediHalt } from "./halt.js";
 export type { Budget, HaltTrigger } from "./halt.js";
 

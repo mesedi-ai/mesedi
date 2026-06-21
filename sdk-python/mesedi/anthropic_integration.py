@@ -51,7 +51,11 @@ from typing import Any, List, Optional, Type
 
 from mesedi._context import current_execution_context
 from mesedi.client import get_client
-from mesedi.errors import classify_anthropic_exception, extract_http_status
+from mesedi.errors import (
+    classify_anthropic_exception,
+    extract_http_status,
+    extract_retry_after,
+)
 from mesedi.events import Event, EventType, utcnow_rfc3339
 
 # Stable lowercase provider identifier shipped on every llm_call
@@ -160,6 +164,13 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
             http_status = extract_http_status(exc)
             if http_status is not None:
                 failure_payload["http_status"] = http_status
+            # Provider-recommended back-off window. When present, the
+            # backend surfaces it on the provider_incident failure
+            # group so the customer's dashboard shows "back off N
+            # seconds" alongside the incident itself.
+            retry_after = extract_retry_after(exc)
+            if retry_after is not None:
+                failure_payload["retry_after_seconds"] = retry_after
             client.submit_event(Event(
                 event_id=event_id,
                 execution_id=ctx.execution_id,

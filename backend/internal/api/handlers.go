@@ -3008,10 +3008,13 @@ func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
 // customers should set min_tenants to 1 so any provider error
 // fires the detector.
 //
+// Response shape matches HandleGetTimeBudgetConfig so the dashboard
+// can use one shared pattern for per-project threshold tiles.
+//
 // Response:
 //
 //	{
-//	  "ok": true,
+//	  "project_id": "...",
 //	  "min_tenants": 2
 //	}
 func (h *Handlers) HandleGetProviderIncidentConfig(w http.ResponseWriter, r *http.Request) {
@@ -3032,7 +3035,7 @@ func (h *Handlers) HandleGetProviderIncidentConfig(w http.ResponseWriter, r *htt
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":          true,
+		"project_id":  authProjectID,
 		"min_tenants": n,
 	})
 }

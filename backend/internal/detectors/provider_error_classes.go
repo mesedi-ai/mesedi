@@ -1,61 +1,35 @@
 package detectors
 
-// Canonical provider-error vocabulary, backend side. Mirrors the
-// `ErrorClass` constants and `PROVIDER_SIDE_ERROR_CLASSES` set in
-// the Python and TypeScript SDKs (mesedi/errors.py, src/errors.ts).
-// The provider_incident detector only cross-tenant-aggregates
-// error classes in :data:`ProviderSideErrorClasses` — customer-side
-// classes (invalid_api_key, client_error, unknown) get stored in
-// the event payload for observability but never trigger a
-// provider_incident failure_group because they're not actually
-// signals of provider-side outages.
+// Canonical provider-error vocabulary, backend side. Values + the
+// provider-side filter set are sourced from
+// spec/error_classes.yaml via scripts/codegen.py, which writes
+// provider_error_classes_generated.go. Hand-written constants
+// below re-export the generated values under the historical
+// Go names so call sites stay unchanged.
 //
-// Adding a new canonical value here requires the same addition to
-// BOTH SDK files and a coordinated release of all three. The
-// integration suite at backend/test/integration/ exercises the
-// SDK + backend pair end-to-end and is the canary for drift.
+// To add a new class: edit spec/error_classes.yaml and run
+// `python scripts/codegen.py`. The CI staleness check runs codegen
+// with --check to fail the build if generators are out of date.
 
-const (
-	// ErrorClassRateLimited — provider says you're going too fast.
-	ErrorClassRateLimited = "rate_limited"
-
-	// ErrorClassQuotaExhausted — billing / quota cap hit.
-	ErrorClassQuotaExhausted = "quota_exhausted"
-
-	// ErrorClassInternalError — provider 5xx or malformed response.
-	ErrorClassInternalError = "internal_error"
-
-	// ErrorClassServiceUnavailable — provider unreachable /
-	// overloaded / circuit-open.
-	ErrorClassServiceUnavailable = "service_unavailable"
-
-	// ErrorClassTimeout — provider exceeded its configured timeout.
-	ErrorClassTimeout = "timeout"
-
-	// ErrorClassInvalidAPIKey — auth rejection. Customer-side, not
-	// a provider incident.
-	ErrorClassInvalidAPIKey = "invalid_api_key"
-
-	// ErrorClassClientError — 4xx request validation failure.
-	// Customer-side, not a provider incident.
-	ErrorClassClientError = "client_error"
-
-	// ErrorClassUnknown — couldn't classify. Backend treats as
-	// non-clusterable to avoid mislabeling.
-	ErrorClassUnknown = "unknown"
+// ErrorClass* constants re-export the generated wire-format values
+// under the historical Go-style names. The generated file is the
+// source of truth — these are bindings, not declarations.
+var (
+	ErrorClassRateLimited        = ErrorClassValues["RATE_LIMITED"]
+	ErrorClassQuotaExhausted     = ErrorClassValues["QUOTA_EXHAUSTED"]
+	ErrorClassInternalError      = ErrorClassValues["INTERNAL_ERROR"]
+	ErrorClassServiceUnavailable = ErrorClassValues["SERVICE_UNAVAILABLE"]
+	ErrorClassTimeout            = ErrorClassValues["TIMEOUT"]
+	ErrorClassInvalidAPIKey      = ErrorClassValues["INVALID_API_KEY"]
+	ErrorClassClientError        = ErrorClassValues["CLIENT_ERROR"]
+	ErrorClassUnknown            = ErrorClassValues["UNKNOWN"]
 )
 
 // ProviderSideErrorClasses is the closed set of canonical error
 // classes that trigger provider_incident cross-tenant aggregation.
-// Must match `PROVIDER_SIDE_ERROR_CLASSES` in mesedi/errors.py and
-// src/errors.ts exactly.
-var ProviderSideErrorClasses = map[string]struct{}{
-	ErrorClassRateLimited:        {},
-	ErrorClassQuotaExhausted:     {},
-	ErrorClassInternalError:      {},
-	ErrorClassServiceUnavailable: {},
-	ErrorClassTimeout:            {},
-}
+// Sourced from the generated file so Python / TypeScript / Go all
+// see the SAME membership without manual sync.
+var ProviderSideErrorClasses = ProviderSideErrorClassValues
 
 // IsProviderSideErrorClass reports whether the supplied error_class
 // is in the cross-tenant-aggregation set. The provider_incident
