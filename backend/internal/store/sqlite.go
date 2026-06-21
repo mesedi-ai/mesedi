@@ -50,6 +50,18 @@ func OpenSQLite(dsn string, logger *slog.Logger) (*SQLiteStore, error) {
 	// Setting max-open=1 also avoids "database is locked" errors under load.
 	db.SetMaxOpenConns(1)
 
+	// Enforce foreign keys explicitly regardless of what the DSN
+	// includes. SQLite defaults to FK enforcement OFF, which silently
+	// allows orphan inserts and lets production bugs slip past tests
+	// that use a no-pragma in-memory DSN. Postgres enforces FKs by
+	// default; this PRAGMA makes the SQLite store behave the same so
+	// localhost integration tests catch the same class of bug
+	// production would surface.
+	if _, err := db.ExecContext(context.Background(), `PRAGMA foreign_keys = ON`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable foreign_keys pragma: %w", err)
+	}
+
 	s := &SQLiteStore{db: db, logger: logger}
 	if err := s.applyMigrations(context.Background()); err != nil {
 		_ = db.Close()
@@ -2390,10 +2402,8 @@ func (s *SQLiteStore) groupExecutionInternal(
 		return false, fmt.Errorf("executionID, projectID, failureClass, signature all required")
 	}
 
-	// Confirm the execution row exists before doing any work. The
-	// detector chain is supposed to only call this for executions
-	// the handler just observed reach terminal status, but defensive
-	// against caller bugs.
+	// Confirm the execution row exists; capture its current primary
+	// failure_group_id so we know whether to claim the primary slot.
 	var primaryExisting sql.NullString
 	err = s.db.QueryRowContext(
 		ctx,
@@ -2406,18 +2416,61 @@ func (s *SQLiteStore) groupExecutionInternal(
 	if err != nil {
 		return false, fmt.Errorf("read execution failure_group_id: %w", err)
 	}
+	isPrimary := !primaryExisting.Valid || primaryExisting.String == ""
 
 	groupID := deriveGroupID(projectID, failureClass, signature)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Try to record the membership row first. PK is
-	// (execution_id, group_id) so a second call with the same
-	// arguments is a true no-op rather than a double-count. The
-	// is_primary flag is set ONLY when no primary exists yet on the
-	// execution row — preserving the v002 semantic that the first
-	// detector wins the "primary" slot, while letting every later
-	// detector record itself as a non-primary classification.
-	isPrimary := !primaryExisting.Valid || primaryExisting.String == ""
+	// Newness probe BEFORE the upsert so we can report isNew=true to
+	// the caller for webhook escalation. Racy under concurrent
+	// writers — both observers could see "not found" and both report
+	// isNew=true. At Mesedi's current volume the worst case is
+	// duplicate webhook deliveries, not data corruption.
+	var existedBefore int
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT 1 FROM failure_groups WHERE group_id = ? LIMIT 1`,
+		groupID,
+	).Scan(&existedBefore)
+	if err != nil && err != sql.ErrNoRows {
+		return false, fmt.Errorf("probe failure_group existence: %w", err)
+	}
+	isNew = err == sql.ErrNoRows
+
+	// CRITICAL ORDERING: upsert the failure_groups row BEFORE
+	// inserting into the link table. The link table has a foreign
+	// key on group_id; doing the link insert first against a
+	// not-yet-created group violates the FK and the whole detector
+	// silently fails ("link execution to failure_group: ERROR:
+	// violates foreign key constraint"). The original migration-039
+	// commit got this order backwards; SQLite tolerated it because
+	// FK enforcement defaults off, Postgres surfaced it in
+	// production. See lessons-learned for the full trace.
+	//
+	// Counters get +1 here on the assumption that the link insert
+	// below WILL succeed (the common case). If the link turns out to
+	// already exist — a true idempotent retry or a concurrent
+	// writer winning the race — the decrement at the bottom of this
+	// function compensates.
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO failure_groups (
+			group_id, project_id, failure_class, signature,
+			first_seen, last_seen,
+			event_count, affected_executions,
+			sample_execution_id
+		)
+		VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
+		ON CONFLICT(group_id) DO UPDATE SET
+			event_count = event_count + 1,
+			affected_executions = affected_executions + 1,
+			last_seen = excluded.last_seen
+	`, groupID, projectID, failureClass, signature, now, now, executionID)
+	if err != nil {
+		return false, fmt.Errorf("upsert failure_group: %w", err)
+	}
+
+	// Now insert the link. PK (execution_id, group_id) +
+	// ON CONFLICT DO NOTHING gives true idempotency.
 	isPrimaryInt := 0
 	if isPrimary {
 		isPrimaryInt = 1
@@ -2437,56 +2490,30 @@ func (s *SQLiteStore) groupExecutionInternal(
 		return false, fmt.Errorf("rows affected on membership insert: %w", err)
 	}
 	if inserted == 0 {
-		// Already linked; not new from this caller's perspective and
-		// no counter updates are warranted (would double-count).
+		// Link already existed (true idempotent retry, or a
+		// concurrent writer beat us). The counter +1 above was
+		// speculative; undo it here so affected_executions
+		// continues to mean "distinct executions classified into
+		// this group."
+		_, derr := s.db.ExecContext(ctx, `
+			UPDATE failure_groups
+			SET event_count = event_count - 1,
+			    affected_executions = affected_executions - 1
+			WHERE group_id = ?
+		`, groupID)
+		if derr != nil {
+			s.logger.Warn("failed to undo speculative counter increment after link conflict",
+				"execution_id", executionID,
+				"failure_group_id", groupID,
+				"error", derr.Error(),
+			)
+		}
 		return false, nil
 	}
 
-	// Newness probe: does the failure_group itself already exist? If
-	// not, this call is about to create it and we'll report
-	// isNew=true so the handler can fire webhook escalation. Racy
-	// under concurrent writers for the same signature — both
-	// observers could see "not found" and both report isNew=true.
-	// For v1 with low concurrency the worst case is duplicate
-	// webhook deliveries, not data corruption.
-	var existedBefore int
-	err = s.db.QueryRowContext(
-		ctx,
-		`SELECT 1 FROM failure_groups WHERE group_id = ? LIMIT 1`,
-		groupID,
-	).Scan(&existedBefore)
-	if err != nil && err != sql.ErrNoRows {
-		return false, fmt.Errorf("probe failure_group existence: %w", err)
-	}
-	isNew = err == sql.ErrNoRows
-
-	// Upsert the failure_groups row: insert on first-ever match,
-	// increment counters on subsequent matches. Counters are
-	// incremented exactly once per (execution, group) pair because
-	// of the INSERT OR IGNORE guard above — so affected_executions
-	// continues to mean "distinct executions classified into this
-	// group," matching v002's invariant.
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO failure_groups (
-			group_id, project_id, failure_class, signature,
-			first_seen, last_seen,
-			event_count, affected_executions,
-			sample_execution_id
-		)
-		VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
-		ON CONFLICT(group_id) DO UPDATE SET
-			event_count = event_count + 1,
-			affected_executions = affected_executions + 1,
-			last_seen = excluded.last_seen
-	`, groupID, projectID, failureClass, signature, now, now, executionID)
-	if err != nil {
-		return false, fmt.Errorf("upsert failure_group: %w", err)
-	}
-
 	// Claim the primary slot if no detector has yet. Skipping when
-	// already populated preserves the historical "first detector
-	// wins the primary classification" behavior the dashboard's
-	// executions detail page still renders.
+	// already populated preserves the v002 first-detector-wins
+	// behavior the dashboard's executions detail page still renders.
 	if isPrimary {
 		_, err = s.db.ExecContext(
 			ctx,

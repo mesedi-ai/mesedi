@@ -1892,10 +1892,14 @@ func (s *PostgresStore) groupExecutionInternalPg(
 	ctx context.Context,
 	executionID, projectID, failureClass, signature string,
 ) (isNew bool, err error) {
-	// See sqlite.go groupExecutionInternal for the design rationale
-	// behind the migration 039 link-table refactor. This is the
-	// Postgres twin of that function — same algorithm, $N-placeholder
-	// SQL, BOOLEAN for is_primary.
+	// Postgres twin of sqlite.go groupExecutionInternal. The order
+	// of operations is CRITICAL: failure_groups must be upserted
+	// BEFORE the link insert because the link table has a foreign
+	// key on group_id, and Postgres enforces FKs by default. The
+	// original migration-039 commit had the order reversed; SQLite
+	// tolerated it (FKs default off), Postgres surfaced it in
+	// production as "violates foreign key constraint" warnings on
+	// every brand-new group. See lessons-learned for the trace.
 	if executionID == "" || projectID == "" || failureClass == "" || signature == "" {
 		return false, fmt.Errorf("executionID, projectID, failureClass, signature all required")
 	}
@@ -1912,32 +1916,13 @@ func (s *PostgresStore) groupExecutionInternalPg(
 	if err != nil {
 		return false, fmt.Errorf("read execution failure_group_id: %w", err)
 	}
+	isPrimary := !primaryExisting.Valid || primaryExisting.String == ""
 
 	groupID := deriveGroupID(projectID, failureClass, signature)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Membership insert with (execution_id, group_id) PK + ON
-	// CONFLICT DO NOTHING gives true idempotency: a repeated call
-	// with the same args is a no-op rather than a double-count.
-	isPrimary := !primaryExisting.Valid || primaryExisting.String == ""
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO execution_failure_groups (
-			execution_id, group_id, is_primary, classified_at
-		)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT(execution_id, group_id) DO NOTHING
-	`, executionID, groupID, isPrimary, now)
-	if err != nil {
-		return false, fmt.Errorf("link execution to failure_group: %w", err)
-	}
-	inserted, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("rows affected on membership insert: %w", err)
-	}
-	if inserted == 0 {
-		return false, nil
-	}
-
+	// Newness probe BEFORE the upsert for webhook escalation
+	// semantics. Racy but acceptable at current volume.
 	var existedBefore int
 	err = s.db.QueryRowContext(
 		ctx,
@@ -1949,6 +1934,11 @@ func (s *PostgresStore) groupExecutionInternalPg(
 	}
 	isNew = err == sql.ErrNoRows
 
+	// Step 1: upsert failure_groups so the FK target exists. Counters
+	// get +1 speculatively on the assumption that the link insert
+	// below will succeed (the common case). If the link turns out to
+	// already exist, the decrement at the bottom of this function
+	// compensates.
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO failure_groups (
 			group_id, project_id, failure_class, signature,
@@ -1964,6 +1954,40 @@ func (s *PostgresStore) groupExecutionInternalPg(
 	`, groupID, projectID, failureClass, signature, now, now, executionID)
 	if err != nil {
 		return false, fmt.Errorf("upsert failure_group: %w", err)
+	}
+
+	// Step 2: insert the link. FK on group_id is now satisfied.
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO execution_failure_groups (
+			execution_id, group_id, is_primary, classified_at
+		)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT(execution_id, group_id) DO NOTHING
+	`, executionID, groupID, isPrimary, now)
+	if err != nil {
+		return false, fmt.Errorf("link execution to failure_group: %w", err)
+	}
+	inserted, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rows affected on membership insert: %w", err)
+	}
+	if inserted == 0 {
+		// Link already existed; undo the speculative counter
+		// increment so affected_executions stays accurate.
+		_, derr := s.db.ExecContext(ctx, `
+			UPDATE failure_groups
+			SET event_count = failure_groups.event_count - 1,
+			    affected_executions = failure_groups.affected_executions - 1
+			WHERE group_id = $1
+		`, groupID)
+		if derr != nil {
+			s.logger.Warn("failed to undo speculative counter increment after link conflict",
+				"execution_id", executionID,
+				"failure_group_id", groupID,
+				"error", derr.Error(),
+			)
+		}
+		return false, nil
 	}
 
 	if isPrimary {
