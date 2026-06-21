@@ -672,6 +672,9 @@ func main() {
 	// Task #271, per-project provider_incident detector threshold.
 	mux.Handle("GET /me/provider-incident-config", privateHandler)
 	mux.Handle("PUT /me/provider-incident-config", privateHandler)
+	// Task #276, per-project time_budget detector threshold (ms).
+	mux.Handle("GET /me/time-budget-config", privateHandler)
+	mux.Handle("PUT /me/time-budget-config", privateHandler)
 	// #252 — customer-facing 2FA / TOTP. All five live on
 	// privateHandler because they manage the calling customer's own
 	// authenticator-app enrollment and need the session cookie.

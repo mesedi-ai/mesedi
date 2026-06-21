@@ -257,6 +257,9 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// typically set to 1).
 	mux.HandleFunc("GET /me/provider-incident-config", h.HandleGetProviderIncidentConfig)
 	mux.HandleFunc("PUT /me/provider-incident-config", h.HandleSetProviderIncidentConfig)
+	// Task #276, per-project time_budget detector threshold (ms).
+	mux.HandleFunc("GET /me/time-budget-config", h.HandleGetTimeBudgetConfig)
+	mux.HandleFunc("PUT /me/time-budget-config", h.HandleSetTimeBudgetConfig)
 	// Task #263, Team / multi-seat. Admin-gated endpoints for
 	// managing the org + members + invites under the auth project's
 	// tenant_id. resolveAdminContext() guards each handler.
@@ -1471,7 +1474,24 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// wait does not falsely trip the time budget.
 			// effectiveDurationMs reflects the agent's actual working
 			// time (wall-clock minus all paused intervals).
-			if isTerminalStatus(patch.Status) && effectiveDurationMs >= 60_000 {
+			//
+			// Mesedi #276: threshold is now per-project (migration
+			// 041). Default 60_000 ms matches the historical
+			// hardcoded constant; a chat-agent project can lower it
+			// to 30_000, a research-agent project can raise it to
+			// 300_000. Falls back to the default on store error so a
+			// transient DB blip never silences the detector.
+			thresholdMs := 60_000
+			if tbMs, tbErr := h.Store.GetProjectTimeBudgetMs(r.Context(), authProjectID); tbErr == nil {
+				thresholdMs = tbMs
+			} else {
+				h.Logger.Warn("get time_budget_ms failed; using default",
+					"execution_id", executionID,
+					"project_id", authProjectID,
+					"error", tbErr.Error(),
+				)
+			}
+			if isTerminalStatus(patch.Status) && effectiveDurationMs >= int64(thresholdMs) {
 				isNew, err := h.Store.GroupTimeBudgetExceedance(r.Context(), executionID, authProjectID, effectiveDurationMs)
 				if err != nil {
 					h.Logger.Warn("time-budget grouping failed (continuing)",
@@ -3060,6 +3080,87 @@ func (h *Handlers) HandleSetProviderIncidentConfig(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":          true,
 		"min_tenants": body.MinTenants,
+	})
+}
+
+// HandleGetTimeBudgetConfig returns the per-project time_budget
+// detector threshold (migration 041) in milliseconds. Default 60000
+// mirrors the historical hardcoded constant. Chat-agent projects
+// often lower it (e.g. 30000); research-agent projects often raise
+// it (e.g. 300000).
+//
+// Response:
+//
+//	{
+//	  "project_id": "...",
+//	  "threshold_ms": 60000
+//	}
+func (h *Handlers) HandleGetTimeBudgetConfig(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	n, err := h.Store.GetProjectTimeBudgetMs(r.Context(), authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("get time_budget config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load time_budget config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id":   authProjectID,
+		"threshold_ms": n,
+	})
+}
+
+// HandleSetTimeBudgetConfig updates the per-project time_budget
+// threshold. Body:
+//
+//	{"threshold_ms": 30000}
+//
+// Validation: threshold_ms must be >= 1 (zero would fire on every
+// terminal execution). No upper cap — a batch-processing project
+// might legitimately set hours-long thresholds.
+func (h *Handlers) HandleSetTimeBudgetConfig(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	var body struct {
+		ThresholdMs int `json:"threshold_ms"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.ThresholdMs < 1 {
+		writeError(w, http.StatusBadRequest, "threshold_ms must be >= 1")
+		return
+	}
+	if err := h.Store.SetProjectTimeBudgetMs(
+		r.Context(), authProjectID, body.ThresholdMs,
+	); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("set time_budget config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not update time_budget config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"threshold_ms": body.ThresholdMs,
 	})
 }
 

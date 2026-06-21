@@ -462,16 +462,60 @@ def test_context_overflow(backend: Backend, configured_sdk):
     pass
 
 
-@pytest.mark.skip(
-    reason=(
-        "time_budget fires on terminal executions whose duration >= "
-        "60s (post v0.0.1 threshold fix). Holding the suite for 60s "
-        "per run is impractical. Pending an opt-in env flag for "
-        "slow-test mode."
-    )
-)
 def test_time_budget(backend: Backend, configured_sdk):
-    pass
+    """End-to-end test for the time_budget detector against the
+    per-project threshold added in #276 (migration 041).
+
+    Setup:
+        - Lower the project's time_budget_ms to 100 via the new
+          PUT /me/time-budget-config endpoint, so an execution that
+          runs longer than 100 ms trips the detector. (Default 60000
+          would require holding the suite for 60s per run.)
+        - Wrap an agent whose body just sleeps 150 ms — no
+          tool/LLM/validator calls, so nothing else in the detector
+          chain can claim the execution. Pure time-budget signal.
+
+    Assertion:
+        - failure_group with class=loops and signature prefix
+          "time_budget_" appears within the timeout. Backend uses
+          FailureClassLoops + TimeBudgetSignature(effectiveDurationMs);
+          a 150 ms run buckets to "time_budget_1s+".
+
+    Exercises: per-project threshold read inside the handlers.go
+    chain, the per-project store method, and the existing
+    GroupTimeBudgetExceedance grouping path.
+    """
+    import time
+
+    mesedi = configured_sdk
+
+    # Set per-project threshold to 100 ms so a 150 ms agent fires.
+    resp = requests.put(
+        f"{backend.base_url}/me/time-budget-config",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"threshold_ms": 100},
+        timeout=5.0,
+    )
+    assert resp.status_code == 200, (
+        f"failed to set time_budget_ms: "
+        f"status={resp.status_code} body={resp.text}"
+    )
+
+    @mesedi.wrap
+    def slow_agent():
+        # Pure wall-clock burn. No tool/LLM/validator events emitted,
+        # so no other detector in the chain can race time_budget for
+        # the failure_group.
+        time.sleep(0.15)
+
+    slow_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="loops",
+        signature_prefix="time_budget_",
+    )
 
 
 def test_provider_incident(backend: Backend, configured_sdk):

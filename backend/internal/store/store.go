@@ -1239,6 +1239,17 @@ type Store interface {
 	// passed.
 	SetProjectProviderIncidentMinTenants(ctx context.Context, projectID string, minTenants int) error
 
+	// GetProjectTimeBudgetMs returns the per-project time_budget
+	// detector threshold in milliseconds. Migration 041 added the
+	// column with default 60_000 (60s), matching the historical
+	// hardcoded constant. Chat-agent projects often lower it (e.g.
+	// 30_000); research-agent projects often raise it (e.g.
+	// 300_000).
+	GetProjectTimeBudgetMs(ctx context.Context, projectID string) (int, error)
+	// SetProjectTimeBudgetMs writes the threshold in ms. Handler
+	// validates >= 1 before invoking; store accepts what's passed.
+	SetProjectTimeBudgetMs(ctx context.Context, projectID string, thresholdMs int) error
+
 	GetProjectRetentionDays(ctx context.Context, projectID string) (*int, error)
 	// SetProjectRetentionDays writes nil for indefinite or a positive
 	// int for a finite window. Handlers validate the value before
