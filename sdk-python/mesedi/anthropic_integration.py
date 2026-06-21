@@ -51,7 +51,15 @@ from typing import Any, List, Optional, Type
 
 from mesedi._context import current_execution_context
 from mesedi.client import get_client
+from mesedi.errors import classify_anthropic_exception, extract_http_status
 from mesedi.events import Event, EventType, utcnow_rfc3339
+
+# Stable lowercase provider identifier shipped on every llm_call
+# event emitted by this integration. Backend detectors (e.g.
+# provider_incident) cluster cross-tenant signals on (provider,
+# error_class), so this string must NOT change between SDK versions
+# without a coordinated backend change.
+_PROVIDER = "anthropic"
 
 logger = logging.getLogger("mesedi.anthropic")
 
@@ -132,6 +140,26 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
             response = original_create(self, *args, **kwargs)
         except BaseException as exc:
             duration_ms = int((time.perf_counter() - start) * 1000)
+            # Build the failure payload using the canonical
+            # cross-provider vocabulary in mesedi.errors. provider
+            # lets the backend group multi-provider signals;
+            # error_class maps the native exception to one of eight
+            # canonical buckets; http_status is included when the
+            # exception exposes it (Anthropic APIStatusError
+            # subclasses do, connection / timeout errors don't).
+            failure_payload = {
+                "provider": _PROVIDER,
+                "model": model,
+                "system_prompt": _truncate(system_text, _MAX_SYSTEM),
+                "user_message": _truncate(user_message, _MAX_USER_MSG),
+                "status": "failed",
+                "error_class": classify_anthropic_exception(exc),
+                "exception_type": type(exc).__name__,
+                "exception_message": _truncate(str(exc), _MAX_EXC_MSG),
+            }
+            http_status = extract_http_status(exc)
+            if http_status is not None:
+                failure_payload["http_status"] = http_status
             client.submit_event(Event(
                 event_id=event_id,
                 execution_id=ctx.execution_id,
@@ -139,14 +167,7 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
                 sequence=sequence,
                 timestamp=utcnow_rfc3339(),
                 duration_ms=duration_ms,
-                payload={
-                    "model": model,
-                    "system_prompt": _truncate(system_text, _MAX_SYSTEM),
-                    "user_message": _truncate(user_message, _MAX_USER_MSG),
-                    "status": "failed",
-                    "exception_type": type(exc).__name__,
-                    "exception_message": _truncate(str(exc), _MAX_EXC_MSG),
-                },
+                payload=failure_payload,
             ))
             raise
 
@@ -166,6 +187,7 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
             timestamp=utcnow_rfc3339(),
             duration_ms=duration_ms,
             payload={
+                "provider": _PROVIDER,
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),

@@ -25,12 +25,20 @@
 
 import { getClient } from "./client.js";
 import { currentExecutionContext, newEventId } from "./context.js";
+import { classifyAnthropicException, extractHttpStatus } from "./errors.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
 
 const MAX_SYSTEM = 1000;
 const MAX_USER_MSG = 1000;
 const MAX_RESPONSE = 1000;
 const MAX_EXC_MSG = 500;
+
+/** Stable lowercase provider identifier shipped on every llm_call
+ * event from this integration. Backend detectors cluster cross-
+ * tenant signals on (provider, error_class), so this string must
+ * NOT change between SDK versions without a coordinated backend
+ * change. */
+const PROVIDER = "anthropic";
 
 /** Already-patched classes, keyed by class identity to make
  * instrumentAnthropic() idempotent and to allow distinct fake classes
@@ -169,6 +177,7 @@ export async function instrumentAnthropic(
         timestamp: utcNowRfc3339(),
         duration_ms: durationMs,
         payload: {
+          provider: PROVIDER,
           model,
           system_prompt: truncate(systemText, MAX_SYSTEM),
           user_message: truncate(userMessage, MAX_USER_MSG),
@@ -182,6 +191,31 @@ export async function instrumentAnthropic(
       return response;
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
+      // Build the failure payload with the canonical cross-
+      // provider vocabulary from ./errors. provider lets the
+      // backend group multi-provider signals; error_class maps
+      // the native exception to one of eight canonical buckets;
+      // http_status is included when the exception exposes it.
+      const failurePayload: Record<string, unknown> = {
+        provider: PROVIDER,
+        model,
+        system_prompt: truncate(systemText, MAX_SYSTEM),
+        user_message: truncate(userMessage, MAX_USER_MSG),
+        status: "failed",
+        error_class: classifyAnthropicException(err),
+        exception_type:
+          err instanceof Error && err.constructor.name
+            ? err.constructor.name
+            : typeof err,
+        exception_message: truncate(
+          err instanceof Error ? err.message : String(err),
+          MAX_EXC_MSG,
+        ),
+      };
+      const httpStatus = extractHttpStatus(err);
+      if (httpStatus !== undefined) {
+        failurePayload.http_status = httpStatus;
+      }
       const event: Event = {
         event_id: eventId,
         execution_id: ctx.executionId,
@@ -189,20 +223,7 @@ export async function instrumentAnthropic(
         sequence,
         timestamp: utcNowRfc3339(),
         duration_ms: durationMs,
-        payload: {
-          model,
-          system_prompt: truncate(systemText, MAX_SYSTEM),
-          user_message: truncate(userMessage, MAX_USER_MSG),
-          status: "failed",
-          exception_type:
-            err instanceof Error && err.constructor.name
-              ? err.constructor.name
-              : typeof err,
-          exception_message: truncate(
-            err instanceof Error ? err.message : String(err),
-            MAX_EXC_MSG,
-          ),
-        },
+        payload: failurePayload,
       };
       client.submitEvent(event);
       throw err;
