@@ -27,6 +27,12 @@ import { Event, EventType, utcNowRfc3339 } from "./events.js";
 const MAX_ARG_REPR = 200;
 const MAX_RESULT_REPR = 500;
 const MAX_EXC_MSG = 500;
+/** Cap for the JSON-serialized return_value field. Larger than
+ * MAX_RESULT_REPR because the detector fingerprints structure,
+ * not value text — preserving structure is more valuable than a
+ * tight cap. 2048 chars covers typical tool responses (objects
+ * with a dozen keys) while still bounding pathological returns. */
+const MAX_RETURN_VALUE_JSON = 2048;
 
 export interface ToolOptions {
   /** Override the tool name (defaults to fn.name). */
@@ -85,6 +91,24 @@ export function tool<TArgs extends unknown[], TResult>(
     try {
       const result = await fn(...args);
       const durationMs = Math.round(performance.now() - start);
+      const payload: Record<string, unknown> = {
+        tool_name: toolName,
+        arguments: argsSummary,
+        status: "ok",
+        // Human-readable repr for dashboard display. Kept
+        // alongside structured return_value below so the UI can
+        // render whatever shape the customer's tool returns.
+        result_summary: truncate(safeRepr(result), MAX_RESULT_REPR),
+      };
+      // Structured JSON-native form for backend detectors
+      // (tool_schema_drift fingerprints the return shape). Only
+      // present when the result is JSON-serializable AND under
+      // the size cap; absent otherwise so the detector gracefully
+      // no-ops on this call instead of mis-fingerprinting.
+      const structured = structuredReturnValue(result);
+      if (structured !== undefined) {
+        payload.return_value = structured;
+      }
       const event: Event = {
         event_id: eventId,
         execution_id: ctx.executionId,
@@ -92,12 +116,7 @@ export function tool<TArgs extends unknown[], TResult>(
         sequence,
         timestamp: utcNowRfc3339(),
         duration_ms: durationMs,
-        payload: {
-          tool_name: toolName,
-          arguments: argsSummary,
-          status: "ok",
-          result_summary: truncate(safeRepr(result), MAX_RESULT_REPR),
-        },
+        payload,
       };
       client.submitEvent(event);
       return result;
@@ -134,6 +153,57 @@ function summarizeArgs(args: unknown[]): Record<string, unknown> {
   return {
     args: args.map((a) => truncate(safeRepr(a), MAX_ARG_REPR)),
   };
+}
+
+/**
+ * Returns ``result`` as a JSON-native value (string / number / boolean
+ * / null / array / object) suitable for embedding in the
+ * ``return_value`` payload field, or ``undefined`` when the result
+ * cannot be safely serialized.
+ *
+ * The backend's tool_schema_drift detector fingerprints the
+ * structure (sorted keys + value types) from this field. We need
+ * valid JSON structure, NOT a repr string.
+ *
+ * Implementation mirrors the Python `_structured_return_value`:
+ *   1. Serialize with a replacer that coerces unserializable values
+ *      (BigInt, functions, undefined, symbols) to strings rather
+ *      than dropping them silently.
+ *   2. Check the serialized size; if it exceeds the cap, return
+ *      the sentinel "<truncated>" so the detector treats this call
+ *      as non-comparable instead of mis-fingerprinting a partial
+ *      structure.
+ *   3. Round-trip through JSON.parse so the returned value is
+ *      guaranteed JSON-native (the shipper later JSON.stringifies
+ *      the whole payload with no replacer and would silently drop
+ *      raw BigInt / undefined values).
+ */
+function structuredReturnValue(result: unknown): unknown {
+  let encoded: string;
+  try {
+    encoded = JSON.stringify(result, (_k, v) => {
+      if (typeof v === "bigint") return v.toString();
+      if (typeof v === "function") return `<function:${v.name || "anonymous"}>`;
+      if (typeof v === "symbol") return v.toString();
+      if (typeof v === "undefined") return "<undefined>";
+      return v;
+    });
+  } catch {
+    // Circular reference or other JSON.stringify failure.
+    return undefined;
+  }
+  // JSON.stringify can legitimately return undefined for inputs
+  // like a top-level function or a top-level undefined; treat as
+  // unserializable rather than crashing the payload.
+  if (encoded === undefined) return undefined;
+  if (encoded.length > MAX_RETURN_VALUE_JSON) {
+    return "<truncated>";
+  }
+  try {
+    return JSON.parse(encoded);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

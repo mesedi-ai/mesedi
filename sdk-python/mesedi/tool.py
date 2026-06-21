@@ -27,9 +27,10 @@ the whole execution crashed) is up to the agent code.
 from __future__ import annotations
 
 import functools
+import json
 import time
 import uuid
-from typing import Any, Callable, Dict, TypeVar
+from typing import Any, Callable, Dict, Optional, TypeVar
 
 from mesedi._context import current_execution_context
 from mesedi.client import get_client
@@ -44,6 +45,52 @@ F = TypeVar("F", bound=Callable[..., Any])
 _MAX_ARG_REPR = 200
 _MAX_RESULT_REPR = 500
 _MAX_EXC_MSG = 500
+# Cap for the JSON-serialized return_value field. Larger than
+# _MAX_RESULT_REPR because the detector consumes the structural
+# fingerprint, not the value text — preserving more of the structure
+# is more valuable than a tight cap. 2048 chars covers typical tool
+# responses (objects with a dozen keys, short string values) while
+# still bounding pathological large returns.
+_MAX_RETURN_VALUE_JSON = 2048
+
+
+def _structured_return_value(result: Any) -> Any:
+    """Return ``result`` as a JSON-native Python value (str/int/
+    float/bool/None/list/dict) suitable for embedding in the
+    ``return_value`` payload field, or ``None`` when the result is
+    unserializable.
+
+    The backend's ``tool_schema_drift`` detector computes a
+    structural fingerprint (sorted keys + value types) from this
+    field — it needs valid JSON structure, not a Python ``repr``.
+
+    Implementation:
+      1. Serialize once with ``default=str`` so non-JSON-native
+         values (datetime, UUID, custom objects) get coerced to
+         strings rather than crashing.
+      2. Measure the serialized size; if it exceeds the cap, return
+         the sentinel string ``"<truncated>"`` so the detector
+         treats this call as non-comparable rather than mis-
+         fingerprinting a partial structure.
+      3. Round-trip through ``json.loads`` so the returned value is
+         guaranteed JSON-native (the shipper's later ``json.dumps``
+         call has no ``default=`` and would crash on raw datetime /
+         UUID values).
+
+    Returns ``None`` when serialization is impossible (e.g. a self-
+    referential structure that defeats ``default=str``), so the
+    caller can omit the field cleanly.
+    """
+    try:
+        encoded = json.dumps(result, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return None
+    if len(encoded) > _MAX_RETURN_VALUE_JSON:
+        return "<truncated>"
+    try:
+        return json.loads(encoded)
+    except (TypeError, ValueError):
+        return None
 
 
 def tool(func: F) -> F:
@@ -113,12 +160,23 @@ def tool(func: F) -> F:
             raise
 
         duration_ms = _elapsed_ms(start_wall)
-        payload = {
+        payload: Dict[str, Any] = {
             "tool_name": tool_name,
             "arguments": args_summary,
             "status": "ok",
+            # Human-readable repr for dashboard display. Kept
+            # alongside structured return_value below so the UI
+            # can render whatever shape the customer's tool
+            # actually returns.
             "result_summary": _truncate(repr(result), _MAX_RESULT_REPR),
         }
+        # Structured JSON form for backend detectors (specifically
+        # tool_schema_drift, which fingerprints the return shape).
+        # Only present when the result is JSON-serializable;
+        # detectors gracefully no-op on its absence.
+        structured = _structured_return_value(result)
+        if structured is not None:
+            payload["return_value"] = structured
         client.submit_event(Event(
             event_id=event_id,
             execution_id=ctx.execution_id,

@@ -203,26 +203,19 @@ def test_data_leakage(backend: Backend, configured_sdk):
 # tool_schema_drift
 # ──────────────────────────────────────────────────────────────────────
 
-@pytest.mark.skip(
-    reason=(
-        "tool_schema_drift is structurally unreachable via the real "
-        "SDK as currently shipped. DetectSchemaDrift reads the "
-        "`return_value` field of tool_call payloads and runs "
-        "ReturnShapeHash on it (json.Unmarshal + structural fingerprint). "
-        "The SDK's @mesedi.tool decorator ships `result_summary` = "
-        "repr(result) truncated to a string — wrong field name AND "
-        "the value is a Python repr string, not valid JSON, so "
-        "ReturnShapeHash would return empty even if the field name "
-        "matched. SDK needs to ship the JSON-marshaled return value "
-        "(with truncation) under `return_value` before this test "
-        "can be re-enabled. Same class of bug as the token_waste / "
-        "semantic_loop / data_leakage field mismatches the suite "
-        "already caught; tracked as a follow-up SDK release."
-    )
-)
 def test_tool_schema_drift(backend: Backend, configured_sdk):
-    """Two-phase scaffold preserved for when the SDK ships
-    structured return values. See skip reason for the SDK gap."""
+    """End-to-end test for the tool_schema_drift detector against
+    the v0.5.0 SDK (which ships structured ``return_value`` on
+    tool_call payloads — see #270).
+
+    DetectSchemaDrift requires minHistoryCalls=10 baseline
+    successful calls of the same tool sharing a majority shape
+    before it can flag a drift. Phase 1 seeds 10 baseline calls
+    returning shape A; phase 2 makes one call returning shape B
+    and asserts the detector fires.
+
+    Same factory function in both phases so tool_name matches
+    (the detector compares per-(tool_name, return_shape))."""
     mesedi = configured_sdk
     return_shape = ["A"]
 
