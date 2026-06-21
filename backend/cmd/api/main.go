@@ -680,6 +680,8 @@ func main() {
 	mux.Handle("PUT /me/tool-return-value-config", privateHandler)
 	// Task #270.c, per-project truncation-rate telemetry.
 	mux.Handle("GET /me/tool-return-value-stats", privateHandler)
+	// Task #276.d, per-project config-fallback telemetry.
+	mux.Handle("GET /me/config-fallback-stats", privateHandler)
 	// #252 — customer-facing 2FA / TOTP. All five live on
 	// privateHandler because they manage the calling customer's own
 	// authenticator-app enrollment and need the session cookie.

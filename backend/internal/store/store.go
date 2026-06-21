@@ -1275,6 +1275,17 @@ type Store interface {
 		maxBytes int,
 	) (ToolReturnValueStats, error)
 
+	// GetConfigFallbackStats counts audit_events rows where the
+	// backend's per-project config read failed and the handler
+	// fell back to the hardcoded default. Surfaces in the dashboard
+	// (#276.d) so a bad migration / column drop doesn't silently
+	// ignore every customer's config without anyone noticing.
+	GetConfigFallbackStats(
+		ctx context.Context,
+		projectID string,
+		windowHours int,
+	) (ConfigFallbackStats, error)
+
 	GetProjectRetentionDays(ctx context.Context, projectID string) (*int, error)
 	// SetProjectRetentionDays writes nil for indefinite or a positive
 	// int for a finite window. Handlers validate the value before

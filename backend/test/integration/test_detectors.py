@@ -673,6 +673,51 @@ def test_provider_incident_openai(backend: Backend, configured_sdk):
     )
 
 
+def test_config_fallback_stats_endpoint(backend: Backend, configured_sdk):
+    """#276.d: smoke test for GET /me/config-fallback-stats.
+
+    Hits the endpoint and asserts the response shape is what the
+    dashboard expects. Counts are zero in a fresh test project (no
+    fallbacks have fired yet) — the test verifies wire format, auth,
+    route registration, and the store query path don't crash.
+
+    Triggering a real fallback in an integration test would require
+    dropping a column mid-run; that's a separate piece of CI
+    infrastructure tracked as #276.e.
+    """
+    resp = requests.get(
+        f"{backend.base_url}/me/config-fallback-stats",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        timeout=5.0,
+    )
+    assert resp.status_code == 200, (
+        f"failed to get config-fallback-stats: "
+        f"status={resp.status_code} body={resp.text}"
+    )
+    body = resp.json()
+    # Required fields the dashboard ConfigFallbackChip reads.
+    required = {
+        "project_id",
+        "window_hours",
+        "time_budget_count",
+        "provider_incident_min_tenants_count",
+        "tool_return_value_max_bytes_count",
+        "class_severity_override_count",
+    }
+    missing = required - set(body.keys())
+    assert not missing, f"response missing fields: {missing}; got {body}"
+    assert body["window_hours"] == 24
+    # Counts are integers (not strings); the chip's > 0 check
+    # depends on this.
+    for k in (
+        "time_budget_count",
+        "provider_incident_min_tenants_count",
+        "tool_return_value_max_bytes_count",
+        "class_severity_override_count",
+    ):
+        assert isinstance(body[k], int), f"{k} should be int, got {type(body[k])}"
+
+
 def test_provider_incident_cohere(backend: Backend, configured_sdk):
     """End-to-end test for provider_incident against the Cohere v2
     integration (#271.b closeout). Same shape as Anthropic /

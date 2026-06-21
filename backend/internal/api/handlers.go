@@ -265,6 +265,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /me/tool-return-value-config", h.HandleSetToolReturnValueConfig)
 	// Task #270.c, per-project truncation-rate telemetry.
 	mux.HandleFunc("GET /me/tool-return-value-stats", h.HandleGetToolReturnValueStats)
+	// Task #276.d, per-project config-fallback telemetry.
+	mux.HandleFunc("GET /me/config-fallback-stats", h.HandleGetConfigFallbackStats)
 	// Task #263, Team / multi-seat. Admin-gated endpoints for
 	// managing the org + members + invites under the auth project's
 	// tenant_id. resolveAdminContext() guards each handler.
@@ -880,6 +882,16 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					"project_id", authProjectID,
 					"error", mbErr.Error(),
 				)
+				// #276.d: durable telemetry — surfaces in dashboard.
+				h.recordAuditEventForProject(
+					r.Context(),
+					authProjectID, "system",
+					"config_fallback", "project_config", "tool_return_value_max_bytes",
+					map[string]any{
+						"error":          mbErr.Error(),
+						"fallback_value": maxBytes,
+					},
+				)
 			}
 			for _, toolName := range toolNames {
 				// Current-execution shape: query the most recent
@@ -1257,6 +1269,16 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					"error", tErr.Error(),
 				)
 				threshold = detectors.MinTenantsForProviderIncident
+				// #276.d: durable telemetry — surfaces in dashboard.
+				h.recordAuditEventForProject(
+					r.Context(),
+					authProjectID, "system",
+					"config_fallback", "project_config", "provider_incident_min_tenants",
+					map[string]any{
+						"error":          tErr.Error(),
+						"fallback_value": threshold,
+					},
+				)
 			}
 			// Look back 15 minutes — long enough to span a
 			// rolling provider blip, short enough to keep the
@@ -1523,6 +1545,18 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					"execution_id", executionID,
 					"project_id", authProjectID,
 					"error", tbErr.Error(),
+				)
+				// #276.d: durable telemetry so a silent column-drop
+				// or persistent DB issue surfaces in the dashboard
+				// instead of only the Warn log.
+				h.recordAuditEventForProject(
+					r.Context(),
+					authProjectID, "system",
+					"config_fallback", "project_config", "time_budget_ms",
+					map[string]any{
+						"error":          tbErr.Error(),
+						"fallback_value": thresholdMs,
+					},
 				)
 			}
 			if isTerminalStatus(patch.Status) && effectiveDurationMs >= int64(thresholdMs) {
@@ -3102,6 +3136,14 @@ func (h *Handlers) HandleSetProviderIncidentConfig(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "min_tenants must be >= 1")
 		return
 	}
+	// Same upper-bound discipline as time_budget / tool_return_value
+	// (#276.c). The dashboard tile caps at 1000; match server-side.
+	const maxMinTenants = 1000
+	if body.MinTenants > maxMinTenants {
+		writeError(w, http.StatusBadRequest,
+			"min_tenants must be <= 1000")
+		return
+	}
 	if err := h.Store.SetProjectProviderIncidentMinTenants(
 		r.Context(), authProjectID, body.MinTenants,
 	); err != nil {
@@ -3181,6 +3223,16 @@ func (h *Handlers) HandleSetTimeBudgetConfig(w http.ResponseWriter, r *http.Requ
 	}
 	if body.ThresholdMs < 1 {
 		writeError(w, http.StatusBadRequest, "threshold_ms must be >= 1")
+		return
+	}
+	// Server-side upper bound matches the dashboard tile's 24h cap
+	// (86_400_000 ms). Without this, a typo of 999999999999 was
+	// silently accepted by the backend and mishandled downstream
+	// (#276.c).
+	const maxThresholdMs = 86_400_000 // 24 hours
+	if body.ThresholdMs > maxThresholdMs {
+		writeError(w, http.StatusBadRequest,
+			"threshold_ms must be <= 86400000 (24 hours)")
 		return
 	}
 	if err := h.Store.SetProjectTimeBudgetMs(
@@ -3351,6 +3403,46 @@ func (h *Handlers) HandleGetToolReturnValueStats(w http.ResponseWriter, r *http.
 		"truncated_sentinel_count": stats.TruncatedCount,
 		"oversized_count":          stats.OversizedCount,
 		"max_bytes":                maxBytes,
+	})
+}
+
+// HandleGetConfigFallbackStats returns recent-window counts of
+// per-project config-read fallbacks (#276.d). The dashboard uses
+// this to render a warning chip on each Settings tile when the
+// corresponding config has fallen back to the default in the last
+// 24 h — a signal that something operational is going wrong with
+// the backend (transient DB blip, dropped column, etc.) and the
+// customer's tuning is being silently ignored.
+//
+// Response:
+//
+//	{
+//	  "project_id": "...",
+//	  "window_hours": 24,
+//	  "time_budget_count": 0,
+//	  "provider_incident_min_tenants_count": 0,
+//	  "tool_return_value_max_bytes_count": 0
+//	}
+func (h *Handlers) HandleGetConfigFallbackStats(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	stats, err := h.Store.GetConfigFallbackStats(r.Context(), authProjectID, 24)
+	if err != nil {
+		h.Logger.Error("get config_fallback stats failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load config_fallback stats")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id":                          authProjectID,
+		"window_hours":                        stats.WindowHours,
+		"time_budget_count":                   stats.TimeBudgetCount,
+		"provider_incident_min_tenants_count": stats.ProviderIncidentMinTenantsCount,
+		"tool_return_value_max_bytes_count":   stats.ToolReturnValueMaxBytesCount,
+		"class_severity_override_count":       stats.ClassSeverityOverrideCount,
 	})
 }
 

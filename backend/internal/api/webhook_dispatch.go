@@ -155,6 +155,18 @@ func (h *Handlers) runFailureGroupDispatch(
 		// over a config-lookup hiccup.
 		logger.Warn("webhook dispatch: severity override lookup failed (using default)",
 			"error", oerr.Error())
+		// #276.d (extended): durable telemetry — surfaces in the
+		// dashboard's Severity Routing section so customers see
+		// when their severity overrides are being silently ignored.
+		h.recordAuditEventForProject(
+			ctx, projectID, "system",
+			"config_fallback", "project_config", "class_severity_override",
+			map[string]any{
+				"error":          oerr.Error(),
+				"failure_class":  failureClass,
+				"fallback_value": string(eventSeverity),
+			},
+		)
 	}
 
 	eventName := "failure_group.created"
