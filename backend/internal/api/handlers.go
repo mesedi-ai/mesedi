@@ -260,6 +260,11 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Task #276, per-project time_budget detector threshold (ms).
 	mux.HandleFunc("GET /me/time-budget-config", h.HandleGetTimeBudgetConfig)
 	mux.HandleFunc("PUT /me/time-budget-config", h.HandleSetTimeBudgetConfig)
+	// Task #270.a, per-project tool_schema_drift return_value byte cap.
+	mux.HandleFunc("GET /me/tool-return-value-config", h.HandleGetToolReturnValueConfig)
+	mux.HandleFunc("PUT /me/tool-return-value-config", h.HandleSetToolReturnValueConfig)
+	// Task #270.c, per-project truncation-rate telemetry.
+	mux.HandleFunc("GET /me/tool-return-value-stats", h.HandleGetToolReturnValueStats)
 	// Task #263, Team / multi-seat. Admin-gated endpoints for
 	// managing the org + members + invites under the auth project's
 	// tenant_id. resolveAdminContext() guards each handler.
@@ -860,6 +865,22 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else {
+			// #270.a: per-project cap on return_value bytes used
+			// for fingerprinting. Returns above this threshold are
+			// excluded from the comparison (treated as inconclusive,
+			// mirroring the SDK's "<truncated>" sentinel). Default
+			// 8192 on store error so a transient DB blip can't
+			// silence the detector entirely.
+			maxBytes := 8192
+			if mb, mbErr := h.Store.GetProjectToolReturnValueMaxBytes(r.Context(), authProjectID); mbErr == nil {
+				maxBytes = mb
+			} else {
+				h.Logger.Warn("get tool_return_value_max_bytes failed; using default",
+					"execution_id", executionID,
+					"project_id", authProjectID,
+					"error", mbErr.Error(),
+				)
+			}
 			for _, toolName := range toolNames {
 				// Current-execution shape: query the most recent
 				// successful tool_call for this tool on THIS
@@ -870,6 +891,12 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					// "" excludes nothing, gets the most recent
 					// project-wide which includes the current
 					// execution. If it returns nothing, skip.
+					continue
+				}
+				if len(currentReturns[0]) > maxBytes {
+					// Exceeds the per-project cap; treat as
+					// non-comparable rather than hashing a partial
+					// or oversized structure.
 					continue
 				}
 				currentShape := detectors.ReturnShapeHash(json.RawMessage(currentReturns[0]))
@@ -887,6 +914,13 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				}
 				shapeCounts := map[string]int{}
 				for _, raw := range history {
+					if len(raw) > maxBytes {
+						// Same cap for history rows — keeps
+						// fingerprint computation symmetric so a
+						// customer raising/lowering the cap sees
+						// consistent comparisons.
+						continue
+					}
 					shape := detectors.ReturnShapeHash(json.RawMessage(raw))
 					if shape == "" {
 						continue
@@ -3164,6 +3198,159 @@ func (h *Handlers) HandleSetTimeBudgetConfig(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"threshold_ms": body.ThresholdMs,
+	})
+}
+
+// HandleGetToolReturnValueConfig returns the per-project byte cap
+// on tool_call return_value payloads used by the tool_schema_drift
+// detector (migration 042 / #270.a). Default 8192 (8 KB) — covers
+// typical tool returns while bounding pathological cases. The full
+// event payload is still stored regardless of this cap; only the
+// detector's fingerprint comparison is bounded.
+//
+// Response shape matches HandleGetTimeBudgetConfig /
+// HandleGetProviderIncidentConfig so the dashboard can use one
+// shared pattern for per-project threshold tiles.
+//
+// Response:
+//
+//	{
+//	  "project_id": "...",
+//	  "max_bytes": 8192
+//	}
+func (h *Handlers) HandleGetToolReturnValueConfig(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	n, err := h.Store.GetProjectToolReturnValueMaxBytes(r.Context(), authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("get tool_return_value config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load tool_return_value config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id": authProjectID,
+		"max_bytes":  n,
+	})
+}
+
+// HandleSetToolReturnValueConfig updates the per-project cap. Body:
+//
+//	{"max_bytes": 16384}
+//
+// Validation: max_bytes must be >= 1. Server-side upper bound is
+// 1 MB (matches the existing payload cap from #243) — a per-project
+// fingerprint cap larger than the wire-format max is meaningless
+// because the SDK can't ship more than 1 MB anyway.
+func (h *Handlers) HandleSetToolReturnValueConfig(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	var body struct {
+		MaxBytes int `json:"max_bytes"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.MaxBytes < 1 {
+		writeError(w, http.StatusBadRequest, "max_bytes must be >= 1")
+		return
+	}
+	const oneMegabyte = 1 << 20
+	if body.MaxBytes > oneMegabyte {
+		writeError(w, http.StatusBadRequest, "max_bytes must be <= 1048576 (the wire-format payload cap)")
+		return
+	}
+	if err := h.Store.SetProjectToolReturnValueMaxBytes(
+		r.Context(), authProjectID, body.MaxBytes,
+	); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("set tool_return_value config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not update tool_return_value config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"max_bytes": body.MaxBytes,
+	})
+}
+
+// HandleGetToolReturnValueStats returns recent-window telemetry on
+// how often tool_call return_values are being clipped (#270.c).
+// Two clip sources are counted:
+//
+//   - SDK truncation: the SDK shipped the literal "<truncated>"
+//     string after the return_value JSON exceeded its on-wire cap
+//     (16 KB in v0.5.0+).
+//   - Backend exclusion: the return_value JSON length exceeds the
+//     per-project tool_return_value_max_bytes cap; the detector
+//     drops these from the schema-drift fingerprint comparison.
+//
+// Window defaults to the last 24 hours. A high rate means the
+// customer should raise their cap (or refactor the tool to return
+// less) so schema_drift has more comparable signal.
+//
+// Response shape:
+//
+//	{
+//	  "project_id": "...",
+//	  "window_hours": 24,
+//	  "total_calls": 1500,
+//	  "truncated_sentinel_count": 12,
+//	  "oversized_count": 8,
+//	  "max_bytes": 8192
+//	}
+func (h *Handlers) HandleGetToolReturnValueStats(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	maxBytes, err := h.Store.GetProjectToolReturnValueMaxBytes(r.Context(), authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		// Fall through with default 8192 on transient errors so
+		// the stats query doesn't fail outright — the customer
+		// just sees stats computed against the default cap rather
+		// than their configured one.
+		maxBytes = 8192
+	}
+	stats, err := h.Store.GetToolReturnValueStats(
+		r.Context(), authProjectID, 24, maxBytes,
+	)
+	if err != nil {
+		h.Logger.Error("get tool_return_value stats failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load tool_return_value stats")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id":               authProjectID,
+		"window_hours":             stats.WindowHours,
+		"total_calls":              stats.TotalCalls,
+		"truncated_sentinel_count": stats.TruncatedCount,
+		"oversized_count":          stats.OversizedCount,
+		"max_bytes":                maxBytes,
 	})
 }
 

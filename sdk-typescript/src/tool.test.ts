@@ -84,15 +84,48 @@ describe("tool() return_value field", () => {
     expect(lastPayload().return_value).toBe(42);
   });
 
-  test("BigInt coerces to string via replacer", async () => {
+  test("BigInt coerces to typed sentinel (#270.b)", async () => {
     const fn = tool(async () => ({ big: BigInt(42) }));
     await fn();
     const rv = lastPayload().return_value as Record<string, unknown>;
-    expect(rv.big).toBe("42");
+    expect(rv.big).toEqual({ __type__: "bigint", value: "42" });
+  });
+
+  test("Date coerces to typed datetime sentinel (#270.b)", async () => {
+    const fn = tool(async () => ({ when: new Date("2026-06-21T12:00:00Z") }));
+    await fn();
+    const rv = lastPayload().return_value as Record<string, unknown>;
+    expect(rv.when).toEqual({
+      __type__: "datetime",
+      value: "2026-06-21T12:00:00.000Z",
+    });
+  });
+
+  test("Date vs ISO string produce DIFFERENT fingerprints (#270.b)", async () => {
+    /** The whole point of #270.b: distinguish a real Date field from
+     * a string field with the same content. Pre-#270.b both
+     * collapsed to {key: str} and silently masked schema drift. */
+    const fn1 = tool(async () => ({
+      created_at: new Date("2026-06-21T12:00:00Z"),
+    }));
+    await fn1();
+    const dateShape = lastPayload().return_value;
+
+    const fn2 = tool(async () => ({
+      created_at: "2026-06-21T12:00:00.000Z",
+    }));
+    await fn2();
+    const stringShape = lastPayload().return_value;
+
+    expect(JSON.stringify(dateShape)).not.toEqual(JSON.stringify(stringShape));
   });
 
   test("oversized return returns the <truncated> sentinel", async () => {
-    const huge = "x".repeat(3000);
+    // SDK cap is now 16384 bytes (raised from 2048 in #270.a — the
+    // backend per-project cap is now the policy knob; the SDK cap
+    // exists only to bound bandwidth and memory). Anything over the
+    // cap returns the "<truncated>" sentinel.
+    const huge = "x".repeat(20_000);
     const fn = tool(async () => ({ data: huge }));
     await fn();
     expect(lastPayload().return_value).toBe("<truncated>");

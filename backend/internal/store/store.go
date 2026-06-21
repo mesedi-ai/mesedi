@@ -1250,6 +1250,31 @@ type Store interface {
 	// validates >= 1 before invoking; store accepts what's passed.
 	SetProjectTimeBudgetMs(ctx context.Context, projectID string, thresholdMs int) error
 
+	// GetProjectToolReturnValueMaxBytes returns the per-project cap
+	// on tool_call return_value size (bytes) for the
+	// tool_schema_drift detector's fingerprint computation.
+	// Migration 042 added the column with default 8192 (8 KB).
+	// Returns above this threshold are excluded from the detector's
+	// comparison (treated as inconclusive, mirroring the SDK's
+	// "<truncated>" sentinel).
+	GetProjectToolReturnValueMaxBytes(ctx context.Context, projectID string) (int, error)
+	// SetProjectToolReturnValueMaxBytes writes the cap. Handler
+	// validates >= 1 before invoking.
+	SetProjectToolReturnValueMaxBytes(ctx context.Context, projectID string, maxBytes int) error
+
+	// GetToolReturnValueStats aggregates tool_call events in the
+	// last windowHours for projectID, counting how many returned
+	// the SDK's "<truncated>" sentinel and how many would be
+	// excluded by the per-project byte cap. Surface in the
+	// dashboard tile so customers can see when their cap is too
+	// tight to capture useful drift signal (#270.c).
+	GetToolReturnValueStats(
+		ctx context.Context,
+		projectID string,
+		windowHours int,
+		maxBytes int,
+	) (ToolReturnValueStats, error)
+
 	GetProjectRetentionDays(ctx context.Context, projectID string) (*int, error)
 	// SetProjectRetentionDays writes nil for indefinite or a positive
 	// int for a finite window. Handlers validate the value before

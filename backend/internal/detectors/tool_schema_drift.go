@@ -121,6 +121,26 @@ func writeShape(b *strings.Builder, v any) error {
 		}
 		b.WriteByte(']')
 	case map[string]any:
+		// #270.b convention: the SDK ships typed sentinels for non-
+		// JSON-native values, e.g.:
+		//   {"__type__": "datetime", "value": "..."}
+		//   {"__type__": "object", "class": "User", "value": "..."}
+		// When the object carries a string __type__ marker, honor
+		// the convention by emitting the LITERAL type value (and
+		// `class` for object sentinels) into the shape. Without
+		// this, every typed sentinel would collapse to the same
+		// {__type__:string,value:string} shape and silently mask
+		// the drift signal #270.b is designed to surface.
+		if typeName, ok := x["__type__"].(string); ok {
+			b.WriteString("<typed:")
+			b.WriteString(typeName)
+			if cls, hasCls := x["class"].(string); hasCls {
+				b.WriteByte(':')
+				b.WriteString(cls)
+			}
+			b.WriteByte('>')
+			return nil
+		}
 		keys := make([]string, 0, len(x))
 		for k := range x {
 			keys = append(keys, k)

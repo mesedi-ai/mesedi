@@ -675,6 +675,11 @@ func main() {
 	// Task #276, per-project time_budget detector threshold (ms).
 	mux.Handle("GET /me/time-budget-config", privateHandler)
 	mux.Handle("PUT /me/time-budget-config", privateHandler)
+	// Task #270.a, per-project tool_schema_drift return_value byte cap.
+	mux.Handle("GET /me/tool-return-value-config", privateHandler)
+	mux.Handle("PUT /me/tool-return-value-config", privateHandler)
+	// Task #270.c, per-project truncation-rate telemetry.
+	mux.Handle("GET /me/tool-return-value-stats", privateHandler)
 	// #252 — customer-facing 2FA / TOTP. All five live on
 	// privateHandler because they manage the calling customer's own
 	// authenticator-app enrollment and need the session cookie.

@@ -27,12 +27,16 @@ import { Event, EventType, utcNowRfc3339 } from "./events.js";
 const MAX_ARG_REPR = 200;
 const MAX_RESULT_REPR = 500;
 const MAX_EXC_MSG = 500;
-/** Cap for the JSON-serialized return_value field. Larger than
- * MAX_RESULT_REPR because the detector fingerprints structure,
- * not value text — preserving structure is more valuable than a
- * tight cap. 2048 chars covers typical tool responses (objects
- * with a dozen keys) while still bounding pathological returns. */
-const MAX_RETURN_VALUE_JSON = 2048;
+/** Cap for the JSON-serialized return_value field on the wire.
+ * The SDK uses this as a generous upper bound; the backend applies
+ * its OWN per-project cap (default 8 KB) at fingerprint time so
+ * customers tune storage / fingerprint policy from the dashboard
+ * without an SDK redeploy (see #270.a, migration 042).
+ *
+ * Raised from the v0.5.0 hardcoded 2048 to 16384 (16 KB) so the
+ * SDK no longer aggressively truncates returns that the backend
+ * would happily fingerprint. */
+const MAX_RETURN_VALUE_JSON = 16384;
 
 export interface ToolOptions {
   /** Override the tool name (defaults to fn.name). */
@@ -156,54 +160,157 @@ function summarizeArgs(args: unknown[]): Record<string, unknown> {
 }
 
 /**
- * Returns ``result`` as a JSON-native value (string / number / boolean
- * / null / array / object) suitable for embedding in the
- * ``return_value`` payload field, or ``undefined`` when the result
- * cannot be safely serialized.
+ * Returns ``result`` as a JSON-native, schema-preserving value
+ * suitable for embedding in the ``return_value`` payload field, or
+ * ``undefined`` when the result cannot be safely serialized.
  *
  * The backend's tool_schema_drift detector fingerprints the
- * structure (sorted keys + value types) from this field. We need
- * valid JSON structure, NOT a repr string.
+ * structure (sorted keys + value types) from this field. The
+ * pre-#270.b implementation used a JSON.stringify replacer that
+ * coerced BigInt / Date / function / etc. to plain strings, which
+ * silently collapsed ``{created_at: Date}`` and
+ * ``{created_at: "string"}`` to an identical fingerprint and
+ * masked real schema drift (#270.b).
  *
- * Implementation mirrors the Python `_structured_return_value`:
- *   1. Serialize with a replacer that coerces unserializable values
- *      (BigInt, functions, undefined, symbols) to strings rather
- *      than dropping them silently.
- *   2. Check the serialized size; if it exceeds the cap, return
- *      the sentinel "<truncated>" so the detector treats this call
- *      as non-comparable instead of mis-fingerprinting a partial
- *      structure.
- *   3. Round-trip through JSON.parse so the returned value is
- *      guaranteed JSON-native (the shipper later JSON.stringifies
- *      the whole payload with no replacer and would silently drop
- *      raw BigInt / undefined values).
+ * Fix: type-tagged sentinels matching the Python sibling. A Date
+ * becomes ``{"__type__": "datetime", "value": "..."}``; BigInt
+ * becomes ``{"__type__": "bigint", ...}``; etc. The structural
+ * fingerprint now sees a distinct shape for typed-vs-plain-string
+ * fields so the detector catches drift between them.
+ *
+ * The ``__type__`` tag vocabulary is closed and matches Python's
+ * so cross-SDK consumers (e.g. customer running Python tools that
+ * call a TypeScript backend) see consistent fingerprints.
  */
 function structuredReturnValue(result: unknown): unknown {
-  let encoded: string;
+  let walked: unknown;
   try {
-    encoded = JSON.stringify(result, (_k, v) => {
-      if (typeof v === "bigint") return v.toString();
-      if (typeof v === "function") return `<function:${v.name || "anonymous"}>`;
-      if (typeof v === "symbol") return v.toString();
-      if (typeof v === "undefined") return "<undefined>";
-      return v;
-    });
+    walked = walkForShape(result, new WeakSet<object>());
   } catch {
-    // Circular reference or other JSON.stringify failure.
+    // Circular ref or walker failure — omit the field cleanly.
     return undefined;
   }
-  // JSON.stringify can legitimately return undefined for inputs
-  // like a top-level function or a top-level undefined; treat as
-  // unserializable rather than crashing the payload.
+  let encoded: string | undefined;
+  try {
+    encoded = JSON.stringify(walked);
+  } catch {
+    return undefined;
+  }
   if (encoded === undefined) return undefined;
-  if (encoded.length > MAX_RETURN_VALUE_JSON) {
-    return "<truncated>";
+  if (encoded.length > MAX_RETURN_VALUE_JSON) return "<truncated>";
+  return walked;
+}
+
+/** Recursively coerce ``value`` to a JSON-native form that
+ * preserves type information via typed sentinels. ``visited``
+ * tracks objects on the current path so circular refs throw rather
+ * than infinite-loop. */
+function walkForShape(value: unknown, visited: WeakSet<object>): unknown {
+  // Fast path: JSON-native primitives.
+  if (value === null) return null;
+  const t = typeof value;
+  if (t === "string" || t === "boolean") return value;
+  if (t === "number") {
+    const n = value as number;
+    if (!Number.isFinite(n)) {
+      return {
+        __type__: "object",
+        class: "number",
+        value: String(n),
+      };
+    }
+    return n;
   }
-  try {
-    return JSON.parse(encoded);
-  } catch {
-    return undefined;
+  // undefined inside a container needs a typed sentinel so the
+  // shape preserves "this field is intentionally undefined" vs
+  // "this field is a string." Top-level undefined is handled by
+  // the caller (returns undefined-the-payload-absence).
+  if (t === "undefined") {
+    return { __type__: "undefined" };
   }
+  if (t === "bigint") {
+    return { __type__: "bigint", value: (value as bigint).toString() };
+  }
+  if (t === "function") {
+    return {
+      __type__: "function",
+      name: (value as { name?: string }).name || "anonymous",
+    };
+  }
+  if (t === "symbol") {
+    return { __type__: "symbol", value: (value as symbol).toString() };
+  }
+  // Container types: recurse, guarding against cycles.
+  if (Array.isArray(value)) {
+    if (visited.has(value)) {
+      throw new Error("circular array reference");
+    }
+    visited.add(value);
+    try {
+      return value.map((v) => walkForShape(v, visited));
+    } finally {
+      visited.delete(value);
+    }
+  }
+  if (value instanceof Date) {
+    return { __type__: "datetime", value: value.toISOString() };
+  }
+  if (value instanceof Map) {
+    return {
+      __type__: "map",
+      value: Array.from(value.entries()).map(([k, v]) => [
+        walkForShape(k, visited),
+        walkForShape(v, visited),
+      ]),
+    };
+  }
+  if (value instanceof Set) {
+    // Sets aren't JSON-native; tag and sort so order-insensitive
+    // nature is reflected in the shape.
+    const members = Array.from(value).map((v) => walkForShape(v, visited));
+    members.sort((a, b) => {
+      const sa = JSON.stringify(a) ?? "";
+      const sb = JSON.stringify(b) ?? "";
+      return sa.localeCompare(sb);
+    });
+    return { __type__: "set", value: members };
+  }
+  if (value instanceof RegExp) {
+    return { __type__: "regexp", value: value.toString() };
+  }
+  if (value instanceof Error) {
+    return {
+      __type__: "object",
+      class: value.constructor?.name || "Error",
+      value: value.message,
+    };
+  }
+  if (typeof value === "object") {
+    if (visited.has(value as object)) {
+      throw new Error("circular object reference");
+    }
+    visited.add(value as object);
+    try {
+      const obj = value as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        out[k] = walkForShape(v, visited);
+      }
+      // Tag the class name when it's not a plain Object — preserves
+      // "returns User vs returns AdminUser" drift even when both
+      // have the same fields.
+      const className = (value as object).constructor?.name;
+      if (className && className !== "Object") {
+        out.__type__ = "object";
+        out.class = className;
+      }
+      return out;
+    } finally {
+      visited.delete(value as object);
+    }
+  }
+  // Should be unreachable; defensive fallback.
+  return { __type__: "object", class: typeof value, value: String(value) };
 }
 
 /**
