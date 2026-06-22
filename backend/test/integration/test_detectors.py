@@ -436,16 +436,93 @@ def test_cost_velocity(backend: Backend, configured_sdk):
 # the detector side.
 # ──────────────────────────────────────────────────────────────────────
 
-@pytest.mark.skip(
-    reason=(
-        "cascading_failure requires a parent execution with a "
-        "handoff event whose child execution reaches a failure "
-        "terminal status. Needs SDK multi-agent handoff support + a "
-        "child execution that crashes. Pending integration scenario."
-    )
-)
+# cascading_failure test exercises the shipped mesedi.emit_agent_handoff
+# helper (Mesedi #11) — same public function the LangGraph + OpenAI
+# Agents integration modules call internally. Field-name parity vs
+# the backend AgentHandoffPayload struct was verified during Wave 1.2.
+# Skip retired here; original skip reason ("Needs SDK multi-agent
+# handoff support") was a stale misdiagnosis (the SDK has always
+# shipped emit_agent_handoff under that exact name; the audit searched
+# under emit_X conventions and missed the literal match).
+
+
 def test_cascading_failure(backend: Backend, configured_sdk):
-    pass
+    """End-to-end test of the cascading_failure detector (Mesedi #12).
+
+    The detector reads agent_handoff events on the parent execution
+    and LEFT JOINs them against the child execution's terminal status
+    (joined via the handoff payload's `child_execution_id` field).
+    Fires when at least one handoff resolves to a child that reached
+    a failure terminal state (crashed / timeout / validation_failed).
+
+    Test scaffold:
+        1. Pre-generate a child execution_id (UUID-shaped).
+        2. POST /executions creates the child as started, then PATCH
+           it to status=crashed — the child terminal state the
+           detector keys on.
+        3. Wrap the parent agent; inside, emit_agent_handoff with
+           the matching child_execution_id so the backend's
+           ListHandoffsWithChildStatus join resolves.
+        4. Parent closes naturally; the detector chain runs and
+           cascading_failure fires.
+
+    Assertion:
+        failure_group with class=cascading_failure and signature
+        prefix 'cascading_failure:parent:child:' appears within the
+        await_failure_group timeout.
+    """
+    import uuid
+    import mesedi as mesedi_pkg
+
+    mesedi = configured_sdk
+
+    # 1. Pre-generate child execution_id. Format matches the SDK's
+    # wrap-generated IDs so the backend treats it identically.
+    child_id = f"exec-{uuid.uuid4().hex[:12]}"
+
+    # 2. Create + crash the child via the public API. Uses the same
+    # project's auth as the parent.
+    create_resp = requests.post(
+        f"{backend.base_url}/executions",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"execution_id": child_id, "status": "started"},
+        timeout=5.0,
+    )
+    assert create_resp.status_code in (200, 201), (
+        f"create child execution: status={create_resp.status_code} "
+        f"body={create_resp.text}"
+    )
+    patch_resp = requests.patch(
+        f"{backend.base_url}/executions/{child_id}",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"status": "crashed", "crash_signature": "inttest-cascading-crash"},
+        timeout=5.0,
+    )
+    assert patch_resp.status_code == 200, (
+        f"crash child execution: status={patch_resp.status_code} "
+        f"body={patch_resp.text}"
+    )
+
+    # 3. Wrap the parent and emit a handoff that references the
+    # already-crashed child.
+    @mesedi.wrap
+    def parent_agent():
+        mesedi_pkg.emit_agent_handoff(
+            from_agent="parent",
+            to_agent="child",
+            handoff_kind="delegate",
+            task_summary="seeded cascading_failure scenario",
+            child_execution_id=child_id,
+        )
+
+    parent_agent()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="cascading_failure",
+        signature_prefix="cascading_failure:parent:child:",
+    )
 
 
 @pytest.mark.skip(
@@ -1026,15 +1103,72 @@ def test_hitl_rejection_spike_edited(backend: Backend, configured_sdk):
     )
 
 
-@pytest.mark.skip(
-    reason=(
-        "coordination_deadlock reads multi-agent handoff edges and "
-        "looks for circular waits. Needs a multi-agent topology "
-        "scaffold the test harness does not yet have. Pending."
-    )
-)
+# coordination_deadlock test exercises the same shipped public
+# emit_agent_handoff helper. The detector finds 2-cycles in the
+# agent-handoff topology (A→B AND B→A in the same execution subtree).
+# Both edges fit on a single wrapped execution's event stream, which
+# IS the entire subtree at depth=0 — no nested-execution scaffolding
+# required. Skip retired; original skip claimed the harness didn't
+# have a multi-agent scaffold (true at one point; the actual blocker
+# was the misdiagnosed "no SDK helper" framing on the parent
+# emit_agent_handoff task).
+
+
 def test_coordination_deadlock(backend: Backend, configured_sdk):
-    pass
+    """End-to-end test of the coordination_deadlock detector (#13).
+
+    The detector walks the topology subtree rooted at the current
+    execution, collects every agent_handoff edge, and fires on the
+    first 2-cycle (A→B AND B→A) found. Per the detector's design,
+    both edges in the same execution's event stream constitute a
+    valid 2-cycle because the subtree at depth=0 is just that
+    execution.
+
+    Test scaffold:
+        1. Wrap a single agent.
+        2. Inside the wrap, emit two handoff events with reversed
+           from/to agents — that's the smallest possible 2-cycle.
+        3. Close the wrap. The detector chain runs on terminal
+           status and finds the cycle.
+
+    Assertion:
+        failure_group with class=coordination_deadlock and signature
+        prefix 'coordination_deadlock:' appears within the
+        await_failure_group timeout. (Agents are alphabetized in
+        the signature so A↔B and B↔A collapse to the same cluster
+        — see backend/internal/detectors/coordination_deadlock.go.)
+    """
+    import mesedi as mesedi_pkg
+
+    mesedi = configured_sdk
+
+    @mesedi.wrap
+    def agent_in_deadlock_pattern():
+        # Two handoff edges forming a 2-cycle: A→B AND B→A.
+        # The detector alphabetizes the pair into the signature
+        # so this fires as "coordination_deadlock:planner:reviewer"
+        # regardless of which direction was emitted first.
+        mesedi_pkg.emit_agent_handoff(
+            from_agent="planner",
+            to_agent="reviewer",
+            handoff_kind="delegate",
+            task_summary="planner asks reviewer to validate plan",
+        )
+        mesedi_pkg.emit_agent_handoff(
+            from_agent="reviewer",
+            to_agent="planner",
+            handoff_kind="delegate",
+            task_summary="reviewer hands back to planner for revision",
+        )
+
+    agent_in_deadlock_pattern()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="coordination_deadlock",
+        signature_prefix="coordination_deadlock:",
+    )
 
 
 @pytest.mark.skip(
