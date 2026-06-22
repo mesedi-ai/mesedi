@@ -39,13 +39,29 @@ import (
 // reviewed. Bump when editing prices below so reviewers + customers can
 // see staleness. Exposed via GET /me/pricing-info so customers can see
 // which prices Mesedi is using.
-const PricingTableVersion = "2026-06-21"
+const PricingTableVersion = "2026-06-22"
 
 // modelPrice is the cost structure for one model: input + output rate
-// per 1 million tokens.
+// per 1 million tokens, plus optional long-context tier rates that
+// some providers (notably Google for Gemini Pro families) apply when
+// a single call's input_tokens exceed a breakpoint.
+//
+// Tier-flip semantics (Wave 0.6): when TierBreakpointInputTokens is
+// > 0 AND an individual call's input_tokens > TierBreakpointInputTokens,
+// the call gets billed at the over-tier rates for BOTH input and
+// output — matching Google's documented behavior where exceeding the
+// threshold flips the ENTIRE call to long-context pricing, not just
+// the tokens above the threshold. For models without tiered pricing
+// (every Anthropic / OpenAI / Cohere / Mistral / Llama entry, every
+// Gemini Flash variant), TierBreakpointInputTokens is left at 0 and
+// the over-tier fields are ignored — the existing flat-rate semantics
+// are unchanged.
 type modelPrice struct {
-	InputPer1M  float64
-	OutputPer1M float64
+	InputPer1M              float64
+	OutputPer1M             float64
+	InputPer1MOverTier      float64
+	OutputPer1MOverTier     float64
+	TierBreakpointInputTokens int
 }
 
 // priceTable is the source-of-truth for foundation-model pricing.
@@ -90,16 +106,44 @@ var priceTable = map[string]modelPrice{
 	"o1":            {InputPer1M: 15.00, OutputPer1M: 60.00},
 	"o1-mini":       {InputPer1M: 3.00, OutputPer1M: 12.00},
 
-	// ── Google (ai.google.dev/gemini-api/docs/pricing) ───────────────
-	// 2.5-pro / 2.0-pro are tiered by context size; we use the
-	// standard (≤200k input) tier here. Customers running >200k
-	// contexts will see slight underestimates; documented limitation.
-	"gemini-2.5-pro":   {InputPer1M: 1.25, OutputPer1M: 10.00},
-	"gemini-2.5-flash": {InputPer1M: 0.075, OutputPer1M: 0.30},
+	// ── Google (ai.google.dev/gemini-api/docs/pricing, fetched 2026-06-22) ──
+	// Gemini Pro families use long-context tier pricing: when a single
+	// call's input_tokens exceeds 200,000, BOTH input and output get
+	// billed at the higher rate. Flash families are flat-rate per
+	// Google's current docs (no tier breakpoint). See Wave 0.6
+	// closeout for the per-rate breakdown and source links.
+	"gemini-2.5-pro": {
+		InputPer1M:                1.25,
+		OutputPer1M:               10.00,
+		InputPer1MOverTier:        2.50,
+		OutputPer1MOverTier:       15.00,
+		TierBreakpointInputTokens: 200_000,
+	},
+	"gemini-3.1-pro-preview": {
+		InputPer1M:                2.00,
+		OutputPer1M:               12.00,
+		InputPer1MOverTier:        4.00,
+		OutputPer1MOverTier:       18.00,
+		TierBreakpointInputTokens: 200_000,
+	},
+	"gemini-3.5-flash":       {InputPer1M: 1.50, OutputPer1M: 9.00},
+	"gemini-3.1-flash-lite":  {InputPer1M: 0.25, OutputPer1M: 1.50},
+	"gemini-2.5-flash":       {InputPer1M: 0.30, OutputPer1M: 2.50},
+	// gemini-2.0-pro and gemini-1.5-pro retain the legacy flat-rate
+	// shipped before Wave 0.6 (Google's current pricing page no longer
+	// documents them; preserving customer-visible cost continuity
+	// until a dedicated legacy-pricing-deprecation wave). These should
+	// be revisited if Google publishes updated rates or formally
+	// deprecates the families.
 	"gemini-2.0-pro":   {InputPer1M: 1.25, OutputPer1M: 10.00},
-	"gemini-2.0-flash": {InputPer1M: 0.075, OutputPer1M: 0.30},
 	"gemini-1.5-pro":   {InputPer1M: 1.25, OutputPer1M: 5.00},
 	"gemini-1.5-flash": {InputPer1M: 0.075, OutputPer1M: 0.30},
+	// gemini-2.0-flash was deprecated and shut down by Google on
+	// 2026-06-01. Pricing kept at $0/$0 so cost_velocity does not
+	// double-bill for stale historical event records that may still
+	// resolve via the prefix-match path; the model can no longer be
+	// invoked successfully so prospective customer cost is zero.
+	"gemini-2.0-flash": {InputPer1M: 0, OutputPer1M: 0},
 
 	// ── Meta Llama (ai.meta.com/llama) ────────────────────────────────
 	// Llama weights are free for self-hosted deployments and Mesedi
@@ -155,8 +199,21 @@ func ComputeLLMCost(model string, inputTokens, outputTokens int) float64 {
 	if !ok {
 		return 0
 	}
-	return (float64(inputTokens)/1_000_000.0)*p.InputPer1M +
-		(float64(outputTokens)/1_000_000.0)*p.OutputPer1M
+	// Tier-flip: when a per-call input_tokens count exceeds the
+	// configured breakpoint, BOTH input and output get billed at the
+	// over-tier rates. Matches Google's documented long-context
+	// behavior for Gemini Pro models (>200k input flips the whole
+	// call). For flat-rate models, TierBreakpointInputTokens is 0
+	// and this branch never executes — the legacy single-rate path
+	// applies.
+	inputRate := p.InputPer1M
+	outputRate := p.OutputPer1M
+	if p.TierBreakpointInputTokens > 0 && inputTokens > p.TierBreakpointInputTokens {
+		inputRate = p.InputPer1MOverTier
+		outputRate = p.OutputPer1MOverTier
+	}
+	return (float64(inputTokens)/1_000_000.0)*inputRate +
+		(float64(outputTokens)/1_000_000.0)*outputRate
 }
 
 // IsKnownModel reports whether the model identifier resolves to a

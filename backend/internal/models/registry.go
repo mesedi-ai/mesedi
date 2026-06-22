@@ -125,12 +125,15 @@ var windowByModel = map[string]int{
 	"o1-mini":       128_000,
 
 	// ── Google ────────────────────────────────────────────────────
-	"gemini-2.5-pro":   2_000_000,
-	"gemini-2.5-flash": 1_000_000,
-	"gemini-2.0-pro":   2_000_000,
-	"gemini-2.0-flash": 1_000_000,
-	"gemini-1.5-pro":   2_000_000,
-	"gemini-1.5-flash": 1_000_000,
+	"gemini-3.5-flash":       1_000_000,
+	"gemini-3.1-pro-preview": 1_000_000,
+	"gemini-3.1-flash-lite":  1_000_000,
+	"gemini-2.5-pro":         2_000_000,
+	"gemini-2.5-flash":       1_000_000,
+	"gemini-2.0-pro":         2_000_000,
+	"gemini-2.0-flash":       1_000_000,
+	"gemini-1.5-pro":         2_000_000,
+	"gemini-1.5-flash":       1_000_000,
 
 	// ── Meta / Llama ──────────────────────────────────────────────
 	"llama-4-scout":    10_000_000,
@@ -186,12 +189,15 @@ var providerByModel = map[string]string{
 	"o1":            "openai",
 	"o1-mini":       "openai",
 	// Google
-	"gemini-2.5-pro":   "google",
-	"gemini-2.5-flash": "google",
-	"gemini-2.0-pro":   "google",
-	"gemini-2.0-flash": "google",
-	"gemini-1.5-pro":   "google",
-	"gemini-1.5-flash": "google",
+	"gemini-3.5-flash":       "google",
+	"gemini-3.1-pro-preview": "google",
+	"gemini-3.1-flash-lite":  "google",
+	"gemini-2.5-pro":         "google",
+	"gemini-2.5-flash":       "google",
+	"gemini-2.0-pro":         "google",
+	"gemini-2.0-flash":       "google",
+	"gemini-1.5-pro":         "google",
+	"gemini-1.5-flash":       "google",
 	// Meta
 	"llama-4-scout":    "meta",
 	"llama-4-maverick": "meta",

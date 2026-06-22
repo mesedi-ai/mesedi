@@ -169,6 +169,145 @@ func TestLastUpdated_DeprecatedAlias(t *testing.T) {
 	}
 }
 
+// TestComputeLLMCost_GeminiProTierFlip exercises the long-context
+// pricing tier for Gemini Pro families (Wave 0.6). When a single call's
+// input_tokens exceed the 200k breakpoint, BOTH input and output get
+// billed at the over-tier rate — matching Google's documented behavior
+// where exceeding the threshold flips the entire call, not just the
+// tokens above it.
+func TestComputeLLMCost_GeminiProTierFlip(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		model        string
+		inputTokens  int
+		outputTokens int
+		want         float64
+	}{
+		{
+			// gemini-2.5-pro under the threshold: standard tier.
+			// 100k input @ $1.25/1M + 1k output @ $10.00/1M
+			// = 0.125 + 0.01 = $0.135.
+			name:         "gemini-2.5-pro under 200k",
+			model:        "gemini-2.5-pro",
+			inputTokens:  100_000,
+			outputTokens: 1_000,
+			want:         0.135,
+		},
+		{
+			// gemini-2.5-pro over the threshold: long-context tier.
+			// 250k input @ $2.50/1M + 1k output @ $15.00/1M
+			// = 0.625 + 0.015 = $0.640.
+			name:         "gemini-2.5-pro over 200k",
+			model:        "gemini-2.5-pro",
+			inputTokens:  250_000,
+			outputTokens: 1_000,
+			want:         0.640,
+		},
+		{
+			// At exactly the breakpoint, still in the lower tier
+			// (the comparison is strictly greater than). 200k @ $1.25/1M
+			// + 1k @ $10/1M = 0.25 + 0.01 = $0.26.
+			name:         "gemini-2.5-pro at exact 200k breakpoint",
+			model:        "gemini-2.5-pro",
+			inputTokens:  200_000,
+			outputTokens: 1_000,
+			want:         0.26,
+		},
+		{
+			// gemini-3.1-pro-preview under the threshold.
+			// 50k input @ $2.00/1M + 5k output @ $12.00/1M
+			// = 0.10 + 0.06 = $0.16.
+			name:         "gemini-3.1-pro-preview under 200k",
+			model:        "gemini-3.1-pro-preview",
+			inputTokens:  50_000,
+			outputTokens: 5_000,
+			want:         0.16,
+		},
+		{
+			// gemini-3.1-pro-preview over the threshold.
+			// 500k input @ $4.00/1M + 10k output @ $18.00/1M
+			// = 2.00 + 0.18 = $2.18.
+			name:         "gemini-3.1-pro-preview over 200k",
+			model:        "gemini-3.1-pro-preview",
+			inputTokens:  500_000,
+			outputTokens: 10_000,
+			want:         2.18,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := ComputeLLMCost(c.model, c.inputTokens, c.outputTokens)
+			if !floatNearlyEqual(got, c.want, 1e-6) {
+				t.Errorf("ComputeLLMCost(%q, %d, %d) = %v; want %v",
+					c.model, c.inputTokens, c.outputTokens, got, c.want)
+			}
+		})
+	}
+}
+
+// TestComputeLLMCost_GeminiFlashFlat verifies that Gemini Flash families
+// (which Google explicitly does NOT tier) keep flat-rate pricing
+// regardless of input_tokens count. Without this guardrail, a future
+// refactor that accidentally adds tier rates to a Flash row would
+// silently overcharge Flash customers above an arbitrary threshold.
+func TestComputeLLMCost_GeminiFlashFlat(t *testing.T) {
+	t.Parallel()
+	// gemini-2.5-flash: $0.30 input / $2.50 output per 1M (flat).
+	// 250k input @ $0.30/1M + 10k output @ $2.50/1M
+	// = 0.075 + 0.025 = $0.10.
+	got := ComputeLLMCost("gemini-2.5-flash", 250_000, 10_000)
+	want := 0.10
+	if !floatNearlyEqual(got, want, 1e-6) {
+		t.Errorf("gemini-2.5-flash @ 250k input: got %v; want %v (flat-rate, no tier flip)", got, want)
+	}
+	// gemini-3.5-flash: $1.50 / $9.00 (flat).
+	// 300k @ $1.50/1M + 5k @ $9.00/1M = 0.45 + 0.045 = $0.495.
+	got = ComputeLLMCost("gemini-3.5-flash", 300_000, 5_000)
+	want = 0.495
+	if !floatNearlyEqual(got, want, 1e-6) {
+		t.Errorf("gemini-3.5-flash @ 300k input: got %v; want %v (flat-rate, no tier flip)", got, want)
+	}
+	// gemini-3.1-flash-lite: $0.25 / $1.50 (flat).
+	// 250k @ $0.25/1M + 1k @ $1.50/1M = 0.0625 + 0.0015 = $0.064.
+	got = ComputeLLMCost("gemini-3.1-flash-lite", 250_000, 1_000)
+	want = 0.064
+	if !floatNearlyEqual(got, want, 1e-6) {
+		t.Errorf("gemini-3.1-flash-lite @ 250k input: got %v; want %v (flat-rate, no tier flip)", got, want)
+	}
+}
+
+// TestComputeLLMCost_NonGeminiUnaffected verifies the tier-flip path
+// does NOT activate for any model whose TierBreakpointInputTokens is
+// zero — i.e. every Anthropic / OpenAI / Cohere / Mistral / Llama
+// entry. A 500k-token call on Claude Opus must still produce the same
+// cost the pre-Wave-0.6 code did, not double-bill.
+func TestComputeLLMCost_NonGeminiUnaffected(t *testing.T) {
+	t.Parallel()
+	// claude-opus-4-6 @ 500k input / 10k output:
+	// = 500_000/1e6 * $15 + 10_000/1e6 * $75
+	// = 7.5 + 0.75 = $8.25.
+	got := ComputeLLMCost("claude-opus-4-6", 500_000, 10_000)
+	want := 8.25
+	if !floatNearlyEqual(got, want, 1e-9) {
+		t.Errorf("claude-opus-4-6 @ 500k: got %v; want %v (flat-rate path must be unchanged)", got, want)
+	}
+}
+
+// TestComputeLLMCost_DeprecatedGemini2FlashIsZero anchors the
+// gemini-2.0-flash entry's $0 pricing introduced in Wave 0.6 after
+// Google shut down the model on 2026-06-01. The entry is retained so
+// historical events still resolve via the registry; cost must be zero
+// because no prospective billing is possible.
+func TestComputeLLMCost_DeprecatedGemini2FlashIsZero(t *testing.T) {
+	t.Parallel()
+	got := ComputeLLMCost("gemini-2.0-flash", 100_000, 1_000)
+	if got != 0 {
+		t.Errorf("gemini-2.0-flash (deprecated) should price at $0; got %v", got)
+	}
+}
+
 func floatNearlyEqual(a, b, eps float64) bool {
 	d := a - b
 	if d < 0 {
