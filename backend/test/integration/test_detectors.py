@@ -821,27 +821,209 @@ def test_infrastructure_throttled(backend: Backend, configured_sdk):
     pass
 
 
-@pytest.mark.skip(
-    reason=(
-        "hitl_timeout reads human_intervention event payloads. The "
-        "public SDK does not first-class expose HITL event emission "
-        "in a way the test harness can easily drive. Needs SDK-"
-        "injection or an SDK HITL helper. Pending."
-    )
-)
-def test_hitl_timeout(backend: Backend, configured_sdk):
-    pass
+# HITL tests use the public SDK helpers request_human_intervention()
+# + handle.complete() that ship in mesedi v0.5.0 (Python) and the
+# corresponding TypeScript pair. Field-name parity vs the backend
+# HumanInterventionPayload struct was verified during Wave 1.1
+# (all 10 fields match). The previous "no SDK helper" skip reasons
+# on these tests were stale and unblocked four end-to-end paths:
+# explicit timeout + sla_exceeded + rejection spike (rejected
+# variant) + rejection spike (edited variant).
 
 
-@pytest.mark.skip(
-    reason=(
-        "hitl_rejection_spike reads aggregated human_intervention "
-        "rejection events. Same SDK limitation as hitl_timeout. "
-        "Pending SDK-injection helper."
+def test_hitl_timeout_explicit(backend: Backend, configured_sdk):
+    """Explicit timeout path: handle.complete(response_kind='timeout')
+    fires hitl_timeout:explicit regardless of wait duration.
+
+    Setup:
+        - Wrap an agent that immediately requests human intervention
+          and then completes with response_kind='timeout'. Caller is
+          declaring the human timed out (e.g. queue worker noticed
+          the SLA elapsed and timed the request out itself).
+        - sla_seconds is set high (3600) so the sla_exceeded variant
+          is NOT a possibility; only the explicit timeout path can
+          produce the failure_group.
+
+    Assertion:
+        - failure_group with class=hitl_timeout and signature prefix
+          'hitl_timeout:explicit' appears within the timeout.
+    """
+    import mesedi as mesedi_pkg
+
+    mesedi = configured_sdk
+
+    @mesedi.wrap
+    def agent_with_explicit_timeout():
+        handle = mesedi_pkg.request_human_intervention(
+            question="Approve seeded action?",
+            sla_seconds=3600,
+        )
+        # Host application's timeout handler fires the explicit
+        # timeout completion.
+        handle.complete(
+            response_kind="timeout",
+            decided_by="system-timeout-handler",
+        )
+
+    agent_with_explicit_timeout()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="hitl_timeout",
+        signature_prefix="hitl_timeout:explicit",
     )
-)
-def test_hitl_rejection_spike(backend: Backend, configured_sdk):
-    pass
+
+
+def test_hitl_timeout_sla_exceeded(backend: Backend, configured_sdk):
+    """SLA-exceeded path: response_kind is approved (NOT timeout),
+    but wait_duration_ms exceeds sla_seconds * 1000 — the detector
+    flags it as an SLA breach via the second-pass heuristic.
+
+    Setup:
+        - sla_seconds=1 (1-second SLA window)
+        - Agent sleeps 1.5s between request and complete so
+          wait_duration_ms ~= 1500 > 1000.
+        - response_kind='approved' so the explicit-timeout first
+          pass DOES NOT match; the sla_exceeded second pass owns
+          the firing path.
+
+    Assertion:
+        - failure_group with class=hitl_timeout and signature prefix
+          'hitl_timeout:sla_exceeded' appears within the timeout.
+    """
+    import time
+    import mesedi as mesedi_pkg
+
+    mesedi = configured_sdk
+
+    @mesedi.wrap
+    def agent_with_sla_breach():
+        handle = mesedi_pkg.request_human_intervention(
+            question="Approve seeded action?",
+            sla_seconds=1,
+        )
+        # Wait longer than the SLA window. 1.5s gives a 50% margin
+        # over the 1.0s SLA so timing flake on slow test runners
+        # doesn't false-negative.
+        time.sleep(1.5)
+        handle.complete(
+            response_kind="approved",
+            response_payload={"approver": "alice@example.com"},
+            decided_by="alice@example.com",
+        )
+
+    agent_with_sla_breach()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="hitl_timeout",
+        signature_prefix="hitl_timeout:sla_exceeded",
+    )
+
+
+def test_hitl_rejection_spike_rejected(backend: Backend, configured_sdk):
+    """Rejected variant: across 5 HITL executions, 2 complete with
+    response_kind='rejected' (40% rejection rate, clears the 40%
+    threshold). Rejected has priority over edited so this fires
+    the 'rejected' signature.
+
+    Detector enforces a min_sample of 5 executions before firing
+    so we deliberately run 5 sequential wrapped executions, each
+    going through the full request → complete cycle. The DETECTOR
+    runs at execution close on the 5th run and sees the 2/5 = 40%
+    rate that trips the threshold.
+
+    Per Wave 1.1 Decision 2, we do NOT lower the min_sample knob
+    via a config endpoint; we exercise the production behavior.
+
+    Assertion:
+        - failure_group with class=hitl_rejection_spike and
+          signature prefix 'hitl_rejection_spike:rejected' appears
+          within the timeout.
+    """
+    import mesedi as mesedi_pkg
+
+    mesedi = configured_sdk
+
+    # 2 rejected + 3 approved = 40% rejection rate → trips.
+    response_kinds = [
+        "rejected",
+        "approved",
+        "rejected",
+        "approved",
+        "approved",
+    ]
+
+    for kind in response_kinds:
+        @mesedi.wrap
+        def one_hitl_execution():
+            handle = mesedi_pkg.request_human_intervention(
+                question="Approve seeded action?",
+                sla_seconds=3600,
+            )
+            handle.complete(response_kind=kind)
+
+        one_hitl_execution()
+        mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="hitl_rejection_spike",
+        signature_prefix="hitl_rejection_spike:rejected",
+    )
+
+
+def test_hitl_rejection_spike_edited(backend: Backend, configured_sdk):
+    """Edited variant: across 5 HITL executions, 2 complete with
+    response_kind='edited' and ZERO with 'rejected' (40% edit
+    rate clears the 30% edit threshold; rejected priority does NOT
+    pre-empt it because there are no rejections to count).
+
+    The 'edited' threshold is intentionally lower (30%) than
+    'rejected' (40%) because edits are a weaker negative signal —
+    the human approved with modifications rather than outright
+    rejecting — and we want to surface persistent quality drift
+    even when the agent is not being outright rejected.
+
+    Assertion:
+        - failure_group with class=hitl_rejection_spike and
+          signature prefix 'hitl_rejection_spike:edited' appears
+          within the timeout.
+    """
+    import mesedi as mesedi_pkg
+
+    mesedi = configured_sdk
+
+    # 2 edited + 3 approved = 40% edit rate (above 30% threshold).
+    # ZERO rejected so the rejected-variant priority does NOT
+    # claim the failure_group.
+    response_kinds = [
+        "edited",
+        "approved",
+        "edited",
+        "approved",
+        "approved",
+    ]
+
+    for kind in response_kinds:
+        @mesedi.wrap
+        def one_hitl_execution():
+            handle = mesedi_pkg.request_human_intervention(
+                question="Approve seeded action?",
+                sla_seconds=3600,
+            )
+            handle.complete(response_kind=kind)
+
+        one_hitl_execution()
+        mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="hitl_rejection_spike",
+        signature_prefix="hitl_rejection_spike:edited",
+    )
 
 
 @pytest.mark.skip(
