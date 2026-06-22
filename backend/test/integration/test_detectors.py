@@ -909,15 +909,53 @@ def test_provider_incident_gemini(backend: Backend, configured_sdk):
     )
 
 
-@pytest.mark.skip(
-    reason=(
-        "infrastructure_throttled reads infrastructure_event payloads "
-        "for 429 / circuit-open signals. Needs SDK-injection of "
-        "those events. Pending."
-    )
-)
 def test_infrastructure_throttled(backend: Backend, configured_sdk):
-    pass
+    """End-to-end test of the infrastructure_throttled detector
+    (Mesedi #19).
+
+    The detector aggregates infrastructure_event payloads by
+    (reason, provider, quota_dimension) and fires when the
+    per-tenant pattern crosses the configured threshold. Wave 1.4
+    wired the instrument_* modules to auto-emit these events on
+    throttling-class exceptions, but the detector also fires when
+    customers call mesedi.emit_infrastructure_event directly — which
+    is the path this test exercises since it doesn't depend on a
+    real provider 429 response.
+
+    Skip retired here; original skip reason ("Needs SDK-injection
+    of those events") was about the missing public helper which
+    actually shipped under #19 as emit_infrastructure_event. Wave
+    1.4 closes the wiring side (auto-emit from instrument_*) and
+    this test exercises the direct customer-call path through the
+    same public helper.
+    """
+    import mesedi as mesedi_pkg
+
+    mesedi = configured_sdk
+
+    @mesedi.wrap
+    def agent_hitting_rate_limit():
+        # Customer code that observed a 429 emits the infrastructure
+        # event directly. Wave 1.4's auto-emit from instrument_*
+        # produces this same event shape — the detector behavior is
+        # identical regardless of which call path produced it.
+        mesedi_pkg.emit_infrastructure_event(
+            reason="rate_limit",
+            provider="anthropic",
+            endpoint="/v1/messages",
+            status_code=429,
+            retry_after_ms=2000,
+            quota_dimension="tokens_per_minute",
+        )
+
+    agent_hitting_rate_limit()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="infrastructure_throttled",
+        signature_prefix="rate_limit:anthropic",
+    )
 
 
 # HITL tests use the public SDK helpers request_human_intervention()

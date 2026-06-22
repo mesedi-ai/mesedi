@@ -57,6 +57,7 @@ from mesedi.errors import (
     extract_retry_after,
 )
 from mesedi.events import Event, EventType, utcnow_rfc3339
+from mesedi.observe import _maybe_emit_throttling_event
 
 # Stable lowercase provider identifier shipped on every llm_call
 # event emitted by this integration. Backend detectors (e.g.
@@ -180,6 +181,21 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
                 duration_ms=duration_ms,
                 payload=failure_payload,
             ))
+            # Auto-emit a matching infrastructure_event when the
+            # canonical error_class signals per-tenant throttling
+            # (rate_limited or quota_exhausted). Different detector
+            # path from the failed llm_call above: provider_incident
+            # reads the llm_call; infrastructure_throttled reads the
+            # infrastructure_event. Without this auto-emit the
+            # infrastructure_throttled detector is silently inactive
+            # for the default customer (Wave 1.4 audit gap closure).
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=failure_payload["error_class"],
+                http_status=http_status,
+                retry_after_seconds=retry_after,
+                endpoint="/v1/messages",
+            )
             raise
 
         duration_ms = int((time.perf_counter() - start) * 1000)

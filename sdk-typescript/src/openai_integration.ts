@@ -38,6 +38,7 @@ import {
   extractRetryAfter,
 } from "./errors.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
+import { _maybeEmitThrottlingEvent } from "./observe.js";
 
 const MAX_SYSTEM = 1000;
 const MAX_USER_MSG = 1000;
@@ -203,6 +204,15 @@ function patchChatCompletions(cls: CompletionsClassLike): void {
           err,
         }),
       );
+      // Wave 1.4: auto-emit infrastructure_event on throttling-class
+      // exceptions so infrastructure_throttled isn't silently inactive.
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: classifyOpenAIException(err),
+        httpStatus: extractHttpStatus(err),
+        retryAfterSeconds: extractRetryAfter(err),
+        endpoint: "/v1/chat/completions",
+      });
       throw err;
     }
   } as CreateFn;
@@ -277,6 +287,15 @@ function patchResponses(cls: ResponsesClassLike): void {
           err,
         }),
       );
+      // Wave 1.4: auto-emit infrastructure_event on throttling-class
+      // exceptions; same rationale as the chat completions path.
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: classifyOpenAIException(err),
+        httpStatus: extractHttpStatus(err),
+        retryAfterSeconds: extractRetryAfter(err),
+        endpoint: "/v1/responses",
+      });
       throw err;
     }
   } as CreateFn;

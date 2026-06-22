@@ -253,6 +253,61 @@ def emit_llm_call(
 _INFRA_REASONS = frozenset({"rate_limit", "circuit_breaker", "quota_exhausted"})
 
 
+# Canonical error_class values that signal per-tenant throttling — used
+# by the instrument_* modules to decide whether to auto-emit an
+# infrastructure_event alongside their failed llm_call event so the
+# infrastructure_throttled detector picks up the pattern. Deliberately
+# narrow: RATE_LIMITED and QUOTA_EXHAUSTED are unambiguous throttling
+# signals. Anthropic's OverloadedError (HTTP 529) is NOT here because
+# the canonical error class set conflates it with SERVICE_UNAVAILABLE
+# (which also catches network outages and 5xx — provider_incident
+# territory, not throttling). A future wave that splits
+# SERVICE_UNAVAILABLE into separate classes (e.g. PROVIDER_OVERLOADED
+# vs PROVIDER_DOWN) can extend this set; for now we err toward
+# false-negatives over false-positives.
+_THROTTLING_ERROR_CLASSES = frozenset({
+    "rate_limited",
+    "quota_exhausted",
+})
+
+_REASON_BY_ERROR_CLASS = {
+    "rate_limited": "rate_limit",
+    "quota_exhausted": "quota_exhausted",
+}
+
+
+def _maybe_emit_throttling_event(
+    provider: str,
+    error_class: str,
+    http_status: Optional[int] = None,
+    retry_after_seconds: Optional[float] = None,
+    endpoint: str = "",
+    quota_dimension: str = "",
+) -> None:
+    """If the canonical error_class is a throttling signal, emit an
+    infrastructure_event alongside the failed llm_call so the
+    backend's infrastructure_throttled detector picks up the
+    per-tenant backpressure pattern. No-op for non-throttling
+    errors. Internal helper used by the four instrument_* modules
+    (anthropic, openai, cohere, gemini) so the throttling-class
+    filter and reason-mapping live in one place.
+    """
+    if error_class not in _THROTTLING_ERROR_CLASSES:
+        return
+    reason = _REASON_BY_ERROR_CLASS.get(error_class, error_class)
+    retry_after_ms = 0
+    if retry_after_seconds is not None and retry_after_seconds > 0:
+        retry_after_ms = int(float(retry_after_seconds) * 1000)
+    emit_infrastructure_event(
+        reason=reason,
+        provider=provider,
+        endpoint=endpoint,
+        status_code=int(http_status) if http_status is not None else 0,
+        retry_after_ms=retry_after_ms,
+        quota_dimension=quota_dimension,
+    )
+
+
 def emit_infrastructure_event(
     reason: str,
     provider: str = "",

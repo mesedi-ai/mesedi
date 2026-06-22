@@ -31,6 +31,7 @@ import {
   extractRetryAfter,
 } from "./errors.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
+import { _maybeEmitThrottlingEvent } from "./observe.js";
 
 const MAX_SYSTEM = 1000;
 const MAX_USER_MSG = 1000;
@@ -238,6 +239,16 @@ export async function instrumentAnthropic(
         payload: failurePayload,
       };
       client.submitEvent(event);
+      // Wave 1.4: auto-emit infrastructure_event on throttling-class
+      // exceptions so the infrastructure_throttled detector isn't
+      // silently inactive for the default customer.
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: failurePayload.error_class as string,
+        httpStatus,
+        retryAfterSeconds: retryAfter,
+        endpoint: "/v1/messages",
+      });
       throw err;
     }
   } as AnthropicCreateFn;

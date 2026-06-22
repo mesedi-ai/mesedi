@@ -24,6 +24,7 @@ import {
   extractRetryAfter,
 } from "./errors.js";
 import { EventType, utcNowRfc3339 } from "./events.js";
+import { _maybeEmitThrottlingEvent } from "./observe.js";
 
 const MAX_SYSTEM = 1000;
 const MAX_USER_MSG = 1000;
@@ -169,6 +170,15 @@ export async function instrumentGemini(
         timestamp: utcNowRfc3339(),
         duration_ms: durationMs,
         payload: failurePayload,
+      });
+      // Wave 1.4: auto-emit infrastructure_event on throttling-class
+      // exceptions so infrastructure_throttled isn't silently inactive.
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: failurePayload.error_class as string,
+        httpStatus,
+        retryAfterSeconds: retryAfter,
+        endpoint: "/v1/models/generateContent",
       });
       throw err;
     }

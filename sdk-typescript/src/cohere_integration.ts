@@ -25,6 +25,7 @@ import {
   extractRetryAfter,
 } from "./errors.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
+import { _maybeEmitThrottlingEvent } from "./observe.js";
 
 const MAX_SYSTEM = 1000;
 const MAX_USER_MSG = 1000;
@@ -154,6 +155,14 @@ function patchV1(cls: CohereClientLike): void {
           err,
         }),
       );
+      // Wave 1.4: auto-emit infrastructure_event on throttling.
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: classifyCohereException(err),
+        httpStatus: extractHttpStatus(err),
+        retryAfterSeconds: extractRetryAfter(err),
+        endpoint: "/v1/chat",
+      });
       throw err;
     }
   } as ChatFn;
@@ -230,6 +239,14 @@ function patchV2(cls: CohereClientLike): void {
           err,
         }),
       );
+      // Wave 1.4: auto-emit infrastructure_event on throttling.
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: classifyCohereException(err),
+        httpStatus: extractHttpStatus(err),
+        retryAfterSeconds: extractRetryAfter(err),
+        endpoint: "/v2/chat",
+      });
       throw err;
     }
   } as ChatFn;

@@ -79,6 +79,7 @@ from mesedi.errors import (
     extract_http_status,
     extract_retry_after,
 )
+from mesedi.observe import _maybe_emit_throttling_event
 from mesedi.events import Event, EventType, utcnow_rfc3339
 
 # Stable lowercase provider identifier shipped on every llm_call
@@ -205,6 +206,16 @@ def _patch_chat_completions(cls: Type[Any]) -> None:
                 user_message=user_message,
                 exc=exc,
             ))
+            # Auto-emit infrastructure_event on throttling-class
+            # exceptions (Wave 1.4) so infrastructure_throttled isn't
+            # silently inactive for the default customer.
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_openai_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/chat/completions",
+            )
             raise
 
         duration_ms = int((time.perf_counter() - start) * 1000)
@@ -292,6 +303,16 @@ def _patch_responses(cls: Type[Any]) -> None:
                 user_message=user_message,
                 exc=exc,
             ))
+            # Auto-emit infrastructure_event on throttling-class
+            # exceptions (Wave 1.4); same rationale as the chat
+            # completions path above.
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_openai_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/responses",
+            )
             raise
 
         duration_ms = int((time.perf_counter() - start) * 1000)

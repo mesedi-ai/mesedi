@@ -167,6 +167,60 @@ export type InfrastructureReason =
   | (string & {});
 
 /**
+ * Canonical error_class values that signal per-tenant throttling — used
+ * by the instrument_* modules to decide whether to auto-emit an
+ * infrastructure_event alongside their failed llm_call event so the
+ * infrastructure_throttled detector picks up the pattern. Deliberately
+ * narrow: rate_limited and quota_exhausted are unambiguous throttling
+ * signals. Anthropic's OverloadedError (HTTP 529) is NOT here because
+ * the canonical error class set conflates it with service_unavailable
+ * (which also catches network outages and 5xx). A future wave that
+ * splits service_unavailable into separate classes can extend this
+ * set; for now we err toward false-negatives over false-positives.
+ */
+const THROTTLING_ERROR_CLASSES = new Set<string>([
+  "rate_limited",
+  "quota_exhausted",
+]);
+
+const REASON_BY_ERROR_CLASS: Record<string, InfrastructureReason> = {
+  rate_limited: "rate_limit",
+  quota_exhausted: "quota_exhausted",
+};
+
+/**
+ * If the canonical error_class is a throttling signal, emit an
+ * infrastructure_event alongside the failed llm_call so the backend's
+ * infrastructure_throttled detector picks up the per-tenant
+ * backpressure pattern. No-op for non-throttling errors. Internal
+ * helper used by the four instrument_* modules (anthropic, openai,
+ * cohere, gemini) so the throttling-class filter and reason mapping
+ * live in one place.
+ */
+export function _maybeEmitThrottlingEvent(args: {
+  provider: string;
+  errorClass: string;
+  httpStatus?: number;
+  retryAfterSeconds?: number;
+  endpoint?: string;
+  quotaDimension?: string;
+}): void {
+  if (!THROTTLING_ERROR_CLASSES.has(args.errorClass)) return;
+  const reason = REASON_BY_ERROR_CLASS[args.errorClass] ?? args.errorClass;
+  const retryAfterMs =
+    args.retryAfterSeconds && args.retryAfterSeconds > 0
+      ? Math.trunc(args.retryAfterSeconds * 1000)
+      : 0;
+  emitInfrastructureEvent(reason, {
+    provider: args.provider,
+    endpoint: args.endpoint,
+    statusCode: args.httpStatus,
+    retryAfterMs,
+    quotaDimension: args.quotaDimension,
+  });
+}
+
+/**
  * Emit an `infrastructure_event` for transport-plane backpressure.
  *
  * Used when the SDK or caller observes an HTTP 429, hits a provider

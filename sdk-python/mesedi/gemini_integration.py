@@ -52,6 +52,7 @@ from mesedi.errors import (
     extract_retry_after,
 )
 from mesedi.events import Event, EventType, utcnow_rfc3339
+from mesedi.observe import _maybe_emit_throttling_event
 
 _PROVIDER = "gemini"
 
@@ -141,6 +142,16 @@ def instrument_gemini(model_class: Optional[Type[Any]] = None) -> bool:
                 user_message=user_message,
                 exc=exc,
             ))
+            # Auto-emit infrastructure_event on throttling-class
+            # exceptions (Wave 1.4) so infrastructure_throttled
+            # isn't silently inactive for the default customer.
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_gemini_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/models/generateContent",
+            )
             raise
 
         duration_ms = int((time.perf_counter() - start) * 1000)
