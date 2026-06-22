@@ -268,6 +268,14 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Task #270.a, per-project tool_schema_drift return_value byte cap.
 	mux.HandleFunc("GET /me/tool-return-value-config", h.HandleGetToolReturnValueConfig)
 	mux.HandleFunc("PUT /me/tool-return-value-config", h.HandleSetToolReturnValueConfig)
+	// Wave 2.1.a, per-project custom-pattern storage for the three
+	// security detectors (prompt_injection / data_leakage /
+	// sandbox_escape). Detectors read these in Wave 2.1.b; dashboard
+	// editor lands in Wave 2.1.c.
+	mux.HandleFunc("GET /me/pattern-config/{detector}", h.HandleListPatternConfig)
+	mux.HandleFunc("POST /me/pattern-config/{detector}", h.HandleCreatePatternConfig)
+	mux.HandleFunc("PATCH /me/pattern-config/{detector}/{pattern_id}", h.HandleUpdatePatternConfig)
+	mux.HandleFunc("DELETE /me/pattern-config/{detector}/{pattern_id}", h.HandleDeletePatternConfig)
 	// Task #270.c, per-project truncation-rate telemetry.
 	mux.HandleFunc("GET /me/tool-return-value-stats", h.HandleGetToolReturnValueStats)
 	// Task #276.d, per-project config-fallback telemetry.
