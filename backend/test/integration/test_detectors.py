@@ -1193,17 +1193,58 @@ def test_coordination_deadlock(backend: Backend, configured_sdk):
     )
 
 
-@pytest.mark.skip(
-    reason=(
-        "grounding_failure aggregates validator_result events that "
-        "compare an agent's answer against retrieved context. Needs "
-        "a RAG-shaped scenario (retrieval event + answer event + "
-        "validator event) the test harness does not yet build. "
-        "Pending."
-    )
-)
 def test_grounding_failure(backend: Backend, configured_sdk):
-    pass
+    """End-to-end test of the grounding_failure detector (Mesedi #14).
+
+    The detector aggregates eval_score events emitted by external
+    evaluators (Ragas, Promptfoo, Vectara HHEM, custom judges) and
+    fires `grounding_failure:<evaluator_id>:<metric_type>` when at
+    least one eval_score in the execution has passed=false.
+
+    Test scaffold:
+        1. Wrap the agent.
+        2. Inside the wrap, the customer would normally run Ragas/
+           Promptfoo/HHEM against the answer. Here we simulate the
+           score the evaluator returned and call the new Wave 1.3
+           helper mesedi.integrations.ragas.report_faithfulness with
+           a below-threshold score so the eval_score event arrives
+           with passed=false.
+        3. Wrap closes naturally; the detector chain runs and
+           grounding_failure fires.
+
+    Assertion:
+        failure_group with class=grounding_failure and signature
+        prefix 'grounding_failure:ragas/faithfulness:faithfulness'
+        appears within the await_failure_group timeout.
+
+    Skip retired here; original skip reason ("test harness does not
+    yet build the RAG scenario") was a stale dependency on the SDK
+    helpers that Wave 1.3 ships.
+    """
+    mesedi = configured_sdk
+
+    # Lazy-import the helper because the configured_sdk fixture has
+    # to be initialized first (it sets up the api_key + base_url the
+    # underlying emit_eval_score call uses).
+    from mesedi.integrations import ragas as mesedi_ragas
+
+    @mesedi.wrap
+    def rag_agent_with_low_faithfulness():
+        # The customer would run Ragas here; we report a
+        # below-threshold faithfulness score so the eval_score event
+        # arrives with passed=false. That single below-threshold
+        # event is enough to fire grounding_failure for the
+        # execution.
+        mesedi_ragas.report_faithfulness(score=0.3, threshold=0.7)
+
+    rag_agent_with_low_faithfulness()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="grounding_failure",
+        signature_prefix="grounding_failure:ragas/faithfulness:faithfulness",
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────
