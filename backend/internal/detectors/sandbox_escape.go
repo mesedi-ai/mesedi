@@ -121,16 +121,28 @@ func mustCompilePatterns(raw []struct {
 }
 
 // DetectSandboxEscape scans the supplied tool_call payloads for
-// known sandbox-escape patterns. Returns the first matching
-// pattern's id as the cluster signature (one failure_group per
-// escape vector per project).
-//
-// Returns ("", false) when no pattern matched. Iteration order is
-// stable across runs because sandboxPatterns is sorted by id at
-// init.
+// known sandbox-escape patterns. Preserved for the unit tests that
+// pin the built-in behavior; production code paths now go through
+// DetectSandboxEscapeWithCustom (Wave 2.1.b).
 func DetectSandboxEscape(toolPayloads []json.RawMessage) (signature string, detected bool) {
+	sig, _, fired := DetectSandboxEscapeWithCustom(toolPayloads, nil)
+	return sig, fired
+}
+
+// DetectSandboxEscapeWithCustom is the per-project-aware variant.
+// Built-ins first (preserves legacy first-match-wins ordering), then
+// custom patterns. Returns (signature, matchedPatternID, fired);
+// matchedPatternID is the project_patterns.pattern_id only when a
+// custom pattern matched, allowing the handler to call
+// IncrementPatternMatchCount.
+//
+// custom may be nil.
+func DetectSandboxEscapeWithCustom(
+	toolPayloads []json.RawMessage,
+	custom []*CustomPattern,
+) (signature, matchedPatternID string, fired bool) {
 	if len(toolPayloads) == 0 {
-		return "", false
+		return "", "", false
 	}
 	for _, raw := range toolPayloads {
 		// Decode just the fields we care about. arguments and
@@ -145,12 +157,23 @@ func DetectSandboxEscape(toolPayloads []json.RawMessage) (signature string, dete
 		}
 		for _, sp := range sandboxPatterns {
 			if len(p.Arguments) > 0 && sp.regex.Match(p.Arguments) {
-				return "sandbox_escape:" + sp.id, true
+				return "sandbox_escape:" + sp.id, "", true
 			}
 			if len(p.ReturnValue) > 0 && sp.regex.Match(p.ReturnValue) {
-				return "sandbox_escape:" + sp.id, true
+				return "sandbox_escape:" + sp.id, "", true
+			}
+		}
+		for _, c := range custom {
+			if c == nil || c.Compiled == nil {
+				continue
+			}
+			if len(p.Arguments) > 0 && c.Compiled.Match(p.Arguments) {
+				return "sandbox_escape:custom:" + c.PatternID, c.PatternID, true
+			}
+			if len(p.ReturnValue) > 0 && c.Compiled.Match(p.ReturnValue) {
+				return "sandbox_escape:custom:" + c.PatternID, c.PatternID, true
 			}
 		}
 	}
-	return "", false
+	return "", "", false
 }

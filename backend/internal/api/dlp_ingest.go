@@ -17,11 +17,13 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"time"
 
+	"mesedi/backend/internal/detectors"
 	"mesedi/backend/internal/dlp"
 	"mesedi/backend/internal/events"
 )
@@ -72,10 +74,27 @@ var scanFieldKeys = map[events.EventType][]string{
 // sequence: detectors only care about ordering within an execution,
 // and sharing the parent sequence lets the dashboard render the two
 // side-by-side. Future refinement: bump sequence on each sibling).
-func (h *Handlers) applyDLPToBatch(batch []events.Event) []events.Event {
+func (h *Handlers) applyDLPToBatch(
+	ctx context.Context,
+	projectID string,
+	batch []events.Event,
+) (newBatch []events.Event, customMatchedPatternIDs []string) {
 	if h.DLPScanner == nil || len(batch) == 0 {
-		return batch
+		return batch, nil
 	}
+
+	// Wave 2.1.b: load per-project custom data-leakage patterns once
+	// per batch. Project-scoped; nil/empty when the customer has no
+	// custom rules. Compile errors at this layer are unexpected
+	// (POST/PATCH validates) and degrade to built-ins only.
+	customPatterns, _ := h.loadCustomPatternsForDetector(
+		ctx, projectID, "data_leakage",
+	)
+	// Track every pattern_id that fires so the caller can increment
+	// match_count once per match. De-dup'd at the caller to avoid
+	// over-counting when the same custom pattern fires in multiple
+	// events of the same batch.
+	var matched []string
 
 	out := make([]events.Event, 0, len(batch))
 	for i := range batch {
@@ -123,12 +142,35 @@ func (h *Handlers) applyDLPToBatch(batch []events.Event) []events.Event {
 				s = string(bs)
 			}
 			redacted, hits := h.DLPScanner.ScanAndRedact(s)
-			if len(hits) == 0 {
-				continue
+			if len(hits) > 0 {
+				allHits = append(allHits, hits...)
+				pm[key] = redacted
+				mutated = true
+				// Re-stringify the redacted value for the custom
+				// pass — custom patterns scan post-builtin-redaction
+				// so they fire on residual secrets the built-ins
+				// missed without flagging the [REDACTED:rule_id]
+				// markers themselves.
+				s = redacted
 			}
-			allHits = append(allHits, hits...)
-			pm[key] = redacted
-			mutated = true
+			// Wave 2.1.b: run customer's custom patterns against the
+			// same field. Hits get appended to allHits with the
+			// pattern_id surfaced via the matched-IDs slice so the
+			// caller can increment match_count.
+			if len(customPatterns) > 0 {
+				customHits, customMatched := scanCustomDLP(s, customPatterns)
+				if len(customHits) > 0 {
+					allHits = append(allHits, customHits...)
+					matched = append(matched, customMatched...)
+					// Custom patterns participate in the redaction
+					// pass too — applying the same [REDACTED:...]
+					// substitution would require a redactor-aware
+					// path we don't yet have for the customer's
+					// patterns. v1 documents the gap (custom hits
+					// fire the dlp_scan_result sibling but do NOT
+					// redact in place); Wave 2.1.d revisits.
+				}
+			}
 		}
 
 		if mutated {
@@ -159,7 +201,57 @@ func (h *Handlers) applyDLPToBatch(batch []events.Event) []events.Event {
 		}
 		out = append(out, sibling)
 	}
-	return out
+	return out, matched
+}
+
+// scanCustomDLP runs the customer's custom data_leakage patterns
+// against a single field string and returns the resulting hits
+// plus the matched pattern_ids. Severity mapping: pattern_config
+// 'low' → dlp.SeverityMedium (smallest dlp severity); 'medium' →
+// dlp.SeverityHigh; 'high' → dlp.SeverityCritical. The mapping
+// preserves dashboard chip color semantics for customer-defined
+// rules.
+func scanCustomDLP(
+	input string,
+	custom []*detectors.CustomPattern,
+) (hits []dlp.Hit, matchedPatternIDs []string) {
+	if input == "" || len(custom) == 0 {
+		return nil, nil
+	}
+	for _, c := range custom {
+		if c == nil || c.Compiled == nil {
+			continue
+		}
+		for _, idx := range c.Compiled.FindAllStringIndex(input, -1) {
+			start, end := idx[0], idx[1]
+			hits = append(hits, dlp.Hit{
+				RuleID:   "custom:" + c.PatternID,
+				Label:    "Custom pattern " + c.PatternID,
+				Severity: customSeverityToDLP(c.Severity),
+				Start:    start,
+				End:      end,
+				Match:    input[start:end],
+			})
+			matchedPatternIDs = append(matchedPatternIDs, c.PatternID)
+		}
+	}
+	return hits, matchedPatternIDs
+}
+
+// customSeverityToDLP maps pattern_config severity ('low' / 'medium'
+// / 'high') to dlp.Severity ('medium' / 'high' / 'critical'). The
+// shift one tier upward preserves dashboard chip color semantics
+// (customer's 'high' lights the red chip the same way Mesedi's
+// built-in criticals do).
+func customSeverityToDLP(s string) dlp.Severity {
+	switch s {
+	case "high":
+		return dlp.SeverityCritical
+	case "medium":
+		return dlp.SeverityHigh
+	default:
+		return dlp.SeverityMedium
+	}
 }
 
 // buildDLPScanResultEvent constructs the sibling event that the

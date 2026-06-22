@@ -92,18 +92,55 @@ var injectionPatterns = []InjectionPattern{
 //
 // This is a low-recall / high-precision detector by design, false
 // positives are far worse than false negatives for an alerting
-// surface. Customers will tune their own patterns once the dashboard
-// supports per-project rules (Phase 7+).
+// surface.
+//
+// For customer-supplied custom patterns, use DetectInjectionWithCustom
+// (Wave 2.1.b). This function is preserved for the unit tests that
+// pin the built-in behavior; production code paths now go through
+// the With Custom variant.
 //
 // Empty input returns ("", false) without scanning.
 func DetectInjection(text string) (string, bool) {
+	sig, _, fired := DetectInjectionWithCustom(text, nil)
+	return sig, fired
+}
+
+// DetectInjectionWithCustom is the per-project-aware variant of
+// DetectInjection. Scans the input first against the built-in
+// patterns (preserving the legacy first-match-wins ordering customers
+// have built dashboards against), then against custom patterns.
+//
+// Returns (signature, matchedPatternID, fired). When the built-in
+// patterns matched, matchedPatternID is "" (built-ins don't have
+// pattern_ids). When a custom pattern matched, matchedPatternID is
+// the project_patterns.pattern_id so the handler can call
+// IncrementPatternMatchCount on the matched row.
+//
+// custom may be nil; this function then behaves identically to the
+// original DetectInjection.
+func DetectInjectionWithCustom(
+	text string,
+	custom []*CustomPattern,
+) (signature, matchedPatternID string, fired bool) {
 	if text == "" {
-		return "", false
+		return "", "", false
 	}
 	for _, p := range injectionPatterns {
 		if p.Pattern.MatchString(text) {
-			return p.Name, true
+			return p.Name, "", true
 		}
 	}
-	return "", false
+	for _, c := range custom {
+		if c == nil || c.Compiled == nil {
+			continue
+		}
+		if c.Compiled.MatchString(text) {
+			// Custom matches cluster under a per-pattern_id
+			// signature so the dashboard surfaces customer-defined
+			// rules separately from built-ins (less noise on shared
+			// failure_group rows, easier to A/B custom patterns).
+			return "custom:" + c.PatternID, c.PatternID, true
+		}
+	}
+	return "", "", false
 }

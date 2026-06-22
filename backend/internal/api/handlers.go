@@ -1048,7 +1048,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			for i, p := range toolPayloads {
 				rawPayloads[i] = json.RawMessage(p)
 			}
-			if sig, fired := detectors.DetectSandboxEscape(rawPayloads); fired {
+			// Wave 2.1.b: load per-project custom sandbox-escape
+			// patterns and union with built-ins at scan time.
+			customPatterns, _ := h.loadCustomPatternsForDetector(
+				r.Context(), authProjectID, "sandbox_escape",
+			)
+			sig, matchedPatternID, fired := detectors.DetectSandboxEscapeWithCustom(
+				rawPayloads, customPatterns,
+			)
+			if fired {
 				isNew, gErr := h.Store.GroupSandboxEscape(r.Context(), executionID, authProjectID, sig)
 				if gErr != nil {
 					h.Logger.Warn("sandbox-escape grouping failed (continuing)",
@@ -1058,6 +1066,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					)
 				}
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassSandboxEscape, sig, isNew, gErr)
+				h.incrementCustomPatternMatch(r.Context(), authProjectID, matchedPatternID)
 			}
 		}
 	}
@@ -1519,7 +1528,14 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// The failure_group_id idempotency short-circuit means an
 			// injection-classified execution skips cost-velocity even
 			// if it would otherwise have matched.
-			if pattern, found := scanForInjection(evts); found {
+			// Wave 2.1.b: load per-project custom prompt-injection
+			// patterns and union with built-ins at scan time.
+			customPatterns, _ := h.loadCustomPatternsForDetector(
+				r.Context(), authProjectID, "prompt_injection",
+			)
+			if pattern, matchedPatternID, found := scanForInjection(
+				evts, customPatterns,
+			); found {
 				isNew, gErr := h.Store.GroupPromptInjection(r.Context(), executionID, authProjectID, pattern)
 				if gErr != nil {
 					h.Logger.Warn("prompt-injection grouping failed (continuing)",
@@ -1529,6 +1545,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					)
 				}
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassInjection, pattern, isNew, gErr)
+				h.incrementCustomPatternMatch(r.Context(), authProjectID, matchedPatternID)
 			}
 
 			// Sub-slice 16: cost-velocity detector. Any execution whose
@@ -2276,6 +2293,15 @@ func payloadOverCap(evt *events.Event) bool {
 // accepted as a 1-element array; rejecting non-array bodies catches
 // SDK bugs early.
 func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
+	// Wave 2.1.b: the DLP layer now consumes per-project custom
+	// patterns, so the ingest path needs the authenticated
+	// project_id at the top. Existing event-level project_id checks
+	// downstream still apply.
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
 	var batch []events.Event
 	if err := decodeJSON(r, &batch); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -2327,13 +2353,23 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 		accepted = append(accepted, *evt)
 	}
 
-	// Mesedi #1 + #24: scan + redact outbound LLM / tool payloads
-	// against the DLP rule registry before persistence. Matched
-	// secrets are replaced with `[REDACTED:rule_id]` tokens; high /
-	// critical hits also generate a sibling dlp_scan_result event
-	// that the data_leakage detector consumes downstream. Nil
-	// scanner (local dev) leaves the batch unchanged.
-	accepted = h.applyDLPToBatch(accepted)
+	// Mesedi #1 + #24 + Wave 2.1.b: scan + redact outbound LLM /
+	// tool payloads against the DLP rule registry (built-ins) plus
+	// the project's custom data_leakage patterns. Matched secrets
+	// are replaced with `[REDACTED:rule_id]` tokens; high / critical
+	// hits also generate a sibling dlp_scan_result event that the
+	// data_leakage detector consumes downstream. Nil scanner (local
+	// dev) leaves the batch unchanged.
+	var customMatched []string
+	accepted, customMatched = h.applyDLPToBatch(r.Context(), authProjectID, accepted)
+	// Wave 2.1.b: increment match_count once per matched custom
+	// pattern_id (de-dup; a single pattern firing 10 times in one
+	// batch should bump the counter once, not ten times — the
+	// dashboard "this rule is doing work" signal is more useful as
+	// "fired on N executions" than "matched N times across executions").
+	for _, pid := range uniqueStrings(customMatched) {
+		h.incrementCustomPatternMatch(r.Context(), authProjectID, pid)
+	}
 
 	if err := h.Store.SaveEvents(r.Context(), accepted); err != nil {
 		h.Logger.Error("save events failed", "error", err.Error(), "batch_size", len(accepted))
@@ -4834,7 +4870,10 @@ func scanForIdenticalCalls(evts []*events.Event, threshold int) (string, bool) {
 // Both user_message and system_prompt are scanned because injections
 // can come from either side, a compromised system prompt is rarer
 // but more dangerous, so we want it caught.
-func scanForInjection(evts []*events.Event) (string, bool) {
+func scanForInjection(
+	evts []*events.Event,
+	custom []*detectors.CustomPattern,
+) (signature, matchedPatternID string, found bool) {
 	for _, e := range evts {
 		if e.EventType != events.EventTypeLLMCall {
 			continue
@@ -4849,14 +4888,18 @@ func scanForInjection(evts []*events.Event) (string, bool) {
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			continue
 		}
-		if name, found := detectors.DetectInjection(p.UserMessage); found {
-			return name, true
+		if sig, pid, fired := detectors.DetectInjectionWithCustom(
+			p.UserMessage, custom,
+		); fired {
+			return sig, pid, true
 		}
-		if name, found := detectors.DetectInjection(p.SystemPrompt); found {
-			return name, true
+		if sig, pid, fired := detectors.DetectInjectionWithCustom(
+			p.SystemPrompt, custom,
+		); fired {
+			return sig, pid, true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // isTerminalStatus returns true for any execution status that means
