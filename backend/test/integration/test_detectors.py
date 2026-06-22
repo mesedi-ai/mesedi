@@ -547,18 +547,85 @@ def test_cascading_failure(backend: Backend, configured_sdk):
     )
 
 
-@pytest.mark.skip(
-    reason=(
-        "context_overflow requires an llm_call with cumulative "
-        "input_tokens >= 90 percent of the model's context window. "
-        "For claude-haiku-4-5 that's ~180k tokens, costing roughly "
-        "USD 0.18 per test run. Too expensive for the default "
-        "suite; pending an opt-in env flag or a stub model with a "
-        "deliberately tiny context window."
-    )
-)
 def test_context_overflow(backend: Backend, configured_sdk):
-    pass
+    """End-to-end test of the context_overflow detector against a real
+    Anthropic API call.
+
+    The detector fires when cumulative input_tokens on an llm_call
+    crosses 90% of the model's documented context window. For
+    claude-haiku-4-5 that means ~180K tokens (200K window). Each run
+    costs Anthropic API spend at ~USD 0.18, so the test is opt-in via
+    the shared RUN_EXPENSIVE_TESTS=1 env flag — keeps default CI from
+    bleeding credits while making the path verifiable during
+    pre-launch QA.
+
+    Behavior:
+        - RUN_EXPENSIVE_TESTS unset → skipped with a clear reason that
+          names both the flag and the cost.
+        - RUN_EXPENSIVE_TESTS=1 + ANTHROPIC_API_KEY set → runs end-to-end;
+          asserts a context_overflow failure_group appears.
+        - RUN_EXPENSIVE_TESTS=1 + ANTHROPIC_API_KEY unset → pytest.fail
+          with a clear message. Honors the FOUNDATION 'no silent skips'
+          principle: the customer opted INTO the expensive path, so a
+          missing key is a config bug they need to know about.
+    """
+    if os.environ.get("RUN_EXPENSIVE_TESTS") != "1":
+        pytest.skip(
+            "test_context_overflow makes a real Anthropic API call with "
+            "~180K input tokens, costing ~USD 0.18 per run. Set "
+            "RUN_EXPENSIVE_TESTS=1 to opt in (e.g. pre-launch QA)."
+        )
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        pytest.fail(
+            "RUN_EXPENSIVE_TESTS=1 but ANTHROPIC_API_KEY is not set in "
+            "the environment. The opt-in expensive test requires a "
+            "real Anthropic API key; export ANTHROPIC_API_KEY=sk-... "
+            "and re-run."
+        )
+
+    try:
+        import anthropic
+    except ImportError:
+        pytest.fail(
+            "RUN_EXPENSIVE_TESTS=1 but the anthropic package is not "
+            "installed. pip install anthropic and re-run."
+        )
+
+    mesedi = configured_sdk
+
+    # Patch Anthropic's messages.create so the API call produces an
+    # llm_call event with input_tokens populated; the detector reads
+    # that field to decide whether the call crossed the 90% window.
+    mesedi.instrument_anthropic()
+    client = anthropic.Anthropic(api_key=api_key)
+
+    # Deterministic synthetic prompt sized to overshoot the 180K
+    # trigger by ~10%, so tokenizer differences vs our rough
+    # 4-chars-per-token estimate don't leave us under threshold.
+    # claude-haiku-4-5's 200K window means 90% = 180K input tokens;
+    # 25,000 repetitions of a 45-char phrase ≈ 1.1M chars ≈ 200K-280K
+    # tokens depending on tokenization, comfortably over the trigger.
+    phrase = "The quick brown fox jumps over the lazy dog. " * 25_000
+
+    @mesedi.wrap
+    def long_context_agent():
+        client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=64,
+            messages=[{"role": "user", "content": phrase}],
+        )
+
+    long_context_agent()
+    mesedi.flush(timeout=10.0)
+
+    await_failure_group(
+        backend,
+        failure_class="context_overflow",
+        signature_prefix="context_overflow:",
+        timeout_secs=15.0,
+    )
 
 
 def test_time_budget(backend: Backend, configured_sdk):
