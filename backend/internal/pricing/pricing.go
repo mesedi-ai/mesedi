@@ -2,30 +2,44 @@
 // the backend can compute estimated_cost_usd on executions and roll those
 // costs up to failure_groups.
 //
-// **Posture for v0.0.1**: prices are hardcoded in this file with a
-// last-updated note. When a model is launched at a new price, or when
-// existing prices change, edit the map and bump the lastUpdated
-// constant. Future versions will pull this from a config file, an
-// admin-editable table, or a small external service.
+// **Posture**: prices are hardcoded in this file with a version stamp.
+// When a model is launched at a new price, or when existing prices change,
+// edit the map and bump the PricingTableVersion constant. Future versions
+// may pull this from a config file, an admin-editable table, or a small
+// external service.
 //
-// **Lookup behavior**: lookup is case-insensitive on a prefix match. The
-// table keys are the canonical model identifiers (e.g. "claude-opus-4-6");
-// matchers like "claude-opus-4-6-20260301" still hit the row because the
-// stable price is keyed on the family. Unknown models return (0, 0, false)
-// , cost stays $0 rather than guessing.
+// **Lookup behavior**: lookup is case-insensitive with prefix-match
+// fallback. The table keys are the canonical model identifiers (e.g.
+// "claude-opus-4-6"); matchers like "claude-opus-4-6-20260301" still hit
+// the row because the stable price is keyed on the family. Unknown models
+// return (0, false), cost stays $0 from this package's perspective. The
+// caller (handler) decides what to do with the (0, false) result —
+// typically falling back to the SDK-shipped per-event estimated_cost_usd.
+//
+// **Source of truth (Wave 0.3)**: the backend is now authoritative for
+// known models. The handler always calls into this package at execution
+// close; SDK-shipped per-event cost is fallback for unknown models only.
+// This means new model pricing (or pricing changes) ship with a backend
+// deploy — no SDK release wait.
 //
 // **Units**: prices in the table are USD per 1 million tokens, matching
 // the way every provider currently publishes them. The compute helper
 // converts to per-token internally.
+//
+// **Sources**: each provider block links to the official pricing page.
+// Verify quarterly (or whenever PricingTableVersion was last bumped).
 package pricing
 
 import (
+	"sort"
 	"strings"
 )
 
-// lastUpdated documents the most recent time the price map was reviewed.
-// Bump this when editing prices below so reviewers can spot a stale map.
-const lastUpdated = "2026-05-14"
+// PricingTableVersion documents the most recent time the price map was
+// reviewed. Bump when editing prices below so reviewers + customers can
+// see staleness. Exposed via GET /me/pricing-info so customers can see
+// which prices Mesedi is using.
+const PricingTableVersion = "2026-06-21"
 
 // modelPrice is the cost structure for one model: input + output rate
 // per 1 million tokens.
@@ -44,24 +58,83 @@ type modelPrice struct {
 // Order: most-recently launched first within each provider, since most
 // production traffic goes to the newest model.
 var priceTable = map[string]modelPrice{
-	// ── Anthropic (claude.com pricing as of lastUpdated) ─────────────
+	// ── Anthropic (docs.anthropic.com/en/docs/about-claude/pricing) ──
 	"claude-opus-4-6":   {InputPer1M: 15.00, OutputPer1M: 75.00},
 	"claude-sonnet-4-6": {InputPer1M: 3.00, OutputPer1M: 15.00},
 	"claude-haiku-4-5":  {InputPer1M: 1.00, OutputPer1M: 5.00},
 	"claude-opus-4-1":   {InputPer1M: 15.00, OutputPer1M: 75.00},
 	"claude-sonnet-4":   {InputPer1M: 3.00, OutputPer1M: 15.00},
+	"claude-3-7-sonnet": {InputPer1M: 3.00, OutputPer1M: 15.00},
 	"claude-3-5-sonnet": {InputPer1M: 3.00, OutputPer1M: 15.00},
 	"claude-3-5-haiku":  {InputPer1M: 1.00, OutputPer1M: 5.00},
 	"claude-3-opus":     {InputPer1M: 15.00, OutputPer1M: 75.00},
+	"claude-3-sonnet":   {InputPer1M: 3.00, OutputPer1M: 15.00},
+	"claude-3-haiku":    {InputPer1M: 0.25, OutputPer1M: 1.25},
+	"claude-2.1":        {InputPer1M: 8.00, OutputPer1M: 24.00},
+	"claude-2":          {InputPer1M: 8.00, OutputPer1M: 24.00},
 
-	// ── OpenAI (platform.openai.com pricing as of lastUpdated) ───────
+	// ── OpenAI (platform.openai.com/pricing) ─────────────────────────
+	"gpt-5":         {InputPer1M: 1.25, OutputPer1M: 10.00},
+	"gpt-5-mini":    {InputPer1M: 0.25, OutputPer1M: 2.00},
+	"gpt-5-nano":    {InputPer1M: 0.05, OutputPer1M: 0.40},
+	"gpt-4.1":       {InputPer1M: 2.00, OutputPer1M: 8.00},
+	"gpt-4.1-mini":  {InputPer1M: 0.40, OutputPer1M: 1.60},
+	"gpt-4.1-nano":  {InputPer1M: 0.10, OutputPer1M: 0.40},
 	"gpt-4o":        {InputPer1M: 2.50, OutputPer1M: 10.00},
 	"gpt-4o-mini":   {InputPer1M: 0.15, OutputPer1M: 0.60},
 	"gpt-4-turbo":   {InputPer1M: 10.00, OutputPer1M: 30.00},
 	"gpt-4":         {InputPer1M: 30.00, OutputPer1M: 60.00},
 	"gpt-3.5-turbo": {InputPer1M: 0.50, OutputPer1M: 1.50},
+	"o3":            {InputPer1M: 2.00, OutputPer1M: 8.00},
+	"o3-mini":       {InputPer1M: 1.10, OutputPer1M: 4.40},
 	"o1":            {InputPer1M: 15.00, OutputPer1M: 60.00},
 	"o1-mini":       {InputPer1M: 3.00, OutputPer1M: 12.00},
+
+	// ── Google (ai.google.dev/gemini-api/docs/pricing) ───────────────
+	// 2.5-pro / 2.0-pro are tiered by context size; we use the
+	// standard (≤200k input) tier here. Customers running >200k
+	// contexts will see slight underestimates; documented limitation.
+	"gemini-2.5-pro":   {InputPer1M: 1.25, OutputPer1M: 10.00},
+	"gemini-2.5-flash": {InputPer1M: 0.075, OutputPer1M: 0.30},
+	"gemini-2.0-pro":   {InputPer1M: 1.25, OutputPer1M: 10.00},
+	"gemini-2.0-flash": {InputPer1M: 0.075, OutputPer1M: 0.30},
+	"gemini-1.5-pro":   {InputPer1M: 1.25, OutputPer1M: 5.00},
+	"gemini-1.5-flash": {InputPer1M: 0.075, OutputPer1M: 0.30},
+
+	// ── Meta Llama (ai.meta.com/llama) ────────────────────────────────
+	// Llama weights are free for self-hosted deployments and Mesedi
+	// has no visibility into per-customer hosting agreements (Together,
+	// Groq, Fireworks, Bedrock, self-hosted, etc.). Default to $0 so
+	// the detector silently doesn't fire on Llama-only workloads.
+	// Customers with paid Llama hosting can declare actual pricing via
+	// per-tenant overrides (future work — see Decision 1c in audit).
+	"llama-4-scout":    {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"llama-4-maverick": {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"llama-3.3-70b":    {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"llama-3.2-90b":    {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"llama-3.1-405b":   {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"llama-3.1-70b":    {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"llama-3.1-8b":     {InputPer1M: 0.00, OutputPer1M: 0.00},
+
+	// ── Mistral (docs.mistral.ai/getting-started/models) ─────────────
+	"mistral-large-2":    {InputPer1M: 2.00, OutputPer1M: 6.00},
+	"mistral-large-2407": {InputPer1M: 2.00, OutputPer1M: 6.00},
+	"mistral-medium":     {InputPer1M: 2.70, OutputPer1M: 8.10},
+	"mistral-small-3":    {InputPer1M: 0.20, OutputPer1M: 0.60},
+	"mistral-nemo":       {InputPer1M: 0.15, OutputPer1M: 0.15},
+	"codestral":          {InputPer1M: 0.30, OutputPer1M: 0.90},
+
+	// ── Ollama (local; no API cost) ──────────────────────────────────
+	// Ollama is locally-hosted with zero per-token API cost. The
+	// identifiers below match the canonical Llama / Mistral names; if
+	// a customer is running an Ollama model via instrument_ollama with
+	// a tag-style identifier (e.g. "llama3.2:3b" instead of
+	// "llama-3.2-90b"), it will land in the unknown-model fallback
+	// path. Wave 2.5.4 extends this table with Ollama-tag-style
+	// identifiers as part of the instrument_ollama work.
+	// (Entries above under "Meta Llama" already cover llama-*; this
+	// block is a placeholder for future Ollama-specific tags so the
+	// reviewer sees the intent.)
 }
 
 // ComputeLLMCost returns the estimated USD cost of a single LLM call
@@ -96,7 +169,23 @@ func IsKnownModel(model string) bool {
 
 // LastUpdated returns the date the price table was last reviewed.
 // Useful in admin / observability surfaces.
-func LastUpdated() string { return lastUpdated }
+//
+// Deprecated: Use PricingTableVersion directly. LastUpdated remains for
+// backward-compat with callers that expect a function.
+func LastUpdated() string { return PricingTableVersion }
+
+// SupportedModels returns the sorted list of model identifiers in the
+// pricing table. Used by GET /me/pricing-info so customers can see
+// exactly which models Mesedi prices server-side and which models will
+// fall back to the SDK-shipped per-event cost.
+func SupportedModels() []string {
+	out := make([]string, 0, len(priceTable))
+	for k := range priceTable {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // lookup tries exact match first (case-insensitive), then prefix-match
 // against the table keys. The prefix match handles dated suffixes like

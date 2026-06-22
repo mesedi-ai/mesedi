@@ -682,6 +682,10 @@ func main() {
 	// (threshold $/min + rolling window in minutes).
 	mux.Handle("GET /me/cost-velocity-rate-config", privateHandler)
 	mux.Handle("PUT /me/cost-velocity-rate-config", privateHandler)
+	// Backend pricing-table metadata. Returns the pricing table
+	// version + supported model list so customers can verify which
+	// models Mesedi prices server-side (Wave 0.3).
+	mux.Handle("GET /me/pricing-info", privateHandler)
 	// Task #270.a, per-project tool_schema_drift return_value byte cap.
 	mux.Handle("GET /me/tool-return-value-config", privateHandler)
 	mux.Handle("PUT /me/tool-return-value-config", privateHandler)

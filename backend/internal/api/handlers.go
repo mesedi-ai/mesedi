@@ -264,6 +264,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /me/cost-velocity-config", h.HandleSetCostVelocityConfig)
 	mux.HandleFunc("GET /me/cost-velocity-rate-config", h.HandleGetCostVelocityRateConfig)
 	mux.HandleFunc("PUT /me/cost-velocity-rate-config", h.HandleSetCostVelocityRateConfig)
+	mux.HandleFunc("GET /me/pricing-info", h.HandleGetPricingInfo)
 	// Task #270.a, per-project tool_schema_drift return_value byte cap.
 	mux.HandleFunc("GET /me/tool-return-value-config", h.HandleGetToolReturnValueConfig)
 	mux.HandleFunc("PUT /me/tool-return-value-config", h.HandleSetToolReturnValueConfig)
@@ -1402,28 +1403,57 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else {
-			// Sub-slice 12: cost computation. Skip if the SDK pre-filled
-			// estimated_cost_usd (caller knows better than us). The
-			// resolved cost (effectiveCost) flows into the cost-velocity
-			// detector below so we don't recompute.
-			effectiveCost := patch.EstimatedCostUSD
+			// Sub-slice 12: cost computation. Wave 0.3 — backend is now
+			// the source of truth for known models. The SDK-shipped
+			// per-event estimated_cost_usd is fallback only for models
+			// missing from pricing.priceTable. This means new model
+			// pricing or pricing changes ship with a backend deploy
+			// without waiting for an SDK release.
+			//
+			// Always walks events and recomputes; the patch body's
+			// EstimatedCostUSD is kept as a defensive last-resort
+			// fallback when the walk produced no value (e.g. tool-only
+			// executions with no llm_call events). When the walk
+			// produces a value, it overrides whatever the SDK rolled
+			// up — that's the inversion.
+			//
+			// Unknown models surface via an audit_event (one per
+			// execution, not per event) so the dashboard's existing
+			// config-fallback chip can show "Mesedi doesn't know how
+			// to price model X — using SDK fallback" tile.
+			cost, unknownModels := computeExecutionCost(evts)
+			effectiveCost := cost
 			if effectiveCost == 0 {
-				cost := computeExecutionCost(evts)
-				if cost > 0 {
-					if err := h.Store.SetExecutionCost(r.Context(), executionID, cost); err != nil {
-						h.Logger.Warn("set execution cost failed",
-							"execution_id", executionID,
-							"computed_cost_usd", cost,
-							"error", err.Error(),
-						)
-					} else {
-						h.Logger.Info("execution cost computed",
-							"execution_id", executionID,
-							"cost_usd", cost,
-						)
-					}
-					effectiveCost = cost
+				effectiveCost = patch.EstimatedCostUSD
+			}
+			if effectiveCost > 0 {
+				if err := h.Store.SetExecutionCost(r.Context(), executionID, effectiveCost); err != nil {
+					h.Logger.Warn("set execution cost failed",
+						"execution_id", executionID,
+						"computed_cost_usd", effectiveCost,
+						"backend_cost_usd", cost,
+						"sdk_rollup_cost_usd", patch.EstimatedCostUSD,
+						"error", err.Error(),
+					)
+				} else {
+					h.Logger.Info("execution cost computed",
+						"execution_id", executionID,
+						"cost_usd", effectiveCost,
+						"backend_cost_usd", cost,
+						"unknown_model_count", len(unknownModels),
+					)
 				}
+			}
+			if len(unknownModels) > 0 {
+				h.recordAuditEventForProject(
+					r.Context(),
+					authProjectID, "system",
+					"pricing_unknown_model", "execution", executionID,
+					map[string]any{
+						"models":         unknownModels,
+						"pricing_table_version": pricing.PricingTableVersion,
+					},
+				)
 			}
 
 			// Sub-slice 17: identical-call loop detector. Hashes
@@ -3470,6 +3500,37 @@ func (h *Handlers) HandleSetCostVelocityConfig(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// HandleGetPricingInfo returns the backend pricing-table metadata so
+// customers can see exactly which models Mesedi prices server-side
+// AND when those prices were last reviewed. Wave 0.3 made the backend
+// authoritative for known models; this endpoint is how customers
+// verify which models that includes.
+//
+// Models not in `supported_models` fall back to the SDK-shipped
+// per-event estimated_cost_usd at execution close. When that happens,
+// a `pricing_unknown_model` audit_event is recorded; the dashboard
+// surfaces it via the existing config-fallback chip.
+//
+// Response:
+//
+//	{
+//	  "pricing_table_version": "2026-06-21",
+//	  "supported_models":      ["claude-3-haiku", "claude-3-opus", ...]
+//	}
+//
+// No auth scope beyond project context — the pricing table is the
+// same for every project (per Wave 0.3 Decision 5, tier-agnostic).
+func (h *Handlers) HandleGetPricingInfo(w http.ResponseWriter, r *http.Request) {
+	if _, ok := ProjectIDFromContext(r.Context()); !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"pricing_table_version": pricing.PricingTableVersion,
+		"supported_models":      pricing.SupportedModels(),
+	})
+}
+
 // HandleGetCostVelocityRateConfig returns the per-project rate
 // detector configuration (migration 044): the $/minute threshold and
 // the rolling lookback window in minutes. Defaults {5.00, 5} —
@@ -3973,17 +4034,33 @@ func (h *Handlers) HandleDeleteClassSeverity(w http.ResponseWriter, r *http.Requ
 
 // computeExecutionCost sums the estimated USD cost across every
 // llm_call event in the slice. Each event's payload is unmarshaled into
-// a small struct extracting only the three fields cost-computation
-// needs (model, input_tokens, output_tokens); everything else is
-// ignored, so changes to the payload schema (adding fields) don't
-// affect this code.
+// a small struct extracting only the four fields cost-computation needs
+// (model, input_tokens, output_tokens, estimated_cost_usd); everything
+// else is ignored, so changes to the payload schema (adding fields)
+// don't affect this code.
 //
-// Events with unknown models contribute 0 (pricing.ComputeLLMCost
-// returns 0 for keys not in the pricing table). Events whose payload
-// fails to unmarshal are skipped silently, a single malformed event
-// shouldn't break cost computation for the whole execution.
-func computeExecutionCost(evts []*events.Event) float64 {
-	total := 0.0
+// Wave 0.3 semantics — backend is the source of truth for known models;
+// SDK-shipped per-event cost is the fallback for unknown models:
+//
+//   - Known model (pricing.IsKnownModel == true): use the backend
+//     pricing table. SDK-shipped cost on the event is ignored. This
+//     means new model pricing or pricing changes ship with a backend
+//     deploy without waiting for an SDK release.
+//
+//   - Unknown model: use the per-event payload.estimated_cost_usd as
+//     the fallback. Customer using a brand-new model the day it ships
+//     doesn't see $0 costs — they see the SDK's best-effort number
+//     until the next backend deploy adds the row.
+//
+// Returns (totalUSD, unknownModelIDs). Caller uses unknownModelIDs to
+// emit a single audit_event per execution (not per event) for the
+// dashboard's unknown-model surface.
+//
+// Events whose payload fails to unmarshal are skipped silently — a
+// single malformed event shouldn't break cost computation for the
+// whole execution.
+func computeExecutionCost(evts []*events.Event) (totalUSD float64, unknownModels []string) {
+	seenUnknown := map[string]struct{}{}
 	for _, e := range evts {
 		if e.EventType != events.EventTypeLLMCall {
 			continue
@@ -3992,16 +4069,39 @@ func computeExecutionCost(evts []*events.Event) float64 {
 			continue
 		}
 		var p struct {
-			Model        string `json:"model"`
-			InputTokens  int    `json:"input_tokens"`
-			OutputTokens int    `json:"output_tokens"`
+			Model             string  `json:"model"`
+			InputTokens       int     `json:"input_tokens"`
+			OutputTokens      int     `json:"output_tokens"`
+			EstimatedCostUSD  float64 `json:"estimated_cost_usd"`
 		}
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			continue
 		}
-		total += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)
+		// Defensive: negative token counts coerced to 0. SDK never
+		// ships negatives but bug-class protection.
+		if p.InputTokens < 0 {
+			p.InputTokens = 0
+		}
+		if p.OutputTokens < 0 {
+			p.OutputTokens = 0
+		}
+		if pricing.IsKnownModel(p.Model) {
+			totalUSD += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)
+			continue
+		}
+		// Unknown to backend table — fall back to SDK-shipped cost
+		// on this event. Treat negative or NaN as 0 defensively.
+		if p.EstimatedCostUSD > 0 {
+			totalUSD += p.EstimatedCostUSD
+		}
+		if p.Model != "" {
+			if _, dup := seenUnknown[p.Model]; !dup {
+				seenUnknown[p.Model] = struct{}{}
+				unknownModels = append(unknownModels, p.Model)
+			}
+		}
 	}
-	return total
+	return totalUSD, unknownModels
 }
 
 // extractLLMUserMessages walks the event list and returns the
