@@ -2797,6 +2797,14 @@ func (s *PostgresStore) GroupCostVelocity(ctx context.Context, executionID, proj
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCostVelocity, signature)
 }
 
+// GroupCostVelocityRate is the Postgres twin of the SQLite method of
+// the same name. Companion to GroupCostVelocity using the rate-bucketed
+// signature.
+func (s *PostgresStore) GroupCostVelocityRate(ctx context.Context, executionID, projectID string, ratePerMinUSD float64) (isNew bool, err error) {
+	signature := CostVelocityRateSignature(ratePerMinUSD)
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCostVelocity, signature)
+}
+
 func (s *PostgresStore) GroupIdenticalCallLoop(ctx context.Context, executionID, projectID, callHash string) (isNew bool, err error) {
 	if callHash == "" {
 		return false, fmt.Errorf("callHash required")

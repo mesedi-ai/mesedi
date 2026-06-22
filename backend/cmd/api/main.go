@@ -675,6 +675,13 @@ func main() {
 	// Task #276, per-project time_budget detector threshold (ms).
 	mux.Handle("GET /me/time-budget-config", privateHandler)
 	mux.Handle("PUT /me/time-budget-config", privateHandler)
+	// Per-project cost_velocity detector absolute threshold (USD).
+	mux.Handle("GET /me/cost-velocity-config", privateHandler)
+	mux.Handle("PUT /me/cost-velocity-config", privateHandler)
+	// Per-project cost_velocity rate detector configuration
+	// (threshold $/min + rolling window in minutes).
+	mux.Handle("GET /me/cost-velocity-rate-config", privateHandler)
+	mux.Handle("PUT /me/cost-velocity-rate-config", privateHandler)
 	// Task #270.a, per-project tool_schema_drift return_value byte cap.
 	mux.Handle("GET /me/tool-return-value-config", privateHandler)
 	mux.Handle("PUT /me/tool-return-value-config", privateHandler)

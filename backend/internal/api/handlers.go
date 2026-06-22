@@ -262,6 +262,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /me/time-budget-config", h.HandleSetTimeBudgetConfig)
 	mux.HandleFunc("GET /me/cost-velocity-config", h.HandleGetCostVelocityConfig)
 	mux.HandleFunc("PUT /me/cost-velocity-config", h.HandleSetCostVelocityConfig)
+	mux.HandleFunc("GET /me/cost-velocity-rate-config", h.HandleGetCostVelocityRateConfig)
+	mux.HandleFunc("PUT /me/cost-velocity-rate-config", h.HandleSetCostVelocityRateConfig)
 	// Task #270.a, per-project tool_schema_drift return_value byte cap.
 	mux.HandleFunc("GET /me/tool-return-value-config", h.HandleGetToolReturnValueConfig)
 	mux.HandleFunc("PUT /me/tool-return-value-config", h.HandleSetToolReturnValueConfig)
@@ -1504,10 +1506,12 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// durable audit_event so persistent failures surface in
 			// the dashboard config-fallback chip.
 			//
-			// Wave 0.2 will add a parallel rate-based ($/min) detector
-			// alongside this absolute-magnitude one — both can fire,
-			// they answer different questions (single expensive call
-			// vs sustained burn rate).
+			// Migration 044 (Wave 0.2) adds the rate-based ($/min)
+			// detector immediately after this block. Both can fire on
+			// the same execution because they answer different
+			// questions (single expensive call vs sustained burn
+			// rate); idempotent failure_group writes ensure no
+			// double-counting under the absolute signature.
 			if effectiveCost > 0 {
 				costThresholdUSD := store.DefaultCostVelocityThresholdUSD
 				if cvUSD, cvErr := h.Store.GetProjectCostVelocityThresholdUSD(r.Context(), authProjectID); cvErr == nil {
@@ -1539,6 +1543,83 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 						)
 					}
 					h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocitySignature(effectiveCost), isNew, gErr)
+				}
+			}
+
+			// Sub-slice 16b: cost-velocity RATE detector. Sums execution
+			// costs over a per-project rolling window and fires when
+			// the burn-rate ($/minute) exceeds the per-project threshold.
+			// Closes the marketing-vs-implementation gap from the audit
+			// (cost_velocity.G2): marketing promised "$/minute rate
+			// detection" but only per-execution magnitude existed.
+			//
+			// Migration 044: threshold + window are per-project. Defaults
+			// {5.00 USD/min, 5 min}. Same fallback-to-default-with-audit
+			// pattern as the absolute block above. Independent of the
+			// absolute detector — both can fire on the same execution.
+			//
+			// Aggregator reuses SumExecutionCostByProjectSince — it
+			// already exists (org-rollup endpoint), so no new store
+			// API surface and no new index requirements (the existing
+			// (project_id, started_at) covers the scan).
+			rateCfg := store.DefaultCostVelocityRateConfig
+			if rc, rcErr := h.Store.GetProjectCostVelocityRateConfig(r.Context(), authProjectID); rcErr == nil {
+				rateCfg = rc
+			} else {
+				h.Logger.Warn("get cost_velocity_rate_config failed; using default",
+					"execution_id", executionID,
+					"project_id", authProjectID,
+					"error", rcErr.Error(),
+				)
+				h.recordAuditEventForProject(
+					r.Context(),
+					authProjectID, "system",
+					"config_fallback", "project_config", "cost_velocity_rate_config",
+					map[string]any{
+						"error":                 rcErr.Error(),
+						"fallback_threshold":    rateCfg.ThresholdUSDPerMin,
+						"fallback_window_mins":  rateCfg.WindowMinutes,
+					},
+				)
+			}
+			windowStart := time.Now().UTC().Add(-time.Duration(rateCfg.WindowMinutes) * time.Minute)
+			windowCostUSD, _, rcAggErr := h.Store.SumExecutionCostByProjectSince(r.Context(), authProjectID, windowStart)
+			if rcAggErr != nil {
+				// Aggregator failures must NOT break the request path.
+				// Log + audit-telemetry + skip the rate fire for this
+				// execution. The absolute detector above has already
+				// run; rate is additive signal, not the only one.
+				h.Logger.Warn("cost-velocity rate aggregator failed (continuing)",
+					"execution_id", executionID,
+					"project_id", authProjectID,
+					"window_minutes", rateCfg.WindowMinutes,
+					"error", rcAggErr.Error(),
+				)
+				h.recordAuditEventForProject(
+					r.Context(),
+					authProjectID, "system",
+					"config_fallback", "project_config", "cost_velocity_rate_aggregator",
+					map[string]any{
+						"error": rcAggErr.Error(),
+					},
+				)
+			} else if rateCfg.WindowMinutes > 0 {
+				ratePerMin := windowCostUSD / float64(rateCfg.WindowMinutes)
+				if ratePerMin >= rateCfg.ThresholdUSDPerMin {
+					isNew, gErr := h.Store.GroupCostVelocityRate(r.Context(), executionID, authProjectID, ratePerMin)
+					if gErr != nil {
+						h.Logger.Warn("cost-velocity rate grouping failed (continuing)",
+							"execution_id", executionID,
+							"rate_usd_per_min", ratePerMin,
+							"threshold_usd_per_min", rateCfg.ThresholdUSDPerMin,
+							"window_minutes", rateCfg.WindowMinutes,
+							"error", gErr.Error(),
+						)
+					}
+					// Webhook fires under the rate signature
+					// distinctly from the absolute one so SREs can
+					// route them differently if they choose.
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocityRateSignature(ratePerMin), isNew, gErr)
 				}
 			}
 
@@ -3386,6 +3467,125 @@ func (h *Handlers) HandleSetCostVelocityConfig(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":            true,
 		"threshold_usd": body.ThresholdUSD,
+	})
+}
+
+// HandleGetCostVelocityRateConfig returns the per-project rate
+// detector configuration (migration 044): the $/minute threshold and
+// the rolling lookback window in minutes. Defaults {5.00, 5} —
+// $300/hr sustained burn over a 5-minute window. Pairs with the
+// absolute threshold (HandleGetCostVelocityConfig); both detectors
+// fire independently because they answer different questions.
+//
+// Response:
+//
+//	{
+//	  "project_id":             "...",
+//	  "threshold_usd_per_min":  5.00,
+//	  "window_minutes":         5
+//	}
+func (h *Handlers) HandleGetCostVelocityRateConfig(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	cfg, err := h.Store.GetProjectCostVelocityRateConfig(r.Context(), authProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("get cost_velocity_rate config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not load cost_velocity_rate config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id":            authProjectID,
+		"threshold_usd_per_min": cfg.ThresholdUSDPerMin,
+		"window_minutes":        cfg.WindowMinutes,
+	})
+}
+
+// HandleSetCostVelocityRateConfig updates the per-project rate
+// configuration. Body:
+//
+//	{"threshold_usd_per_min": 2.50, "window_minutes": 10}
+//
+// Validation:
+//   - threshold_usd_per_min ∈ [0.10, 10000.00]. The floor prevents
+//     fires-on-every-minute storage abuse; the ceiling prevents
+//     typo / float overflow.
+//   - window_minutes ∈ [1, 60]. The floor avoids noise from sub-minute
+//     spikes; the ceiling bounds aggregator scan size.
+//
+// NOT tier-capped: same reasoning as the absolute threshold and
+// provider_incident_min_tenants — alarm sensitivity is the customer's
+// choice, not a Mesedi-side cost vector. See tier_caps.go.
+func (h *Handlers) HandleSetCostVelocityRateConfig(w http.ResponseWriter, r *http.Request) {
+	if !h.requireRole(w, r, "write") {
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	var body struct {
+		ThresholdUSDPerMin float64 `json:"threshold_usd_per_min"`
+		WindowMinutes      int     `json:"window_minutes"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	const (
+		minThresholdUSDPerMin = 0.10
+		maxThresholdUSDPerMin = 10_000.00
+		minWindowMinutes      = 1
+		maxWindowMinutes      = 60
+	)
+	if body.ThresholdUSDPerMin < minThresholdUSDPerMin {
+		writeError(w, http.StatusBadRequest,
+			"threshold_usd_per_min must be >= 0.10 (lower values would fire on every minute and create storage abuse)")
+		return
+	}
+	if body.ThresholdUSDPerMin > maxThresholdUSDPerMin {
+		writeError(w, http.StatusBadRequest,
+			"threshold_usd_per_min must be <= 10000.00")
+		return
+	}
+	if body.WindowMinutes < minWindowMinutes {
+		writeError(w, http.StatusBadRequest,
+			"window_minutes must be >= 1")
+		return
+	}
+	if body.WindowMinutes > maxWindowMinutes {
+		writeError(w, http.StatusBadRequest,
+			"window_minutes must be <= 60 (longer windows make aggregator scans pathological)")
+		return
+	}
+	cfg := store.CostVelocityRateConfig{
+		ThresholdUSDPerMin: body.ThresholdUSDPerMin,
+		WindowMinutes:      body.WindowMinutes,
+	}
+	if err := h.Store.SetProjectCostVelocityRateConfig(
+		r.Context(), authProjectID, cfg,
+	); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		h.Logger.Error("set cost_velocity_rate config failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "could not update cost_velocity_rate config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                    true,
+		"threshold_usd_per_min": cfg.ThresholdUSDPerMin,
+		"window_minutes":        cfg.WindowMinutes,
 	})
 }
 

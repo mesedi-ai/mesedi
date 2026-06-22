@@ -1268,6 +1268,20 @@ type Store interface {
 	// store accepts what's passed.
 	SetProjectCostVelocityThresholdUSD(ctx context.Context, projectID string, thresholdUSD float64) error
 
+	// GetProjectCostVelocityRateConfig returns the per-project rate
+	// detector configuration: the $/minute threshold and the rolling
+	// lookback window in minutes. Migration 044 added the columns
+	// with defaults {5.00 USD/min, 5 min}. Rate-based detection
+	// answers a different question than the absolute-magnitude
+	// detector (sustained burn vs single expensive call) — both can
+	// fire on the same execution. NOT tier-capped (same reasoning as
+	// the absolute threshold and provider_incident_min_tenants).
+	GetProjectCostVelocityRateConfig(ctx context.Context, projectID string) (CostVelocityRateConfig, error)
+	// SetProjectCostVelocityRateConfig writes both rate-config fields
+	// in one statement. Handler validates threshold ∈ [0.10, 10000.00]
+	// $/min and window ∈ [1, 60] minutes before invoking.
+	SetProjectCostVelocityRateConfig(ctx context.Context, projectID string, cfg CostVelocityRateConfig) error
+
 	// GetProjectToolReturnValueMaxBytes returns the per-project cap
 	// on tool_call return_value size (bytes) for the
 	// tool_schema_drift detector's fingerprint computation.
@@ -1647,6 +1661,12 @@ type Store interface {
 	// GroupCostVelocity upserts a failure_group with
 	// failure_class=cost_velocity and a cost-bucketed signature.
 	GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64) (bool, error)
+	// GroupCostVelocityRate upserts a failure_group with
+	// failure_class=cost_velocity and a RATE-bucketed signature
+	// (rate_$X+_per_min). Companion to GroupCostVelocity — same
+	// failure_class, different signature so rate-based bursts cluster
+	// distinctly from per-execution magnitude on the dashboard.
+	GroupCostVelocityRate(ctx context.Context, executionID, projectID string, ratePerMinUSD float64) (bool, error)
 	// GroupIdenticalCallLoop upserts a failure_group with
 	// failure_class=loops and signature=identical_call_<short_hash>.
 	GroupIdenticalCallLoop(ctx context.Context, executionID, projectID, callHash string) (bool, error)
