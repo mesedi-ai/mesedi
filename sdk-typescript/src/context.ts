@@ -27,11 +27,25 @@ export class ExecutionContext {
    * `checkBudget()` at entry, which is a no-op when this is undefined.
    */
   readonly budgetTracker?: BudgetTracker;
+  /**
+   * Optional human-readable agent name set by
+   * `wrap({ agentName: "planner" }, fn)`. Used by `emitAgentHandoff`
+   * as a fallback when the caller does NOT supply `fromAgent`,
+   * so multi-agent code can avoid repeating the same string at every
+   * handoff site. Always undefined when wrap() was invoked without
+   * the agentName option.
+   */
+  readonly agentName?: string;
   private sequence = 0;
 
-  constructor(executionId: string, budgetTracker?: BudgetTracker) {
+  constructor(
+    executionId: string,
+    budgetTracker?: BudgetTracker,
+    agentName?: string,
+  ) {
     this.executionId = executionId;
     this.budgetTracker = budgetTracker;
+    this.agentName = agentName;
   }
 
   nextSequence(): number {
@@ -74,8 +88,9 @@ export function runInExecutionContext<T>(
   executionId: string,
   fn: () => Promise<T>,
   budgetTracker?: BudgetTracker,
+  agentName?: string,
 ): Promise<T> {
-  const ctx = new ExecutionContext(executionId, budgetTracker);
+  const ctx = new ExecutionContext(executionId, budgetTracker, agentName);
   return storage.run(ctx, fn);
 }
 

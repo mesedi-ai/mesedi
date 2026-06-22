@@ -446,42 +446,24 @@ def test_cost_velocity(backend: Backend, configured_sdk):
 # under emit_X conventions and missed the literal match).
 
 
-def test_cascading_failure(backend: Backend, configured_sdk):
-    """End-to-end test of the cascading_failure detector (Mesedi #12).
+def _create_pre_crashed_child(
+    backend: Backend,
+    crash_signature: str = "inttest-cascading-crash",
+) -> str:
+    """Pre-generate a child execution, POST it as started, then PATCH
+    it to a crashed terminal state. Returns the child execution_id.
 
-    The detector reads agent_handoff events on the parent execution
-    and LEFT JOINs them against the child execution's terminal status
-    (joined via the handoff payload's `child_execution_id` field).
-    Fires when at least one handoff resolves to a child that reached
-    a failure terminal state (crashed / timeout / validation_failed).
-
-    Test scaffold:
-        1. Pre-generate a child execution_id (UUID-shaped).
-        2. POST /executions creates the child as started, then PATCH
-           it to status=crashed — the child terminal state the
-           detector keys on.
-        3. Wrap the parent agent; inside, emit_agent_handoff with
-           the matching child_execution_id so the backend's
-           ListHandoffsWithChildStatus join resolves.
-        4. Parent closes naturally; the detector chain runs and
-           cascading_failure fires.
-
-    Assertion:
-        failure_group with class=cascading_failure and signature
-        prefix 'cascading_failure:parent:child:' appears within the
-        await_failure_group timeout.
+    Used by tests that need a child execution already in a failure
+    terminal state BEFORE the parent's agent_handoff event references
+    it — cascading_failure being the canonical case. Lives at module
+    level rather than in conftest because (as of Wave 1.2.b) only one
+    test needs the pattern; hoist to conftest.py when a third caller
+    appears.
     """
     import uuid
-    import mesedi as mesedi_pkg
 
-    mesedi = configured_sdk
-
-    # 1. Pre-generate child execution_id. Format matches the SDK's
-    # wrap-generated IDs so the backend treats it identically.
     child_id = f"exec-{uuid.uuid4().hex[:12]}"
 
-    # 2. Create + crash the child via the public API. Uses the same
-    # project's auth as the parent.
     create_resp = requests.post(
         f"{backend.base_url}/executions",
         headers={"Authorization": f"Bearer {backend.api_key}"},
@@ -495,20 +477,60 @@ def test_cascading_failure(backend: Backend, configured_sdk):
     patch_resp = requests.patch(
         f"{backend.base_url}/executions/{child_id}",
         headers={"Authorization": f"Bearer {backend.api_key}"},
-        json={"status": "crashed", "crash_signature": "inttest-cascading-crash"},
+        json={"status": "crashed", "crash_signature": crash_signature},
         timeout=5.0,
     )
     assert patch_resp.status_code == 200, (
         f"crash child execution: status={patch_resp.status_code} "
         f"body={patch_resp.text}"
     )
+    return child_id
 
-    # 3. Wrap the parent and emit a handoff that references the
-    # already-crashed child.
-    @mesedi.wrap
+
+def test_cascading_failure(backend: Backend, configured_sdk):
+    """End-to-end test of the cascading_failure detector (Mesedi #12).
+
+    The detector reads agent_handoff events on the parent execution
+    and LEFT JOINs them against the child execution's terminal status
+    (joined via the handoff payload's `child_execution_id` field).
+    Fires when at least one handoff resolves to a child that reached
+    a failure terminal state (crashed / timeout / validation_failed).
+
+    Test scaffold:
+        1. Pre-generate a child execution, POST it as started, then
+           PATCH it to status=crashed via _create_pre_crashed_child.
+        2. Wrap the parent agent with @mesedi.wrap(agent_name="parent")
+           — exercises the Wave 1.2.b ergonomic path where
+           emit_agent_handoff infers from_agent from the wrap-context.
+        3. Inside the wrap, emit_agent_handoff(to_agent="child", ...)
+           with NO explicit from_agent — relying on the ctx fallback.
+        4. Parent closes naturally; cascading_failure detector fires.
+
+    Assertion:
+        failure_group with class=cascading_failure and signature
+        prefix 'cascading_failure:parent:child:' appears within the
+        await_failure_group timeout.
+
+    Backward-compat note: test_coordination_deadlock (below) uses the
+    OLD explicit `from_agent=...` form so we exercise both call shapes
+    in CI — Wave 1.2.b kept the positional signature working.
+    """
+    import mesedi as mesedi_pkg
+
+    mesedi = configured_sdk
+
+    # 1. Pre-generate + crash the child via the shared helper.
+    child_id = _create_pre_crashed_child(backend)
+
+    # 2. Wrap with agent_name so the emit call below can omit
+    # from_agent and have it resolved from the execution context.
+    @mesedi.wrap(agent_name="parent")
     def parent_agent():
+        # NEW Wave 1.2.b ergonomic form: from_agent inferred from
+        # @wrap(agent_name="parent") above. Customer code that
+        # repeats the same source agent at every handoff site now
+        # collapses to one declaration at decoration time.
         mesedi_pkg.emit_agent_handoff(
-            from_agent="parent",
             to_agent="child",
             handoff_kind="delegate",
             task_summary="seeded cascading_failure scenario",

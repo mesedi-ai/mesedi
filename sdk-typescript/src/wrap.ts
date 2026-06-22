@@ -89,6 +89,27 @@ export interface WrapOptions {
    *     );
    */
   tenant_id?: string;
+  /**
+   * Mesedi #11 (Wave 1.2.b): optional human-readable agent name. When
+   * set, `emitAgentHandoff` will use it as a fallback when the caller
+   * does not pass `fromAgent`, letting multi-agent code avoid
+   * repeating the same string at every handoff site:
+   *
+   *     export const planner = wrap(
+   *       { agentName: "planner" },
+   *       async (query: string) => {
+   *         emitAgentHandoff({ toAgent: "reviewer", ... });
+   *         // ^ from_agent="planner" inferred from context
+   *       },
+   *     );
+   *
+   * Explicit `fromAgent` always wins. If neither is supplied while
+   * inside `wrap()`, `emitAgentHandoff` throws an Error rather than
+   * silently emitting an `unknown` source agent — the topology graph
+   * powers cascading_failure / coordination_deadlock clustering and
+   * must not be polluted.
+   */
+  agentName?: string;
 }
 
 /**
@@ -169,6 +190,7 @@ export function wrap<TArgs extends unknown[], TResult>(
         executionId,
         () => fn(...args),
         tracker,
+        opts.agentName,
       );
       execution.status = Status.COMPLETED;
       execution.duration_ms = Math.round(performance.now() - startWall);

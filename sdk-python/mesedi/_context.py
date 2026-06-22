@@ -46,14 +46,18 @@ class ExecutionContext:
 
     Holds the execution_id (so events know which Execution to attach
     to), a sequence counter (so each emitted event gets a monotonically
-    increasing sequence number within the execution), and an optional
-    BudgetTracker for hard-halt enforcement.
+    increasing sequence number within the execution), an optional
+    BudgetTracker for hard-halt enforcement, and an optional
+    ``agent_name`` set by ``@mesedi.wrap(agent_name=...)`` so
+    multi-agent emit helpers (``emit_agent_handoff``) can fall back
+    to it when the caller doesn't pass an explicit ``from_agent``.
     """
 
     execution_id: str
     _seq_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _seq: int = 0
     budget_tracker: Optional[BudgetTracker] = None
+    agent_name: Optional[str] = None
 
     def next_sequence(self) -> int:
         """Return the next sequence number for this execution.
@@ -92,6 +96,7 @@ def current_execution_context() -> Optional[ExecutionContext]:
 def push_execution_context(
     execution_id: str,
     budget: Optional[Budget] = None,
+    agent_name: Optional[str] = None,
 ) -> Token[Optional[ExecutionContext]]:
     """Set the current execution context.
 
@@ -100,13 +105,22 @@ def push_execution_context(
     calling another @wrap function) work naturally: each call pushes,
     each return pops, the outer context is restored automatically.
 
-    If `budget` is provided, a fresh BudgetTracker is attached for
+    If ``budget`` is provided, a fresh BudgetTracker is attached for
     halt enforcement within this execution.
+
+    If ``agent_name`` is provided, it is stored on the context so
+    multi-agent emit helpers (notably ``emit_agent_handoff``) can use
+    it as a fallback when the caller doesn't pass an explicit
+    ``from_agent``. Set by ``@mesedi.wrap(agent_name="planner")``.
     """
     tracker: Optional[BudgetTracker] = None
     if budget is not None and not budget.is_unbounded():
         tracker = BudgetTracker(budget=budget, started_at_monotonic=time.perf_counter())
-    ctx = ExecutionContext(execution_id=execution_id, budget_tracker=tracker)
+    ctx = ExecutionContext(
+        execution_id=execution_id,
+        budget_tracker=tracker,
+        agent_name=agent_name,
+    )
     return _current.set(ctx)
 
 

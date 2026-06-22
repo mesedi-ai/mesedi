@@ -437,21 +437,95 @@ export interface AgentHandoffOptions {
 }
 
 /**
+ * Object-form options for the new {@link emitAgentHandoff} overload
+ * (Wave 1.2.b). Use this when calling inside a `wrap()` whose
+ * `agentName` option supplies the source agent — the `fromAgent`
+ * field becomes optional and falls back to the wrapped execution's
+ * agent name.
+ */
+export interface EmitAgentHandoffArgs extends AgentHandoffOptions {
+  fromAgent?: string;
+  toAgent: string;
+}
+
+/**
  * Emit an `agent_handoff` event marking that the current agent
  * delegated work to another agent.
  *
- * Outside `@wrap` / `withExecution`: no-op.
+ * Two call shapes (Wave 1.2.b):
+ *
+ * Positional (original, fully backward-compatible):
+ *
+ *     emitAgentHandoff("planner", "reviewer", { handoffKind: "delegate" });
+ *
+ * Object-form (new, terser when `wrap({ agentName: "planner" }, ...)`
+ * already declared the source agent):
+ *
+ *     emitAgentHandoff({ toAgent: "reviewer", handoffKind: "delegate" });
+ *
+ * Resolution of the source agent:
+ *
+ *   1. Explicit `fromAgent` argument wins if supplied (positional or
+ *      in the object form).
+ *   2. Otherwise, the `agentName` set on the active
+ *      `wrap({ agentName: ... }, fn)` is used.
+ *   3. If neither is supplied while inside `wrap()`, this function
+ *      throws Error rather than silently emitting an `unknown` source
+ *      agent — polluting the topology graph would degrade
+ *      cascading_failure / coordination_deadlock clustering at scale.
+ *
+ * Outside `wrap()` / `runInExecutionContext`: no-op (matches the
+ * existing fail-open contract).
  */
+export function emitAgentHandoff(args: EmitAgentHandoffArgs): void;
 export function emitAgentHandoff(
   fromAgent: string,
   toAgent: string,
-  opts: AgentHandoffOptions = {},
+  opts?: AgentHandoffOptions,
+): void;
+export function emitAgentHandoff(
+  fromAgentOrArgs: string | EmitAgentHandoffArgs,
+  maybeToAgent?: string,
+  maybeOpts: AgentHandoffOptions = {},
 ): void {
+  // Normalize the two call shapes into (fromAgentRaw, toAgent, opts).
+  let fromAgentRaw: string | undefined;
+  let toAgent: string;
+  let opts: AgentHandoffOptions;
+  if (typeof fromAgentOrArgs === "string") {
+    fromAgentRaw = fromAgentOrArgs;
+    toAgent = maybeToAgent ?? "";
+    opts = maybeOpts;
+  } else {
+    const { fromAgent, toAgent: ta, ...rest } = fromAgentOrArgs;
+    fromAgentRaw = fromAgent;
+    toAgent = ta;
+    opts = rest;
+  }
+
   const ctx = currentExecutionContext();
   if (!ctx) return;
 
+  // Resolve the effective source agent. Explicit wins; otherwise the
+  // wrap()'s agentName fallback. Missing both inside wrap() is a
+  // caller-side logic bug we surface loudly so the customer fixes it
+  // in dev rather than polluting the topology graph in prod.
+  const effectiveFrom = fromAgentRaw ?? ctx.agentName;
+  if (!effectiveFrom) {
+    throw new Error(
+      "emitAgentHandoff: no source agent identity available. " +
+        "Either pass fromAgent explicitly, or call " +
+        "wrap({ agentName: '...' }, fn).",
+    );
+  }
+  if (!toAgent) {
+    throw new Error(
+      "emitAgentHandoff: toAgent is required (cannot be empty).",
+    );
+  }
+
   const payload: Record<string, unknown> = {
-    from_agent: fromAgent,
+    from_agent: effectiveFrom,
     to_agent: toAgent,
   };
   if (opts.handoffKind) payload["handoff_kind"] = opts.handoffKind;

@@ -56,6 +56,7 @@ def wrap(
     *,
     budget: Optional[Budget] = None,
     tenant_id: Optional[str] = None,
+    agent_name: Optional[str] = None,
 ) -> Any:
     """Decorate a function so each call is recorded as an agent execution.
 
@@ -84,6 +85,21 @@ def wrap(
     should set this so the cost report breaks down per end-user instead
     of collapsing into one project-wide total.
 
+    Multi-agent ergonomics (Mesedi #11)::
+
+        @mesedi.wrap(agent_name="planner")
+        def planner(query: str) -> str:
+            # No need to repeat from_agent="planner" at each emit:
+            mesedi.emit_agent_handoff(to_agent="reviewer", ...)
+            ...
+
+    The ``agent_name`` is stored on the execution context and is used
+    as a fallback by ``emit_agent_handoff`` when the caller does NOT
+    pass ``from_agent``. Explicit ``from_agent`` always wins. If neither
+    is supplied inside ``@wrap``, ``emit_agent_handoff`` raises
+    ``ValueError`` rather than silently emitting an ``unknown`` source
+    agent into the topology graph.
+
     Behavior:
       - On entry: enqueue POST /executions (status=started). Returns
         immediately; HTTP happens in the background shipper thread.
@@ -104,10 +120,16 @@ def wrap(
     # need to return a decorator factory. Otherwise this IS the
     # decorator.
     if func is None:
-        # `@mesedi.wrap(budget=..., tenant_id=...)`, return a factory
-        # that takes the actual function on the next call.
+        # `@mesedi.wrap(budget=..., tenant_id=..., agent_name=...)`,
+        # return a factory that takes the actual function on the next
+        # call.
         def factory(actual: F) -> F:
-            return wrap(actual, budget=budget, tenant_id=tenant_id)  # type: ignore[return-value]
+            return wrap(  # type: ignore[return-value]
+                actual,
+                budget=budget,
+                tenant_id=tenant_id,
+                agent_name=agent_name,
+            )
         return factory
 
     @functools.wraps(func)
@@ -124,7 +146,11 @@ def wrap(
         # captures only the user's function, not the SDK's own overhead.
         client.submit_execution_start(execution)
         start_wall = time.perf_counter()
-        ctx_token = push_execution_context(execution_id, budget=budget)
+        ctx_token = push_execution_context(
+            execution_id,
+            budget=budget,
+            agent_name=agent_name,
+        )
 
         # Sub-slice 21b.2: if a budget is configured for this
         # execution, spawn a background SSE reader subscribed to

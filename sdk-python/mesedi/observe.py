@@ -632,8 +632,8 @@ def emit_memory_operation(
 
 
 def emit_agent_handoff(
-    from_agent: str,
-    to_agent: str,
+    from_agent: Optional[str] = None,
+    to_agent: str = "",
     handoff_kind: str = "",
     task_summary: str = "",
     child_execution_id: str = "",
@@ -666,18 +666,46 @@ def emit_agent_handoff(
     ``parent_execution_id``; the handoff event remains useful for
     surfacing the cross-agent intent.
 
-    Outside @wrap: no-op.
+    Resolution of ``from_agent`` (Wave 1.2.b ergonomics):
+
+      1. Explicit ``from_agent=...`` argument wins if supplied.
+      2. Otherwise, the ``agent_name`` set on the active
+         ``@mesedi.wrap(agent_name=...)`` decoration is used.
+      3. If neither is supplied while inside ``@wrap``, this function
+         raises ``ValueError`` rather than silently emitting an
+         ``unknown`` source agent — polluting the topology graph
+         would degrade ``cascading_failure`` / ``coordination_deadlock``
+         clustering at scale.
+
+    Outside ``@wrap``: no-op (matches the existing fail-open contract).
     """
     ctx = current_execution_context()
     if ctx is None:
         return
+
+    # Resolve the effective source agent. Explicit beats context;
+    # missing both inside @wrap is a caller-side logic bug we surface
+    # loudly so the customer fixes it in dev rather than polluting the
+    # topology graph in prod.
+    effective_from = from_agent if from_agent is not None else ctx.agent_name
+    if effective_from is None:
+        raise ValueError(
+            "emit_agent_handoff: no source agent identity available. "
+            "Either pass from_agent=... explicitly, or decorate the "
+            "calling @mesedi.wrap with agent_name='...'."
+        )
+
+    if not to_agent:
+        raise ValueError(
+            "emit_agent_handoff: to_agent is required (cannot be empty)."
+        )
 
     ctx.check_budget()
     if ctx.budget_tracker is not None:
         ctx.budget_tracker.increment_steps()
 
     payload: Dict[str, Any] = {
-        "from_agent": from_agent,
+        "from_agent": effective_from,
         "to_agent": to_agent,
     }
     if handoff_kind:
