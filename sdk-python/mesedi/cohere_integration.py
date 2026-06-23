@@ -141,6 +141,17 @@ def instrument_cohere(
         _patch_async_v2(async_client_v2_class)
         patched_any = True
 
+    # #271.i: also patch chat_stream on each available class. Each
+    # patcher is idempotent (separate _stream_patched_classes set).
+    if client_v1_class is not None:
+        _patch_v1_stream(client_v1_class)
+    if client_v2_class is not None:
+        _patch_v2_stream(client_v2_class)
+    if async_client_v1_class is not None:
+        _patch_async_v1_stream(async_client_v1_class)
+    if async_client_v2_class is not None:
+        _patch_async_v2_stream(async_client_v2_class)
+
     return patched_any
 
 
@@ -621,3 +632,420 @@ def _truncate(s: str, max_len: int) -> str:
     if len(s) <= max_len:
         return s
     return s[: max_len - 3] + "..."
+
+
+## ── #271.i streaming patching ────────────────────────────────────────
+
+
+_stream_patched_classes: set = set()
+
+
+def _patch_v1_stream(cls: Type[Any]) -> None:
+    """Patch Cohere v1 Client.chat_stream — sync streaming generator."""
+    if cls in _stream_patched_classes:
+        return
+    original_stream = getattr(cls, "chat_stream", None)
+    if original_stream is None:
+        return
+
+    def patched_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return original_stream(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        user_message = kwargs.get("message", "") or ""
+        if not isinstance(user_message, str):
+            user_message = str(user_message)
+        system_text = kwargs.get("preamble", "") or ""
+        if not isinstance(system_text, str):
+            system_text = str(system_text)
+
+        start = time.perf_counter()
+        try:
+            inner = original_stream(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            _emit_cohere_stream_failure(
+                client=client, ctx=ctx, event_id=event_id, sequence=sequence,
+                duration_ms=duration_ms, model=model, system_text=system_text,
+                user_message=user_message, exc=exc, endpoint="/v1/chat",
+            )
+            raise
+
+        return _CohereStreamIteratorWrapper(
+            inner=inner, ctx=ctx, client=client, event_id=event_id,
+            sequence=sequence, model=model, system_text=system_text,
+            user_message=user_message, start=start, endpoint="/v1/chat",
+            accumulate_chunk=_accumulate_cohere_v1_chunk,
+        )
+
+    patched_stream.__name__ = getattr(original_stream, "__name__", "chat_stream")
+    patched_stream.__doc__ = getattr(original_stream, "__doc__", None)
+    cls.chat_stream = patched_stream  # type: ignore[assignment]
+    _stream_patched_classes.add(cls)
+
+
+def _patch_v2_stream(cls: Type[Any]) -> None:
+    """Patch Cohere v2 ClientV2.chat_stream — sync streaming generator."""
+    if cls in _stream_patched_classes:
+        return
+    original_stream = getattr(cls, "chat_stream", None)
+    if original_stream is None:
+        return
+
+    def patched_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return original_stream(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        messages = kwargs.get("messages", []) or []
+        system_text = _extract_first_system_message(messages)
+        user_message = _extract_last_user_message(messages)
+
+        start = time.perf_counter()
+        try:
+            inner = original_stream(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            _emit_cohere_stream_failure(
+                client=client, ctx=ctx, event_id=event_id, sequence=sequence,
+                duration_ms=duration_ms, model=model, system_text=system_text,
+                user_message=user_message, exc=exc, endpoint="/v2/chat",
+            )
+            raise
+
+        return _CohereStreamIteratorWrapper(
+            inner=inner, ctx=ctx, client=client, event_id=event_id,
+            sequence=sequence, model=model, system_text=system_text,
+            user_message=user_message, start=start, endpoint="/v2/chat",
+            accumulate_chunk=_accumulate_cohere_v2_chunk,
+        )
+
+    patched_stream.__name__ = getattr(original_stream, "__name__", "chat_stream")
+    patched_stream.__doc__ = getattr(original_stream, "__doc__", None)
+    cls.chat_stream = patched_stream  # type: ignore[assignment]
+    _stream_patched_classes.add(cls)
+
+
+def _patch_async_v1_stream(cls: Type[Any]) -> None:
+    """Patch Cohere v1 AsyncClient.chat_stream — async streaming generator."""
+    if cls in _stream_patched_classes:
+        return
+    original_stream = getattr(cls, "chat_stream", None)
+    if original_stream is None:
+        return
+
+    def patched_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return original_stream(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        user_message = kwargs.get("message", "") or ""
+        if not isinstance(user_message, str):
+            user_message = str(user_message)
+        system_text = kwargs.get("preamble", "") or ""
+        if not isinstance(system_text, str):
+            system_text = str(system_text)
+
+        start = time.perf_counter()
+        try:
+            inner = original_stream(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            _emit_cohere_stream_failure(
+                client=client, ctx=ctx, event_id=event_id, sequence=sequence,
+                duration_ms=duration_ms, model=model, system_text=system_text,
+                user_message=user_message, exc=exc, endpoint="/v1/chat",
+            )
+            raise
+
+        return _CohereAsyncStreamIteratorWrapper(
+            inner=inner, ctx=ctx, client=client, event_id=event_id,
+            sequence=sequence, model=model, system_text=system_text,
+            user_message=user_message, start=start, endpoint="/v1/chat",
+            accumulate_chunk=_accumulate_cohere_v1_chunk,
+        )
+
+    patched_stream.__name__ = getattr(original_stream, "__name__", "chat_stream")
+    patched_stream.__doc__ = getattr(original_stream, "__doc__", None)
+    cls.chat_stream = patched_stream  # type: ignore[assignment]
+    _stream_patched_classes.add(cls)
+
+
+def _patch_async_v2_stream(cls: Type[Any]) -> None:
+    """Patch Cohere v2 AsyncClientV2.chat_stream — async streaming generator."""
+    if cls in _stream_patched_classes:
+        return
+    original_stream = getattr(cls, "chat_stream", None)
+    if original_stream is None:
+        return
+
+    def patched_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return original_stream(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        messages = kwargs.get("messages", []) or []
+        system_text = _extract_first_system_message(messages)
+        user_message = _extract_last_user_message(messages)
+
+        start = time.perf_counter()
+        try:
+            inner = original_stream(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            _emit_cohere_stream_failure(
+                client=client, ctx=ctx, event_id=event_id, sequence=sequence,
+                duration_ms=duration_ms, model=model, system_text=system_text,
+                user_message=user_message, exc=exc, endpoint="/v2/chat",
+            )
+            raise
+
+        return _CohereAsyncStreamIteratorWrapper(
+            inner=inner, ctx=ctx, client=client, event_id=event_id,
+            sequence=sequence, model=model, system_text=system_text,
+            user_message=user_message, start=start, endpoint="/v2/chat",
+            accumulate_chunk=_accumulate_cohere_v2_chunk,
+        )
+
+    patched_stream.__name__ = getattr(original_stream, "__name__", "chat_stream")
+    patched_stream.__doc__ = getattr(original_stream, "__doc__", None)
+    cls.chat_stream = patched_stream  # type: ignore[assignment]
+    _stream_patched_classes.add(cls)
+
+
+class _CohereStreamIteratorWrapper:
+    """Wraps a Cohere chat_stream sync generator. Aggregates chunks
+    via the provided accumulator callback; emits llm_call event on
+    iteration completion (StopIteration). Mid-stream exceptions are
+    caught in __next__ and re-raised after emission."""
+
+    def __init__(
+        self, *, inner: Any, ctx: Any, client: Any, event_id: str,
+        sequence: int, model: str, system_text: str, user_message: str,
+        start: float, endpoint: str, accumulate_chunk: Any,
+    ) -> None:
+        self._inner = inner
+        self._ctx = ctx
+        self._client = client
+        self._event_id = event_id
+        self._sequence = sequence
+        self._model = model
+        self._system_text = system_text
+        self._user_message = user_message
+        self._start = start
+        self._endpoint = endpoint
+        self._accumulate_chunk = accumulate_chunk
+        self._state: Dict[str, Any] = {"text_parts": [], "input_tokens": 0, "output_tokens": 0}
+        self._emitted = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def __iter__(self) -> Any:
+        return self
+
+    def __next__(self) -> Any:
+        try:
+            chunk = next(self._inner)
+        except StopIteration:
+            self._emit_success()
+            raise
+        except BaseException as exc:
+            self._emit_failure(exc)
+            raise
+        try:
+            self._accumulate_chunk(chunk, self._state)
+        except Exception as acc_exc:
+            logger.debug("mesedi: cohere stream chunk accumulate failed: %s", acc_exc)
+        return chunk
+
+    def _emit_success(self) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        response_text = "".join(self._state["text_parts"])
+        input_tokens = int(self._state.get("input_tokens", 0) or 0)
+        output_tokens = int(self._state.get("output_tokens", 0) or 0)
+        if self._ctx.budget_tracker is not None:
+            self._ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        self._client.submit_event(Event(
+            event_id=self._event_id,
+            execution_id=self._ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=self._sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "model": self._model,
+                "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
+                "user_message": _truncate(self._user_message, _MAX_USER_MSG),
+                "response_text": _truncate(response_text, _MAX_RESPONSE),
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "streaming": True,
+            },
+        ))
+
+    def _emit_failure(self, exc: BaseException) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        _emit_cohere_stream_failure(
+            client=self._client, ctx=self._ctx, event_id=self._event_id,
+            sequence=self._sequence, duration_ms=duration_ms,
+            model=self._model, system_text=self._system_text,
+            user_message=self._user_message, exc=exc, endpoint=self._endpoint,
+        )
+
+
+class _CohereAsyncStreamIteratorWrapper(_CohereStreamIteratorWrapper):
+    """Async twin of _CohereStreamIteratorWrapper."""
+
+    def __aiter__(self) -> Any:
+        return self
+
+    async def __anext__(self) -> Any:
+        try:
+            chunk = await self._inner.__anext__()
+        except StopAsyncIteration:
+            self._emit_success()
+            raise
+        except BaseException as exc:
+            self._emit_failure(exc)
+            raise
+        try:
+            self._accumulate_chunk(chunk, self._state)
+        except Exception as acc_exc:
+            logger.debug("mesedi: cohere async stream chunk accumulate failed: %s", acc_exc)
+        return chunk
+
+
+def _accumulate_cohere_v1_chunk(chunk: Any, state: Dict[str, Any]) -> None:
+    """v1 event shape: event.event_type 'text-generation' with .text
+    for incremental tokens, 'stream-end' with .response for finals."""
+    et = getattr(chunk, "event_type", "") or ""
+    if et == "text-generation":
+        text = getattr(chunk, "text", None)
+        if isinstance(text, str) and text:
+            state["text_parts"].append(text)
+    elif et == "stream-end":
+        response = getattr(chunk, "response", None)
+        if response is not None:
+            try:
+                meta = getattr(response, "meta", None) or getattr(response, "response", None)
+                if meta is not None:
+                    tokens = getattr(meta, "tokens", None) or getattr(meta, "billed_units", None)
+                    if tokens is not None:
+                        state["input_tokens"] = int(getattr(tokens, "input_tokens", 0) or 0)
+                        state["output_tokens"] = int(getattr(tokens, "output_tokens", 0) or 0)
+            except Exception:
+                pass
+
+
+def _accumulate_cohere_v2_chunk(chunk: Any, state: Dict[str, Any]) -> None:
+    """v2 event shape: event.type 'content-delta' with .delta.message
+    .content.text for incremental tokens, 'message-end' with .delta.usage."""
+    t = getattr(chunk, "type", "") or ""
+    delta = getattr(chunk, "delta", None)
+    if t == "content-delta" and delta is not None:
+        try:
+            msg = getattr(delta, "message", None)
+            if msg is not None:
+                content = getattr(msg, "content", None)
+                if content is not None:
+                    text = getattr(content, "text", None)
+                    if isinstance(text, str) and text:
+                        state["text_parts"].append(text)
+        except Exception:
+            pass
+    elif t == "message-end" and delta is not None:
+        try:
+            usage = getattr(delta, "usage", None)
+            if usage is not None:
+                tokens = getattr(usage, "tokens", None) or getattr(usage, "billed_units", None)
+                if tokens is not None:
+                    state["input_tokens"] = int(getattr(tokens, "input_tokens", 0) or 0)
+                    state["output_tokens"] = int(getattr(tokens, "output_tokens", 0) or 0)
+        except Exception:
+            pass
+
+
+def _emit_cohere_stream_failure(
+    *, client: Any, ctx: Any, event_id: str, sequence: int, duration_ms: int,
+    model: str, system_text: str, user_message: str, exc: BaseException,
+    endpoint: str,
+) -> None:
+    """Shared failure-event emitter for request-time + mid-stream
+    streaming exceptions."""
+    failure_payload = {
+        "provider": _PROVIDER,
+        "model": model,
+        "system_prompt": _truncate(system_text, _MAX_SYSTEM),
+        "user_message": _truncate(user_message, _MAX_USER_MSG),
+        "status": "failed",
+        "error_class": classify_cohere_exception(exc),
+        "exception_type": type(exc).__name__,
+        "exception_message": _truncate(str(exc), _MAX_EXC_MSG),
+        "streaming": True,
+    }
+    http_status = extract_http_status(exc)
+    if http_status is not None:
+        failure_payload["http_status"] = http_status
+    retry_after = extract_retry_after(exc)
+    if retry_after is not None:
+        failure_payload["retry_after_seconds"] = retry_after
+    client.submit_event(Event(
+        event_id=event_id,
+        execution_id=ctx.execution_id,
+        event_type=EventType.LLM_CALL,
+        sequence=sequence,
+        timestamp=utcnow_rfc3339(),
+        duration_ms=duration_ms,
+        payload=failure_payload,
+    ))
+    _maybe_emit_throttling_event(
+        provider=_PROVIDER,
+        error_class=failure_payload["error_class"],
+        http_status=http_status,
+        retry_after_seconds=retry_after,
+        endpoint=endpoint,
+    )
