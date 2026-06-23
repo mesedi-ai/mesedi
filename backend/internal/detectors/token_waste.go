@@ -218,8 +218,9 @@ func jaccardSimilarity(a, b map[string]struct{}) float64 {
 func detectNearDuplicateCluster(
 	normalized []string,
 	shingles []map[string]struct{},
+	threshold int,
 ) (signature string, detected bool) {
-	if len(normalized) < minRepeats {
+	if len(normalized) < threshold {
 		return "", false
 	}
 	for seed := 0; seed < len(normalized); seed++ {
@@ -232,7 +233,7 @@ func detectNearDuplicateCluster(
 				group = append(group, j)
 			}
 		}
-		if len(group) < minRepeats {
+		if len(group) < threshold {
 			continue
 		}
 		// Build the deterministic signature from the intersection
@@ -265,6 +266,25 @@ func detectNearDuplicateCluster(
 	return "", false
 }
 
+// TokenWasteThresholds carries the per-project tunable values for
+// this detector (Theme B.b). PrefixWindowChars + MinRepeats default
+// to prefixWindowChars (2048) + minRepeats (3) for customers who
+// don't tune. PrefixWindowChars is the one tier-capped Theme B knob
+// (real CPU vector — more chars hashed + bigger shingle set).
+type TokenWasteThresholds struct {
+	PrefixWindowChars int
+	MinRepeats        int
+}
+
+// DefaultTokenWasteThresholds returns the hardcoded historical
+// defaults. Used by legacy call sites and tests.
+func DefaultTokenWasteThresholds() TokenWasteThresholds {
+	return TokenWasteThresholds{
+		PrefixWindowChars: prefixWindowChars,
+		MinRepeats:        minRepeats,
+	}
+}
+
 // DetectTokenWaste scans the supplied llm_call payloads in sequence
 // order and reports either:
 //
@@ -281,8 +301,30 @@ func detectNearDuplicateCluster(
 //
 // Returns ("", false) when fewer than minRepeats payloads exist or
 // when no signature crosses the threshold on either path.
+//
+// Preserved verbatim for backward compatibility with existing unit
+// tests + non-handler call sites. The production execution-close
+// path uses DetectTokenWasteWithThresholds.
 func DetectTokenWaste(payloads []json.RawMessage) (signature string, detected bool) {
-	if len(payloads) < minRepeats {
+	return DetectTokenWasteWithThresholds(payloads, DefaultTokenWasteThresholds())
+}
+
+// DetectTokenWasteWithThresholds is the per-project-aware variant.
+// Defensive: PrefixWindowChars < 64 OR MinRepeats < 2 fall back to
+// defaults (validators registry rejects these at write time).
+func DetectTokenWasteWithThresholds(
+	payloads []json.RawMessage,
+	t TokenWasteThresholds,
+) (signature string, detected bool) {
+	window := t.PrefixWindowChars
+	if window < 64 {
+		window = prefixWindowChars
+	}
+	threshold := t.MinRepeats
+	if threshold < 2 {
+		threshold = minRepeats
+	}
+	if len(payloads) < threshold {
 		return "", false
 	}
 	// Extract + normalize each user_message once; reused by both the
@@ -306,12 +348,12 @@ func DetectTokenWaste(payloads []json.RawMessage) (signature string, detected bo
 			continue
 		}
 		text := stripVariablePrefixes(p.UserMessage)
-		if len(text) > prefixWindowChars {
-			text = text[:prefixWindowChars]
+		if len(text) > window {
+			text = text[:window]
 		}
 		normalized = append(normalized, text)
 	}
-	if len(normalized) < minRepeats {
+	if len(normalized) < threshold {
 		return "", false
 	}
 	// Layer 1+2: exact-prefix SHA-256 on the normalized text.
@@ -325,7 +367,7 @@ func DetectTokenWaste(payloads []json.RawMessage) (signature string, detected bo
 	bestHash := ""
 	bestCount := 0
 	for h, c := range counts {
-		if c < minRepeats {
+		if c < threshold {
 			continue
 		}
 		if c > bestCount || (c == bestCount && h < bestHash) {
@@ -333,7 +375,7 @@ func DetectTokenWaste(payloads []json.RawMessage) (signature string, detected bo
 			bestCount = c
 		}
 	}
-	if bestCount >= minRepeats {
+	if bestCount >= threshold {
 		suffix := bestHash
 		if len(suffix) > 8 {
 			suffix = suffix[:8]
@@ -347,5 +389,5 @@ func DetectTokenWaste(payloads []json.RawMessage) (signature string, detected bo
 	for i, text := range normalized {
 		shingles[i] = kShingles(text, shingleSize)
 	}
-	return detectNearDuplicateCluster(normalized, shingles)
+	return detectNearDuplicateCluster(normalized, shingles, threshold)
 }

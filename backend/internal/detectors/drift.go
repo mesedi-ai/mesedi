@@ -33,6 +33,7 @@ package detectors
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -152,6 +153,46 @@ var LexicalDriftThresholds = []struct {
 	{Cutoff: 0.45, Signature: "lexical_drift_0.45+"},
 }
 
+// DriftThresholds carries the per-project tunable values for the
+// lexical drift detector (Theme B.b). Three cutoffs that must satisfy
+// Low < Medium < High for the bucketing to make sense. Defaults match
+// the historical hardcoded values from LexicalDriftThresholds.
+type DriftThresholds struct {
+	LexicalLow    float64
+	LexicalMedium float64
+	LexicalHigh   float64
+}
+
+// DefaultDriftThresholds returns the historical hardcoded defaults
+// (0.45 / 0.55 / 0.70).
+func DefaultDriftThresholds() DriftThresholds {
+	return DriftThresholds{
+		LexicalLow:    0.45,
+		LexicalMedium: 0.55,
+		LexicalHigh:   0.70,
+	}
+}
+
+// validForBucketing returns true iff the three thresholds satisfy
+// `low < medium < high` AND each is in [0.0, 1.0]. Bad config falls
+// back to the all-defaults path; bucketing chaos is worse than
+// ignoring the customer's broken override. The validators registry
+// rejects out-of-range values at write time but does NOT enforce
+// cross-threshold ordering — the detector is the last line of
+// defense for that constraint.
+func (t DriftThresholds) validForBucketing() bool {
+	if t.LexicalLow < 0 || t.LexicalLow > 1 {
+		return false
+	}
+	if t.LexicalMedium < 0 || t.LexicalMedium > 1 {
+		return false
+	}
+	if t.LexicalHigh < 0 || t.LexicalHigh > 1 {
+		return false
+	}
+	return t.LexicalLow < t.LexicalMedium && t.LexicalMedium < t.LexicalHigh
+}
+
 // DetectLexicalDrift compares the current execution's user_messages
 // against the historical baseline and returns a bucketed signature if
 // the cosine distance exceeds the lowest threshold. Returns:
@@ -168,9 +209,30 @@ var LexicalDriftThresholds = []struct {
 //     after retention purge), drift on day-one is noise, not signal
 //   - either corpus produces an empty 3-gram bag (very short messages)
 //
-// The function is pure: no I/O, no globals mutated, safe to call from
-// any goroutine.
+// Preserved verbatim for backward compatibility; the production
+// execution-close path uses DetectLexicalDriftWithThresholds.
 func DetectLexicalDrift(current, historical []string) (signature string, distance float64, detected bool) {
+	return DetectLexicalDriftWithThresholds(current, historical, DefaultDriftThresholds())
+}
+
+// DetectLexicalDriftWithThresholds is the per-project-aware variant.
+// Defensive self-defense: if t fails validForBucketing (any value
+// out-of-range OR ordering violation), the detector falls back to
+// defaults rather than producing bucketing chaos.
+//
+// Signature shape: customers who never tune (and customers whose
+// tuned values match the defaults exactly) see the historical
+// "lexical_drift_0.45+" / "0.55+" / "0.70+" signatures. Customers
+// who tune get signatures embedding THEIR cutoff values, e.g.
+// "lexical_drift_0.60+" — keeps the dashboard signature filter
+// meaningful for tuned projects.
+func DetectLexicalDriftWithThresholds(
+	current, historical []string,
+	t DriftThresholds,
+) (signature string, distance float64, detected bool) {
+	if !t.validForBucketing() {
+		t = DefaultDriftThresholds()
+	}
 	if len(current) == 0 || len(historical) == 0 {
 		return "", 0, false
 	}
@@ -183,13 +245,21 @@ func DetectLexicalDrift(current, historical []string) (signature string, distanc
 
 	distance = cosineDistance(currentBag, historicalBag)
 
-	// Thresholds are sorted highest-cutoff-first so the first match
-	// is the most-severe bucket. This is the natural "ratchet up"
-	// classification ordering, if a distance is 0.65, we want it
-	// classified as drift_0.50+ (the next-highest bucket below 0.70).
-	for _, t := range LexicalDriftThresholds {
-		if distance >= t.Cutoff {
-			return t.Signature, distance, true
+	// Highest-cutoff-first so the first match is the most-severe
+	// bucket. Same "ratchet up" classification ordering as the
+	// historical LexicalDriftThresholds list.
+	type bucket struct {
+		cutoff float64
+		sig    string
+	}
+	buckets := [...]bucket{
+		{cutoff: t.LexicalHigh, sig: fmt.Sprintf("lexical_drift_%.2f+", t.LexicalHigh)},
+		{cutoff: t.LexicalMedium, sig: fmt.Sprintf("lexical_drift_%.2f+", t.LexicalMedium)},
+		{cutoff: t.LexicalLow, sig: fmt.Sprintf("lexical_drift_%.2f+", t.LexicalLow)},
+	}
+	for _, b := range buckets {
+		if distance >= b.cutoff {
+			return b.sig, distance, true
 		}
 	}
 	return "", distance, false

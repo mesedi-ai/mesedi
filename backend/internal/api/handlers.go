@@ -695,6 +695,23 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	//
 	// Best-effort throughout, drift query failures log and continue
 	// rather than blocking the rest of the detection pipeline.
+
+	// Theme B.b — load per-project detector thresholds once per
+	// terminal-status pipeline. Bulk-reads every override row for
+	// the 6 in-scope detectors and assembles a typed aggregate.
+	// Store errors / parse errors silently fall back to defaults
+	// per-knob; the aggregate is always populated.
+	detectorThresholds := DefaultProjectDetectorThresholds()
+	if isTerminalStatus(patch.Status) {
+		thresholdTier := TierHobby
+		if proj, projErr := h.Store.GetProject(r.Context(), authProjectID); projErr == nil && proj != nil {
+			thresholdTier = normalizeTier(proj.Tier)
+		}
+		detectorThresholds = LoadProjectDetectorThresholds(
+			r.Context(), h.Store, h.Logger, authProjectID, thresholdTier,
+		)
+	}
+
 	if isTerminalStatus(patch.Status) {
 		// 7-day historical window, same for both drift signals.
 		cutoff := time.Now().Add(-7 * 24 * time.Hour)
@@ -807,7 +824,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			}
 			// context_overflow first; fail-level overrides
 			// token_waste claim if both fired on the same exec.
-			if sig, fired := detectors.DetectContextOverflow(rawPayloads); fired {
+			if sig, fired := detectors.DetectContextOverflowWithThresholds(rawPayloads, detectorThresholds.ContextOverflow); fired {
 				isNew, gErr := h.Store.GroupContextOverflow(r.Context(), executionID, authProjectID, sig)
 				if gErr != nil {
 					h.Logger.Warn("context-overflow grouping failed (continuing)",
@@ -818,7 +835,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				}
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassContextOverflow, sig, isNew, gErr)
 			}
-			if sig, fired := detectors.DetectTokenWaste(rawPayloads); fired {
+			if sig, fired := detectors.DetectTokenWasteWithThresholds(rawPayloads, detectorThresholds.TokenWaste); fired {
 				isNew, gErr := h.Store.GroupTokenWaste(r.Context(), executionID, authProjectID, sig)
 				if gErr != nil {
 					h.Logger.Warn("token-waste grouping failed (continuing)",
@@ -852,7 +869,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			for i, p := range checkpoints {
 				payloads[i] = json.RawMessage(p)
 			}
-			if sig, fired := detectors.DetectSemanticLoop(payloads); fired {
+			if sig, fired := detectors.DetectSemanticLoopWithThresholds(payloads, detectorThresholds.SemanticLoop); fired {
 				isNew, gErr := h.Store.GroupSemanticLoop(r.Context(), executionID, authProjectID, sig)
 				if gErr != nil {
 					h.Logger.Warn("semantic-loop grouping failed (continuing)",
@@ -961,7 +978,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					}
 					shapeCounts[shape]++
 				}
-				if sig, fired := detectors.DetectSchemaDrift(toolName, currentShape, shapeCounts); fired {
+				if sig, fired := detectors.DetectSchemaDriftWithThresholds(toolName, currentShape, shapeCounts, detectorThresholds.ToolSchemaDrift); fired {
 					isNew, gErr := h.Store.GroupToolSchemaDrift(r.Context(), executionID, authProjectID, sig)
 					if gErr != nil {
 						h.Logger.Warn("tool-schema-drift grouping failed (continuing)",
@@ -1174,7 +1191,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			for i, p := range evalPayloads {
 				rawPayloads[i] = json.RawMessage(p)
 			}
-			if sig, fired := detectors.DetectGroundingFailure(rawPayloads); fired {
+			if sig, fired := detectors.DetectGroundingFailureWithThresholds(rawPayloads, detectorThresholds.GroundingFailure); fired {
 				isNew, gErr := h.Store.GroupGroundingFailure(r.Context(), executionID, authProjectID, sig)
 				if gErr != nil {
 					h.Logger.Warn("grounding-failure grouping failed (continuing)",
@@ -1803,7 +1820,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 						"error", hErr.Error(),
 					)
 				} else if len(historicalMsgs) > 0 {
-					if signature, distance, drift := detectors.DetectLexicalDrift(currentMsgs, historicalMsgs); drift {
+					if signature, distance, drift := detectors.DetectLexicalDriftWithThresholds(currentMsgs, historicalMsgs, detectorThresholds.Drift); drift {
 						isNew, dErr := h.Store.GroupDriftSignal(r.Context(), executionID, authProjectID, signature)
 						if dErr != nil {
 							h.Logger.Warn("lexical drift grouping failed (continuing)",

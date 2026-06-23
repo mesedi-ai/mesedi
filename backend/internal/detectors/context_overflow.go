@@ -51,24 +51,50 @@ const (
 	contextOverflowFailPct = 1.00
 )
 
+// ContextOverflowThresholds carries the per-project tunable values
+// for this detector (Theme B.b). HighPct + CriticalPct default to
+// the historical 0.90 / 1.00 for customers who don't tune.
+type ContextOverflowThresholds struct {
+	HighPct     float64
+	CriticalPct float64
+}
+
+// DefaultContextOverflowThresholds returns the historical hardcoded
+// defaults.
+func DefaultContextOverflowThresholds() ContextOverflowThresholds {
+	return ContextOverflowThresholds{
+		HighPct:     contextOverflowWarnPct,
+		CriticalPct: contextOverflowFailPct,
+	}
+}
+
 // DetectContextOverflow walks the supplied llm_call payloads and
 // reports the highest-severity overflow signal found. Returns
 // (signature, true) on detection. Signature shape is
 // "context_overflow:<level>:<model>" where level is "warn" or "fail".
 //
-// The detector takes the MAX cumulative input_tokens per (model)
-// across the execution: agents that make multiple LLM calls
-// independently (e.g. retry + retry-with-context-reduction) shouldn't
-// trip just because they spike once. The high-water mark captures
-// the actual ceiling the agent operated under.
-//
-// Returns ("", false) when:
-//   - payloads is empty
-//   - no payload had a usable model + input_tokens
-//   - no observed model is in the registry
-//   - the highest utilization observed is below
-//     contextOverflowWarnPct
+// Preserved verbatim for backward compatibility; the production
+// execution-close path uses DetectContextOverflowWithThresholds.
 func DetectContextOverflow(payloads []json.RawMessage) (signature string, detected bool) {
+	return DetectContextOverflowWithThresholds(payloads, DefaultContextOverflowThresholds())
+}
+
+// DetectContextOverflowWithThresholds is the per-project-aware
+// variant. Defensive: out-of-range pcts OR HighPct >= CriticalPct
+// fall back to defaults (validators registry rejects out-of-range
+// at write time; cross-pct ordering is the detector's responsibility).
+func DetectContextOverflowWithThresholds(
+	payloads []json.RawMessage,
+	t ContextOverflowThresholds,
+) (signature string, detected bool) {
+	warnPct := t.HighPct
+	failPct := t.CriticalPct
+	if warnPct < 0.5 || warnPct > 1.0 ||
+		failPct < 0.5 || failPct > 1.0 ||
+		warnPct >= failPct {
+		warnPct = contextOverflowWarnPct
+		failPct = contextOverflowFailPct
+	}
 	if len(payloads) == 0 {
 		return "", false
 	}
@@ -103,11 +129,11 @@ func DetectContextOverflow(payloads []json.RawMessage) (signature string, detect
 			continue
 		}
 		pct := float64(tokens) / float64(window)
-		if pct < contextOverflowWarnPct {
+		if pct < warnPct {
 			continue
 		}
 		level := "warn"
-		if pct >= contextOverflowFailPct {
+		if pct >= failPct {
 			level = "fail"
 		}
 		// "fail" outranks "warn"; within same level, higher pct

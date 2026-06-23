@@ -62,6 +62,21 @@ const minRevisits = 3
 // while keeping the signature scan-friendly.
 const signatureLen = 8
 
+// SemanticLoopThresholds carries the per-project tunable values for
+// this detector (Theme B.b). RevisitThreshold defaults to minRevisits
+// (3) for customers who don't tune.
+type SemanticLoopThresholds struct {
+	RevisitThreshold int
+}
+
+// DefaultSemanticLoopThresholds returns the values that match the
+// detector's historical hardcoded behavior. Used by call sites that
+// don't have per-project config available (legacy unit tests,
+// synthetic executions in test harnesses).
+func DefaultSemanticLoopThresholds() SemanticLoopThresholds {
+	return SemanticLoopThresholds{RevisitThreshold: minRevisits}
+}
+
 // DetectSemanticLoop scans the supplied checkpoint payloads in
 // sequence order and reports the most-revisited canonical-state hash
 // if it crossed the threshold. Returns (signature, true) on detection,
@@ -78,8 +93,29 @@ const signatureLen = 8
 // (same as TimeBudgetSignature / StepCountSignature) while still
 // giving on-call responders a stable, copy-pasteable cluster
 // identifier.
+//
+// Preserved verbatim for backward compatibility with existing unit
+// tests + non-handler call sites. The production execution-close
+// path uses DetectSemanticLoopWithThresholds.
 func DetectSemanticLoop(payloads []json.RawMessage) (signature string, detected bool) {
-	if len(payloads) < minRevisits {
+	return DetectSemanticLoopWithThresholds(payloads, DefaultSemanticLoopThresholds())
+}
+
+// DetectSemanticLoopWithThresholds is the per-project-aware variant
+// of DetectSemanticLoop. RevisitThreshold from t overrides the
+// hardcoded minRevisits. Defensive: values below 2 fall back to the
+// default (a 1-revisit threshold would fire on every single repeat;
+// the validators registry rejects this at write time but we defend
+// on read regardless).
+func DetectSemanticLoopWithThresholds(
+	payloads []json.RawMessage,
+	t SemanticLoopThresholds,
+) (signature string, detected bool) {
+	threshold := t.RevisitThreshold
+	if threshold < 2 {
+		threshold = minRevisits
+	}
+	if len(payloads) < threshold {
 		return "", false
 	}
 	counts := make(map[string]int, len(payloads))
@@ -102,7 +138,7 @@ func DetectSemanticLoop(payloads []json.RawMessage) (signature string, detected 
 	}
 	best := entry{}
 	for h, c := range counts {
-		if c < minRevisits {
+		if c < threshold {
 			continue
 		}
 		if c > best.count || (c == best.count && h < best.hash) {

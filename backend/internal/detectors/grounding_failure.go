@@ -38,7 +38,39 @@ import (
 // score-below-mean-floor. This matches customer intent: the
 // evaluator's own verdict outranks our heuristic interpretation
 // of its numeric output.
+// GroundingFailureThresholds carries the per-project tunable values
+// for this detector (Theme B.b). MeanFloor defaults to 0.5 — half
+// the evaluator's pass band. Customers who don't tune see the
+// historical behavior.
+type GroundingFailureThresholds struct {
+	MeanFloor float64
+}
+
+// DefaultGroundingFailureThresholds returns the historical hardcoded
+// default. Used by legacy call sites and tests.
+func DefaultGroundingFailureThresholds() GroundingFailureThresholds {
+	return GroundingFailureThresholds{MeanFloor: 0.5}
+}
+
+// DetectGroundingFailure scans eval_score payloads for grounding
+// failures. Preserved verbatim for backward compatibility; the
+// production execution-close path uses
+// DetectGroundingFailureWithThresholds.
 func DetectGroundingFailure(payloads []json.RawMessage) (signature string, detected bool) {
+	return DetectGroundingFailureWithThresholds(payloads, DefaultGroundingFailureThresholds())
+}
+
+// DetectGroundingFailureWithThresholds is the per-project-aware
+// variant. Defensive: MeanFloor outside [0.0, 1.0] reverts to the
+// 0.5 default (validators registry rejects this at write time).
+func DetectGroundingFailureWithThresholds(
+	payloads []json.RawMessage,
+	t GroundingFailureThresholds,
+) (signature string, detected bool) {
+	floor := t.MeanFloor
+	if floor < 0.0 || floor > 1.0 {
+		floor = 0.5
+	}
 	if len(payloads) == 0 {
 		return "", false
 	}
@@ -97,7 +129,7 @@ func DetectGroundingFailure(payloads []json.RawMessage) (signature string, detec
 			continue
 		}
 		mean := r.sum / float64(r.count)
-		if mean >= 0.5 {
+		if mean >= floor {
 			continue
 		}
 		if firingKey == "" || key < firingKey {

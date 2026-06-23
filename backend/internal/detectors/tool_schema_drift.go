@@ -186,6 +186,39 @@ func DetectSchemaDrift(
 	currentShape string,
 	historicalShapes map[string]int,
 ) (signature string, detected bool) {
+	return DetectSchemaDriftWithThresholds(
+		toolName, currentShape, historicalShapes,
+		DefaultToolSchemaDriftThresholds(),
+	)
+}
+
+// ToolSchemaDriftThresholds carries the per-project tunable values
+// for this detector (Theme B.b). MinHistoryCalls defaults to the
+// hardcoded minHistoryCalls (10) for customers who don't tune.
+type ToolSchemaDriftThresholds struct {
+	MinHistoryCalls int
+}
+
+// DefaultToolSchemaDriftThresholds returns the historical hardcoded
+// default. Used by legacy call sites and tests.
+func DefaultToolSchemaDriftThresholds() ToolSchemaDriftThresholds {
+	return ToolSchemaDriftThresholds{MinHistoryCalls: minHistoryCalls}
+}
+
+// DetectSchemaDriftWithThresholds is the per-project-aware variant.
+// Defensive: MinHistoryCalls < 2 reverts to default (a single-call
+// baseline cannot establish a majority; the validators registry
+// rejects this at write time).
+func DetectSchemaDriftWithThresholds(
+	toolName string,
+	currentShape string,
+	historicalShapes map[string]int,
+	t ToolSchemaDriftThresholds,
+) (signature string, detected bool) {
+	minHistory := t.MinHistoryCalls
+	if minHistory < 2 {
+		minHistory = minHistoryCalls
+	}
 	if currentShape == "" || toolName == "" {
 		return "", false
 	}
@@ -199,7 +232,7 @@ func DetectSchemaDrift(
 			dominantCount = count
 		}
 	}
-	if total < minHistoryCalls {
+	if total < minHistory {
 		return "", false
 	}
 	if float64(dominantCount)/float64(total) < majorityThreshold {
