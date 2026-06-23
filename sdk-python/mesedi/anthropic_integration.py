@@ -32,10 +32,19 @@ Async coverage (#271.h):
     same throttling auto-emit. Customers using ``AsyncAnthropic`` get
     full provider_incident + infrastructure_throttled coverage.
 
+Streaming coverage (#271.i):
+
+  - ``Messages.stream()`` and ``AsyncMessages.stream()`` are also
+    patched. The wrapper returns a proxy MessageStreamManager that
+    delegates iteration to the original stream while injecting an
+    llm_call event emission at stream close (via the inner manager's
+    ``get_final_message()`` helper). Customer's iteration protocol
+    preserved — ``with client.messages.stream(...) as stream: for
+    event in stream:`` works unchanged. Mid-stream exceptions are
+    captured via ``exc_val`` on __exit__/__aexit__.
+
 Still out of scope for this slice:
 
-  - ``Messages.stream()`` / streaming responses, patched in #271.i
-    (separate wave).
   - Anthropic tools / tool_use response blocks, handled by @mesedi.tool
     at the agent layer, not at the LLM-call layer
 
@@ -115,6 +124,15 @@ def instrument_anthropic(
     """
     sync_ok = _instrument_sync_anthropic(messages_class)
     async_ok = _instrument_async_anthropic(async_messages_class)
+    # #271.i: also patch the .stream() methods on both Messages
+    # classes if available. These are streaming surfaces that bypass
+    # the create() patches entirely. The patchers locate the
+    # already-resolved Messages / AsyncMessages classes via the
+    # _patched_classes set; we re-resolve here so this function is
+    # idempotent even if .stream() patching runs after create()
+    # patching on the same class.
+    _patch_anthropic_sync_stream(messages_class)
+    _patch_anthropic_async_stream(async_messages_class)
     return sync_ok or async_ok
 
 
@@ -384,6 +402,339 @@ def _instrument_async_anthropic(async_messages_class: Optional[Type[Any]]) -> bo
     async_messages_class.create = patched_acreate  # type: ignore[assignment]
     _patched_classes.add(async_messages_class)
     return True
+
+
+## ── #271.i streaming patching ──────────────────────────────────────
+
+# Streaming uses a separate idempotency sentinel because .stream() is
+# a different METHOD on the same Messages / AsyncMessages classes
+# than .create() (which is tracked in _patched_classes). A single set
+# would falsely block stream patching when create patching had
+# already added the class.
+_stream_patched_classes: set = set()
+
+
+def _patch_anthropic_sync_stream(messages_class: Optional[Type[Any]]) -> bool:
+    """Patch Messages.stream() — sync streaming context manager."""
+    if messages_class is None:
+        try:
+            from anthropic.resources.messages import Messages as _Messages
+            messages_class = _Messages
+        except ImportError:
+            return False
+    if messages_class in _stream_patched_classes:
+        return True
+    original_stream = getattr(messages_class, "stream", None)
+    if original_stream is None:
+        return False
+
+    def patched_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return original_stream(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        system_raw = kwargs.get("system", "")
+        messages = kwargs.get("messages", [])
+        user_message = _extract_last_user_message(messages)
+        system_text = system_raw if isinstance(system_raw, str) else str(system_raw)
+
+        start = time.perf_counter()
+        try:
+            manager = original_stream(self, *args, **kwargs)
+        except BaseException as exc:
+            # Request-time failure — no manager to wrap, no chunks
+            # to aggregate. Emit failed event + throttling event +
+            # re-raise, same as the non-streaming .create() failure
+            # path.
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            _emit_anthropic_stream_failure(
+                client=client, ctx=ctx, event_id=event_id, sequence=sequence,
+                duration_ms=duration_ms, model=model, system_text=system_text,
+                user_message=user_message, exc=exc, async_mode=False,
+            )
+            raise
+
+        return _AnthropicStreamManagerWrapper(
+            inner=manager,
+            ctx=ctx,
+            client=client,
+            event_id=event_id,
+            sequence=sequence,
+            model=model,
+            system_text=system_text,
+            user_message=user_message,
+            start=start,
+            async_mode=False,
+        )
+
+    patched_stream.__name__ = getattr(original_stream, "__name__", "stream")
+    patched_stream.__doc__ = getattr(original_stream, "__doc__", None)
+    messages_class.stream = patched_stream  # type: ignore[assignment]
+    _stream_patched_classes.add(messages_class)
+    return True
+
+
+def _patch_anthropic_async_stream(async_messages_class: Optional[Type[Any]]) -> bool:
+    """Patch AsyncMessages.stream() — async streaming context manager."""
+    if async_messages_class is None:
+        try:
+            from anthropic.resources.messages import AsyncMessages as _AsyncMessages
+            async_messages_class = _AsyncMessages
+        except ImportError:
+            return False
+    if async_messages_class in _stream_patched_classes:
+        return True
+    original_stream = getattr(async_messages_class, "stream", None)
+    if original_stream is None:
+        return False
+
+    def patched_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return original_stream(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        system_raw = kwargs.get("system", "")
+        messages = kwargs.get("messages", [])
+        user_message = _extract_last_user_message(messages)
+        system_text = system_raw if isinstance(system_raw, str) else str(system_raw)
+
+        start = time.perf_counter()
+        try:
+            manager = original_stream(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            _emit_anthropic_stream_failure(
+                client=client, ctx=ctx, event_id=event_id, sequence=sequence,
+                duration_ms=duration_ms, model=model, system_text=system_text,
+                user_message=user_message, exc=exc, async_mode=True,
+            )
+            raise
+
+        return _AnthropicStreamManagerWrapper(
+            inner=manager,
+            ctx=ctx,
+            client=client,
+            event_id=event_id,
+            sequence=sequence,
+            model=model,
+            system_text=system_text,
+            user_message=user_message,
+            start=start,
+            async_mode=True,
+        )
+
+    patched_stream.__name__ = getattr(original_stream, "__name__", "stream")
+    patched_stream.__doc__ = getattr(original_stream, "__doc__", None)
+    async_messages_class.stream = patched_stream  # type: ignore[assignment]
+    _stream_patched_classes.add(async_messages_class)
+    return True
+
+
+class _AnthropicStreamManagerWrapper:
+    """Proxies an Anthropic MessageStreamManager (sync OR async) and
+    emits the llm_call event at stream close.
+
+    Customers' iteration protocol is preserved: __enter__ returns the
+    actual inner MessageStream so `with stream() as stream: for event
+    in stream:` works unchanged. The wrapper stays alive as the
+    context manager so __exit__ (or __aexit__) fires when the
+    customer's `with` / `async with` block exits.
+
+    On close:
+      - If the customer's block exited cleanly (exc_val is None), the
+        wrapper calls inner.get_final_message() to extract the final
+        response + token counts, then emits a status=ok llm_call event.
+      - If the block exited with an exception (mid-stream failure),
+        the wrapper builds a failure payload using the same canonical
+        error_class mapping as the .create() patcher and emits a
+        status=failed event + auto-fires the throttling event when
+        applicable. The exception is re-raised through the inner's
+        __exit__.
+      - If the customer drops the stream early (exits before
+        consuming all chunks), __exit__ still fires; get_final_message
+        returns what was buffered (empty response_text + 0 tokens is
+        acceptable — that's an accurate reflection of what the call
+        delivered).
+    """
+
+    def __init__(
+        self,
+        *,
+        inner: Any,
+        ctx: Any,
+        client: Any,
+        event_id: str,
+        sequence: int,
+        model: str,
+        system_text: str,
+        user_message: str,
+        start: float,
+        async_mode: bool,
+    ) -> None:
+        self._inner = inner
+        self._ctx = ctx
+        self._client = client
+        self._event_id = event_id
+        self._sequence = sequence
+        self._model = model
+        self._system_text = system_text
+        self._user_message = user_message
+        self._start = start
+        self._async_mode = async_mode
+        self._stream: Any = None
+        self._emitted = False
+
+    # Proxy any non-overridden attribute access to the inner manager.
+    # Customers who use the manager's methods directly (rare; the
+    # documented usage is `with`-blocks) get the original behavior.
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def __enter__(self) -> Any:
+        self._stream = self._inner.__enter__()
+        return self._stream
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
+        self._emit_event(exc_val=exc_val, endpoint="/v1/messages")
+        return self._inner.__exit__(exc_type, exc_val, exc_tb)
+
+    async def __aenter__(self) -> Any:
+        self._stream = await self._inner.__aenter__()
+        return self._stream
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
+        self._emit_event(exc_val=exc_val, endpoint="/v1/messages")
+        return await self._inner.__aexit__(exc_type, exc_val, exc_tb)
+
+    def _emit_event(self, *, exc_val: Optional[BaseException], endpoint: str) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        if exc_val is not None:
+            # Mid-stream failure — use same canonical error classifier
+            # + throttling auto-emit as the .create() failure path.
+            _emit_anthropic_stream_failure(
+                client=self._client,
+                ctx=self._ctx,
+                event_id=self._event_id,
+                sequence=self._sequence,
+                duration_ms=duration_ms,
+                model=self._model,
+                system_text=self._system_text,
+                user_message=self._user_message,
+                exc=exc_val,
+                async_mode=self._async_mode,
+                endpoint=endpoint,
+            )
+            return
+        # Success path — try to extract final message. Failure here
+        # is defensive: customer may have dropped the stream early
+        # leaving no final message available. Log + emit a partial
+        # event with empty response_text + 0 tokens rather than
+        # losing the event entirely.
+        response_text = ""
+        input_tokens = 0
+        output_tokens = 0
+        try:
+            stream = self._stream if self._stream is not None else self._inner
+            final = stream.get_final_message()
+            response_text, input_tokens, output_tokens = _extract_response_fields(final)
+        except Exception as emit_exc:
+            logger.debug("mesedi: stream get_final_message failed: %s", emit_exc)
+        if self._ctx.budget_tracker is not None:
+            self._ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        self._client.submit_event(Event(
+            event_id=self._event_id,
+            execution_id=self._ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=self._sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "model": self._model,
+                "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
+                "user_message": _truncate(self._user_message, _MAX_USER_MSG),
+                "response_text": _truncate(response_text, _MAX_RESPONSE),
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "streaming": True,
+            },
+        ))
+
+
+def _emit_anthropic_stream_failure(
+    *,
+    client: Any,
+    ctx: Any,
+    event_id: str,
+    sequence: int,
+    duration_ms: int,
+    model: str,
+    system_text: str,
+    user_message: str,
+    exc: BaseException,
+    async_mode: bool,
+    endpoint: str = "/v1/messages",
+) -> None:
+    """Emit a status=failed llm_call event + fire infrastructure_event
+    auto-throttling. Shared between request-time failures (caught
+    around original_stream() call) and mid-stream failures (caught
+    via __exit__'s exc_val).
+    """
+    failure_payload = {
+        "provider": _PROVIDER,
+        "model": model,
+        "system_prompt": _truncate(system_text, _MAX_SYSTEM),
+        "user_message": _truncate(user_message, _MAX_USER_MSG),
+        "status": "failed",
+        "error_class": classify_anthropic_exception(exc),
+        "exception_type": type(exc).__name__,
+        "exception_message": _truncate(str(exc), _MAX_EXC_MSG),
+        "streaming": True,
+    }
+    http_status = extract_http_status(exc)
+    if http_status is not None:
+        failure_payload["http_status"] = http_status
+    retry_after = extract_retry_after(exc)
+    if retry_after is not None:
+        failure_payload["retry_after_seconds"] = retry_after
+    client.submit_event(Event(
+        event_id=event_id,
+        execution_id=ctx.execution_id,
+        event_type=EventType.LLM_CALL,
+        sequence=sequence,
+        timestamp=utcnow_rfc3339(),
+        duration_ms=duration_ms,
+        payload=failure_payload,
+    ))
+    _maybe_emit_throttling_event(
+        provider=_PROVIDER,
+        error_class=failure_payload["error_class"],
+        http_status=http_status,
+        retry_after_seconds=retry_after,
+        endpoint=endpoint,
+    )
 
 
 def _extract_last_user_message(messages: List[Any]) -> str:
