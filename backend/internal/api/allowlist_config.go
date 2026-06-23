@@ -356,6 +356,62 @@ func sanitizeAllowlistKey(raw string) (string, string) {
 	return trimmed, ""
 }
 
+// checkAllowlistAndMaybeSkip is the Allowlist.b hot-path entry
+// point used by the 3 detector call sites in handlers.go (crashes,
+// tool_failures, validator_failures). Returns true when the
+// signature matches a customer allowlist entry — callers should
+// SKIP both the GroupX call AND the maybeFireWebhook call when
+// true is returned.
+//
+// On match: bumps the matched row's match_count synchronously so
+// the dashboard editor surfaces per-entry telemetry ("this entry
+// suppressed N failures").
+//
+// Fail-safe: any store error on the lookup returns false (detection
+// fires as if no allowlist exists). Silently suppressing on a
+// broken read would be the worst possible failure mode — customers
+// would lose detection coverage without seeing the cause. Match-
+// count increment errors log warn + continue (telemetry-only;
+// suppression decision already made).
+func (h *Handlers) checkAllowlistAndMaybeSkip(
+	r *http.Request, projectID, detector, signature string,
+) bool {
+	if !allowlistDetectors[detector] {
+		// Defensive: caller passed a detector that's not in the
+		// allow-list. Don't query the store; fall through to
+		// normal detection.
+		return false
+	}
+	matched, err := h.Store.CheckAllowlistMatch(
+		r.Context(), projectID, detector, signature,
+	)
+	if err != nil {
+		h.Logger.Warn("allowlist check failed (continuing as not-allowlisted)",
+			"project_id", projectID,
+			"detector", detector,
+			"signature", signature,
+			"error", err.Error())
+		return false
+	}
+	if !matched {
+		return false
+	}
+	if incErr := h.Store.IncrementAllowlistMatchCount(
+		r.Context(), projectID, detector, signature, 1,
+	); incErr != nil {
+		h.Logger.Warn("allowlist match_count increment failed (continuing)",
+			"project_id", projectID,
+			"detector", detector,
+			"signature", signature,
+			"error", incErr.Error())
+	}
+	h.Logger.Debug("failure suppressed by allowlist",
+		"project_id", projectID,
+		"detector", detector,
+		"signature", signature)
+	return true
+}
+
 // newAllowlistID produces a server-side allowlist identifier in the
 // "allow_<32 hex>" format (same shape as patternID + auditID).
 func newAllowlistID() string {

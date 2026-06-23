@@ -793,16 +793,26 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// is already correctly recorded. Runs AFTER drift, if drift already
 	// claimed this execution, GroupCrashedExecution's idempotency check
 	// short-circuits as a no-op.
+	//
+	// Allowlist.b: check the per-project crashes allowlist first.
+	// When the crash_signature (= exception_type, e.g. "ValueError")
+	// matches a customer allowlist entry, SKIP both the grouping
+	// AND the webhook. Closes crashes.G3.
 	if patch.Status == events.StatusCrashed && patch.CrashSignature != "" {
-		isNew, err := h.Store.GroupCrashedExecution(r.Context(), executionID, authProjectID, patch.CrashSignature)
-		if err != nil {
-			h.Logger.Warn("crash grouping failed (continuing)",
-				"execution_id", executionID,
-				"crash_signature", patch.CrashSignature,
-				"error", err.Error(),
-			)
+		if h.checkAllowlistAndMaybeSkip(r, authProjectID, "crashes", patch.CrashSignature) {
+			// Suppressed by customer allowlist; no failure_group,
+			// no webhook. match_count incremented inside the helper.
+		} else {
+			isNew, err := h.Store.GroupCrashedExecution(r.Context(), executionID, authProjectID, patch.CrashSignature)
+			if err != nil {
+				h.Logger.Warn("crash grouping failed (continuing)",
+					"execution_id", executionID,
+					"crash_signature", patch.CrashSignature,
+					"error", err.Error(),
+				)
+			}
+			h.maybeFireWebhook(r, authProjectID, store.FailureClassCrashes, patch.CrashSignature, isNew, err)
 		}
-		h.maybeFireWebhook(r, authProjectID, store.FailureClassCrashes, patch.CrashSignature, isNew, err)
 	}
 
 	// Phase 3b sub-slice 11: step-count detector. Any terminal execution
@@ -1042,15 +1052,21 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else if toolName != "" {
-			isNew, gErr := h.Store.GroupToolFailure(r.Context(), executionID, authProjectID, toolName)
-			if gErr != nil {
-				h.Logger.Warn("tool-failure grouping failed (continuing)",
-					"execution_id", executionID,
-					"tool_name", toolName,
-					"error", gErr.Error(),
-				)
+			// Allowlist.b: customer allowlist by tool_name suppresses
+			// detection for known-flaky tools. Closes tool_failures.G4.
+			if h.checkAllowlistAndMaybeSkip(r, authProjectID, "tool_failures", toolName) {
+				// Suppressed; skip grouping + webhook.
+			} else {
+				isNew, gErr := h.Store.GroupToolFailure(r.Context(), executionID, authProjectID, toolName)
+				if gErr != nil {
+					h.Logger.Warn("tool-failure grouping failed (continuing)",
+						"execution_id", executionID,
+						"tool_name", toolName,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassToolFailures, toolName, isNew, gErr)
 			}
-			h.maybeFireWebhook(r, authProjectID, store.FailureClassToolFailures, toolName, isNew, gErr)
 		}
 	}
 
@@ -1171,34 +1187,43 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else if validatorName != "" {
-			isNew, gErr := h.Store.GroupValidatorFailure(r.Context(), executionID, authProjectID, validatorName)
-			if gErr != nil {
-				h.Logger.Warn("validator-failure grouping failed (continuing)",
-					"execution_id", executionID,
-					"validator_name", validatorName,
-					"error", gErr.Error(),
-				)
-			}
-			// validator_failures.G1: persist the SDK-supplied
-			// severity hint on the freshly-created/updated row so
-			// the severity resolution chain (webhook_dispatch.go +
-			// dashboard read paths) can honor it. Best-effort —
-			// failure here doesn't suppress the failure_group itself.
-			if gErr == nil && severityHint != "" {
-				groupID := store.DeriveFailureGroupID(
-					authProjectID, store.FailureClassValidator, validatorName,
-				)
-				if hErr := h.Store.UpdateFailureGroupSeverityHint(
-					r.Context(), groupID, severityHint,
-				); hErr != nil && !errors.Is(hErr, store.ErrNotFound) {
-					h.Logger.Warn("update failure_group severity_hint failed",
-						"group_id", groupID,
-						"severity_hint", severityHint,
-						"error", hErr.Error(),
+			// Allowlist.b: customer allowlist by validator_name
+			// suppresses detection for known-flaky validators.
+			// Closes validator_failures.G5. When suppressed, also
+			// skip the severity_hint persistence (no failure_group
+			// to attach the hint to) and the webhook fire.
+			if h.checkAllowlistAndMaybeSkip(r, authProjectID, "validator_failures", validatorName) {
+				// Suppressed; skip grouping + severity_hint + webhook.
+			} else {
+				isNew, gErr := h.Store.GroupValidatorFailure(r.Context(), executionID, authProjectID, validatorName)
+				if gErr != nil {
+					h.Logger.Warn("validator-failure grouping failed (continuing)",
+						"execution_id", executionID,
+						"validator_name", validatorName,
+						"error", gErr.Error(),
 					)
 				}
+				// validator_failures.G1: persist the SDK-supplied
+				// severity hint on the freshly-created/updated row so
+				// the severity resolution chain (webhook_dispatch.go +
+				// dashboard read paths) can honor it. Best-effort —
+				// failure here doesn't suppress the failure_group itself.
+				if gErr == nil && severityHint != "" {
+					groupID := store.DeriveFailureGroupID(
+						authProjectID, store.FailureClassValidator, validatorName,
+					)
+					if hErr := h.Store.UpdateFailureGroupSeverityHint(
+						r.Context(), groupID, severityHint,
+					); hErr != nil && !errors.Is(hErr, store.ErrNotFound) {
+						h.Logger.Warn("update failure_group severity_hint failed",
+							"group_id", groupID,
+							"severity_hint", severityHint,
+							"error", hErr.Error(),
+						)
+					}
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassValidator, validatorName, isNew, gErr)
 			}
-			h.maybeFireWebhook(r, authProjectID, store.FailureClassValidator, validatorName, isNew, gErr)
 		}
 	}
 
