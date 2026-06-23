@@ -1298,6 +1298,73 @@ def test_coordination_deadlock(backend: Backend, configured_sdk):
     )
 
 
+def test_coordination_deadlock_three_cycle(backend: Backend, configured_sdk):
+    """End-to-end test of the Tarjan SCC fallback for N>=3 cycles.
+
+    Closes coordination_deadlock.G1 — the v1 detector only found
+    2-cycles, so a 3-cycle topology (planner → researcher →
+    executor → planner) silently missed. The new Tarjan pass runs
+    when no 2-cycle is present and emits a signature with all
+    cycle members sorted alphabetically under the same
+    coordination_deadlock: prefix as 2-cycles.
+
+    Test scaffold:
+        1. Wrap a single agent.
+        2. Inside the wrap, emit three handoff events forming a
+           3-cycle. No edge has its reverse — there's no 2-cycle
+           anywhere in the topology, so the fast path must miss
+           and Tarjan must take over.
+        3. Close the wrap. The detector chain runs on terminal
+           status; Tarjan finds the SCC; signature includes all
+           three sorted members.
+
+    Assertion:
+        failure_group with class=coordination_deadlock and
+        signature exactly
+        'coordination_deadlock:executor:planner:researcher'
+        (alphabetized cycle members). Identical 2-cycle test
+        above asserts on the prefix only; this one pins the
+        exact 3-member signature so a regression in SCC ordering
+        or member-selection would surface.
+    """
+    import mesedi as mesedi_pkg
+
+    mesedi = configured_sdk
+
+    @mesedi.wrap
+    def agent_in_three_cycle_deadlock():
+        # 3-cycle: planner → researcher → executor → planner.
+        # No reverse edges, so 2-cycle detection finds nothing
+        # and the Tarjan fallback must catch it.
+        mesedi_pkg.emit_agent_handoff(
+            from_agent="planner",
+            to_agent="researcher",
+            handoff_kind="delegate",
+            task_summary="planner delegates research to researcher",
+        )
+        mesedi_pkg.emit_agent_handoff(
+            from_agent="researcher",
+            to_agent="executor",
+            handoff_kind="delegate",
+            task_summary="researcher hands findings to executor",
+        )
+        mesedi_pkg.emit_agent_handoff(
+            from_agent="executor",
+            to_agent="planner",
+            handoff_kind="delegate",
+            task_summary="executor escalates back to planner — closes the 3-cycle",
+        )
+
+    agent_in_three_cycle_deadlock()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="coordination_deadlock",
+        signature_prefix="coordination_deadlock:executor:planner:researcher",
+    )
+
+
 def test_grounding_failure(backend: Backend, configured_sdk):
     """End-to-end test of the grounding_failure detector (Mesedi #14).
 
