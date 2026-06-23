@@ -45,6 +45,14 @@ var scanFieldKeys = map[events.EventType][]string{
 		"system_prompt",
 		"user_message",
 		"response_text",
+		// Theme A: failure-path PII redaction. instrument_*
+		// modules ship `exception_message` on failed llm_call
+		// events (provider exception text — may contain API keys
+		// returned in the error response, request IDs with
+		// embedded customer IDs, etc.). Scanning here closes
+		// tool_failures.G1 + validator_failures.G2's parent
+		// concern about raw exception persistence.
+		"exception_message",
 	},
 	events.EventTypeToolCall: {
 		// arguments and return_value are json.RawMessage on the payload
@@ -52,6 +60,30 @@ var scanFieldKeys = map[events.EventType][]string{
 		// not scanned (it's a logical identifier, never a secret).
 		"arguments",
 		"return_value",
+		// Theme A: tool failure path. `error` is the standard
+		// failure message on ToolCallPayload; `exception_message`
+		// is the richer variant SDK integrations may ship on
+		// tool wrapping errors. Both treated identically.
+		"error",
+		"exception_message",
+	},
+	// Theme A (closes validator_failures.G2): scan the validator's
+	// reason / message field on failed validator_result events.
+	// Customers' validators sometimes echo the failing slice of the
+	// agent's output verbatim into the reason string — if that
+	// slice contains a secret the agent had been working with, the
+	// secret would otherwise persist raw.
+	events.EventTypeValidatorResult: {
+		"reason",
+		"message",
+	},
+	// Theme A: catch-all for any direct exception_event the SDK
+	// might emit. The canonical crash path hashes BEFORE persist
+	// (see audit closure on crashes.G1), so this entry is
+	// defensive: zero cost when the field is absent, full DLP
+	// protection if a future SDK change starts emitting raw.
+	events.EventTypeException: {
+		"message",
 	},
 }
 
