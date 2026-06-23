@@ -1505,6 +1505,69 @@ def test_sandbox_escape(backend: Backend, configured_sdk):
 # ──────────────────────────────────────────────────────────────────────
 
 @needs_anthropic
+def test_detector_thresholds_semantic_loop_custom(backend: Backend, configured_sdk):
+    """End-to-end test for the Theme B per-project detector-threshold
+    primitive, using semantic_loop as the representative case.
+
+    Proves the full pipeline: PUT /me/detector-thresholds → store
+    upsert → LoadProjectDetectorThresholds bulk-read at
+    execution-close → DetectSemanticLoopWithThresholds picks up the
+    custom value → cluster appears under the canonical signature
+    shape. The 5 other Theme B detectors (token_waste,
+    tool_schema_drift, grounding_failure, drift, context_overflow)
+    are wired through the same loader + applyDetectorThresholdValue
+    switch + WithThresholds-variant pattern, so this one passing
+    proves the wiring works for all six. Per-detector trigger
+    coverage for the other five is banked as a follow-up.
+
+    Setup:
+        - Lower semantic_loop.revisit_threshold from the hardcoded
+          default 3 to 2 via PUT /me/detector-thresholds/semantic_loop/revisit_threshold.
+        - Emit two identical checkpoint events with the same
+          metadata. Default behavior would NOT fire (needs 3
+          revisits); the custom threshold of 2 SHOULD fire.
+
+    Assertion:
+        failure_group with class=semantic_loop and signature prefix
+        "semantic_loop:" appears within the timeout. (Default
+        threshold would produce no failure_group.)
+
+    Exercises: validators registry parse + global-bounds check at
+    write time, store upsert, LoadProjectDetectorThresholds read,
+    SemanticLoopThresholds defaults aggregate, RevisitThreshold
+    handoff to the WithThresholds variant.
+    """
+    mesedi = configured_sdk
+
+    # Lower the per-project revisit_threshold from default (3) to 2.
+    resp = requests.put(
+        f"{backend.base_url}/me/detector-thresholds/semantic_loop/revisit_threshold",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"value": 2},
+        timeout=5.0,
+    )
+    assert resp.status_code == 200, (
+        f"failed to set semantic_loop.revisit_threshold: "
+        f"status={resp.status_code} body={resp.text}"
+    )
+
+    @mesedi.wrap
+    def agent_two_checkpoints():
+        # Two identical checkpoints. Default semantic_loop wouldn't
+        # fire (needs 3 revisits); the custom threshold of 2 should.
+        mesedi.checkpoint("step", step="A")
+        mesedi.checkpoint("step", step="A")
+
+    agent_two_checkpoints()
+    mesedi.flush(timeout=5.0)
+
+    await_failure_group(
+        backend,
+        failure_class="semantic_loop",
+        signature_prefix="semantic_loop:",
+    )
+
+
 def test_identical_call_loop(backend: Backend, configured_sdk):
     """Three llm_call events with identical (model, user_message)
     hash within one execution → identical_call_loop detector should

@@ -701,14 +701,34 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// the 6 in-scope detectors and assembles a typed aggregate.
 	// Store errors / parse errors silently fall back to defaults
 	// per-knob; the aggregate is always populated.
+	//
+	// Theme B.d telemetry: any fallback path (store error OR
+	// per-knob parse error) writes a durable audit_event row via
+	// the same `config_fallback` shape used by #276.d. target_id
+	// is "detector_threshold:<detector>:<key>" so the existing
+	// dashboard config-fallback tile aggregates them under
+	// DetectorThresholdsCount.
 	detectorThresholds := DefaultProjectDetectorThresholds()
 	if isTerminalStatus(patch.Status) {
 		thresholdTier := TierHobby
 		if proj, projErr := h.Store.GetProject(r.Context(), authProjectID); projErr == nil && proj != nil {
 			thresholdTier = normalizeTier(proj.Tier)
 		}
+		auditWriter := func(detector, thresholdKey, reason string, metadata map[string]any) {
+			meta := map[string]any{"reason": reason}
+			for k, v := range metadata {
+				meta[k] = v
+			}
+			h.recordAuditEventForProject(
+				r.Context(),
+				authProjectID, "system",
+				"config_fallback", "project_config",
+				"detector_threshold:"+detector+":"+thresholdKey,
+				meta,
+			)
+		}
 		detectorThresholds = LoadProjectDetectorThresholds(
-			r.Context(), h.Store, h.Logger, authProjectID, thresholdTier,
+			r.Context(), h.Store, h.Logger, authProjectID, thresholdTier, auditWriter,
 		)
 	}
 

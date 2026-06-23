@@ -26,6 +26,14 @@ type ConfigFallbackStats struct {
 	ProviderIncidentMinTenantsCount int
 	ToolReturnValueMaxBytesCount    int
 	ClassSeverityOverrideCount      int
+	// DetectorThresholdsCount aggregates ALL Theme B detector-
+	// threshold fallback events (any (detector, threshold_key)
+	// pair). Per-detector breakdown is intentionally NOT exposed
+	// at the dashboard tile level — the customer-facing question
+	// is "is my config being silently eaten?" and a single
+	// counter answers that. Per-detector telemetry lives in the
+	// audit_events table for ops to query when needed.
+	DetectorThresholdsCount int
 }
 
 // GetConfigFallbackStats counts audit_events rows where
@@ -60,15 +68,21 @@ func (s *SQLiteStore) GetConfigFallbackStats(
 		if err := rows.Scan(&targetID, &n); err != nil {
 			return stats, fmt.Errorf("scan config_fallback stats: %w", err)
 		}
-		switch targetID {
-		case "time_budget_ms":
+		switch {
+		case targetID == "time_budget_ms":
 			stats.TimeBudgetCount = n
-		case "provider_incident_min_tenants":
+		case targetID == "provider_incident_min_tenants":
 			stats.ProviderIncidentMinTenantsCount = n
-		case "tool_return_value_max_bytes":
+		case targetID == "tool_return_value_max_bytes":
 			stats.ToolReturnValueMaxBytesCount = n
-		case "class_severity_override":
+		case targetID == "class_severity_override":
 			stats.ClassSeverityOverrideCount = n
+		case len(targetID) > len("detector_threshold:") &&
+			targetID[:len("detector_threshold:")] == "detector_threshold:":
+			// Theme B.d: every detector_threshold:<detector>:<key>
+			// fallback rolls up into the same aggregate counter.
+			// Per-detector breakdown stays in audit_events for ops.
+			stats.DetectorThresholdsCount += n
 		}
 		// Unknown target_id values are silently ignored — keeps
 		// the query forward-compatible if a future config is

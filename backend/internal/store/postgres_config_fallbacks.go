@@ -41,15 +41,19 @@ func (s *PostgresStore) GetConfigFallbackStats(
 		if err := rows.Scan(&targetID, &n); err != nil {
 			return stats, fmt.Errorf("scan config_fallback stats: %w", err)
 		}
-		switch targetID {
-		case "time_budget_ms":
+		switch {
+		case targetID == "time_budget_ms":
 			stats.TimeBudgetCount = n
-		case "provider_incident_min_tenants":
+		case targetID == "provider_incident_min_tenants":
 			stats.ProviderIncidentMinTenantsCount = n
-		case "tool_return_value_max_bytes":
+		case targetID == "tool_return_value_max_bytes":
 			stats.ToolReturnValueMaxBytesCount = n
-		case "class_severity_override":
+		case targetID == "class_severity_override":
 			stats.ClassSeverityOverrideCount = n
+		case len(targetID) > len("detector_threshold:") &&
+			targetID[:len("detector_threshold:")] == "detector_threshold:":
+			// Theme B.d: detector-threshold fallbacks roll up.
+			stats.DetectorThresholdsCount += n
 		}
 	}
 	return stats, rows.Err()

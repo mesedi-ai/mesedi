@@ -29,6 +29,24 @@ import (
 	"mesedi/backend/internal/store"
 )
 
+// DetectorThresholdAuditWriter is the minimal callback the loader
+// uses to promote fallback warnings to durable audit_events rows
+// (Theme B.d). Same shape as the `config_fallback` action shipped
+// by #276.d for the existing per-project primitives. Detector +
+// threshold_key + reason name the fallback; metadata carries the
+// underlying error string when applicable. The handler call site
+// wires this to `recordAuditEventForProject` with action
+// "config_fallback" and target_type "detector_thresholds" so the
+// dashboard tile that aggregates config-fallback events picks
+// these up automatically.
+//
+// Passing nil makes the loader skip audit writes (used by tests
+// and any future caller that doesn't want durable telemetry).
+type DetectorThresholdAuditWriter func(
+	detector, thresholdKey, reason string,
+	metadata map[string]any,
+)
+
 // ProjectDetectorThresholds bundles every detector's typed Thresholds
 // struct for one project, so handlers load once and pass each detector
 // its own slice.
@@ -74,6 +92,7 @@ func LoadProjectDetectorThresholds(
 	logger *slog.Logger,
 	projectID string,
 	tier string,
+	auditWriter DetectorThresholdAuditWriter,
 ) ProjectDetectorThresholds {
 	out := DefaultProjectDetectorThresholds()
 
@@ -91,6 +110,10 @@ func LoadProjectDetectorThresholds(
 				"project_id", projectID,
 				"detector", detector,
 				"error", err.Error())
+			if auditWriter != nil {
+				auditWriter(detector, "*", "store_error",
+					map[string]any{"error": err.Error()})
+			}
 			continue
 		}
 		for _, row := range rows {
@@ -108,6 +131,14 @@ func LoadProjectDetectorThresholds(
 					"detector", detector,
 					"threshold_key", row.ThresholdKey,
 					"error", perr.Error())
+				if auditWriter != nil {
+					auditWriter(detector, row.ThresholdKey, "parse_error",
+						map[string]any{
+							"error":          perr.Error(),
+							"stored_value":   row.ValueJSON,
+							"fallback_value": spec.Default,
+						})
+				}
 				continue
 			}
 			applyDetectorThresholdValue(&out, detector, row.ThresholdKey, parsed)
