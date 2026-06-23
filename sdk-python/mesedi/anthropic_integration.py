@@ -24,11 +24,18 @@ so the events table doesn't bloat from agents that paste whole web
 pages into prompts. PII redaction is a separate, configurable layer
 that lands in a future sub-slice.
 
-Out of scope for this sub-slice:
+Async coverage (#271.h):
 
-  - ``AsyncAnthropic.messages.create`` (async client), patched in the
-    async-support sub-slice
-  - ``Messages.stream()`` / streaming responses, patched separately
+  - ``AsyncAnthropic.messages.create`` (async client) is also patched
+    by ``instrument_anthropic()``. The async wrapper mirrors the sync
+    one — same captured fields, same canonical error classification,
+    same throttling auto-emit. Customers using ``AsyncAnthropic`` get
+    full provider_incident + infrastructure_throttled coverage.
+
+Still out of scope for this slice:
+
+  - ``Messages.stream()`` / streaming responses, patched in #271.i
+    (separate wave).
   - Anthropic tools / tool_use response blocks, handled by @mesedi.tool
     at the agent layer, not at the LLM-call layer
 
@@ -81,22 +88,41 @@ _MAX_EXC_MSG = 500
 _patched_classes: set = set()
 
 
-def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
-    """Patch the Anthropic SDK's ``Messages.create`` to emit llm_call events.
+def instrument_anthropic(
+    messages_class: Optional[Type[Any]] = None,
+    async_messages_class: Optional[Type[Any]] = None,
+) -> bool:
+    """Patch the Anthropic SDK to emit llm_call events on both sync + async paths.
 
     Args:
-        messages_class: The class whose ``create`` method should be
-            patched. When ``None`` (the default), tries to import
+        messages_class: The sync class whose ``create`` method should
+            be patched. When ``None`` (the default), tries to import
             ``anthropic.resources.messages.Messages``. Passing an
-            explicit class is intended for testing, production callers
-            should leave this as None and let the function auto-locate
-            the real Anthropic class.
+            explicit class is intended for testing.
+        async_messages_class: The async class whose ``create`` method
+            should be patched. When ``None`` (the default), tries to
+            import ``anthropic.resources.messages.AsyncMessages``. An
+            ImportError on the async class logs + skips async patching;
+            the sync path is unaffected. (Older Anthropic SDK versions
+            without the async client are still partially supported via
+            the sync path.)
 
     Returns:
-        True if patching succeeded (or was a no-op because the class is
-        already patched). False if ``anthropic`` is not installed and no
-        ``messages_class`` was provided.
+        True if at least one of the sync/async paths was successfully
+        patched (or was a no-op because the class is already patched).
+        False if neither path could be patched (e.g. anthropic is not
+        installed at all).
     """
+    sync_ok = _instrument_sync_anthropic(messages_class)
+    async_ok = _instrument_async_anthropic(async_messages_class)
+    return sync_ok or async_ok
+
+
+def _instrument_sync_anthropic(messages_class: Optional[Type[Any]]) -> bool:
+    """Patch the sync Messages.create path. Extracted from
+    instrument_anthropic so the sync + async paths can be patched
+    independently and either one can no-op cleanly if its target class
+    isn't importable in the installed Anthropic SDK version."""
     if messages_class is None:
         try:
             from anthropic.resources.messages import Messages as _Messages
@@ -104,7 +130,7 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
         except ImportError:
             logger.warning(
                 "mesedi: anthropic package not importable; "
-                "instrument_anthropic() is a no-op. "
+                "instrument_anthropic() sync path is a no-op. "
                 "Install with `pip install anthropic` to enable."
             )
             return False
@@ -233,6 +259,130 @@ def instrument_anthropic(messages_class: Optional[Type[Any]] = None) -> bool:
 
     messages_class.create = patched_create  # type: ignore[assignment]
     _patched_classes.add(messages_class)
+    return True
+
+
+def _instrument_async_anthropic(async_messages_class: Optional[Type[Any]]) -> bool:
+    """Patch AsyncAnthropic.messages.create — #271.h.
+
+    Mirrors the sync wrapper's event-emit logic line-for-line; the
+    only differences are (a) ``await`` on the underlying call and (b)
+    ``async def`` on the wrapper. Same canonical error_class mapping,
+    same retry_after extraction, same _maybe_emit_throttling_event
+    auto-emit on rate_limited / quota_exhausted.
+
+    Best-effort: an ImportError on AsyncMessages (older Anthropic SDK
+    versions that don't ship it) logs at INFO + returns False; the
+    sync path remains patched independently.
+    """
+    if async_messages_class is None:
+        try:
+            from anthropic.resources.messages import AsyncMessages as _AsyncMessages
+            async_messages_class = _AsyncMessages
+        except ImportError:
+            logger.info(
+                "mesedi: anthropic.resources.messages.AsyncMessages not importable; "
+                "async client instrumentation skipped. Sync path is unaffected."
+            )
+            return False
+
+    if async_messages_class in _patched_classes:
+        return True
+
+    original_acreate = async_messages_class.create
+
+    async def patched_acreate(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return await original_acreate(self, *args, **kwargs)
+
+        # Halt-safe boundary — same posture as sync wrapper.
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        system_raw = kwargs.get("system", "")
+        messages = kwargs.get("messages", [])
+        user_message = _extract_last_user_message(messages)
+        system_text = system_raw if isinstance(system_raw, str) else str(system_raw)
+
+        start = time.perf_counter()
+        try:
+            response = await original_acreate(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            failure_payload = {
+                "provider": _PROVIDER,
+                "model": model,
+                "system_prompt": _truncate(system_text, _MAX_SYSTEM),
+                "user_message": _truncate(user_message, _MAX_USER_MSG),
+                "status": "failed",
+                "error_class": classify_anthropic_exception(exc),
+                "exception_type": type(exc).__name__,
+                "exception_message": _truncate(str(exc), _MAX_EXC_MSG),
+            }
+            http_status = extract_http_status(exc)
+            if http_status is not None:
+                failure_payload["http_status"] = http_status
+            retry_after = extract_retry_after(exc)
+            if retry_after is not None:
+                failure_payload["retry_after_seconds"] = retry_after
+            client.submit_event(Event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                event_type=EventType.LLM_CALL,
+                sequence=sequence,
+                timestamp=utcnow_rfc3339(),
+                duration_ms=duration_ms,
+                payload=failure_payload,
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=failure_payload["error_class"],
+                http_status=http_status,
+                retry_after_seconds=retry_after,
+                endpoint="/v1/messages",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        response_text, input_tokens, output_tokens = _extract_response_fields(response)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens,
+                tokens_out=output_tokens,
+            )
+
+        client.submit_event(Event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "model": model,
+                "system_prompt": _truncate(system_text, _MAX_SYSTEM),
+                "user_message": _truncate(user_message, _MAX_USER_MSG),
+                "response_text": _truncate(response_text, _MAX_RESPONSE),
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
+        ))
+        return response
+
+    patched_acreate.__name__ = getattr(original_acreate, "__name__", "create")
+    patched_acreate.__doc__ = getattr(original_acreate, "__doc__", None)
+
+    async_messages_class.create = patched_acreate  # type: ignore[assignment]
+    _patched_classes.add(async_messages_class)
     return True
 
 

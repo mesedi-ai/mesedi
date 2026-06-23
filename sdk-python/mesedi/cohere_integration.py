@@ -14,10 +14,16 @@ patch:
 Both write the same canonical llm_call payload (``provider="cohere"``)
 so the backend doesn't need to know which API surface fired.
 
-Out of scope (filed under #271 follow-ups):
+Async coverage (#271.h):
 
-  - Async clients (``AsyncClient`` / ``AsyncClientV2``)
-  - Streaming responses (``chat_stream``)
+  - ``cohere.AsyncClient`` (v1) and ``cohere.AsyncClientV2`` (v2)
+    are also patched by ``instrument_cohere()``. Mirrors the sync
+    wrappers: same canonical error_class mapping, same retry_after
+    extraction, same _maybe_emit_throttling_event auto-emit.
+
+Still out of scope (filed under #271 follow-ups):
+
+  - Streaming responses (``chat_stream``) — patched in #271.i.
   - RAG endpoints (``rerank``, ``embed``) — provider_incident is
     most valuable on chat surfaces
 
@@ -58,18 +64,19 @@ _patched_classes: set = set()
 def instrument_cohere(
     client_v1_class: Optional[Type[Any]] = None,
     client_v2_class: Optional[Type[Any]] = None,
+    async_client_v1_class: Optional[Type[Any]] = None,
+    async_client_v2_class: Optional[Type[Any]] = None,
 ) -> bool:
-    """Patch Cohere SDK chat methods to emit llm_call events.
+    """Patch Cohere SDK chat methods (sync + async) to emit llm_call events.
 
     Args:
-        client_v1_class: legacy ``cohere.Client`` class (``message=``
-            shape). When None, tries ``cohere.Client``.
-        client_v2_class: modern ``cohere.ClientV2`` class
-            (``messages=`` shape). When None, tries
-            ``cohere.ClientV2``.
+        client_v1_class: legacy ``cohere.Client`` class.
+        client_v2_class: modern ``cohere.ClientV2`` class.
+        async_client_v1_class: legacy ``cohere.AsyncClient`` class (#271.h).
+        async_client_v2_class: modern ``cohere.AsyncClientV2`` class (#271.h).
 
-    Returns True if at least one surface patched. False only if
-    neither could be located AND cohere isn't installed.
+    Returns True if at least one surface patched. False only if none
+    could be located AND cohere isn't installed.
     """
     patched_any = False
 
@@ -107,6 +114,33 @@ def instrument_cohere(
     if client_v2_class is not None:
         _patch_v2(client_v2_class)
         patched_any = True
+
+    # #271.h: async-aware patching.
+    if async_client_v1_class is None:
+        try:
+            from cohere import AsyncClient as _AsyncClientV1
+            async_client_v1_class = _AsyncClientV1
+        except (ImportError, AttributeError):
+            logger.debug(
+                "mesedi: cohere.AsyncClient not importable; skipping async v1 patch."
+            )
+
+    if async_client_v2_class is None:
+        try:
+            from cohere import AsyncClientV2 as _AsyncClientV2
+            async_client_v2_class = _AsyncClientV2
+        except (ImportError, AttributeError):
+            logger.debug(
+                "mesedi: cohere.AsyncClientV2 not importable; skipping async v2 patch."
+            )
+
+    if async_client_v1_class is not None:
+        _patch_async_v1(async_client_v1_class)
+        patched_any = True
+    if async_client_v2_class is not None:
+        _patch_async_v2(async_client_v2_class)
+        patched_any = True
+
     return patched_any
 
 
@@ -233,6 +267,155 @@ def _patch_v2(cls: Type[Any]) -> None:
             # Auto-emit infrastructure_event on throttling-class
             # exceptions (Wave 1.4); same rationale as the v1 chat
             # path above.
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_cohere_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v2/chat",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        response_text, input_tokens, output_tokens = _extract_v2_fields(response)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        client.submit_event(_success_event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            sequence=sequence,
+            duration_ms=duration_ms,
+            model=model,
+            system_text=system_text,
+            user_message=user_message,
+            response_text=response_text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        ))
+        return response
+
+    patched_chat.__name__ = getattr(original_chat, "__name__", "chat")
+    patched_chat.__doc__ = getattr(original_chat, "__doc__", None)
+    cls.chat = patched_chat  # type: ignore[assignment]
+    _patched_classes.add(cls)
+
+
+def _patch_async_v1(cls: Type[Any]) -> None:
+    """Async twin of _patch_v1 — wraps AsyncClient.chat (#271.h)."""
+    if cls in _patched_classes:
+        return
+    original_chat = cls.chat
+
+    async def patched_chat(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return await original_chat(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        user_message = kwargs.get("message", "") or ""
+        if not isinstance(user_message, str):
+            user_message = str(user_message)
+        system_text = kwargs.get("preamble", "") or ""
+        if not isinstance(system_text, str):
+            system_text = str(system_text)
+
+        start = time.perf_counter()
+        try:
+            response = await original_chat(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                exc=exc,
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_cohere_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/chat",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        response_text, input_tokens, output_tokens = _extract_v1_fields(response)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        client.submit_event(_success_event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            sequence=sequence,
+            duration_ms=duration_ms,
+            model=model,
+            system_text=system_text,
+            user_message=user_message,
+            response_text=response_text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        ))
+        return response
+
+    patched_chat.__name__ = getattr(original_chat, "__name__", "chat")
+    patched_chat.__doc__ = getattr(original_chat, "__doc__", None)
+    cls.chat = patched_chat  # type: ignore[assignment]
+    _patched_classes.add(cls)
+
+
+def _patch_async_v2(cls: Type[Any]) -> None:
+    """Async twin of _patch_v2 — wraps AsyncClientV2.chat (#271.h)."""
+    if cls in _patched_classes:
+        return
+    original_chat = cls.chat
+
+    async def patched_chat(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return await original_chat(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        messages = kwargs.get("messages", []) or []
+        system_text = _extract_first_system_message(messages)
+        user_message = _extract_last_user_message(messages)
+
+        start = time.perf_counter()
+        try:
+            response = await original_chat(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                exc=exc,
+            ))
             _maybe_emit_throttling_event(
                 provider=_PROVIDER,
                 error_class=classify_cohere_exception(exc),

@@ -64,20 +64,28 @@ _MAX_RESPONSE = 1000
 _MAX_EXC_MSG = 500
 
 _patched_classes: set = set()
+# Async patching uses a separate sentinel because Gemini's async
+# surface is a different METHOD on the SAME class (generate_content
+# vs generate_content_async) rather than a different class like
+# Anthropic's AsyncMessages. A single `_patched_classes` set would
+# falsely block async patching when sync had already run.
+_async_patched_classes: set = set()
 
 
 def instrument_gemini(model_class: Optional[Type[Any]] = None) -> bool:
-    """Patch GenerativeModel.generate_content to emit llm_call events.
+    """Patch GenerativeModel.generate_content (sync) AND
+    generate_content_async (async, #271.h) to emit llm_call events.
 
     Args:
-        model_class: Class whose ``generate_content`` method to patch.
-            When None (default), tries to import
+        model_class: Class whose ``generate_content`` /
+            ``generate_content_async`` methods to patch. When None
+            (default), tries to import
             ``google.generativeai.GenerativeModel``.
 
     Returns:
-        True if patching succeeded (or was a no-op on a re-patch).
-        False if neither google-generativeai is installed nor a
-        class was provided.
+        True if at least one of the sync/async surfaces was patched
+        (or was a no-op on a re-patch). False if neither
+        google-generativeai is installed nor a class was provided.
     """
     if model_class is None:
         try:
@@ -91,6 +99,12 @@ def instrument_gemini(model_class: Optional[Type[Any]] = None) -> bool:
             )
             return False
 
+    sync_ok = _patch_gemini_sync(model_class)
+    async_ok = _patch_gemini_async(model_class)
+    return sync_ok or async_ok
+
+
+def _patch_gemini_sync(model_class: Type[Any]) -> bool:
     if model_class in _patched_classes:
         return True
 
@@ -184,6 +198,107 @@ def instrument_gemini(model_class: Optional[Type[Any]] = None) -> bool:
     patched_generate.__doc__ = getattr(original_generate, "__doc__", None)
     model_class.generate_content = patched_generate  # type: ignore[assignment]
     _patched_classes.add(model_class)
+    return True
+
+
+def _patch_gemini_async(model_class: Type[Any]) -> bool:
+    """Patch GenerativeModel.generate_content_async — #271.h.
+
+    Mirrors _patch_gemini_sync exactly except for `async def` +
+    `await`. Best-effort: if the installed google-generativeai
+    version doesn't ship generate_content_async, skip silently.
+    """
+    if model_class in _async_patched_classes:
+        return True
+
+    original_generate_async = getattr(model_class, "generate_content_async", None)
+    if original_generate_async is None:
+        logger.debug(
+            "mesedi: GenerativeModel.generate_content_async not present; "
+            "async Gemini instrumentation skipped."
+        )
+        return False
+
+    async def patched_generate_async(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return await original_generate_async(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = getattr(self, "model_name", None) or kwargs.get("model", "unknown")
+        if not isinstance(model, str):
+            model = str(model)
+        system_text = getattr(self, "_system_instruction", "") or getattr(
+            self, "system_instruction", ""
+        ) or ""
+        if not isinstance(system_text, str):
+            system_text = _stringify_gemini_content(system_text)
+
+        contents = args[0] if args else kwargs.get("contents", "")
+        user_message = _extract_user_message_from_contents(contents)
+
+        start = time.perf_counter()
+        try:
+            response = await original_generate_async(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                exc=exc,
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_gemini_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/models/generateContent",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        response_text, input_tokens, output_tokens = _extract_response_fields(response)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        client.submit_event(Event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "model": model,
+                "system_prompt": _truncate(system_text, _MAX_SYSTEM),
+                "user_message": _truncate(user_message, _MAX_USER_MSG),
+                "response_text": _truncate(response_text, _MAX_RESPONSE),
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
+        ))
+        return response
+
+    patched_generate_async.__name__ = getattr(
+        original_generate_async, "__name__", "generate_content_async"
+    )
+    patched_generate_async.__doc__ = getattr(original_generate_async, "__doc__", None)
+    model_class.generate_content_async = patched_generate_async  # type: ignore[assignment]
+    _async_patched_classes.add(model_class)
     return True
 
 

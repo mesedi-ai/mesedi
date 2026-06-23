@@ -107,26 +107,31 @@ _patched_classes: set = set()
 def instrument_openai(
     completions_class: Optional[Type[Any]] = None,
     responses_class: Optional[Type[Any]] = None,
+    async_completions_class: Optional[Type[Any]] = None,
+    async_responses_class: Optional[Type[Any]] = None,
 ) -> bool:
     """Patch the OpenAI SDK's chat-completions and Responses APIs to
-    emit llm_call events.
+    emit llm_call events. Patches both sync + async surfaces (#271.h
+    closes the async coverage gap that previously left AsyncOpenAI
+    customers invisible to provider_incident).
 
     Args:
-        completions_class: Class whose ``create`` method handles chat
-            completions. When ``None`` (default), tries to import
-            ``openai.resources.chat.completions.Completions``.
-        responses_class: Class whose ``create`` method handles the
-            Responses API. When ``None``, tries to import
-            ``openai.resources.responses.Responses``. The Responses
-            API was added in openai>=1.40; older installations skip
-            this patch (logged at debug level, not warning, because
-            it's a clean no-op for the older surface).
+        completions_class: Sync class whose ``create`` method handles
+            chat completions. Default: ``openai.resources.chat.completions.Completions``.
+        responses_class: Sync class whose ``create`` method handles
+            the Responses API. Default: ``openai.resources.responses.Responses``.
+            Requires openai>=1.40; older installations skip silently.
+        async_completions_class: Async class whose ``create`` method
+            handles chat completions. Default:
+            ``openai.resources.chat.completions.AsyncCompletions``.
+        async_responses_class: Async class whose ``create`` method
+            handles the Responses API. Default:
+            ``openai.resources.responses.AsyncResponses``.
 
     Returns:
         True if at least one of the classes was successfully patched
-        (including the case where it was already patched on a prior
-        call). False if neither could be located AND the openai
-        package is not importable.
+        (or was a no-op because already patched). False if NONE
+        could be located AND the openai package is not importable.
     """
     patched_any = False
 
@@ -162,6 +167,38 @@ def instrument_openai(
 
     if responses_class is not None:
         _patch_responses(responses_class)
+        patched_any = True
+
+    # #271.h: async-aware patching. Mirrors the sync patchers but
+    # targets the AsyncXxx classes and wraps with `async def`.
+    if async_completions_class is None:
+        try:
+            from openai.resources.chat.completions import (
+                AsyncCompletions as _AsyncCompletions,
+            )
+            async_completions_class = _AsyncCompletions
+        except ImportError:
+            logger.info(
+                "mesedi: openai AsyncCompletions not importable; "
+                "async chat.completions instrumentation skipped."
+            )
+
+    if async_completions_class is not None:
+        _patch_async_chat_completions(async_completions_class)
+        patched_any = True
+
+    if async_responses_class is None:
+        try:
+            from openai.resources.responses import AsyncResponses as _AsyncResponses
+            async_responses_class = _AsyncResponses
+        except ImportError:
+            logger.debug(
+                "mesedi: openai AsyncResponses not importable; "
+                "skipping async Responses API patch."
+            )
+
+    if async_responses_class is not None:
+        _patch_async_responses(async_responses_class)
         patched_any = True
 
     return patched_any
@@ -306,6 +343,174 @@ def _patch_responses(cls: Type[Any]) -> None:
             # Auto-emit infrastructure_event on throttling-class
             # exceptions (Wave 1.4); same rationale as the chat
             # completions path above.
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_openai_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/responses",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        response_text, input_tokens, output_tokens = (
+            _extract_responses_response_fields(response)
+        )
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        client.submit_event(Event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "model": model,
+                "system_prompt": _truncate(system_text, _MAX_SYSTEM),
+                "user_message": _truncate(user_message, _MAX_USER_MSG),
+                "response_text": _truncate(response_text, _MAX_RESPONSE),
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
+        ))
+        return response
+
+    patched_create.__name__ = getattr(original_create, "__name__", "create")
+    patched_create.__doc__ = getattr(original_create, "__doc__", None)
+    cls.create = patched_create  # type: ignore[assignment]
+    _patched_classes.add(cls)
+
+
+def _patch_async_chat_completions(cls: Type[Any]) -> None:
+    """Wrap cls.create (async) to emit chat-completions llm_call events.
+    Mirrors _patch_chat_completions; only differences are `async def`
+    + `await` on the underlying call. Same failure path, same throttling
+    auto-emit, same canonical error classification."""
+    if cls in _patched_classes:
+        return
+
+    original_create = cls.create
+
+    async def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return await original_create(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        messages = kwargs.get("messages", []) or []
+        system_text = _extract_first_system_message(messages)
+        user_message = _extract_last_user_message(messages)
+
+        start = time.perf_counter()
+        try:
+            response = await original_create(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                exc=exc,
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_openai_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/chat/completions",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        response_text, input_tokens, output_tokens = (
+            _extract_chat_response_fields(response)
+        )
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        client.submit_event(Event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "model": model,
+                "system_prompt": _truncate(system_text, _MAX_SYSTEM),
+                "user_message": _truncate(user_message, _MAX_USER_MSG),
+                "response_text": _truncate(response_text, _MAX_RESPONSE),
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
+        ))
+        return response
+
+    patched_create.__name__ = getattr(original_create, "__name__", "create")
+    patched_create.__doc__ = getattr(original_create, "__doc__", None)
+    cls.create = patched_create  # type: ignore[assignment]
+    _patched_classes.add(cls)
+
+
+def _patch_async_responses(cls: Type[Any]) -> None:
+    """Async twin of _patch_responses for the OpenAI Responses API."""
+    if cls in _patched_classes:
+        return
+
+    original_create = cls.create
+
+    async def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return await original_create(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        instructions = kwargs.get("instructions", "") or ""
+        input_field = kwargs.get("input", "")
+        user_message, system_from_input = _extract_responses_input(input_field)
+        system_text = instructions or system_from_input
+
+        start = time.perf_counter()
+        try:
+            response = await original_create(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                exc=exc,
+            ))
             _maybe_emit_throttling_event(
                 provider=_PROVIDER,
                 error_class=classify_openai_exception(exc),
