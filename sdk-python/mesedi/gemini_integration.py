@@ -168,6 +168,14 @@ def _patch_gemini_sync(model_class: Type[Any]) -> bool:
             )
             raise
 
+        # #271.i: stream=True → wrap iterator for chunk aggregation.
+        if kwargs.get("stream") is True:
+            return _GeminiStreamIteratorWrapper(
+                inner=response, ctx=ctx, client=client, event_id=event_id,
+                sequence=sequence, model=model, system_text=system_text,
+                user_message=user_message, start=start,
+            )
+
         duration_ms = int((time.perf_counter() - start) * 1000)
         response_text, input_tokens, output_tokens = _extract_response_fields(response)
         if ctx.budget_tracker is not None:
@@ -266,6 +274,14 @@ def _patch_gemini_async(model_class: Type[Any]) -> bool:
                 endpoint="/v1/models/generateContent",
             )
             raise
+
+        # #271.i: stream=True → wrap async iterator for chunk aggregation.
+        if kwargs.get("stream") is True:
+            return _GeminiAsyncStreamIteratorWrapper(
+                inner=response, ctx=ctx, client=client, event_id=event_id,
+                sequence=sequence, model=model, system_text=system_text,
+                user_message=user_message, start=start,
+            )
 
         duration_ms = int((time.perf_counter() - start) * 1000)
         response_text, input_tokens, output_tokens = _extract_response_fields(response)
@@ -426,3 +442,183 @@ def _truncate(s: str, max_len: int) -> str:
     if len(s) <= max_len:
         return s
     return s[: max_len - 3] + "..."
+
+
+## ── #271.i streaming patching ────────────────────────────────────────
+
+
+def _accumulate_gemini_chunk(chunk: Any, state: Dict[str, Any]) -> None:
+    """Pull incremental text + final usage from a Gemini stream chunk.
+
+    Gemini streaming chunks each carry .text (incremental output) and
+    the LAST chunk carries .usage_metadata with prompt_token_count +
+    candidates_token_count for the full call.
+    """
+    try:
+        text = getattr(chunk, "text", None)
+        if isinstance(text, str) and text:
+            state["text_parts"].append(text)
+    except Exception:
+        # Some chunk types (e.g. safety-blocked) raise on .text;
+        # defensive skip so accumulation continues for subsequent
+        # chunks.
+        pass
+    usage = getattr(chunk, "usage_metadata", None)
+    if usage is not None:
+        try:
+            state["input_tokens"] = int(getattr(usage, "prompt_token_count", 0) or 0)
+            state["output_tokens"] = int(getattr(usage, "candidates_token_count", 0) or 0)
+        except Exception:
+            pass
+
+
+class _GeminiStreamIteratorWrapper:
+    """Wraps a Gemini sync stream iterator. Aggregates chunks via
+    _accumulate_gemini_chunk; emits llm_call event on iteration
+    completion (StopIteration). Mid-stream exceptions caught in
+    __next__ and re-raised after emission."""
+
+    def __init__(
+        self, *, inner: Any, ctx: Any, client: Any, event_id: str,
+        sequence: int, model: str, system_text: str, user_message: str,
+        start: float,
+    ) -> None:
+        self._inner = inner
+        self._ctx = ctx
+        self._client = client
+        self._event_id = event_id
+        self._sequence = sequence
+        self._model = model
+        self._system_text = system_text
+        self._user_message = user_message
+        self._start = start
+        self._state: Dict[str, Any] = {"text_parts": [], "input_tokens": 0, "output_tokens": 0}
+        self._emitted = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def __iter__(self) -> Any:
+        return self
+
+    def __next__(self) -> Any:
+        try:
+            chunk = next(self._inner)
+        except StopIteration:
+            self._emit_success()
+            raise
+        except BaseException as exc:
+            self._emit_failure(exc)
+            raise
+        try:
+            _accumulate_gemini_chunk(chunk, self._state)
+        except Exception as acc_exc:
+            logger.debug("mesedi: gemini stream chunk accumulate failed: %s", acc_exc)
+        return chunk
+
+    def _emit_success(self) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        response_text = "".join(self._state["text_parts"])
+        input_tokens = int(self._state.get("input_tokens", 0) or 0)
+        output_tokens = int(self._state.get("output_tokens", 0) or 0)
+        if self._ctx.budget_tracker is not None:
+            self._ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        self._client.submit_event(Event(
+            event_id=self._event_id,
+            execution_id=self._ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=self._sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "model": self._model,
+                "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
+                "user_message": _truncate(self._user_message, _MAX_USER_MSG),
+                "response_text": _truncate(response_text, _MAX_RESPONSE),
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "streaming": True,
+            },
+        ))
+
+    def _emit_failure(self, exc: BaseException) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        _emit_gemini_stream_failure(
+            client=self._client, ctx=self._ctx, event_id=self._event_id,
+            sequence=self._sequence, duration_ms=duration_ms,
+            model=self._model, system_text=self._system_text,
+            user_message=self._user_message, exc=exc,
+        )
+
+
+class _GeminiAsyncStreamIteratorWrapper(_GeminiStreamIteratorWrapper):
+    """Async twin of _GeminiStreamIteratorWrapper."""
+
+    def __aiter__(self) -> Any:
+        return self
+
+    async def __anext__(self) -> Any:
+        try:
+            chunk = await self._inner.__anext__()
+        except StopAsyncIteration:
+            self._emit_success()
+            raise
+        except BaseException as exc:
+            self._emit_failure(exc)
+            raise
+        try:
+            _accumulate_gemini_chunk(chunk, self._state)
+        except Exception as acc_exc:
+            logger.debug("mesedi: gemini async stream chunk accumulate failed: %s", acc_exc)
+        return chunk
+
+
+def _emit_gemini_stream_failure(
+    *, client: Any, ctx: Any, event_id: str, sequence: int,
+    duration_ms: int, model: str, system_text: str, user_message: str,
+    exc: BaseException,
+) -> None:
+    """Shared failure-event emitter for streaming exceptions."""
+    failure_payload = {
+        "provider": _PROVIDER,
+        "model": model,
+        "system_prompt": _truncate(system_text, _MAX_SYSTEM),
+        "user_message": _truncate(user_message, _MAX_USER_MSG),
+        "status": "failed",
+        "error_class": classify_gemini_exception(exc),
+        "exception_type": type(exc).__name__,
+        "exception_message": _truncate(str(exc), _MAX_EXC_MSG),
+        "streaming": True,
+    }
+    http_status = extract_http_status(exc)
+    if http_status is not None:
+        failure_payload["http_status"] = http_status
+    retry_after = extract_retry_after(exc)
+    if retry_after is not None:
+        failure_payload["retry_after_seconds"] = retry_after
+    client.submit_event(Event(
+        event_id=event_id,
+        execution_id=ctx.execution_id,
+        event_type=EventType.LLM_CALL,
+        sequence=sequence,
+        timestamp=utcnow_rfc3339(),
+        duration_ms=duration_ms,
+        payload=failure_payload,
+    ))
+    _maybe_emit_throttling_event(
+        provider=_PROVIDER,
+        error_class=failure_payload["error_class"],
+        http_status=http_status,
+        retry_after_seconds=retry_after,
+        endpoint="/v1/models/generateContent",
+    )
