@@ -255,6 +255,25 @@ def _patch_chat_completions(cls: Type[Any]) -> None:
             )
             raise
 
+        # #271.i: stream=True → response is a Stream iterator, not a
+        # completed ChatCompletion. Wrap so chunks pass through to the
+        # customer while we aggregate response_text + tokens for the
+        # final emission.
+        if kwargs.get("stream") is True:
+            return _OpenAIStreamIteratorWrapper(
+                inner=response,
+                ctx=ctx,
+                client=client,
+                event_id=event_id,
+                sequence=sequence,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                start=start,
+                endpoint="/v1/chat/completions",
+                accumulate_chunk=_accumulate_chat_chunk,
+            )
+
         duration_ms = int((time.perf_counter() - start) * 1000)
         response_text, input_tokens, output_tokens = (
             _extract_chat_response_fields(response)
@@ -352,6 +371,22 @@ def _patch_responses(cls: Type[Any]) -> None:
             )
             raise
 
+        # #271.i: stream=True → wrap iterator for chunk aggregation.
+        if kwargs.get("stream") is True:
+            return _OpenAIStreamIteratorWrapper(
+                inner=response,
+                ctx=ctx,
+                client=client,
+                event_id=event_id,
+                sequence=sequence,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                start=start,
+                endpoint="/v1/responses",
+                accumulate_chunk=_accumulate_responses_chunk,
+            )
+
         duration_ms = int((time.perf_counter() - start) * 1000)
         response_text, input_tokens, output_tokens = (
             _extract_responses_response_fields(response)
@@ -437,6 +472,22 @@ def _patch_async_chat_completions(cls: Type[Any]) -> None:
             )
             raise
 
+        # #271.i: stream=True → wrap async iterator for chunk aggregation.
+        if kwargs.get("stream") is True:
+            return _OpenAIAsyncStreamIteratorWrapper(
+                inner=response,
+                ctx=ctx,
+                client=client,
+                event_id=event_id,
+                sequence=sequence,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                start=start,
+                endpoint="/v1/chat/completions",
+                accumulate_chunk=_accumulate_chat_chunk,
+            )
+
         duration_ms = int((time.perf_counter() - start) * 1000)
         response_text, input_tokens, output_tokens = (
             _extract_chat_response_fields(response)
@@ -519,6 +570,22 @@ def _patch_async_responses(cls: Type[Any]) -> None:
                 endpoint="/v1/responses",
             )
             raise
+
+        # #271.i: stream=True → wrap async iterator for chunk aggregation.
+        if kwargs.get("stream") is True:
+            return _OpenAIAsyncStreamIteratorWrapper(
+                inner=response,
+                ctx=ctx,
+                client=client,
+                event_id=event_id,
+                sequence=sequence,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                start=start,
+                endpoint="/v1/responses",
+                accumulate_chunk=_accumulate_responses_chunk,
+            )
 
         duration_ms = int((time.perf_counter() - start) * 1000)
         response_text, input_tokens, output_tokens = (
@@ -757,3 +824,246 @@ def _truncate(s: str, max_len: int) -> str:
     if len(s) <= max_len:
         return s
     return s[: max_len - 3] + "..."
+
+
+## ── #271.i streaming patching ────────────────────────────────────────
+
+
+class _OpenAIStreamIteratorWrapper:
+    """Wraps an OpenAI sync Stream iterator so chunks pass through to
+    the customer while we accumulate response_text + tokens for the
+    final llm_call event emission.
+
+    Customer iteration protocol preserved: __iter__ / __next__
+    delegate to the inner Stream. On StopIteration we emit the
+    success event; on any other exception we emit the failure event
+    + fire the throttling auto-emit (mid-stream API errors).
+
+    `accumulate_chunk` is provided per-surface (chat completions vs
+    Responses API) so this one wrapper class covers both — chat
+    chunks have `.choices[0].delta.content` + late `.usage`;
+    Responses events carry text on different paths.
+    """
+
+    def __init__(
+        self,
+        *,
+        inner: Any,
+        ctx: Any,
+        client: Any,
+        event_id: str,
+        sequence: int,
+        model: str,
+        system_text: str,
+        user_message: str,
+        start: float,
+        endpoint: str,
+        accumulate_chunk: Any,  # Callable[[chunk, state_dict], None]
+    ) -> None:
+        self._inner = inner
+        self._ctx = ctx
+        self._client = client
+        self._event_id = event_id
+        self._sequence = sequence
+        self._model = model
+        self._system_text = system_text
+        self._user_message = user_message
+        self._start = start
+        self._endpoint = endpoint
+        self._accumulate_chunk = accumulate_chunk
+        self._state = {"text_parts": [], "input_tokens": 0, "output_tokens": 0}
+        self._emitted = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def __iter__(self) -> Any:
+        return self
+
+    def __next__(self) -> Any:
+        try:
+            chunk = next(self._inner)
+        except StopIteration:
+            self._emit_success()
+            raise
+        except BaseException as exc:
+            self._emit_failure(exc)
+            raise
+        try:
+            self._accumulate_chunk(chunk, self._state)
+        except Exception as acc_exc:
+            logger.debug("mesedi: openai stream chunk accumulate failed: %s", acc_exc)
+        return chunk
+
+    # Allow `with stream as s:` context-manager usage (OpenAI Stream
+    # objects support this for resource cleanup).
+    def __enter__(self) -> Any:
+        if hasattr(self._inner, "__enter__"):
+            self._inner.__enter__()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
+        # If the customer used the with-block AND iterated to
+        # completion, _emit_success already fired on StopIteration.
+        # If they broke out early, no emission happens (matches
+        # documented behavior — partial consumption = no aggregated
+        # event). If exc_val is set, emit the failure event now.
+        if exc_val is not None and not self._emitted:
+            self._emit_failure(exc_val)
+        if hasattr(self._inner, "__exit__"):
+            return self._inner.__exit__(exc_type, exc_val, exc_tb)
+        return None
+
+    def _emit_success(self) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        response_text = "".join(self._state["text_parts"])
+        input_tokens = int(self._state.get("input_tokens", 0) or 0)
+        output_tokens = int(self._state.get("output_tokens", 0) or 0)
+        if self._ctx.budget_tracker is not None:
+            self._ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        self._client.submit_event(Event(
+            event_id=self._event_id,
+            execution_id=self._ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=self._sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "model": self._model,
+                "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
+                "user_message": _truncate(self._user_message, _MAX_USER_MSG),
+                "response_text": _truncate(response_text, _MAX_RESPONSE),
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "streaming": True,
+            },
+        ))
+
+    def _emit_failure(self, exc: BaseException) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        failure_payload = {
+            "provider": _PROVIDER,
+            "model": self._model,
+            "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
+            "user_message": _truncate(self._user_message, _MAX_USER_MSG),
+            "status": "failed",
+            "error_class": classify_openai_exception(exc),
+            "exception_type": type(exc).__name__,
+            "exception_message": _truncate(str(exc), _MAX_EXC_MSG),
+            "streaming": True,
+        }
+        http_status = extract_http_status(exc)
+        if http_status is not None:
+            failure_payload["http_status"] = http_status
+        retry_after = extract_retry_after(exc)
+        if retry_after is not None:
+            failure_payload["retry_after_seconds"] = retry_after
+        self._client.submit_event(Event(
+            event_id=self._event_id,
+            execution_id=self._ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=self._sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload=failure_payload,
+        ))
+        _maybe_emit_throttling_event(
+            provider=_PROVIDER,
+            error_class=failure_payload["error_class"],
+            http_status=http_status,
+            retry_after_seconds=retry_after,
+            endpoint=self._endpoint,
+        )
+
+
+class _OpenAIAsyncStreamIteratorWrapper(_OpenAIStreamIteratorWrapper):
+    """Async twin of _OpenAIStreamIteratorWrapper. Same accumulator
+    logic; differs only in the iteration / context-manager protocol
+    (async __aiter__/__anext__/__aenter__/__aexit__ vs sync versions).
+    """
+
+    def __aiter__(self) -> Any:
+        return self
+
+    async def __anext__(self) -> Any:
+        try:
+            chunk = await self._inner.__anext__()
+        except StopAsyncIteration:
+            self._emit_success()
+            raise
+        except BaseException as exc:
+            self._emit_failure(exc)
+            raise
+        try:
+            self._accumulate_chunk(chunk, self._state)
+        except Exception as acc_exc:
+            logger.debug("mesedi: openai async stream chunk accumulate failed: %s", acc_exc)
+        return chunk
+
+    async def __aenter__(self) -> Any:
+        if hasattr(self._inner, "__aenter__"):
+            await self._inner.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
+        if exc_val is not None and not self._emitted:
+            self._emit_failure(exc_val)
+        if hasattr(self._inner, "__aexit__"):
+            return await self._inner.__aexit__(exc_type, exc_val, exc_tb)
+        return None
+
+
+def _accumulate_chat_chunk(chunk: Any, state: Dict[str, Any]) -> None:
+    """Pull content + usage from a ChatCompletionChunk into state.
+    OpenAI chat chunks have .choices[0].delta.content for incremental
+    text, and .usage on the LAST chunk (when the customer passes
+    stream_options={"include_usage": True}) or None otherwise.
+    """
+    choices = getattr(chunk, "choices", None) or []
+    if choices:
+        delta = getattr(choices[0], "delta", None)
+        if delta is not None:
+            content = getattr(delta, "content", None)
+            if isinstance(content, str) and content:
+                state["text_parts"].append(content)
+    usage = getattr(chunk, "usage", None)
+    if usage is not None:
+        try:
+            state["input_tokens"] = int(getattr(usage, "prompt_tokens", 0) or 0)
+            state["output_tokens"] = int(getattr(usage, "completion_tokens", 0) or 0)
+        except Exception:
+            pass
+
+
+def _accumulate_responses_chunk(chunk: Any, state: Dict[str, Any]) -> None:
+    """Pull content + usage from a Responses-API stream event.
+    Responses API uses event-based streaming with multiple event
+    types; the text-delta events carry incremental output_text and
+    the response.completed event carries final usage.
+    """
+    event_type = getattr(chunk, "type", "") or ""
+    # Text deltas appear on response.output_text.delta events.
+    if event_type.endswith(".delta"):
+        delta = getattr(chunk, "delta", None)
+        if isinstance(delta, str) and delta:
+            state["text_parts"].append(delta)
+    # Final usage appears on the response.completed event.
+    response_obj = getattr(chunk, "response", None)
+    if response_obj is not None:
+        usage = getattr(response_obj, "usage", None)
+        if usage is not None:
+            try:
+                state["input_tokens"] = int(getattr(usage, "input_tokens", 0) or 0)
+                state["output_tokens"] = int(getattr(usage, "output_tokens", 0) or 0)
+            except Exception:
+                pass
