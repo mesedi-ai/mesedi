@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"time"
 
 	"mesedi/backend/internal/detectors"
@@ -153,22 +154,21 @@ func (h *Handlers) applyDLPToBatch(
 				// markers themselves.
 				s = redacted
 			}
-			// Wave 2.1.b: run customer's custom patterns against the
-			// same field. Hits get appended to allHits with the
-			// pattern_id surfaced via the matched-IDs slice so the
-			// caller can increment match_count.
+			// Wave 2.1.b + Wave 2.1.d.3: run customer's custom
+			// patterns against the same field AND redact matched
+			// bytes in place. Closes the documented data_leakage.G1
+			// gap from 2.1.b — custom rules now redact at the same
+			// trust boundary the built-in rules do (matched secret
+			// never reaches durable storage).
 			if len(customPatterns) > 0 {
-				customHits, customMatched := scanCustomDLP(s, customPatterns)
+				customRedacted, customHits, customMatched :=
+					scanAndRedactCustomDLP(s, customPatterns)
 				if len(customHits) > 0 {
 					allHits = append(allHits, customHits...)
 					matched = append(matched, customMatched...)
-					// Custom patterns participate in the redaction
-					// pass too — applying the same [REDACTED:...]
-					// substitution would require a redactor-aware
-					// path we don't yet have for the customer's
-					// patterns. v1 documents the gap (custom hits
-					// fire the dlp_scan_result sibling but do NOT
-					// redact in place); Wave 2.1.d revisits.
+					pm[key] = customRedacted
+					mutated = true
+					s = customRedacted
 				}
 			}
 		}
@@ -204,38 +204,101 @@ func (h *Handlers) applyDLPToBatch(
 	return out, matched
 }
 
-// scanCustomDLP runs the customer's custom data_leakage patterns
-// against a single field string and returns the resulting hits
-// plus the matched pattern_ids. Severity mapping: pattern_config
-// 'low' → dlp.SeverityMedium (smallest dlp severity); 'medium' →
-// dlp.SeverityHigh; 'high' → dlp.SeverityCritical. The mapping
-// preserves dashboard chip color semantics for customer-defined
-// rules.
-func scanCustomDLP(
+// scanAndRedactCustomDLP runs the customer's custom data_leakage
+// patterns against a single field string and returns:
+//   - redacted: a copy of the input with every match replaced by
+//     `[REDACTED:custom-<pattern_id>]`. Walks matches in reverse
+//     end-to-start order so earlier offsets stay valid as later
+//     ones get replaced. Zero-width matches are skipped (a regex
+//     like `^` or `(?=...)` would otherwise insert tokens at every
+//     position).
+//   - hits: dlp.Hit entries (same shape the built-in scanner
+//     produces) so the sibling dlp_scan_result event includes
+//     custom matches at the right severity tier.
+//   - matchedPatternIDs: for IncrementPatternMatchCount telemetry.
+//
+// Severity mapping: pattern_config 'low' → dlp.SeverityMedium
+// (smallest dlp severity); 'medium' → dlp.SeverityHigh; 'high' →
+// dlp.SeverityCritical. Preserves dashboard chip color semantics
+// for customer-defined rules.
+//
+// Wave 2.1.d.3 closes the documented gap from 2.1.b: custom rules
+// now redact at the same trust boundary the built-in rules do.
+func scanAndRedactCustomDLP(
 	input string,
 	custom []*detectors.CustomPattern,
-) (hits []dlp.Hit, matchedPatternIDs []string) {
+) (redacted string, hits []dlp.Hit, matchedPatternIDs []string) {
 	if input == "" || len(custom) == 0 {
-		return nil, nil
+		return input, nil, nil
 	}
+	// Collect ALL matches across all custom patterns first so we
+	// can do one in-order redaction walk afterwards. Each match
+	// carries its pattern_id so the replacement token can name it.
+	type customMatch struct {
+		start, end int
+		patternID  string
+		hit        dlp.Hit
+	}
+	var matches []customMatch
 	for _, c := range custom {
 		if c == nil || c.Compiled == nil {
 			continue
 		}
 		for _, idx := range c.Compiled.FindAllStringIndex(input, -1) {
 			start, end := idx[0], idx[1]
-			hits = append(hits, dlp.Hit{
+			// Skip zero-width matches (defensive against regexes
+			// like `^` or `(?=...)` that would otherwise produce
+			// an infinite stream of insertion points).
+			if end <= start {
+				continue
+			}
+			h := dlp.Hit{
 				RuleID:   "custom:" + c.PatternID,
 				Label:    "Custom pattern " + c.PatternID,
 				Severity: customSeverityToDLP(c.Severity),
 				Start:    start,
 				End:      end,
 				Match:    input[start:end],
+			}
+			matches = append(matches, customMatch{
+				start: start, end: end, patternID: c.PatternID, hit: h,
 			})
+			hits = append(hits, h)
 			matchedPatternIDs = append(matchedPatternIDs, c.PatternID)
 		}
 	}
-	return hits, matchedPatternIDs
+	if len(matches) == 0 {
+		return input, nil, nil
+	}
+	// Walk matches in reverse end-position order so earlier offsets
+	// stay valid as later ones are replaced. Stable sort: prefer
+	// later end first, then later start; ties (multiple patterns
+	// matching the same span) keep first-pattern's redaction.
+	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].end != matches[j].end {
+			return matches[i].end > matches[j].end
+		}
+		return matches[i].start > matches[j].start
+	})
+	buf := []byte(input)
+	for _, m := range matches {
+		token := []byte("[REDACTED:custom-" + m.patternID + "]")
+		// Defensive: if a previous iteration's substitution shrunk
+		// or grew the buffer (it does), the recorded match offsets
+		// (against the original input) may fall outside current
+		// bounds. Skip any match whose range is no longer in
+		// bounds; the earlier outer-loop produced the hit already
+		// (it'll still surface in the sibling event).
+		if m.start < 0 || m.end > len(buf) || m.start >= m.end {
+			continue
+		}
+		newBuf := make([]byte, 0, len(buf)-(m.end-m.start)+len(token))
+		newBuf = append(newBuf, buf[:m.start]...)
+		newBuf = append(newBuf, token...)
+		newBuf = append(newBuf, buf[m.end:]...)
+		buf = newBuf
+	}
+	return string(buf), hits, matchedPatternIDs
 }
 
 // customSeverityToDLP maps pattern_config severity ('low' / 'medium'
