@@ -2378,6 +2378,14 @@ func parseFlexTime(s string) time.Time {
 // volume (billions of distinct signatures before birthday-paradox
 // collisions become measurable).
 func deriveGroupID(projectID, failureClass, signature string) string {
+	return DeriveFailureGroupID(projectID, failureClass, signature)
+}
+
+// DeriveFailureGroupID is the exported form of deriveGroupID for
+// callers (api handlers) that need to compute a group_id without
+// hitting the DB — used by the validator_failures.G1 post-step
+// that updates severity_hint on the just-created row.
+func DeriveFailureGroupID(projectID, failureClass, signature string) string {
 	h := sha256.Sum256([]byte(projectID + "|" + failureClass + "|" + signature))
 	return "grp-" + hex.EncodeToString(h[:8])
 }
@@ -3542,27 +3550,86 @@ func (s *SQLiteStore) GetExecutionTopology(
 func (s *SQLiteStore) FindFirstFailedValidator(
 	ctx context.Context,
 	executionID string,
-) (string, error) {
+) (validatorName, severityHint string, err error) {
 	var name sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT json_extract(payload, '$.name')
+	var sev sql.NullString
+	err = s.db.QueryRowContext(ctx, `
+		SELECT json_extract(payload, '$.name'),
+		       json_extract(payload, '$.severity')
 		FROM events
 		WHERE execution_id = ?
 		  AND event_type = 'validator_result'
 		  AND json_extract(payload, '$.passed') = 0
 		ORDER BY sequence ASC
 		LIMIT 1
-	`, executionID).Scan(&name)
+	`, executionID).Scan(&name, &sev)
+	if err == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("find first failed validator: %w", err)
+	}
+	if !name.Valid {
+		return "", "", nil
+	}
+	if sev.Valid {
+		severityHint = sev.String
+	}
+	return name.String, severityHint, nil
+}
+
+// UpdateFailureGroupSeverityHint writes severity_hint on an existing
+// row. Returns ErrNotFound when groupID doesn't exist.
+func (s *SQLiteStore) UpdateFailureGroupSeverityHint(
+	ctx context.Context,
+	groupID string,
+	severityHint string,
+) error {
+	if groupID == "" {
+		return fmt.Errorf("groupID required")
+	}
+	var hint sql.NullString
+	if severityHint != "" {
+		hint = sql.NullString{String: severityHint, Valid: true}
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE failure_groups
+		SET severity_hint = ?
+		WHERE group_id = ?
+	`, hint, groupID)
+	if err != nil {
+		return fmt.Errorf("update failure_group severity_hint: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetFailureGroupSeverityHint returns the per-group severity hint
+// or empty string when none was set.
+func (s *SQLiteStore) GetFailureGroupSeverityHint(
+	ctx context.Context,
+	groupID string,
+) (string, error) {
+	var hint sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT severity_hint FROM failure_groups WHERE group_id = ?
+	`, groupID).Scan(&hint)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("find first failed validator: %w", err)
+		return "", fmt.Errorf("get failure_group severity_hint: %w", err)
 	}
-	if !name.Valid {
+	if !hint.Valid {
 		return "", nil
 	}
-	return name.String, nil
+	return hint.String, nil
 }
 
 // GroupValidatorFailure upserts a failure_group with
@@ -3922,7 +3989,8 @@ func (s *SQLiteStore) ListFailureGroups(
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
-			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
+			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+			fg.severity_hint
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.project_id = ?
@@ -3959,7 +4027,8 @@ func (s *SQLiteStore) GetFailureGroup(
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
-			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
+			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+			fg.severity_hint
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.group_id = ?
@@ -4003,6 +4072,7 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		analysisMarkdown sql.NullString
 		analyzedAt       sql.NullTime
 		analysisModel    sql.NullString
+		severityHint     sql.NullString
 	)
 	if err := r.Scan(
 		&g.GroupID,
@@ -4018,6 +4088,7 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		&analysisMarkdown,
 		&analyzedAt,
 		&analysisModel,
+		&severityHint,
 	); err != nil {
 		return nil, err
 	}
@@ -4045,6 +4116,10 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 	if analysisModel.Valid && analysisModel.String != "" {
 		v := analysisModel.String
 		g.AnalysisModel = &v
+	}
+	if severityHint.Valid && severityHint.String != "" {
+		v := severityHint.String
+		g.SeverityHint = &v
 	}
 	return &g, nil
 }
@@ -4196,7 +4271,8 @@ func (s *SQLiteStore) ListAnalyzedFailureGroupsByProject(
 		SELECT group_id, project_id, failure_class, signature,
 		       first_seen, last_seen, event_count, affected_executions,
 		       cost_wasted_usd, sample_execution_id,
-		       analysis_markdown, analyzed_at, analysis_model
+		       analysis_markdown, analyzed_at, analysis_model,
+		       severity_hint
 		FROM failure_groups
 		WHERE project_id = ?
 		  AND analyzed_at IS NOT NULL

@@ -2751,27 +2751,87 @@ func (s *PostgresStore) GetExecutionTopology(
 // to the literal text 'false'. In SQLite the same comparison was
 // against integer 0 because SQLite's JSON1 returns 0 for false; in
 // Postgres jsonb the text form is 'false'.
-func (s *PostgresStore) FindFirstFailedValidator(ctx context.Context, executionID string) (string, error) {
+func (s *PostgresStore) FindFirstFailedValidator(
+	ctx context.Context,
+	executionID string,
+) (validatorName, severityHint string, err error) {
 	var name sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT (payload::jsonb->>'name')
+	var sev sql.NullString
+	err = s.db.QueryRowContext(ctx, `
+		SELECT (payload::jsonb->>'name'),
+		       (payload::jsonb->>'severity')
 		FROM events
 		WHERE execution_id = $1
 		  AND event_type = 'validator_result'
 		  AND (payload::jsonb->>'passed') = 'false'
 		ORDER BY sequence ASC
 		LIMIT 1
-	`, executionID).Scan(&name)
+	`, executionID).Scan(&name, &sev)
+	if err == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("find first failed validator: %w", err)
+	}
+	if !name.Valid {
+		return "", "", nil
+	}
+	if sev.Valid {
+		severityHint = sev.String
+	}
+	return name.String, severityHint, nil
+}
+
+// UpdateFailureGroupSeverityHint — Postgres twin (validator_failures.G1).
+func (s *PostgresStore) UpdateFailureGroupSeverityHint(
+	ctx context.Context,
+	groupID string,
+	severityHint string,
+) error {
+	if groupID == "" {
+		return fmt.Errorf("groupID required")
+	}
+	var hint sql.NullString
+	if severityHint != "" {
+		hint = sql.NullString{String: severityHint, Valid: true}
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE failure_groups
+		SET severity_hint = $1
+		WHERE group_id = $2
+	`, hint, groupID)
+	if err != nil {
+		return fmt.Errorf("update failure_group severity_hint: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetFailureGroupSeverityHint — Postgres twin.
+func (s *PostgresStore) GetFailureGroupSeverityHint(
+	ctx context.Context,
+	groupID string,
+) (string, error) {
+	var hint sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT severity_hint FROM failure_groups WHERE group_id = $1
+	`, groupID).Scan(&hint)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("find first failed validator: %w", err)
+		return "", fmt.Errorf("get failure_group severity_hint: %w", err)
 	}
-	if !name.Valid {
+	if !hint.Valid {
 		return "", nil
 	}
-	return name.String, nil
+	return hint.String, nil
 }
 
 func (s *PostgresStore) GroupValidatorFailure(ctx context.Context, executionID, projectID, validatorName string) (isNew bool, err error) {
@@ -2961,14 +3021,16 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
-			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
+			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+			fg.severity_hint
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.project_id = $1
 		GROUP BY fg.group_id, fg.project_id, fg.failure_class, fg.signature,
 		         fg.first_seen, fg.last_seen, fg.event_count,
 		         fg.affected_executions, fg.sample_execution_id,
-		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
+		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+		         fg.severity_hint
 		ORDER BY fg.last_seen DESC
 		LIMIT $2 OFFSET $3
 	`, projectID, limit, offset)
@@ -2996,14 +3058,16 @@ func (s *PostgresStore) GetFailureGroup(ctx context.Context, groupID string) (*F
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
-			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
+			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+			fg.severity_hint
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.group_id = $1
 		GROUP BY fg.group_id, fg.project_id, fg.failure_class, fg.signature,
 		         fg.first_seen, fg.last_seen, fg.event_count,
 		         fg.affected_executions, fg.sample_execution_id,
-		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model
+		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+		         fg.severity_hint
 	`, groupID)
 	g, err := scanFailureGroup(row)
 	if err == sql.ErrNoRows {
@@ -3122,7 +3186,8 @@ func (s *PostgresStore) ListAnalyzedFailureGroupsByProject(
 		SELECT group_id, project_id, failure_class, signature,
 		       first_seen, last_seen, event_count, affected_executions,
 		       cost_wasted_usd, sample_execution_id,
-		       analysis_markdown, analyzed_at, analysis_model
+		       analysis_markdown, analyzed_at, analysis_model,
+		       severity_hint
 		FROM failure_groups
 		WHERE project_id = $1
 		  AND analyzed_at IS NOT NULL

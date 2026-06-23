@@ -643,6 +643,17 @@ type FailureGroup struct {
 	// (e.g. "claude-haiku-4-5"). Lets the dashboard render
 	// provenance ("Analyzed by claude-haiku-4-5 14m ago").
 	AnalysisModel *string `json:"analysis_model,omitempty"`
+	// SeverityHint is the SDK-supplied severity at the time the
+	// failure_group was created (migration 047). Today only
+	// validator_failures populates it (via the SDK
+	// `validator_result(..., severity=...)` parameter). NULL means
+	// no hint was supplied — severity resolution falls through to
+	// the class default. Severity precedence (#261 + validator
+	// failures.G1):
+	//   1. project_class_severities override
+	//   2. severity_hint (this field)
+	//   3. severity.Default(failureClass)
+	SeverityHint *string `json:"severity_hint,omitempty"`
 }
 
 // TopologyNode is one entry in a multi-agent execution topology
@@ -1689,11 +1700,39 @@ type Store interface {
 		until time.Time,
 		limit int,
 	) ([]TenantCostRow, error)
+	// UpdateFailureGroupSeverityHint writes the SDK-supplied severity
+	// to the severity_hint column on a freshly-created failure_group
+	// row (migration 047). Used by the validator_failures detector
+	// to honor the SDK's `validator_result(..., severity=...)`
+	// parameter (validator_failures.G1). NULL/empty value clears the
+	// hint. Only writes when the group already exists; returns
+	// ErrNotFound otherwise.
+	UpdateFailureGroupSeverityHint(
+		ctx context.Context,
+		groupID string,
+		severityHint string,
+	) error
+	// GetFailureGroupSeverityHint reads the per-group severity hint
+	// the SDK supplied at detection time. Returns ("", nil) when no
+	// hint was set. Used by the severity resolution chain in
+	// webhook_dispatch: per-class override > severity_hint >
+	// severity.Default(failureClass).
+	GetFailureGroupSeverityHint(
+		ctx context.Context,
+		groupID string,
+	) (string, error)
+
 	// FindFirstFailedValidator returns the name of the first
 	// validator_result event with payload.passed=false in this
 	// execution, or empty string if no validators failed. The "agent
 	// recovered from a quality-check failure" pattern.
-	FindFirstFailedValidator(ctx context.Context, executionID string) (string, error)
+	// Returns (validatorName, severityHint, err). severityHint is
+	// the SDK-supplied `severity` payload field on validator_result
+	// events (added validator_failures.G1) — one of {"warning",
+	// "error", "critical"} or empty when the SDK is older than the
+	// fix. Empty means "no hint"; resolution falls through to class
+	// default.
+	FindFirstFailedValidator(ctx context.Context, executionID string) (validatorName, severityHint string, err error)
 	// GroupValidatorFailure upserts a failure_group with
 	// failure_class=validator_failures and signature=validatorName.
 	GroupValidatorFailure(ctx context.Context, executionID, projectID, validatorName string) (bool, error)

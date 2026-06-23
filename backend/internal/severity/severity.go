@@ -102,6 +102,38 @@ func Default(failureClass string) Severity {
 	}
 }
 
+// FromSDKValue maps the SDK's per-event severity string (one of
+// "warning" | "error" | "critical" — the vocabulary
+// validator_result() accepts on the Python + TS SDKs) to the
+// backend's 3-level Severity enum (Critical, Warning, Info).
+//
+// validator_failures.G1: the SDK accepted `severity` as a parameter
+// but the backend ignored it. This function is the canonical
+// translation layer.
+//
+// Mapping rationale:
+//   - SDK "warning" → Warning (direct match)
+//   - SDK "error"   → Critical (preserves the pre-#G1 behavior;
+//     every validator failure today resolves to Critical because
+//     severity.Default(validator_failures) = Critical. Customers
+//     who never explicitly opt into "warning" or "critical" via
+//     the SDK see no behavior change.)
+//   - SDK "critical" → Critical (direct match)
+//   - anything else → Warning (safe fallback)
+//
+// Future detectors that gain per-event severity hints reuse this
+// helper.
+func FromSDKValue(sdkSeverity string) Severity {
+	switch strings.ToLower(strings.TrimSpace(sdkSeverity)) {
+	case "warning":
+		return Warning
+	case "error", "critical":
+		return Critical
+	default:
+		return Warning
+	}
+}
+
 // ParseFilter takes the comma-separated severity_filter column value
 // and returns the set of severities it represents. Empty input
 // returns nil, which callers should treat as "all severities allowed"

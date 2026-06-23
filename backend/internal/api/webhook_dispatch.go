@@ -138,13 +138,18 @@ func (h *Handlers) runFailureGroupDispatch(
 			url.QueryEscape(signature)
 	}
 
-	// Compute event severity ONCE for this failure_group (#261).
-	// Override-first lookup: if the customer has set a per-class
-	// override for (project, failure_class), use it; otherwise fall
-	// back to severity.Default for the class. The result rides on the
-	// webhook payload AND determines per-webhook filter eligibility
-	// in the loop below.
+	// Compute event severity ONCE for this failure_group (#261 +
+	// validator_failures.G1). Resolution chain:
+	//   1. per-project class override (customer dashboard policy) — wins
+	//   2. severity_hint on the failure_group row (SDK-supplied
+	//      per-event signal; today only validator_failures populates) — wins over default
+	//   3. severity.Default(failureClass) — fallback
+	// The result rides on the webhook payload AND determines
+	// per-webhook filter eligibility in the loop below.
 	eventSeverity := severity.Default(failureClass)
+	if group != nil && group.SeverityHint != nil && *group.SeverityHint != "" {
+		eventSeverity = severity.FromSDKValue(*group.SeverityHint)
+	}
 	if override, oerr := h.Store.GetProjectClassSeverity(ctx, projectID, failureClass); oerr == nil && override != nil {
 		if severity.Valid(override.Severity) {
 			eventSeverity = severity.Severity(override.Severity)

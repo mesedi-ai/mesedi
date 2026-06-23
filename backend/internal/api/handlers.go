@@ -1107,7 +1107,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// tool-failures, the agent ran to completion but produced output
 	// that a downstream quality check failed.
 	if isTerminalStatus(patch.Status) {
-		validatorName, err := h.Store.FindFirstFailedValidator(r.Context(), executionID)
+		validatorName, severityHint, err := h.Store.FindFirstFailedValidator(r.Context(), executionID)
 		if err != nil {
 			h.Logger.Warn("find failed validator for detection failed",
 				"execution_id", executionID,
@@ -1121,6 +1121,25 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					"validator_name", validatorName,
 					"error", gErr.Error(),
 				)
+			}
+			// validator_failures.G1: persist the SDK-supplied
+			// severity hint on the freshly-created/updated row so
+			// the severity resolution chain (webhook_dispatch.go +
+			// dashboard read paths) can honor it. Best-effort —
+			// failure here doesn't suppress the failure_group itself.
+			if gErr == nil && severityHint != "" {
+				groupID := store.DeriveFailureGroupID(
+					authProjectID, store.FailureClassValidator, validatorName,
+				)
+				if hErr := h.Store.UpdateFailureGroupSeverityHint(
+					r.Context(), groupID, severityHint,
+				); hErr != nil && !errors.Is(hErr, store.ErrNotFound) {
+					h.Logger.Warn("update failure_group severity_hint failed",
+						"group_id", groupID,
+						"severity_hint", severityHint,
+						"error", hErr.Error(),
+					)
+				}
 			}
 			h.maybeFireWebhook(r, authProjectID, store.FailureClassValidator, validatorName, isNew, gErr)
 		}
