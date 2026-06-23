@@ -1360,6 +1360,44 @@ type Store interface {
 		projectID, detector string,
 	) (int, error)
 
+	// GetProjectDetectorThreshold reads the per-project override for
+	// the given (projectID, detector, threshold_key). Returns
+	// ErrNotFound when no override row exists — the caller (B.b
+	// hot-path resolver, or the API handler returning the "current
+	// value or default" view) falls back to the validators-registry
+	// default. Migration 048. See backend/internal/api/
+	// detector_thresholds_validators.go for the registry shape.
+	GetProjectDetectorThreshold(
+		ctx context.Context,
+		projectID, detector, thresholdKey string,
+	) (*DetectorThreshold, error)
+	// ListProjectDetectorThresholds returns every override row for
+	// the (projectID, detector) pair, ordered by threshold_key. The
+	// hot path in B.b uses this to fetch all of a detector's
+	// overrides in a single indexed query at execution-close time.
+	ListProjectDetectorThresholds(
+		ctx context.Context,
+		projectID, detector string,
+	) ([]*DetectorThreshold, error)
+	// SetProjectDetectorThreshold upserts an override row. Caller
+	// has already validated (detector, threshold_key) against the
+	// registry, bounds-checked valueJSON via the registry's
+	// per-spec validate function, and enforced the tier cap
+	// (Hobby/Team/Enterprise). The store accepts whatever value
+	// the handler hands it.
+	SetProjectDetectorThreshold(
+		ctx context.Context,
+		projectID, detector, thresholdKey, valueJSON string,
+	) error
+	// DeleteProjectDetectorThreshold removes an override row,
+	// reverting the detector to the registry default for that
+	// (project, detector, threshold_key). Returns ErrNotFound when
+	// no override row matched.
+	DeleteProjectDetectorThreshold(
+		ctx context.Context,
+		projectID, detector, thresholdKey string,
+	) error
+
 	// GetConfigFallbackStats counts audit_events rows where the
 	// backend's per-project config read failed and the handler
 	// fell back to the hardcoded default. Surfaces in the dashboard

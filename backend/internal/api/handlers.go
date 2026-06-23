@@ -276,6 +276,15 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /me/pattern-config/{detector}", h.HandleCreatePatternConfig)
 	mux.HandleFunc("PATCH /me/pattern-config/{detector}/{pattern_id}", h.HandleUpdatePatternConfig)
 	mux.HandleFunc("DELETE /me/pattern-config/{detector}/{pattern_id}", h.HandleDeletePatternConfig)
+	// Theme B.a, per-project tunable thresholds for the six detectors
+	// the audit called out as having hardcoded thresholds
+	// (semantic_loop / token_waste / tool_schema_drift /
+	// grounding_failure / drift / context_overflow). Detectors read
+	// these in B.b; dashboard editor lands in B.c.
+	mux.HandleFunc("GET /me/detector-thresholds/{detector}", h.HandleListDetectorThresholds)
+	mux.HandleFunc("GET /me/detector-thresholds/{detector}/{threshold_key}", h.HandleGetDetectorThreshold)
+	mux.HandleFunc("PUT /me/detector-thresholds/{detector}/{threshold_key}", h.HandleSetDetectorThreshold)
+	mux.HandleFunc("DELETE /me/detector-thresholds/{detector}/{threshold_key}", h.HandleDeleteDetectorThreshold)
 	// Task #270.c, per-project truncation-rate telemetry.
 	mux.HandleFunc("GET /me/tool-return-value-stats", h.HandleGetToolReturnValueStats)
 	// Task #276.d, per-project config-fallback telemetry.
