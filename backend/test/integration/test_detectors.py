@@ -1610,3 +1610,165 @@ def test_identical_call_loop(backend: Backend, configured_sdk):
         failure_class="loops",
         signature_prefix="identical_call_",
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Allowlist primitive — end-to-end (Allowlist.d)
+# ──────────────────────────────────────────────────────────────────────
+
+def test_allowlist_suppresses_matching_tool_failure(
+    backend: Backend, configured_sdk
+):
+    """End-to-end test for the Allowlist primitive, using
+    tool_failures as the representative consuming detector.
+
+    Proves the full pipeline: POST /me/allowlist/tool_failures →
+    store insert → CheckAllowlistMatch hot path read at execution-
+    close → GroupToolFailure short-circuits → no failure_group
+    created → match_count incremented for the allowlisted entry.
+    The other 2 consuming detectors (crashes, validator_failures)
+    are wired through the same Handlers.checkAllowlistAndMaybeSkip
+    helper, so this one passing + the Go-side
+    Test_AllowlistHelperWiredFromAllDetectors regression guard
+    together prove the wiring works for all three. Per-detector
+    trigger coverage for the other two is banked as a follow-up
+    (matches the Theme B.d / Wave 2.1.d scope-reduction pattern).
+
+    Setup:
+        - Create a tool_failures allowlist entry for the tool name
+          'flaky_upstream' via POST /me/allowlist/tool_failures.
+        - Emit a tool_call whose @mesedi.tool flaky_upstream raises
+          (same shape as test_tool_failures above). Without the
+          allowlist, this fires the detector. WITH the allowlist
+          entry, the detector should short-circuit and create no
+          failure_group, AND the entry's match_count should
+          increment from 0 to 1.
+
+    Assertions:
+        1. POST returns the allowlist entry with match_count = 0.
+        2. After the failing tool_call, NO failure_group with
+           class=tool_failures appears within the polling window.
+           (Default behavior would produce one — see the parallel
+           test_tool_failures.)
+        3. Subsequent GET /me/allowlist/tool_failures shows the
+           entry's match_count is now 1 (telemetry hot path also
+           wired correctly, surfaces in the dashboard editor).
+
+    Cleanup:
+        - DELETE the allowlist entry so a re-run of the test suite
+          (or a later test) doesn't see the suppression. Test
+          isolation discipline — every test must leave the project
+          in the state it found it.
+
+    Exercises: HandleCreateAllowlist server-side validation,
+    sanitizeAllowlistKey trim path, CheckAllowlistMatch indexed
+    lookup, GroupToolFailure early-return, IncrementAllowlistMatchCount
+    update path, HandleListAllowlist read for telemetry assertion.
+    """
+    mesedi = configured_sdk
+
+    # 1) Create the allowlist entry. allowlist_key for tool_failures
+    #    is the tool name (per the Allowlist.a docstring + the
+    #    dashboard editor's keyPlaceholder='my_search_tool').
+    create_resp = requests.post(
+        f"{backend.base_url}/me/allowlist/tool_failures",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={
+            "allowlist_key": "flaky_upstream",
+            "reason": "integration-test setup",
+        },
+        timeout=5.0,
+    )
+    assert create_resp.status_code == 201, (
+        f"failed to create allowlist entry: "
+        f"status={create_resp.status_code} body={create_resp.text}"
+    )
+    created = create_resp.json()
+    allowlist_id = created.get("allowlist_id")
+    assert allowlist_id, f"missing allowlist_id in response: {created}"
+    assert created.get("match_count") == 0, (
+        f"newly-created entry should have match_count=0, got {created}"
+    )
+
+    try:
+        # 2) Emit the same shape of failure as test_tool_failures.
+        @mesedi.tool
+        def flaky_upstream():
+            raise RuntimeError("inttest tool failure (allowlist suppression)")
+
+        @mesedi.wrap
+        def agent_with_failing_tool():
+            try:
+                flaky_upstream()
+            except RuntimeError:
+                pass
+
+        agent_with_failing_tool()
+        mesedi.flush(timeout=5.0)
+
+        # 3) Assert NO failure_group with class=tool_failures appears.
+        #    Poll the failure-groups REST surface for the full window —
+        #    if a failure_group materializes mid-poll the assertion
+        #    must catch it. We intentionally use the same polling
+        #    window as await_failure_group so the test isn't faster /
+        #    slower than the positive-case parallel test.
+        import time
+
+        deadline = time.monotonic() + 5.0
+        seen_tool_failure = False
+        while time.monotonic() < deadline:
+            resp = requests.get(
+                f"{backend.base_url}/failure-groups",
+                headers={"Authorization": f"Bearer {backend.api_key}"},
+                timeout=2.0,
+            )
+            if resp.status_code == 200:
+                groups = resp.json().get("groups") or resp.json().get(
+                    "failure_groups", []
+                )
+                for g in groups:
+                    if g.get("failure_class") == "tool_failures":
+                        seen_tool_failure = True
+                        break
+                if seen_tool_failure:
+                    break
+            time.sleep(0.25)
+
+        assert not seen_tool_failure, (
+            "tool_failures failure_group was created despite an "
+            "active allowlist entry for the matching tool name — "
+            "allowlist short-circuit is not working."
+        )
+
+        # 4) Assert match_count incremented from 0 to 1.
+        list_resp = requests.get(
+            f"{backend.base_url}/me/allowlist/tool_failures",
+            headers={"Authorization": f"Bearer {backend.api_key}"},
+            timeout=5.0,
+        )
+        assert list_resp.status_code == 200, (
+            f"failed to list allowlist entries: "
+            f"status={list_resp.status_code} body={list_resp.text}"
+        )
+        entries = list_resp.json().get("entries") or []
+        matched_entry = next(
+            (e for e in entries if e.get("allowlist_id") == allowlist_id),
+            None,
+        )
+        assert matched_entry is not None, (
+            f"created entry not found in list: {entries}"
+        )
+        assert matched_entry.get("match_count") == 1, (
+            f"match_count should be 1 after one suppressed failure, "
+            f"got {matched_entry}"
+        )
+
+    finally:
+        # 5) Cleanup so subsequent test runs / tests see a clean
+        #    project state. Idempotent on the DELETE side — 404 is
+        #    fine if the entry was somehow already gone.
+        requests.delete(
+            f"{backend.base_url}/me/allowlist/tool_failures/{allowlist_id}",
+            headers={"Authorization": f"Bearer {backend.api_key}"},
+            timeout=5.0,
+        )

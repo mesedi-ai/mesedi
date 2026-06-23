@@ -37,6 +37,23 @@ type AllowlistEntry struct {
 	MatchCount   int    `json:"match_count"`
 }
 
+// AllowlistDetectorStats is one row of the per-detector aggregate
+// returned by GetAllowlistStats. Used by the Allowlist.d dashboard
+// suppressions tile.
+//
+// EntryCount + TotalMatchCount + DormantCount are all over the
+// LIFETIME of the project's allowlist for this detector. The current
+// schema doesn't carry a per-match timestamp, so windowed (last 24h)
+// aggregation is deferred to a future enhancement once a
+// per-match-event sidecar lands (would also enable an audit log of
+// what was suppressed when).
+type AllowlistDetectorStats struct {
+	Detector        string `json:"detector"`
+	EntryCount      int    `json:"entry_count"`
+	TotalMatchCount int    `json:"total_match_count"`
+	DormantCount    int    `json:"dormant_count"`
+}
+
 // ListProjectAllowlist returns the customer-defined allowlist
 // entries for the given (projectID, detector) pair, ordered by
 // created_at ascending (oldest first — preserves customer-perceived
@@ -214,6 +231,52 @@ func (s *SQLiteStore) CheckAllowlistMatch(
 		return false, fmt.Errorf("check allowlist match: %w", err)
 	}
 	return n > 0, nil
+}
+
+// GetAllowlistStats returns one AllowlistDetectorStats row per
+// detector for which the project has at least one allowlist entry.
+// Used by the Allowlist.d dashboard suppressions tile.
+//
+// Single indexed scan of project_detector_allowlist filtered by
+// project_id, GROUP BY detector. Cheap even at the worst case
+// (PROJECT_ALLOWLIST_MAX × 3 detectors = 600 rows). Detectors with
+// zero entries are omitted from the result; the dashboard tile
+// treats absent detectors as "0 entries, 0 suppressions" so the
+// store result is the authoritative shape.
+func (s *SQLiteStore) GetAllowlistStats(
+	ctx context.Context,
+	projectID string,
+) ([]AllowlistDetectorStats, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+		  detector,
+		  COUNT(*) AS entry_count,
+		  COALESCE(SUM(match_count), 0) AS total_match_count,
+		  SUM(CASE WHEN match_count = 0 THEN 1 ELSE 0 END) AS dormant_count
+		FROM project_detector_allowlist
+		WHERE project_id = ?
+		GROUP BY detector
+		ORDER BY detector ASC
+	`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get allowlist stats: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AllowlistDetectorStats
+	for rows.Next() {
+		var r AllowlistDetectorStats
+		if err := rows.Scan(
+			&r.Detector, &r.EntryCount, &r.TotalMatchCount, &r.DormantCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan allowlist stats row: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err on allowlist stats scan: %w", err)
+	}
+	return out, nil
 }
 
 // IncrementAllowlistMatchCount adds delta to match_count for the

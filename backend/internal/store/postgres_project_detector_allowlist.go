@@ -184,3 +184,42 @@ func (s *PostgresStore) IncrementAllowlistMatchCount(
 	}
 	return nil
 }
+
+// GetAllowlistStats — Postgres twin of the SQLite implementation.
+// One indexed scan filtered by project_id, GROUP BY detector. See
+// the SQLite version's docstring for the full contract.
+func (s *PostgresStore) GetAllowlistStats(
+	ctx context.Context,
+	projectID string,
+) ([]AllowlistDetectorStats, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+		  detector,
+		  COUNT(*) AS entry_count,
+		  COALESCE(SUM(match_count), 0) AS total_match_count,
+		  SUM(CASE WHEN match_count = 0 THEN 1 ELSE 0 END) AS dormant_count
+		FROM project_detector_allowlist
+		WHERE project_id = $1
+		GROUP BY detector
+		ORDER BY detector ASC
+	`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get allowlist stats: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AllowlistDetectorStats
+	for rows.Next() {
+		var r AllowlistDetectorStats
+		if err := rows.Scan(
+			&r.Detector, &r.EntryCount, &r.TotalMatchCount, &r.DormantCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan allowlist stats row: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err on allowlist stats scan: %w", err)
+	}
+	return out, nil
+}

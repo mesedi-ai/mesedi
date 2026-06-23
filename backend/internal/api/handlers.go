@@ -296,6 +296,10 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /me/allowlist/{detector}", h.HandleCreateAllowlist)
 	mux.HandleFunc("PATCH /me/allowlist/{detector}/{allowlist_id}", h.HandleUpdateAllowlist)
 	mux.HandleFunc("DELETE /me/allowlist/{detector}/{allowlist_id}", h.HandleDeleteAllowlist)
+	// Allowlist.d, lifetime per-detector suppression telemetry for
+	// the main-dashboard suppressions tile. One indexed scan,
+	// GROUP BY detector.
+	mux.HandleFunc("GET /me/allowlist-stats", h.HandleGetAllowlistStats)
 	// Task #270.c, per-project truncation-rate telemetry.
 	mux.HandleFunc("GET /me/tool-return-value-stats", h.HandleGetToolReturnValueStats)
 	// Task #276.d, per-project config-fallback telemetry.

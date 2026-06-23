@@ -8,6 +8,7 @@ package api
 //   - allowlistDetectors allow-list matches the 3 in-scope detectors.
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -123,5 +124,38 @@ func Test_ProjectAllowlistMax_MatchesPatternConfig(t *testing.T) {
 	if projectAllowlistMax != projectPatternMax {
 		t.Errorf("projectAllowlistMax (%d) != projectPatternMax (%d); "+
 			"should match for consistency", projectAllowlistMax, projectPatternMax)
+	}
+}
+
+// Test_AllowlistHelperWiredFromAllDetectors is the Allowlist.d
+// regression guard for the wiring shape — if a future refactor
+// accidentally drops the checkAllowlistAndMaybeSkip call from one
+// of the three consuming detector hot paths in handlers.go, this
+// test fires.
+//
+// We rely on a source-level count rather than a runtime probe
+// because the wiring is a hand-written call site rather than a
+// registry — there's nothing to enumerate at runtime. Reading
+// the source file at test time keeps the regression guard close
+// to the file it's protecting (same package).
+//
+// At least 3 call sites are expected, one per consuming detector
+// (crashes, tool_failures, validator_failures). A future fourth
+// allowlist-supporting detector should add a fourth call site;
+// the assertion is intentionally >= 3 rather than == 3 so the
+// guard doesn't fire on intentional growth.
+func Test_AllowlistHelperWiredFromAllDetectors(t *testing.T) {
+	data, err := os.ReadFile("handlers.go")
+	if err != nil {
+		t.Fatalf("read handlers.go: %v", err)
+	}
+	src := string(data)
+	const callSite = "h.checkAllowlistAndMaybeSkip("
+	count := strings.Count(src, callSite)
+	if count < 3 {
+		t.Errorf("%s wired in %d places in handlers.go, want >= 3 "+
+			"(one per consuming detector: crashes, tool_failures, "+
+			"validator_failures). A wiring may have been accidentally "+
+			"dropped — see Allowlist.b.", callSite, count)
 	}
 }

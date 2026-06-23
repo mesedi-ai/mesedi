@@ -1456,6 +1456,20 @@ type Store interface {
 		projectID, detector, allowlistKey string,
 		delta int,
 	) error
+	// GetAllowlistStats returns lifetime per-detector aggregate
+	// telemetry for the project's allowlist entries: entry count,
+	// total match count (= total failures suppressed), and dormant
+	// entry count (entries with match_count = 0). Used by the
+	// dashboard suppressions tile (Allowlist.d) to surface
+	// "Mesedi suppressed N failures for you" at a glance.
+	//
+	// One indexed scan of project_detector_allowlist filtered by
+	// project_id, GROUP BY detector. Cheap even at the 200-entry
+	// PROJECT_ALLOWLIST_MAX cap × 3 detectors = 600-row worst case.
+	GetAllowlistStats(
+		ctx context.Context,
+		projectID string,
+	) ([]AllowlistDetectorStats, error)
 
 	// GetConfigFallbackStats counts audit_events rows where the
 	// backend's per-project config read failed and the handler

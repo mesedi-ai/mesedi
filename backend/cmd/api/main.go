@@ -693,6 +693,34 @@ func main() {
 	mux.Handle("GET /me/tool-return-value-stats", privateHandler)
 	// Task #276.d, per-project config-fallback telemetry.
 	mux.Handle("GET /me/config-fallback-stats", privateHandler)
+	// Wave 2.1.a, per-project custom security patterns for the 3
+	// security detectors (prompt_injection, data_leakage,
+	// sandbox_escape). Without these explicit forwards the routes
+	// registered on privateMux inside RegisterRoutes would 404 at
+	// the outer mux before ever reaching the auth chain (same
+	// pattern as the billing-payment-method bug noted at #187).
+	// Added retroactively in Allowlist.d after the foundation-audit
+	// B22 check fired on the missing primitive-family forwards.
+	mux.Handle("GET /me/pattern-config/{detector}", privateHandler)
+	mux.Handle("POST /me/pattern-config/{detector}", privateHandler)
+	mux.Handle("PATCH /me/pattern-config/{detector}/{pattern_id}", privateHandler)
+	mux.Handle("DELETE /me/pattern-config/{detector}/{pattern_id}", privateHandler)
+	// Theme B.a, per-project detector thresholds for the 6
+	// audit-called-out detectors (semantic_loop, token_waste,
+	// tool_schema_drift, grounding_failure, drift, context_overflow).
+	mux.Handle("GET /me/detector-thresholds/{detector}", privateHandler)
+	mux.Handle("GET /me/detector-thresholds/{detector}/{threshold_key}", privateHandler)
+	mux.Handle("PUT /me/detector-thresholds/{detector}/{threshold_key}", privateHandler)
+	mux.Handle("DELETE /me/detector-thresholds/{detector}/{threshold_key}", privateHandler)
+	// Allowlist.a + .d, per-project failure-suppression entries for
+	// the 3 detectors that share the Allowlist primitive (crashes,
+	// tool_failures, validator_failures) plus the lifetime
+	// per-detector suppression-count telemetry tile.
+	mux.Handle("GET /me/allowlist/{detector}", privateHandler)
+	mux.Handle("POST /me/allowlist/{detector}", privateHandler)
+	mux.Handle("PATCH /me/allowlist/{detector}/{allowlist_id}", privateHandler)
+	mux.Handle("DELETE /me/allowlist/{detector}/{allowlist_id}", privateHandler)
+	mux.Handle("GET /me/allowlist-stats", privateHandler)
 	// #252 — customer-facing 2FA / TOTP. All five live on
 	// privateHandler because they manage the calling customer's own
 	// authenticator-app enrollment and need the session cookie.

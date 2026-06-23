@@ -412,6 +412,54 @@ func (h *Handlers) checkAllowlistAndMaybeSkip(
 	return true
 }
 
+// HandleGetAllowlistStats returns lifetime per-detector aggregate
+// telemetry for the calling project's allowlist entries. Used by the
+// Allowlist.d dashboard suppressions tile on /app to surface
+// "Mesedi suppressed N failures for you" at a glance.
+//
+//	GET /me/allowlist-stats
+//	→ 200 {"project_id": "...", "per_detector": [...],
+//	       "total_match_count": N, "total_entries": M}
+//
+// Response shape is always populated (zero-row stats yield empty
+// per_detector array + zero totals) so the dashboard tile can render
+// without a separate "is allowlist set up?" probe.
+func (h *Handlers) HandleGetAllowlistStats(w http.ResponseWriter, r *http.Request) {
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	rows, err := h.Store.GetAllowlistStats(r.Context(), authProjectID)
+	if err != nil {
+		h.Logger.Error("get allowlist stats failed",
+			"project_id", authProjectID, "error", err.Error())
+		writeError(w, http.StatusInternalServerError,
+			"could not load allowlist stats")
+		return
+	}
+	if rows == nil {
+		rows = []store.AllowlistDetectorStats{}
+	}
+	// Aggregate totals server-side so the dashboard tile renders one
+	// scalar without re-summing on the client (matches the proven
+	// pattern from /me/savings + /me/rollup — server returns both the
+	// breakdown and the totals so the surface is one-shot renderable).
+	// Loop variable named `stat` to avoid shadowing the outer
+	// *http.Request `r`.
+	var totalMatches, totalEntries int
+	for _, stat := range rows {
+		totalMatches += stat.TotalMatchCount
+		totalEntries += stat.EntryCount
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id":        authProjectID,
+		"per_detector":      rows,
+		"total_match_count": totalMatches,
+		"total_entries":     totalEntries,
+	})
+}
+
 // newAllowlistID produces a server-side allowlist identifier in the
 // "allow_<32 hex>" format (same shape as patternID + auditID).
 func newAllowlistID() string {
