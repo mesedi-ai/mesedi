@@ -288,6 +288,14 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /me/detector-thresholds/{detector}/{threshold_key}", h.HandleGetDetectorThreshold)
 	mux.HandleFunc("PUT /me/detector-thresholds/{detector}/{threshold_key}", h.HandleSetDetectorThreshold)
 	mux.HandleFunc("DELETE /me/detector-thresholds/{detector}/{threshold_key}", h.HandleDeleteDetectorThreshold)
+	// Allowlist.a, per-project allowlist entries for the three
+	// detectors that share the Allowlist primitive (crashes,
+	// tool_failures, validator_failures). Detector hot-path check
+	// wired in Allowlist.b; dashboard editor lands in Allowlist.c.
+	mux.HandleFunc("GET /me/allowlist/{detector}", h.HandleListAllowlist)
+	mux.HandleFunc("POST /me/allowlist/{detector}", h.HandleCreateAllowlist)
+	mux.HandleFunc("PATCH /me/allowlist/{detector}/{allowlist_id}", h.HandleUpdateAllowlist)
+	mux.HandleFunc("DELETE /me/allowlist/{detector}/{allowlist_id}", h.HandleDeleteAllowlist)
 	// Task #270.c, per-project truncation-rate telemetry.
 	mux.HandleFunc("GET /me/tool-return-value-stats", h.HandleGetToolReturnValueStats)
 	// Task #276.d, per-project config-fallback telemetry.

@@ -1398,6 +1398,65 @@ type Store interface {
 		projectID, detector, thresholdKey string,
 	) error
 
+	// ListProjectAllowlist returns the customer-defined allowlist
+	// entries for the (projectID, detector) pair. Caller is
+	// responsible for validating detector ∈ {crashes,
+	// tool_failures, validator_failures} at the API edge — the
+	// store accepts any string so a future fourth
+	// allowlist-supporting detector drops in with no store change.
+	// (Wave Allowlist.a — migration 049.)
+	ListProjectAllowlist(
+		ctx context.Context,
+		projectID, detector string,
+	) ([]*AllowlistEntry, error)
+	// GetProjectAllowlistEntry fetches a single row by PK. Returns
+	// ErrNotFound when (projectID, allowlistID) doesn't exist or
+	// belongs to a different project (no information leak).
+	GetProjectAllowlistEntry(
+		ctx context.Context,
+		projectID, allowlistID string,
+	) (*AllowlistEntry, error)
+	// CreateProjectAllowlistEntry inserts a new allowlist row.
+	// Caller has validated input + assigned a server-generated
+	// allowlist_id; created_at is overwritten in the store layer
+	// to ensure monotonic order.
+	CreateProjectAllowlistEntry(ctx context.Context, e *AllowlistEntry) error
+	// UpdateProjectAllowlistEntry overwrites the mutable fields
+	// (allowlist_key, reason). Created_at / created_by /
+	// match_count are NOT touched. Returns ErrNotFound when no
+	// row matched.
+	UpdateProjectAllowlistEntry(ctx context.Context, e *AllowlistEntry) error
+	// DeleteProjectAllowlistEntry removes a row by PK. Returns
+	// ErrNotFound when (projectID, allowlistID) doesn't exist.
+	DeleteProjectAllowlistEntry(
+		ctx context.Context,
+		projectID, allowlistID string,
+	) error
+	// CountProjectAllowlistEntries returns the row count for
+	// (projectID, detector). Used by the handler to enforce
+	// PROJECT_ALLOWLIST_MAX before INSERT.
+	CountProjectAllowlistEntries(
+		ctx context.Context,
+		projectID, detector string,
+	) (int, error)
+	// CheckAllowlistMatch returns true iff a row exists with
+	// (project_id, detector, allowlist_key = signature). Used by
+	// the Allowlist.b detector hot path to skip failure_group
+	// creation on allowlisted signatures. Single indexed query.
+	CheckAllowlistMatch(
+		ctx context.Context,
+		projectID, detector, signature string,
+	) (bool, error)
+	// IncrementAllowlistMatchCount adds delta to match_count for
+	// the (project_id, detector, allowlist_key) row(s). Used by
+	// the Allowlist.b detector hot path to keep per-entry
+	// telemetry visible in the dashboard editor.
+	IncrementAllowlistMatchCount(
+		ctx context.Context,
+		projectID, detector, allowlistKey string,
+		delta int,
+	) error
+
 	// GetConfigFallbackStats counts audit_events rows where the
 	// backend's per-project config read failed and the handler
 	// fell back to the hardcoded default. Surfaces in the dashboard
