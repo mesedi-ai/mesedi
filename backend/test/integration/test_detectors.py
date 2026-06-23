@@ -1570,14 +1570,23 @@ def test_detector_thresholds_semantic_loop_custom(backend: Backend, configured_s
 
 def test_identical_call_loop(backend: Backend, configured_sdk):
     """Three llm_call events with identical (model, user_message)
-    hash within one execution → identical_call_loop detector should
-    fire under the loops failure class.
+    hash within one execution → identical_call_loop detector fires
+    under the loops failure class.
 
-    Currently FAILS because identical_call_loop is structurally
-    suppressed by token_waste in the detector chain ordering — same
-    class of bug as the time_budget greedy-claim we already fixed.
-    Left failing on purpose so the issue stays visible until Robert
-    decides how to resolve."""
+    Detector chain: token_waste runs earlier in the chain on the
+    same llm_call payloads, but the two detectors create INDEPENDENT
+    failure_group rows on the same execution rather than first-
+    match-wins claiming. Both clusters surface (a `token_waste:<hex>`
+    cluster AND an `identical_call_<hash>` cluster) — by design,
+    each detector answers a different question about the same
+    underlying pattern. This test asserts the identical_call signal
+    is present; the parallel `test_token_waste` asserts the
+    token_waste signal.
+
+    (Closes loops.G1 — earlier audit-doc claim that identical_call_loop
+    was \"structurally suppressed by token_waste\" was stale. The
+    chain has never short-circuited at this junction; both Group<X>
+    calls run independently against the same execution row.)"""
     from anthropic import Anthropic
 
     mesedi = configured_sdk

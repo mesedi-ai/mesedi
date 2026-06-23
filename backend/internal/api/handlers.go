@@ -130,17 +130,20 @@ func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg Stri
 		mailer = mail.NoopMailer{Logger: logger}
 	}
 	// Compile the DLP scanner once at startup against the built-in
-	// rule baseline. A compilation failure here is fatal-by-design,
-	// it indicates a malformed rule in code that should NEVER ship.
-	// We log and continue with a nil scanner so the rest of the API
-	// stays up, but the data_leakage detector goes dark until the
-	// next deploy. The nil-check in HandleIngestEvents skips the
-	// scan path cleanly.
+	// rule baseline. A compilation failure here means a malformed
+	// built-in rule in code that should NEVER ship — it's a build
+	// bug, not a runtime config issue. Closes data_leakage.G3:
+	// previously we logged the error and continued with a nil
+	// scanner, leaving the entire data_leakage detector DARK in
+	// production with only a buried startup log to signal it.
+	// Customers thought they had DLP coverage; in reality their
+	// secrets were flowing through unredacted. Same defensive
+	// posture as sandbox_escape's mustCompilePatterns: panic at
+	// init so ops sees the failure immediately and the bad build
+	// can never reach production silently.
 	scanner, err := dlp.NewScanner(nil)
 	if err != nil {
-		logger.Error("dlp scanner construction failed (data_leakage detector disabled)",
-			"error", err.Error())
-		scanner = nil
+		panic("dlp scanner construction failed at startup; built-in rule is malformed and must be fixed before deploy: " + err.Error())
 	}
 	return &Handlers{
 		Logger:        logger,
