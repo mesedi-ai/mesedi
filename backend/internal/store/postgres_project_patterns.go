@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 func (s *PostgresStore) ListProjectPatterns(
@@ -20,7 +21,8 @@ func (s *PostgresStore) ListProjectPatterns(
 ) ([]*ProjectPattern, error) {
 	q := `
 		SELECT pattern_id, project_id, detector, pattern, severity,
-		       description, enabled, created_by, created_at, match_count
+		       description, enabled, created_by, created_at, match_count,
+		       last_matched_at
 		FROM project_patterns
 		WHERE project_id = $1 AND detector = $2
 	`
@@ -38,12 +40,17 @@ func (s *PostgresStore) ListProjectPatterns(
 	var out []*ProjectPattern
 	for rows.Next() {
 		p := &ProjectPattern{}
+		var lastMatchedAt sql.NullTime
 		if err := rows.Scan(
 			&p.PatternID, &p.ProjectID, &p.Detector, &p.Pattern,
 			&p.Severity, &p.Description, &p.Enabled, &p.CreatedBy,
-			&p.CreatedAt, &p.MatchCount,
+			&p.CreatedAt, &p.MatchCount, &lastMatchedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_pattern row: %w", err)
+		}
+		if lastMatchedAt.Valid {
+			s := lastMatchedAt.Time.UTC().Format(time.RFC3339)
+			p.LastMatchedAt = &s
 		}
 		out = append(out, p)
 	}
@@ -123,11 +130,15 @@ func (s *PostgresStore) IncrementPatternMatchCount(
 	projectID, patternID string,
 	delta int,
 ) error {
+	// Wave 2.1.d.1: update last_matched_at alongside the counter so
+	// the dashboard's 'dormant' badge stays accurate.
+	now := time.Now().UTC()
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE project_patterns
-		SET match_count = match_count + $1
-		WHERE project_id = $2 AND pattern_id = $3
-	`, delta, projectID, patternID)
+		SET match_count = match_count + $1,
+		    last_matched_at = $2
+		WHERE project_id = $3 AND pattern_id = $4
+	`, delta, now, projectID, patternID)
 	if err != nil {
 		return fmt.Errorf("increment project_pattern match_count: %w", err)
 	}

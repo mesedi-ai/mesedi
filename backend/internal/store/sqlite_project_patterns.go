@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ProjectPattern is one row of the project_patterns table.
@@ -39,6 +40,12 @@ type ProjectPattern struct {
 	CreatedBy   string `json:"created_by"`
 	CreatedAt   string `json:"created_at"`
 	MatchCount  int    `json:"match_count"`
+	// LastMatchedAt is RFC3339 string OR nil. NULL = pattern has
+	// never matched (or matched before migration 046 added the
+	// column); dashboard renders 'dormant' badge in both cases.
+	// Pointer-to-string deliberately (not time.Time) so the SQL
+	// scan doesn't blow up on minor format drift across engines.
+	LastMatchedAt *string `json:"last_matched_at"`
 }
 
 // ListProjectPatterns returns the customer-defined custom patterns
@@ -52,7 +59,8 @@ func (s *SQLiteStore) ListProjectPatterns(
 ) ([]*ProjectPattern, error) {
 	q := `
 		SELECT pattern_id, project_id, detector, pattern, severity,
-		       description, enabled, created_by, created_at, match_count
+		       description, enabled, created_by, created_at, match_count,
+		       last_matched_at
 		FROM project_patterns
 		WHERE project_id = ? AND detector = ?
 	`
@@ -71,14 +79,19 @@ func (s *SQLiteStore) ListProjectPatterns(
 	for rows.Next() {
 		p := &ProjectPattern{}
 		var enabledInt int
+		var lastMatchedAt sql.NullString
 		if err := rows.Scan(
 			&p.PatternID, &p.ProjectID, &p.Detector, &p.Pattern,
 			&p.Severity, &p.Description, &enabledInt, &p.CreatedBy,
-			&p.CreatedAt, &p.MatchCount,
+			&p.CreatedAt, &p.MatchCount, &lastMatchedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_pattern row: %w", err)
 		}
 		p.Enabled = enabledInt != 0
+		if lastMatchedAt.Valid {
+			s := lastMatchedAt.String
+			p.LastMatchedAt = &s
+		}
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -166,17 +179,23 @@ func (s *SQLiteStore) DeleteProjectPattern(
 	return nil
 }
 
-// IncrementPatternMatchCount adds delta to match_count.
+// IncrementPatternMatchCount adds delta to match_count AND updates
+// last_matched_at to NOW() (Wave 2.1.d.1). The dashboard surfaces
+// the timestamp as a 'dormant' badge on rows that haven't matched
+// in 30 days; without the synchronous write, the badge would be
+// stale or wrong.
 func (s *SQLiteStore) IncrementPatternMatchCount(
 	ctx context.Context,
 	projectID, patternID string,
 	delta int,
 ) error {
+	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE project_patterns
-		SET match_count = match_count + ?
+		SET match_count = match_count + ?,
+		    last_matched_at = ?
 		WHERE project_id = ? AND pattern_id = ?
-	`, delta, projectID, patternID)
+	`, delta, now, projectID, patternID)
 	if err != nil {
 		return fmt.Errorf("increment project_pattern match_count: %w", err)
 	}
