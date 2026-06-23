@@ -50,8 +50,16 @@ package models
 // detector) MUST skip per-model checks when ok=false rather than
 // substituting a default, to avoid false positives on models we
 // haven't characterized yet.
+//
+// Bedrock-routed and Vertex-routed identifiers are normalized to the
+// canonical model name via normalizeModelID before lookup, so
+// customers routing Anthropic-via-Bedrock or Gemini-via-Vertex get
+// the same context_overflow signal as direct-API customers. Azure
+// deployment names are customer-chosen and non-deterministic; Azure
+// customers need the per-project model-window override (banked as
+// context_overflow.G3) instead.
 func ContextWindow(modelID string) (tokens int, ok bool) {
-	w, ok := windowByModel[modelID]
+	w, ok := windowByModel[normalizeModelID(modelID)]
 	return w, ok
 }
 
@@ -59,15 +67,17 @@ func ContextWindow(modelID string) (tokens int, ok bool) {
 // for the given model identifier. Useful for cross-tenant signals
 // like provider_incident (#16) and for routing rate-limit data to
 // the right backoff strategy. Returns "" when the model isn't known.
+// Bedrock + Vertex routed identifiers normalize to the canonical
+// before lookup.
 func Provider(modelID string) string {
-	return providerByModel[modelID]
+	return providerByModel[normalizeModelID(modelID)]
 }
 
 // IsKnown is a cheap predicate for callers that don't need the
 // window or provider value, just whether the registry recognizes
 // the model. Equivalent to checking ContextWindow's ok return.
 func IsKnown(modelID string) bool {
-	_, ok := windowByModel[modelID]
+	_, ok := windowByModel[normalizeModelID(modelID)]
 	return ok
 }
 
@@ -151,6 +161,20 @@ var windowByModel = map[string]int{
 	"mistral-small-3":    32_000,
 	"mistral-nemo":       128_000,
 	"codestral":          256_000,
+
+	// ── Cohere ────────────────────────────────────────────────────
+	// Mesedi instruments Cohere via instrument_cohere; without these
+	// entries, context_overflow silently skips every Cohere
+	// execution because the model identifier isn't in the registry.
+	// Chat models only — embed-* models have 512-token windows that
+	// trigger provider_incident on rejection rather than
+	// context_overflow.
+	"command-r":              128_000,
+	"command-r-plus":         128_000,
+	"command-r-08-2024":      128_000,
+	"command-r-plus-08-2024": 128_000,
+	"command-light":          4_096,
+	"command":                4_096,
 }
 
 // providerByModel groups each model under its vendor for cross-tenant
@@ -213,4 +237,11 @@ var providerByModel = map[string]string{
 	"mistral-small-3":    "mistral",
 	"mistral-nemo":       "mistral",
 	"codestral":          "mistral",
+	// Cohere
+	"command-r":              "cohere",
+	"command-r-plus":         "cohere",
+	"command-r-08-2024":      "cohere",
+	"command-r-plus-08-2024": "cohere",
+	"command-light":          "cohere",
+	"command":                "cohere",
 }

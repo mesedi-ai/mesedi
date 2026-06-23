@@ -84,6 +84,22 @@ type Rule struct {
 // time the rule was added; revisit annually as new key formats ship.
 var builtinRules = []Rule{
 	{
+		ID:    "anthropic_api_key",
+		Label: "Anthropic API key",
+		// Covers both the modern project-scoped sk-ant-api03- form
+		// and the legacy sk-ant- form. Mesedi customers are the
+		// most-exposed segment for these — they instrument LLM
+		// calls, so an Anthropic key leaking through a prompt,
+		// tool argument, or validator message reaches the same
+		// observability pipeline as the call itself. Alphabetized
+		// BEFORE openai_api_key intentionally — the OpenAI rule's
+		// pattern `\bsk-...` would otherwise also match Anthropic
+		// keys; ordering this rule first lets mergeOverlapping
+		// keep the more-specific match.
+		Pattern:  `\bsk-ant-(?:api03-)?[A-Za-z0-9_-]{20,}\b`,
+		Severity: SeverityCritical,
+	},
+	{
 		ID:       "aws_access_key",
 		Label:    "AWS access key ID",
 		Pattern:  `\bAKIA[0-9A-Z]{16}\b`,
@@ -114,6 +130,18 @@ var builtinRules = []Rule{
 		// of GCP credentials (OAuth refresh tokens, etc.) need
 		// future rules.
 		Pattern:  `"type"\s*:\s*"service_account"`,
+		Severity: SeverityCritical,
+	},
+	{
+		ID:    "gemini_api_key",
+		Label: "Google AI / Gemini API key",
+		// Google AI Studio / Gemini API keys use the unambiguous
+		// AIza prefix followed by exactly 35 alphanumeric +
+		// underscore + hyphen characters (39 chars total). The
+		// prefix is unique enough that this rule has near-zero
+		// false-positive rate. Same Critical severity as other
+		// provider-key patterns.
+		Pattern:  `\bAIza[A-Za-z0-9_-]{35}\b`,
 		Severity: SeverityCritical,
 	},
 	{
