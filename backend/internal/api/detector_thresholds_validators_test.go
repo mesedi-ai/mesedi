@@ -27,6 +27,12 @@ func Test_DetectorThresholds_RegistryHasExpectedDetectors(t *testing.T) {
 		"drift:lexical_threshold_high",
 		"context_overflow:high_pct",
 		"context_overflow:critical_pct",
+		// loops-thresholds wave: extends Theme B primitive to the 4th
+		// detector family. Closes loops.G2/G3/G4.
+		"loops:step_count_threshold",
+		"loops:identical_call_min_repeats",
+		"loops:similar_call_distance_threshold",
+		"loops:similar_call_min_cluster_size",
 	}
 	for _, key := range want {
 		if _, ok := detectorThresholdRegistry[key]; !ok {

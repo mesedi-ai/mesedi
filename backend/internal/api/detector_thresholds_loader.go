@@ -57,6 +57,13 @@ type ProjectDetectorThresholds struct {
 	GroundingFailure detectors.GroundingFailureThresholds
 	Drift            detectors.DriftThresholds
 	ContextOverflow  detectors.ContextOverflowThresholds
+	// Loops bundles the 4 loops-family thresholds extended via the
+	// loops-thresholds wave (loops.G2/G3/G4): step_count_threshold,
+	// identical_call_min_repeats, similar_call distance + min cluster
+	// size. step_count and identical_call_loop consume their values
+	// directly at the handler call site (literal comparisons);
+	// similar_call_loop consumes via DetectSimilarCallLoopWithThresholds.
+	Loops detectors.LoopsThresholds
 }
 
 // DefaultProjectDetectorThresholds returns the all-defaults aggregate
@@ -71,6 +78,7 @@ func DefaultProjectDetectorThresholds() ProjectDetectorThresholds {
 		GroundingFailure: detectors.DefaultGroundingFailureThresholds(),
 		Drift:            detectors.DefaultDriftThresholds(),
 		ContextOverflow:  detectors.DefaultContextOverflowThresholds(),
+		Loops:            detectors.DefaultLoopsThresholds(),
 	}
 }
 
@@ -103,6 +111,7 @@ func LoadProjectDetectorThresholds(
 		"grounding_failure",
 		"drift",
 		"context_overflow",
+		"loops",
 	} {
 		rows, err := st.ListProjectDetectorThresholds(ctx, projectID, detector)
 		if err != nil {
@@ -212,6 +221,25 @@ func applyDetectorThresholdValue(
 		case "critical_pct":
 			if v, ok := value.(float64); ok {
 				out.ContextOverflow.CriticalPct = v
+			}
+		}
+	case "loops":
+		switch key {
+		case "step_count_threshold":
+			if v, ok := value.(int); ok {
+				out.Loops.StepCountThreshold = v
+			}
+		case "identical_call_min_repeats":
+			if v, ok := value.(int); ok {
+				out.Loops.IdenticalCallMinRepeats = v
+			}
+		case "similar_call_distance_threshold":
+			if v, ok := value.(float64); ok {
+				out.Loops.SimilarCallDistanceThreshold = v
+			}
+		case "similar_call_min_cluster_size":
+			if v, ok := value.(int); ok {
+				out.Loops.SimilarCallMinClusterSize = v
 			}
 		}
 	}

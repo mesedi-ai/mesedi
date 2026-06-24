@@ -820,13 +820,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Phase 3b sub-slice 11: step-count detector. Any terminal execution
-	// with > 10 events gets grouped as loops/step-count. Runs after the
-	// crash and time-budget checks, so it's the lowest-priority
-	// classification, an execution that crashed, took too long, AND
-	// emitted lots of events ends up classified as crashes (first match
-	// wins via the failure_group_id short-circuit). Threshold of 10 is
-	// artificially low for v0.0.1 demo visibility; production default
-	// 50+ per the concept doc.
+	// with > StepCountThreshold events gets grouped as loops/step-count.
+	// Runs after the crash and time-budget checks, so it's the lowest-
+	// priority classification, an execution that crashed, took too long,
+	// AND emitted lots of events ends up classified as crashes (first
+	// match wins via the failure_group_id short-circuit). Default 10 is
+	// artificially low for v0.0.1 demo visibility; iterative-refinement
+	// workflows that legitimately emit many events should tune this via
+	// the per-project detector_thresholds primitive (loops-thresholds
+	// wave — closes loops.G2).
 	if isTerminalStatus(patch.Status) {
 		count, err := h.Store.CountEventsForExecution(r.Context(), executionID)
 		if err != nil {
@@ -834,7 +836,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"execution_id", executionID,
 				"error", err.Error(),
 			)
-		} else if count > 10 {
+		} else if count > detectorThresholds.Loops.StepCountThreshold {
 			isNew, gErr := h.Store.GroupStepCountExceedance(r.Context(), executionID, authProjectID, count)
 			if gErr != nil {
 				h.Logger.Warn("step-count grouping failed (continuing)",
@@ -1619,12 +1621,15 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 
 			// Sub-slice 17: identical-call loop detector. Hashes
 			// (model + user_message) per llm_call; if the same hash
-			// appears 3+ times in one execution, group as
-			// loops/identical_call. Runs BEFORE the injection check
-			// because a runaway loop generating the same prompt
+			// appears IdenticalCallMinRepeats+ times in one execution,
+			// group as loops/identical_call. Runs BEFORE the injection
+			// check because a runaway loop generating the same prompt
 			// repeatedly is a more urgent resource-waste signal than
 			// a single injection attempt embedded in the same prompt.
-			if callHash, found := scanForIdenticalCalls(evts, 3); found {
+			// loops-thresholds wave: per-project tunable (closes
+			// loops.G3); default 3 matches the historical hardcoded
+			// behavior.
+			if callHash, found := scanForIdenticalCalls(evts, detectorThresholds.Loops.IdenticalCallMinRepeats); found {
 				isNew, gErr := h.Store.GroupIdenticalCallLoop(r.Context(), executionID, authProjectID, callHash)
 				if gErr != nil {
 					h.Logger.Warn("identical-call grouping failed (continuing)",
@@ -1639,14 +1644,17 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// Sub-slice 81: similar-call loop detector. Catches the
 			// "stuck-loop with paraphrased prompts" pattern that
 			// identical_call misses, different exact text, same
-			// semantic intent, ≥3 near-duplicates within one
-			// execution. Runs AFTER identical_call so exact-text
-			// loops win the more-specific signature; only loops with
-			// varied wording reach this code path. Uses the same
-			// trigram substrate as drift v2.
+			// semantic intent, ≥ SimilarCallMinClusterSize near-
+			// duplicates within one execution. Runs AFTER identical_
+			// call so exact-text loops win the more-specific signature;
+			// only loops with varied wording reach this code path.
+			// Uses the same trigram substrate as drift v2. loops-
+			// thresholds wave: distance + cluster size both per-project
+			// tunable via DetectSimilarCallLoopWithThresholds (closes
+			// loops.G4). Defaults match the historical hardcoded behavior.
 			similarMsgs := extractLLMUserMessages(evts)
-			if len(similarMsgs) >= detectors.SimilarCallMinClusterSize {
-				if callHash, found := detectors.DetectSimilarCallLoop(similarMsgs); found {
+			if len(similarMsgs) >= detectorThresholds.Loops.SimilarCallMinClusterSize {
+				if callHash, found := detectors.DetectSimilarCallLoopWithThresholds(similarMsgs, detectorThresholds.Loops); found {
 					isNew, gErr := h.Store.GroupSimilarCallLoop(r.Context(), executionID, authProjectID, callHash)
 					if gErr != nil {
 						h.Logger.Warn("similar-call grouping failed (continuing)",

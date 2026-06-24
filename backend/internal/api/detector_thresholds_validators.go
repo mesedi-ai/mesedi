@@ -252,6 +252,91 @@ func init() {
 			return v, nil
 		},
 	})
+	// ─────────────────────────────────────────────────────────────
+	// Loops family — extends the Theme B primitive to a 4th detector
+	// family. Closes loops.G2 (step_count), loops.G3 (identical_call_
+	// loop), loops.G4 (similar_call_loop). All 4 knobs are pure
+	// alerting-sensitivity (no cost asymmetry across tiers — no tier
+	// caps). Defaults match the existing hardcoded values exactly so
+	// customers who never tune see byte-identical detector behavior.
+	// ─────────────────────────────────────────────────────────────
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "loops",
+		ThresholdKey: "step_count_threshold",
+		ValueType:    "int",
+		Description: "Total events per execution above which loops/" +
+			"step_count fires. Default 10 is artificially low for early-" +
+			"v0 demo visibility; iterative-refinement workflows that " +
+			"legitimately emit many events should raise this.",
+		Default: 10,
+		Parse: func(valueJSON, _ string) (any, error) {
+			v, err := parseIntJSON(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundInt(v, 2, 10000, "step_count_threshold"); err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "loops",
+		ThresholdKey: "identical_call_min_repeats",
+		ValueType:    "int",
+		Description: "How many times the same (model + user_message) " +
+			"LLM call must repeat before loops/identical_call_loop fires. " +
+			"Default 3 matches the loops-family threshold.",
+		Default: 3,
+		Parse: func(valueJSON, _ string) (any, error) {
+			v, err := parseIntJSON(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundInt(v, 2, 100, "identical_call_min_repeats"); err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "loops",
+		ThresholdKey: "similar_call_distance_threshold",
+		ValueType:    "float",
+		Description: "Cosine distance below which two LLM-call user " +
+			"messages are considered near-duplicates (lower = stricter; " +
+			"0.20 distance ≈ 80% similarity). Default 0.20.",
+		Default: 0.20,
+		Parse: func(valueJSON, _ string) (any, error) {
+			v, err := parseFloatJSON(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundFloat(v, 0.05, 0.50, "similar_call_distance_threshold"); err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "loops",
+		ThresholdKey: "similar_call_min_cluster_size",
+		ValueType:    "int",
+		Description: "How many near-duplicate LLM calls must cluster " +
+			"before loops/similar_call_loop fires. Default 3 matches " +
+			"the loops-family threshold.",
+		Default: 3,
+		Parse: func(valueJSON, _ string) (any, error) {
+			v, err := parseIntJSON(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundInt(v, 2, 100, "similar_call_min_cluster_size"); err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
 }
 
 // registerThresholdSpec adds a spec to the registry. Panics on

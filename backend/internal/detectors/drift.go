@@ -427,6 +427,38 @@ const (
 	SimilarCallMinClusterSize = 3
 )
 
+// LoopsThresholds carries the per-project tunable values for the
+// loops detector family (loops-thresholds wave). Closes loops.G2
+// (step_count), loops.G3 (identical_call_loop), loops.G4 (similar_
+// call_loop). Bundled in one struct because all four knobs live
+// under the single "loops" failure-class in the registry and travel
+// together through LoadProjectDetectorThresholds.
+//
+// step_count_threshold + identical_call_min_repeats are consumed
+// directly at the handler call site (literal comparisons in
+// handlers.go); similar_call_distance_threshold +
+// similar_call_min_cluster_size flow into
+// DetectSimilarCallLoopWithThresholds.
+type LoopsThresholds struct {
+	StepCountThreshold           int
+	IdenticalCallMinRepeats      int
+	SimilarCallDistanceThreshold float64
+	SimilarCallMinClusterSize    int
+}
+
+// DefaultLoopsThresholds returns the values that match the loops
+// family's historical hardcoded behavior. Used by call sites that
+// don't have per-project config available (legacy unit tests,
+// synthetic executions, the legacy DetectSimilarCallLoop wrapper).
+func DefaultLoopsThresholds() LoopsThresholds {
+	return LoopsThresholds{
+		StepCountThreshold:           10,
+		IdenticalCallMinRepeats:      3,
+		SimilarCallDistanceThreshold: SimilarCallDistanceThreshold,
+		SimilarCallMinClusterSize:    SimilarCallMinClusterSize,
+	}
+}
+
 // DetectSimilarCallLoop scans the execution's llm_call user_messages
 // and looks for clusters of near-duplicates. Returns:
 //
@@ -440,9 +472,35 @@ const (
 // Returns (empty, false) on:
 //   - fewer than SimilarCallMinClusterSize user_messages
 //   - no message has SimilarCallMinClusterSize-1 near-neighbors
+//
+// Preserved verbatim for backward compatibility with existing unit
+// tests + non-handler call sites. The production execution-close
+// path uses DetectSimilarCallLoopWithThresholds.
 func DetectSimilarCallLoop(userMessages []string) (callHash string, detected bool) {
+	return DetectSimilarCallLoopWithThresholds(userMessages, DefaultLoopsThresholds())
+}
+
+// DetectSimilarCallLoopWithThresholds is the per-project-aware
+// variant of DetectSimilarCallLoop. Reads SimilarCallDistanceThreshold
+// + SimilarCallMinClusterSize from t; falls back to defaults on
+// structurally-bad values that escaped the validators registry
+// (distance outside [0.05, 0.50] or cluster size < 2 reverts to
+// defaults). All other behavior identical to DetectSimilarCallLoop.
+func DetectSimilarCallLoopWithThresholds(
+	userMessages []string,
+	t LoopsThresholds,
+) (callHash string, detected bool) {
+	distance := t.SimilarCallDistanceThreshold
+	if distance < 0.05 || distance > 0.50 {
+		distance = SimilarCallDistanceThreshold
+	}
+	minCluster := t.SimilarCallMinClusterSize
+	if minCluster < 2 {
+		minCluster = SimilarCallMinClusterSize
+	}
+
 	n := len(userMessages)
-	if n < SimilarCallMinClusterSize {
+	if n < minCluster {
 		return "", false
 	}
 
@@ -470,11 +528,11 @@ func DetectSimilarCallLoop(userMessages []string) (callHash string, detected boo
 			if len(bags[j]) == 0 {
 				continue
 			}
-			if cosineDistance(bags[i], bags[j]) < SimilarCallDistanceThreshold {
+			if cosineDistance(bags[i], bags[j]) < distance {
 				neighbors++
 			}
 		}
-		if neighbors >= SimilarCallMinClusterSize {
+		if neighbors >= minCluster {
 			return topTrigramHash(bags[i]), true
 		}
 	}

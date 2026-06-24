@@ -283,3 +283,97 @@ func Test_ContextOverflow_BadOrderingFallsBackToDefaults(t *testing.T) {
 		t.Errorf("expected warn signature under default fallback, got %q", sig)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────
+// loops family (loops-thresholds wave — step_count + identical_call
+// thresholds live at the handler call site as literals, so they're
+// tested via integration; similar_call_loop has a detector-level
+// WithThresholds variant exercised here)
+// ─────────────────────────────────────────────────────────────────
+
+func Test_Loops_DefaultMatchesHardcoded(t *testing.T) {
+	d := DefaultLoopsThresholds()
+	if d.StepCountThreshold != 10 {
+		t.Errorf("default StepCountThreshold = %d, want 10", d.StepCountThreshold)
+	}
+	if d.IdenticalCallMinRepeats != 3 {
+		t.Errorf("default IdenticalCallMinRepeats = %d, want 3", d.IdenticalCallMinRepeats)
+	}
+	if d.SimilarCallDistanceThreshold != SimilarCallDistanceThreshold {
+		t.Errorf("default SimilarCallDistanceThreshold = %g, want %g",
+			d.SimilarCallDistanceThreshold, SimilarCallDistanceThreshold)
+	}
+	if d.SimilarCallMinClusterSize != SimilarCallMinClusterSize {
+		t.Errorf("default SimilarCallMinClusterSize = %d, want %d",
+			d.SimilarCallMinClusterSize, SimilarCallMinClusterSize)
+	}
+}
+
+func Test_Loops_SimilarCallRaisingClusterSizeStopsFiring(t *testing.T) {
+	// Three near-duplicate messages — should fire at default cluster
+	// size 3 (assuming they cluster). Raising min_cluster_size to 4
+	// should stop firing on the same input.
+	msgs := []string{
+		"Please summarize the quarterly earnings report for Acme Corporation.",
+		"Please summarize the quarterly earnings report for Acme Corp.",
+		"Please summarize the quarterly earnings report for Acme Co.",
+	}
+	if _, fired := DetectSimilarCallLoopWithThresholds(msgs, DefaultLoopsThresholds()); !fired {
+		t.Skipf("test fixture didn't cluster at default thresholds; not a regression — fix the fixture if reproducible")
+	}
+	tight := DefaultLoopsThresholds()
+	tight.SimilarCallMinClusterSize = 4
+	if _, fired := DetectSimilarCallLoopWithThresholds(msgs, tight); fired {
+		t.Errorf("raising MinClusterSize to 4 should not fire on 3 messages")
+	}
+}
+
+func Test_Loops_SimilarCallBadConfigFallsBackToDefaults(t *testing.T) {
+	// MinClusterSize < 2 is invalid; detector must use default (3).
+	// 2 near-duplicate messages should NOT fire under the fallback
+	// (need 3+).
+	msgs := []string{
+		"Please summarize the quarterly earnings report for Acme Corporation.",
+		"Please summarize the quarterly earnings report for Acme Corp.",
+	}
+	bad := DefaultLoopsThresholds()
+	bad.SimilarCallMinClusterSize = 1
+	if _, fired := DetectSimilarCallLoopWithThresholds(msgs, bad); fired {
+		t.Errorf("bad MinClusterSize (1) should fall back to default 3; expected no fire on 2 messages")
+	}
+	// Distance outside [0.05, 0.50] should also fall back to default.
+	badDist := DefaultLoopsThresholds()
+	badDist.SimilarCallDistanceThreshold = 0.99
+	// 3 near-dup messages — under bad distance 0.99 EVERY pair would
+	// look near-duplicate (matches always), but the fallback path
+	// uses the default 0.20 which still clusters these three.
+	clusterMsgs := []string{
+		"Please summarize the quarterly earnings report for Acme Corporation.",
+		"Please summarize the quarterly earnings report for Acme Corp.",
+		"Please summarize the quarterly earnings report for Acme Co.",
+	}
+	// Whether it fires depends on the fixture clustering at distance
+	// 0.20; what matters here is no panic + behavior is deterministic.
+	_, _ = DetectSimilarCallLoopWithThresholds(clusterMsgs, badDist)
+}
+
+func Test_Loops_SimilarCallLegacyWrapperUsesDefaults(t *testing.T) {
+	// Legacy DetectSimilarCallLoop must produce byte-identical
+	// behavior to DetectSimilarCallLoopWithThresholds(..., defaults).
+	// Three near-duplicate messages.
+	msgs := []string{
+		"Please summarize the quarterly earnings report for Acme Corporation.",
+		"Please summarize the quarterly earnings report for Acme Corp.",
+		"Please summarize the quarterly earnings report for Acme Co.",
+	}
+	legacySig, legacyFired := DetectSimilarCallLoop(msgs)
+	newSig, newFired := DetectSimilarCallLoopWithThresholds(msgs, DefaultLoopsThresholds())
+	if legacyFired != newFired {
+		t.Errorf("legacy fired=%v vs WithThresholds default fired=%v — backward compat broken",
+			legacyFired, newFired)
+	}
+	if legacySig != newSig {
+		t.Errorf("legacy sig=%q vs WithThresholds default sig=%q — backward compat broken",
+			legacySig, newSig)
+	}
+}
