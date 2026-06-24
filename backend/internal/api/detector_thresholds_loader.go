@@ -78,6 +78,11 @@ type ProjectDetectorThresholds struct {
 	// FindFirstDLPSignalForSeverities method to control which
 	// severities promote to a failure_group.
 	DataLeakage detectors.DataLeakageThresholds
+	// HITLTimeout carries the per-project fire-mode toggle
+	// (hitl_timeout.G4 wave). The handler passes it directly to
+	// DetectHITLTimeoutAllMatchesWithThresholds to control which
+	// timeout modes promote to failure_groups.
+	HITLTimeout detectors.HITLTimeoutThresholds
 }
 
 // DefaultProjectDetectorThresholds returns the all-defaults aggregate
@@ -96,6 +101,7 @@ func DefaultProjectDetectorThresholds() ProjectDetectorThresholds {
 		CascadingFailure:   detectors.DefaultCascadingFailureThresholds(),
 		HITLRejectionSpike: detectors.DefaultHITLRejectionSpikeThresholds(),
 		DataLeakage:        detectors.DefaultDataLeakageThresholds(),
+		HITLTimeout:        detectors.DefaultHITLTimeoutThresholds(),
 	}
 }
 
@@ -132,6 +138,7 @@ func LoadProjectDetectorThresholds(
 		"cascading_failure",
 		"hitl_rejection_spike",
 		"data_leakage",
+		"hitl_timeout",
 	} {
 		rows, err := st.ListProjectDetectorThresholds(ctx, projectID, detector)
 		if err != nil {
@@ -292,6 +299,12 @@ func applyDetectorThresholdValue(
 		if key == "severity_policy" {
 			if v, ok := value.([]string); ok {
 				out.DataLeakage.AllowedSeverities = v
+			}
+		}
+	case "hitl_timeout":
+		if key == "fire_modes" {
+			if v, ok := value.([]string); ok {
+				out.HITLTimeout.FireModes = v
 			}
 		}
 	}

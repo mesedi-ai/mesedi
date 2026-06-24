@@ -47,6 +47,10 @@ func Test_DetectorThresholds_RegistryHasExpectedDetectors(t *testing.T) {
 		// windows (first json-int-map ValueType usage). Unlocks
 		// detection for Ollama / fine-tuned models.
 		"context_overflow:custom_model_windows",
+		// hitl_timeout.G4 wave: per-project fire-mode toggle.
+		// Second consumer of the json-string-slice helpers from
+		// data_leakage.G5.
+		"hitl_timeout:fire_modes",
 	}
 	for _, key := range want {
 		if _, ok := detectorThresholdRegistry[key]; !ok {

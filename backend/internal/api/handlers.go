@@ -1517,7 +1517,11 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// conditions are present in the same execution. Legacy
 			// first-match-wins suppressed the SLA-exceeded view
 			// when an explicit timeout also fired.
-			sigs := detectors.DetectHITLTimeoutAllMatches(raw)
+			// hitl_timeout.G4 — per-project fire-mode toggle.
+			// Defaults `["explicit", "sla_exceeded"]` match historical
+			// posture; customers can mute either mode via the
+			// detector_thresholds primitive.
+			sigs := detectors.DetectHITLTimeoutAllMatchesWithThresholds(raw, detectorThresholds.HITLTimeout)
 			for _, sig := range sigs {
 				isNew, gErr := h.Store.GroupHITLTimeout(r.Context(), executionID, authProjectID, sig)
 				if gErr != nil {

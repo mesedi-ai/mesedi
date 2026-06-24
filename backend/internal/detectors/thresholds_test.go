@@ -448,6 +448,95 @@ func Test_HITLRejectionSpike_DefaultMatchesHardcoded(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// hitl_timeout fire modes (hitl_timeout.G4 wave)
+// ─────────────────────────────────────────────────────────────────
+
+func Test_HITLTimeout_DefaultMatchesHardcoded(t *testing.T) {
+	d := DefaultHITLTimeoutThresholds()
+	want := []string{"explicit", "sla_exceeded"}
+	if len(d.FireModes) != len(want) {
+		t.Errorf("default FireModes length = %d, want %d",
+			len(d.FireModes), len(want))
+	}
+	for i, m := range want {
+		if i >= len(d.FireModes) || d.FireModes[i] != m {
+			t.Errorf("default FireModes[%d] = %q, want %q",
+				i, d.FireModes[i], m)
+		}
+	}
+}
+
+func Test_HITLTimeout_ExplicitOnlyMutesSLA(t *testing.T) {
+	// Two payloads: one explicit timeout, one SLA breach. Default
+	// fires BOTH; explicit-only fires only the explicit sig.
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"response_kind":"timeout"}`),
+		json.RawMessage(`{"sla_seconds":60,"wait_duration_ms":120000,"response_kind":"approved"}`),
+	}
+	got := DetectHITLTimeoutAllMatchesWithThresholds(payloads, DefaultHITLTimeoutThresholds())
+	if len(got) != 2 {
+		t.Errorf("default fire_modes should produce 2 sigs; got %v", got)
+	}
+	explicitOnly := HITLTimeoutThresholds{FireModes: []string{"explicit"}}
+	got = DetectHITLTimeoutAllMatchesWithThresholds(payloads, explicitOnly)
+	if len(got) != 1 || got[0] != "hitl_timeout:explicit" {
+		t.Errorf("explicit-only fire_modes should produce only the explicit sig; got %v", got)
+	}
+}
+
+func Test_HITLTimeout_SLAOnlyMutesExplicit(t *testing.T) {
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"response_kind":"timeout"}`),
+		json.RawMessage(`{"sla_seconds":60,"wait_duration_ms":120000,"response_kind":"approved"}`),
+	}
+	slaOnly := HITLTimeoutThresholds{FireModes: []string{"sla_exceeded"}}
+	got := DetectHITLTimeoutAllMatchesWithThresholds(payloads, slaOnly)
+	if len(got) != 1 || got[0] != "hitl_timeout:sla_exceeded" {
+		t.Errorf("sla-only fire_modes should produce only the sla_exceeded sig; got %v", got)
+	}
+}
+
+func Test_HITLTimeout_BadFireModesFallsBackToDefault(t *testing.T) {
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"response_kind":"timeout"}`),
+		json.RawMessage(`{"sla_seconds":60,"wait_duration_ms":120000,"response_kind":"approved"}`),
+	}
+	bad := []HITLTimeoutThresholds{
+		{FireModes: nil},                              // nil → default
+		{FireModes: []string{}},                       // empty → default
+		{FireModes: []string{"typo"}},                 // invalid → default
+		{FireModes: []string{"explicit", "invalid"}},  // partial-bad → default
+	}
+	for _, c := range bad {
+		got := DetectHITLTimeoutAllMatchesWithThresholds(payloads, c)
+		if len(got) != 2 {
+			t.Errorf("bad FireModes %v should fall back to default (2 sigs); got %v",
+				c.FireModes, got)
+		}
+	}
+}
+
+func Test_HITLTimeout_LegacyWrapperUsesDefaults(t *testing.T) {
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"response_kind":"timeout"}`),
+		json.RawMessage(`{"sla_seconds":60,"wait_duration_ms":120000,"response_kind":"approved"}`),
+	}
+	legacy := DetectHITLTimeoutAllMatches(payloads)
+	withDef := DetectHITLTimeoutAllMatchesWithThresholds(payloads,
+		DefaultHITLTimeoutThresholds())
+	if len(legacy) != len(withDef) {
+		t.Errorf("legacy length=%d vs WithThresholds default length=%d — backward compat broken",
+			len(legacy), len(withDef))
+	}
+	for i := range legacy {
+		if legacy[i] != withDef[i] {
+			t.Errorf("legacy[%d]=%q vs WithThresholds default[%d]=%q — backward compat broken",
+				i, legacy[i], i, withDef[i])
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────
 // context_overflow custom model windows (context_overflow.G3 wave)
 // ─────────────────────────────────────────────────────────────────
 

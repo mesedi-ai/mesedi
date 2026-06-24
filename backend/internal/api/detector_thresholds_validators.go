@@ -425,6 +425,39 @@ func init() {
 			return v, nil
 		},
 	})
+	// hitl_timeout.G4 — per-project fire-mode toggle. Closed set
+	// ["explicit", "sla_exceeded"]; default both fire (matches the
+	// historical hardcoded behavior). Customers can opt out of
+	// either mode when their stack pages explicit timeouts via a
+	// different channel or when SLA breaches are too noisy.
+	// Second consumer of parseJSONStringSlice + boundStringSliceSubset
+	// after data_leakage.G5.
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "hitl_timeout",
+		ThresholdKey: "fire_modes",
+		ValueType:    "json",
+		Description: "HITL timeout firing modes the detector " +
+			"promotes to failure_groups. Closed set " +
+			"[\"explicit\", \"sla_exceeded\"]. Default both fire — " +
+			"matches the historical hardcoded posture. Restrict to " +
+			"[\"explicit\"] to mute SLA-exceeded clusters (e.g. " +
+			"projects where SLA tracking lives outside Mesedi) or " +
+			"[\"sla_exceeded\"] to mute the explicit-timeout " +
+			"cluster (rare — usually treated as control flow).",
+		Default: []string{"explicit", "sla_exceeded"},
+		Parse: func(valueJSON, _ string) (any, error) {
+			v, err := parseJSONStringSlice(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundStringSliceSubset(v,
+				[]string{"explicit", "sla_exceeded"},
+				"fire_modes"); err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
 	// context_overflow.G3 — per-project custom model windows. Unlocks
 	// detection coverage for Ollama / fine-tuned models that aren't
 	// in the static models.ContextWindow registry. Customer overrides
