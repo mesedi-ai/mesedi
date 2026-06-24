@@ -247,6 +247,10 @@ func applyDetectorThresholdValue(
 			if v, ok := value.(float64); ok {
 				out.ContextOverflow.CriticalPct = v
 			}
+		case "custom_model_windows":
+			if v, ok := value.(map[string]int); ok {
+				out.ContextOverflow.CustomModelWindows = v
+			}
 		}
 	case "loops":
 		switch key {

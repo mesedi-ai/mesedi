@@ -425,6 +425,37 @@ func init() {
 			return v, nil
 		},
 	})
+	// context_overflow.G3 — per-project custom model windows. Unlocks
+	// detection coverage for Ollama / fine-tuned models that aren't
+	// in the static models.ContextWindow registry. Customer overrides
+	// win even for KNOWN models (the customer knows their effective
+	// window — e.g. behind an upstream proxy with a tighter limit —
+	// better than the registry). NO tier cap — observability of
+	// self-hosted models is a Hobby-tier feature.
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "context_overflow",
+		ThresholdKey: "custom_model_windows",
+		ValueType:    "json",
+		Description: "Per-model context window overrides keyed by " +
+			"model_id → window_tokens. Wins over the static model " +
+			"registry. Use to unlock context_overflow detection for " +
+			"Ollama or fine-tuned models, or to enforce a tighter " +
+			"window for known models behind a proxy. " +
+			"Default empty map; per-entry bounds [1024, 10_000_000] " +
+			"tokens; max 50 entries; model_id ≤ 200 chars without " +
+			"colon or whitespace (signature stability).",
+		Default: map[string]int{},
+		Parse: func(valueJSON, _ string) (any, error) {
+			m, err := parseJSONIntMap(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundJSONIntMap(m, 50, 1024, 10_000_000, "custom_model_windows"); err != nil {
+				return nil, err
+			}
+			return m, nil
+		},
+	})
 	// data_leakage.G5 — per-project severity-firing policy. Closed
 	// set ["critical", "high", "medium"]; default ["critical", "high"]
 	// matches the historical hardcoded posture in
@@ -661,6 +692,55 @@ func boundStringSliceSubset(s, allowed []string, name string) error {
 		if _, ok := allowSet[v]; !ok {
 			return fmt.Errorf("%s contains invalid value %q; "+
 				"allowed values: %v", name, v, allowed)
+		}
+	}
+	return nil
+}
+
+// parseJSONIntMap unmarshals a JSON-encoded object whose values are
+// integers. Used by context_overflow.G3 for the custom_model_windows
+// knob (model_id → window_tokens); generic enough for any future
+// per-key-int knob (e.g. per-tool token budgets, per-provider rate-
+// limit caps).
+func parseJSONIntMap(valueJSON string) (map[string]int, error) {
+	valueJSON = strings.TrimSpace(valueJSON)
+	if valueJSON == "" {
+		return nil, fmt.Errorf("empty value")
+	}
+	var m map[string]int
+	if err := json.Unmarshal([]byte(valueJSON), &m); err != nil {
+		return nil, fmt.Errorf("expected object {string: integer}, got %q: %w", valueJSON, err)
+	}
+	if m == nil {
+		m = map[string]int{}
+	}
+	return m, nil
+}
+
+// boundJSONIntMap enforces structural bounds on a parsed int-valued
+// map: max key count + per-value range + per-key shape (≤200 chars
+// without colon or whitespace, so the model_id can compose into the
+// signature `context_overflow:<level>:<model_id>` without parsing
+// hazards). The 200-char + no-colon constraints are general enough
+// to reuse for future per-key-int knobs whose keys appear in
+// failure_group signatures.
+func boundJSONIntMap(m map[string]int, maxKeys, lo, hi int, name string) error {
+	if len(m) > maxKeys {
+		return fmt.Errorf("%s map has %d entries; max is %d",
+			name, len(m), maxKeys)
+	}
+	for k, v := range m {
+		if v < lo || v > hi {
+			return fmt.Errorf("%s[%s]=%d out of range [%d, %d]",
+				name, k, v, lo, hi)
+		}
+		if len(k) == 0 || len(k) > 200 {
+			return fmt.Errorf("%s key %q has length %d; max 200, min 1",
+				name, k, len(k))
+		}
+		if strings.ContainsAny(k, ": \t\n\r") {
+			return fmt.Errorf("%s key %q contains forbidden character "+
+				"(colon or whitespace); these break signature parsing", name, k)
 		}
 	}
 	return nil

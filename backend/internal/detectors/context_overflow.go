@@ -52,20 +52,44 @@ const (
 )
 
 // ContextOverflowThresholds carries the per-project tunable values
-// for this detector (Theme B.b). HighPct + CriticalPct default to
+// for this detector. HighPct + CriticalPct (Theme B.b) default to
 // the historical 0.90 / 1.00 for customers who don't tune.
+// CustomModelWindows (context_overflow.G3 wave) maps customer-known
+// model_ids to their effective context window in tokens; overrides
+// win over the static models.ContextWindow registry. Defaults to
+// empty map → every lookup falls through to the registry, matching
+// historical behavior.
 type ContextOverflowThresholds struct {
-	HighPct     float64
-	CriticalPct float64
+	HighPct            float64
+	CriticalPct        float64
+	CustomModelWindows map[string]int
 }
 
 // DefaultContextOverflowThresholds returns the historical hardcoded
-// defaults.
+// defaults. CustomModelWindows defaults to nil — equivalent to an
+// empty map; every model lookup falls through to the registry.
 func DefaultContextOverflowThresholds() ContextOverflowThresholds {
 	return ContextOverflowThresholds{
 		HighPct:     contextOverflowWarnPct,
 		CriticalPct: contextOverflowFailPct,
 	}
+}
+
+// effectiveContextWindow returns the customer's per-project override
+// for the given model_id when present and in bounds, else the static
+// registry's value. (0, false) when neither has a window for the
+// model — caller treats that as "skip detection for this model".
+// Defensive: customer-override values outside [1024, 10_000_000]
+// fall through to the registry (validators registry rejects these
+// at write time; we re-validate at read time for safety against
+// any value that escaped the gate).
+func (t ContextOverflowThresholds) effectiveContextWindow(model string) (int, bool) {
+	if t.CustomModelWindows != nil {
+		if w, ok := t.CustomModelWindows[model]; ok && w >= 1024 && w <= 10_000_000 {
+			return w, true
+		}
+	}
+	return models.ContextWindow(model)
 }
 
 // DetectContextOverflow walks the supplied llm_call payloads and
@@ -124,7 +148,11 @@ func DetectContextOverflowWithThresholds(
 	worstModel := ""
 	worstPct := 0.0
 	for model, tokens := range highWater {
-		window, ok := models.ContextWindow(model)
+		// context_overflow.G3 — customer override wins over the
+		// static registry. Unknown models with no override silently
+		// skip detection (same posture as before; the override path
+		// is what unlocks coverage for Ollama / fine-tuned models).
+		window, ok := t.effectiveContextWindow(model)
 		if !ok {
 			continue
 		}

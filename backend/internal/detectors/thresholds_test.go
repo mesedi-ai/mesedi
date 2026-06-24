@@ -448,6 +448,74 @@ func Test_HITLRejectionSpike_DefaultMatchesHardcoded(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// context_overflow custom model windows (context_overflow.G3 wave)
+// ─────────────────────────────────────────────────────────────────
+
+func Test_ContextOverflow_CustomWindowFiresOnUnknownModel(t *testing.T) {
+	// Model not in the static registry — without override, detector
+	// skips. With customer override, detector fires at 95% utilization.
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"model":"ollama-llama3-70b","input_tokens":7600}`),
+	}
+	// No override → no fire (model unknown to registry).
+	if _, fired := DetectContextOverflowWithThresholds(payloads, DefaultContextOverflowThresholds()); fired {
+		t.Errorf("unknown model without override should not fire")
+	}
+	// With 8000-token override → 7600/8000 = 0.95 > warn 0.90 → fires.
+	custom := DefaultContextOverflowThresholds()
+	custom.CustomModelWindows = map[string]int{"ollama-llama3-70b": 8000}
+	sig, fired := DetectContextOverflowWithThresholds(payloads, custom)
+	if !fired {
+		t.Errorf("custom window 8000 + tokens 7600 should fire warn")
+	}
+	if !strings.Contains(sig, "ollama-llama3-70b") {
+		t.Errorf("signature should carry custom model id; got %q", sig)
+	}
+}
+
+func Test_ContextOverflow_CustomWindowOverridesRegistryForKnownModel(t *testing.T) {
+	// claude-opus-4-6 has 200K registry window. 130K input = 65% →
+	// no fire at default. With customer override to 140K (e.g.
+	// behind a proxy), 130/140 = 92.8% → fires warn.
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"model":"claude-opus-4-6","input_tokens":130000}`),
+	}
+	if _, fired := DetectContextOverflowWithThresholds(payloads, DefaultContextOverflowThresholds()); fired {
+		t.Errorf("130K tokens at 200K registry window should not fire (65%%)")
+	}
+	custom := DefaultContextOverflowThresholds()
+	custom.CustomModelWindows = map[string]int{"claude-opus-4-6": 140000}
+	sig, fired := DetectContextOverflowWithThresholds(payloads, custom)
+	if !fired {
+		t.Errorf("override 140K + tokens 130K should fire warn (92.8%%)")
+	}
+	if !strings.Contains(sig, "claude-opus-4-6") {
+		t.Errorf("signature should carry the known model id; got %q", sig)
+	}
+}
+
+func Test_ContextOverflow_BadCustomWindowFallsThrough(t *testing.T) {
+	// Customer override outside [1024, 10_000_000] should fall
+	// through to the registry. Use a known model so we can verify
+	// the registry path runs (no fire at 65% util).
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"model":"claude-opus-4-6","input_tokens":130000}`),
+	}
+	cases := []map[string]int{
+		{"claude-opus-4-6": 0},          // below floor
+		{"claude-opus-4-6": 500},        // below floor
+		{"claude-opus-4-6": 20_000_000}, // above ceiling
+	}
+	for _, c := range cases {
+		bad := DefaultContextOverflowThresholds()
+		bad.CustomModelWindows = c
+		if _, fired := DetectContextOverflowWithThresholds(payloads, bad); fired {
+			t.Errorf("bad override %v should fall through to registry (65%% util at 200K window — no fire); fired anyway", c)
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────
 // data_leakage severity policy (data_leakage.G5 wave)
 // ─────────────────────────────────────────────────────────────────
 

@@ -43,6 +43,10 @@ func Test_DetectorThresholds_RegistryHasExpectedDetectors(t *testing.T) {
 		// data_leakage.G5 wave: per-project severity-firing policy
 		// (closed set; first json-string-slice ValueType usage).
 		"data_leakage:severity_policy",
+		// context_overflow.G3 wave: per-project custom model
+		// windows (first json-int-map ValueType usage). Unlocks
+		// detection for Ollama / fine-tuned models.
+		"context_overflow:custom_model_windows",
 	}
 	for _, key := range want {
 		if _, ok := detectorThresholdRegistry[key]; !ok {
