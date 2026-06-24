@@ -30,6 +30,43 @@ HERE = Path(__file__).resolve().parent
 BACKEND_DIR = HERE.parent.parent
 REPO_ROOT = BACKEND_DIR.parent
 
+
+def pytest_sessionstart(session):  # noqa: ARG001 — pytest hook signature requires `session` even when unused
+    """semantic_loop.G3 release-gate: enforce that every detector
+    in Mesedi's canonical 20-detector list has at least one
+    non-skipped real-SDK integration test in this directory.
+
+    Runs once at the start of the integration-test session — fails
+    fast before any binary boot if the detector ↔ test mapping is
+    broken. Adding a new detector to Mesedi without a matching test
+    now fails the build.
+
+    Lives here (and not in the script's own __main__) so the gate
+    runs automatically as part of `pytest backend/test/integration`
+    — devs don't have to remember to invoke it separately. The
+    underlying check is implemented in tools/check_detector_test_
+    coverage.py; this hook just dispatches to it.
+    """
+    script = REPO_ROOT / "tools" / "check_detector_test_coverage.py"
+    if not script.exists():
+        # Skip-rather-than-fail when the script is missing — devs
+        # running tests against an old branch shouldn't get blocked
+        # by a script that doesn't exist yet on their side.
+        return
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        pytest.exit(
+            "Detector test coverage gate failed — see stderr above. "
+            "Resolution lives in the script's failure output.",
+            returncode=result.returncode,
+        )
+
 # Binary build cache. Built once per pytest session.
 BUILT_BINARY = HERE / ".build" / "mesedi-api-test"
 
