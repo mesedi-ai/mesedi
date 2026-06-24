@@ -31,17 +31,23 @@ func (s *PostgresStore) GetToolReturnValueStats(
 	// in Postgres but the SUM(CASE) form is portable enough to
 	// stay in lock-step with the SQLite twin and avoids subtle
 	// differences in COUNT semantics.
+	//
+	// COALESCE wraps every SUM(CASE...) because Postgres returns NULL
+	// when SUM runs over zero matching rows (zero tool_call events in
+	// the window). Without COALESCE, Scan into a non-pointer int errors
+	// with "converting NULL to int is unsupported" and the handler 500s.
+	// COUNT(*) is unaffected (it returns 0, not NULL).
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*) AS total,
-			SUM(CASE
+			COALESCE(SUM(CASE
 				WHEN ev.payload->>'return_value' = '<truncated>'
 				THEN 1 ELSE 0
-			END) AS truncated,
-			SUM(CASE
+			END), 0) AS truncated,
+			COALESCE(SUM(CASE
 				WHEN octet_length(ev.payload->>'return_value') > $1
 				THEN 1 ELSE 0
-			END) AS oversized
+			END), 0) AS oversized
 		FROM events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = $2

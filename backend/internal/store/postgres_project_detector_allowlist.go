@@ -192,12 +192,18 @@ func (s *PostgresStore) GetAllowlistStats(
 	ctx context.Context,
 	projectID string,
 ) ([]AllowlistDetectorStats, error) {
+	// COALESCE wraps SUM(CASE...) for parity with the always-non-NULL
+	// guarantee we hold for every SUM aggregate in stats queries. GROUP
+	// BY makes the practical NULL risk negligible here (emitted groups
+	// are non-empty by definition) but the discipline is the discipline:
+	// every SUM in a stats path is COALESCE'd so future schema changes
+	// or null-tolerant column types can't reintroduce a Scan-NULL crash.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 		  detector,
 		  COUNT(*) AS entry_count,
 		  COALESCE(SUM(match_count), 0) AS total_match_count,
-		  SUM(CASE WHEN match_count = 0 THEN 1 ELSE 0 END) AS dormant_count
+		  COALESCE(SUM(CASE WHEN match_count = 0 THEN 1 ELSE 0 END), 0) AS dormant_count
 		FROM project_detector_allowlist
 		WHERE project_id = $1
 		GROUP BY detector

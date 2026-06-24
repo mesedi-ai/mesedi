@@ -45,17 +45,24 @@ func (s *SQLiteStore) GetToolReturnValueStats(
 	// One query, three filtered aggregates. Excludes failed
 	// tool_call events because schema_drift only operates on
 	// successful returns.
+	//
+	// COALESCE wraps every SUM(CASE...) because SQLite returns NULL
+	// when SUM runs over zero matching rows (zero tool_call events in
+	// the window — the synthetic-customer's normal state most of the
+	// day). Without COALESCE, Scan into a non-pointer int errors with
+	// "converting NULL to int is unsupported" and the handler 500s.
+	// COUNT(*) is unaffected (it returns 0, not NULL).
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*) AS total,
-			SUM(CASE
-				WHEN json_extract(ev.payload, '$.return_value') = '"<truncated>"'
+			COALESCE(SUM(CASE
+				WHEN json_extract(ev.payload, '$.return_value') = '<truncated>'
 				THEN 1 ELSE 0
-			END) AS truncated,
-			SUM(CASE
+			END), 0) AS truncated,
+			COALESCE(SUM(CASE
 				WHEN length(json_extract(ev.payload, '$.return_value')) > ?
 				THEN 1 ELSE 0
-			END) AS oversized
+			END), 0) AS oversized
 		FROM events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = ?
