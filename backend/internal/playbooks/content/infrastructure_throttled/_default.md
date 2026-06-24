@@ -37,3 +37,8 @@ After deploying the fix, watch the failure_group's last_seen timestamp. New thro
 ## A note on this being an operations signal
 
 Throttling is not a code bug, and the right people to triage it are operations or platform engineering, not the agent developer. Mesedi flags it distinctly from generic tool failures so triage routing can fork on the failure_class.
+
+## Related detectors
+
+- **`provider_incident:rate_limited`** is the sibling cross-tenant signal. If multiple unrelated Mesedi projects all see rate-limited errors against the same provider in the same window, the cause is provider-side and the playbook is "wait for the provider to recover," not "tune your retry logic." `infrastructure_throttled` is YOUR project's per-tenant view; `provider_incident` is the cross-tenant view. Open both pages side-by-side when triaging — if the provider_incident group is active, your local backoff and quota changes will not help until the provider stabilizes.
+- **`cost_velocity`** is the financial sibling. Throttling and high spend often correlate (more calls per minute → both more throttled retries AND more dollars per minute). Cross-reference to identify whether the same code path is driving both.

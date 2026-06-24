@@ -39,3 +39,8 @@ After deploying, the deadlock failure_group should plateau. A subtler signal tha
 ## A note on detection scope
 
 The detector finds 2-cycles only in v1 (A→B and B→A). Longer cycles (A→B→C→A) are possible in principle but rarer in practice and require Tarjan's algorithm to detect; v1 does not implement this. Most deadlocks customers see in real multi-agent systems are 2-cycles, so v1 covers the common case. If you suspect a longer cycle and the detector did not fire, open an issue with the topology graph as a starting point.
+
+## Related detectors
+
+- **`cascading_failure`** is the parallel multi-agent signal — instead of two agents waiting on each other (deadlock), one agent crashes and the parent inherits the failure (cascade). Both detectors consume the same `agent_handoff` events but answer different questions. If your topology has multiple handoffs and you're seeing one of these groups, check the other: a deadlock that times out can also trigger a cascading_failure when the timing-out side counts as a child terminal failure. Open both failure_groups for the same execution side-by-side to determine the root cause (deadlock first, cascade second is the usual reading).
+- **`hitl_timeout`** is the human-in-the-loop sibling. When the cycle includes a step that asks a human reviewer to break the tie and the human never responds, you may see both a coordination_deadlock and an hitl_timeout. The hitl_timeout is usually the root cause and the deadlock the symptom.
