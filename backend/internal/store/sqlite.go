@@ -2725,45 +2725,55 @@ func (s *SQLiteStore) SetExecutionCost(
 // Uses SQLite's JSON1 extension (json_extract) so we don't have to
 // scan-and-unmarshal Go-side. The events table's payload column is
 // stored as BLOB but JSON1 reads it transparently as JSON text.
-func (s *SQLiteStore) FindFirstFailedToolName(
+func (s *SQLiteStore) FindFirstFailedTool(
 	ctx context.Context,
 	executionID string,
-) (string, error) {
-	var toolName sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT json_extract(payload, '$.tool_name')
+) (toolName, exceptionType string, err error) {
+	var name sql.NullString
+	var exc sql.NullString
+	err = s.db.QueryRowContext(ctx, `
+		SELECT json_extract(payload, '$.tool_name'),
+		       json_extract(payload, '$.exception_type')
 		FROM events
 		WHERE execution_id = ?
 		  AND event_type = 'tool_call'
 		  AND json_extract(payload, '$.status') = 'failed'
 		ORDER BY sequence ASC
 		LIMIT 1
-	`, executionID).Scan(&toolName)
+	`, executionID).Scan(&name, &exc)
 	if err == sql.ErrNoRows {
-		return "", nil
+		return "", "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("find first failed tool: %w", err)
+		return "", "", fmt.Errorf("find first failed tool: %w", err)
 	}
-	if !toolName.Valid {
-		return "", nil
+	if !name.Valid {
+		return "", "", nil
 	}
-	return toolName.String, nil
+	if exc.Valid {
+		exceptionType = exc.String
+	}
+	return name.String, exceptionType, nil
 }
 
 // GroupToolFailure upserts a failure_group with
-// failure_class=tool_failures and signature=toolName. Same idempotency
+// failure_class=tool_failures and signature=signature. Same idempotency
 // contract as the other groupers, if the execution is already linked
 // to a higher-priority group (crash, time-budget, step-count), this is
 // a no-op.
+//
+// granular-sig wave: signature is now "<tool>:<exception_type>" when
+// the caller has access to exception_type from the failed tool_call
+// event; falls back to "<tool>" for backward compat. The store layer
+// is signature-agnostic — concat happens in the handler.
 func (s *SQLiteStore) GroupToolFailure(
 	ctx context.Context,
-	executionID, projectID, toolName string,
+	executionID, projectID, signature string,
 ) (isNew bool, err error) {
-	if toolName == "" {
-		return false, fmt.Errorf("toolName required")
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
 	}
-	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassToolFailures, toolName)
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassToolFailures, signature)
 }
 
 // FindFirstThrottlingSignal returns the cluster signature derived
@@ -3550,32 +3560,37 @@ func (s *SQLiteStore) GetExecutionTopology(
 func (s *SQLiteStore) FindFirstFailedValidator(
 	ctx context.Context,
 	executionID string,
-) (validatorName, severityHint string, err error) {
+) (validatorName, severityHint, category string, err error) {
 	var name sql.NullString
 	var sev sql.NullString
+	var cat sql.NullString
 	err = s.db.QueryRowContext(ctx, `
 		SELECT json_extract(payload, '$.name'),
-		       json_extract(payload, '$.severity')
+		       json_extract(payload, '$.severity'),
+		       json_extract(payload, '$.category')
 		FROM events
 		WHERE execution_id = ?
 		  AND event_type = 'validator_result'
 		  AND json_extract(payload, '$.passed') = 0
 		ORDER BY sequence ASC
 		LIMIT 1
-	`, executionID).Scan(&name, &sev)
+	`, executionID).Scan(&name, &sev, &cat)
 	if err == sql.ErrNoRows {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("find first failed validator: %w", err)
+		return "", "", "", fmt.Errorf("find first failed validator: %w", err)
 	}
 	if !name.Valid {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	if sev.Valid {
 		severityHint = sev.String
 	}
-	return name.String, severityHint, nil
+	if cat.Valid {
+		category = cat.String
+	}
+	return name.String, severityHint, category, nil
 }
 
 // UpdateFailureGroupSeverityHint writes severity_hint on an existing

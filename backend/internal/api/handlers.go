@@ -1049,27 +1049,36 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// that BOTH had a failed tool AND was a runaway loop classifies
 	// as the loop (loops are higher-priority, they waste more).
 	if isTerminalStatus(patch.Status) {
-		toolName, err := h.Store.FindFirstFailedToolName(r.Context(), executionID)
+		toolName, exceptionType, err := h.Store.FindFirstFailedTool(r.Context(), executionID)
 		if err != nil {
 			h.Logger.Warn("find failed tool for detection failed",
 				"execution_id", executionID,
 				"error", err.Error(),
 			)
 		} else if toolName != "" {
+			// granular-sig wave: signature is "<tool>:<exception_type>"
+			// when the SDK reported exception_type on the failing
+			// tool_call event; falls back to bare "<tool>" for legacy
+			// tool_call events that pre-date exception_type capture.
+			// Allowlist matching still happens on the BARE tool_name
+			// (customer allowlists "my_search_tool", not
+			// "my_search_tool:ConnectionError") so the existing
+			// closure of tool_failures.G4 keeps working unchanged.
+			toolSig := toolFailureSignature(toolName, exceptionType)
 			// Allowlist.b: customer allowlist by tool_name suppresses
 			// detection for known-flaky tools. Closes tool_failures.G4.
 			if h.checkAllowlistAndMaybeSkip(r, authProjectID, "tool_failures", toolName) {
 				// Suppressed; skip grouping + webhook.
 			} else {
-				isNew, gErr := h.Store.GroupToolFailure(r.Context(), executionID, authProjectID, toolName)
+				isNew, gErr := h.Store.GroupToolFailure(r.Context(), executionID, authProjectID, toolSig)
 				if gErr != nil {
 					h.Logger.Warn("tool-failure grouping failed (continuing)",
 						"execution_id", executionID,
-						"tool_name", toolName,
+						"tool_signature", toolSig,
 						"error", gErr.Error(),
 					)
 				}
-				h.maybeFireWebhook(r, authProjectID, store.FailureClassToolFailures, toolName, isNew, gErr)
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassToolFailures, toolSig, isNew, gErr)
 			}
 		}
 	}
@@ -1184,13 +1193,22 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// tool-failures, the agent ran to completion but produced output
 	// that a downstream quality check failed.
 	if isTerminalStatus(patch.Status) {
-		validatorName, severityHint, err := h.Store.FindFirstFailedValidator(r.Context(), executionID)
+		validatorName, severityHint, category, err := h.Store.FindFirstFailedValidator(r.Context(), executionID)
 		if err != nil {
 			h.Logger.Warn("find failed validator for detection failed",
 				"execution_id", executionID,
 				"error", err.Error(),
 			)
 		} else if validatorName != "" {
+			// granular-sig wave: signature is "<name>:<category>" when
+			// the SDK customer supplied an optional category arg to
+			// validator_result(); falls back to bare "<name>" when
+			// category absent (backward compat — existing customers
+			// who don't opt in see zero behavior change). Allowlist
+			// matching still happens on the BARE validator_name so
+			// the existing closure of validator_failures.G5 keeps
+			// working unchanged.
+			validatorSig := validatorFailureSignature(validatorName, category)
 			// Allowlist.b: customer allowlist by validator_name
 			// suppresses detection for known-flaky validators.
 			// Closes validator_failures.G5. When suppressed, also
@@ -1199,11 +1217,11 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			if h.checkAllowlistAndMaybeSkip(r, authProjectID, "validator_failures", validatorName) {
 				// Suppressed; skip grouping + severity_hint + webhook.
 			} else {
-				isNew, gErr := h.Store.GroupValidatorFailure(r.Context(), executionID, authProjectID, validatorName)
+				isNew, gErr := h.Store.GroupValidatorFailure(r.Context(), executionID, authProjectID, validatorSig)
 				if gErr != nil {
 					h.Logger.Warn("validator-failure grouping failed (continuing)",
 						"execution_id", executionID,
-						"validator_name", validatorName,
+						"validator_signature", validatorSig,
 						"error", gErr.Error(),
 					)
 				}
@@ -1214,7 +1232,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				// failure here doesn't suppress the failure_group itself.
 				if gErr == nil && severityHint != "" {
 					groupID := store.DeriveFailureGroupID(
-						authProjectID, store.FailureClassValidator, validatorName,
+						authProjectID, store.FailureClassValidator, validatorSig,
 					)
 					if hErr := h.Store.UpdateFailureGroupSeverityHint(
 						r.Context(), groupID, severityHint,
@@ -1226,7 +1244,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 						)
 					}
 				}
-				h.maybeFireWebhook(r, authProjectID, store.FailureClassValidator, validatorName, isNew, gErr)
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassValidator, validatorSig, isNew, gErr)
 			}
 		}
 	}

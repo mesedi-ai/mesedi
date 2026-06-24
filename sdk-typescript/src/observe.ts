@@ -24,6 +24,11 @@ import { currentExecutionContext, newEventId } from "./context.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
 
 const MAX_VALIDATOR_MSG = 500;
+// Granular-signature wave: customer-supplied validator category gets
+// concatenated into the failure_group signature backend-side as
+// "<name>:<category>". 80 chars matches the backend's
+// signaturePartMaxLen helper; longer values are truncated client-side.
+const MAX_VALIDATOR_CATEGORY = 80;
 
 /**
  * Emit a `checkpoint` event marking a notable point in execution.
@@ -69,6 +74,18 @@ export type ValidatorSeverity = "warning" | "error" | "critical";
 export interface ValidatorResultOptions {
   message?: string;
   severity?: ValidatorSeverity;
+  /**
+   * Optional sub-classification of WHY the validator failed (e.g.
+   * "schema_mismatch", "hallucination", "missing_required_field").
+   * Granular-signature wave: when supplied, the backend concatenates
+   * it into the failure_group signature as "<name>:<category>" so a
+   * single `quality_check` validator failing for 50 different reasons
+   * surfaces as 50 clusters instead of one impossibly-coarse cluster.
+   * Truncated to 80 chars client-side + control characters stripped
+   * backend-side. Backward-compat: omitting `category` (the default)
+   * preserves the original "<name>"-only signature shape.
+   */
+  category?: string;
 }
 
 /**
@@ -104,6 +121,12 @@ export function validatorResult(
   const payload: Record<string, unknown> = { name, passed, severity };
   if (opts.message) {
     payload["message"] = opts.message.slice(0, MAX_VALIDATOR_MSG);
+  }
+  if (opts.category) {
+    // Truncate client-side so the wire payload stays bounded;
+    // backend re-sanitizes (strips control chars + re-caps) as
+    // defense-in-depth.
+    payload["category"] = opts.category.slice(0, MAX_VALIDATOR_CATEGORY);
   }
 
   const client = getClient();

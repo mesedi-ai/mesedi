@@ -1629,16 +1629,29 @@ type Store interface {
 	// execution. Called after the cost-aggregator sums LLM tokens from
 	// events. No-op if the value is non-positive.
 	SetExecutionCost(ctx context.Context, executionID string, cost float64) error
-	// FindFirstFailedToolName returns the tool_name of the first
-	// tool_call event with payload.status="failed" in this execution,
-	// or empty string if no failed tool calls exist. Used by the
-	// tool-failures detector to classify executions where a tool
-	// failed silently (agent caught the exception, ran to completion).
-	FindFirstFailedToolName(ctx context.Context, executionID string) (string, error)
+	// FindFirstFailedTool returns the tool_name AND exception_type
+	// of the first tool_call event with payload.status="failed" in
+	// this execution, or empty strings if no failed tool calls
+	// exist. Used by the tool-failures detector to classify
+	// executions where a tool failed silently (agent caught the
+	// exception, ran to completion).
+	//
+	// granular-sig wave: exception_type is the Python exception
+	// class name the SDK captured on the failing tool_call (e.g.
+	// "RuntimeError", "ConnectionError", "ValidationError"). The
+	// handler concatenates it into the failure_group signature as
+	// "<tool>:<exception_type>" so tools failing in N distinct ways
+	// surface as N clusters instead of one.
+	//
+	// exception_type may be empty for legacy tool_call events that
+	// pre-date the SDK's exception_type capture. In that case the
+	// handler falls back to the bare "<tool>" signature shape for
+	// backward compat.
+	FindFirstFailedTool(ctx context.Context, executionID string) (toolName, exceptionType string, err error)
 	// GroupToolFailure upserts a failure_group with
-	// failure_class=tool_failures and signature=toolName. Returns
+	// failure_class=tool_failures and signature=signature. Returns
 	// isNew=true on first occurrence.
-	GroupToolFailure(ctx context.Context, executionID, projectID, toolName string) (bool, error)
+	GroupToolFailure(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// FindFirstThrottlingSignal returns the pre-assembled cluster
 	// signature for the first infrastructure_event row on this
 	// execution, or empty string if none exist. The signature is
@@ -1843,7 +1856,13 @@ type Store interface {
 	// "error", "critical"} or empty when the SDK is older than the
 	// fix. Empty means "no hint"; resolution falls through to class
 	// default.
-	FindFirstFailedValidator(ctx context.Context, executionID string) (validatorName, severityHint string, err error)
+	// granular-sig wave: also returns the optional `category` field
+	// the SDK now lets customers attach to validator_result calls.
+	// The handler concatenates it into the failure_group signature
+	// as "<validatorName>:<category>" when present (forward-only;
+	// callers not supplying category continue to land under the
+	// bare "<validatorName>" signature shape for backward compat).
+	FindFirstFailedValidator(ctx context.Context, executionID string) (validatorName, severityHint, category string, err error)
 	// GroupValidatorFailure upserts a failure_group with
 	// failure_class=validator_failures and signature=validatorName.
 	GroupValidatorFailure(ctx context.Context, executionID, projectID, validatorName string) (bool, error)

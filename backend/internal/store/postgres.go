@@ -2056,37 +2056,42 @@ func (s *PostgresStore) SetExecutionCost(ctx context.Context, executionID string
 	return nil
 }
 
-// FindFirstFailedToolName uses Postgres jsonb operators instead of
-// SQLite's json_extract. payload is a TEXT column, cast to jsonb at
-// query time. (payload::jsonb->>'key') returns text, NULL if absent.
-func (s *PostgresStore) FindFirstFailedToolName(ctx context.Context, executionID string) (string, error) {
-	var toolName sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT (payload::jsonb->>'tool_name')
+// FindFirstFailedTool uses Postgres jsonb operators. See the SQLite
+// twin's docstring for the granular-sig contract (also returns
+// exception_type).
+func (s *PostgresStore) FindFirstFailedTool(ctx context.Context, executionID string) (toolName, exceptionType string, err error) {
+	var name sql.NullString
+	var exc sql.NullString
+	err = s.db.QueryRowContext(ctx, `
+		SELECT (payload::jsonb->>'tool_name'),
+		       (payload::jsonb->>'exception_type')
 		FROM events
 		WHERE execution_id = $1
 		  AND event_type = 'tool_call'
 		  AND (payload::jsonb->>'status') = 'failed'
 		ORDER BY sequence ASC
 		LIMIT 1
-	`, executionID).Scan(&toolName)
+	`, executionID).Scan(&name, &exc)
 	if err == sql.ErrNoRows {
-		return "", nil
+		return "", "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("find first failed tool: %w", err)
+		return "", "", fmt.Errorf("find first failed tool: %w", err)
 	}
-	if !toolName.Valid {
-		return "", nil
+	if !name.Valid {
+		return "", "", nil
 	}
-	return toolName.String, nil
+	if exc.Valid {
+		exceptionType = exc.String
+	}
+	return name.String, exceptionType, nil
 }
 
-func (s *PostgresStore) GroupToolFailure(ctx context.Context, executionID, projectID, toolName string) (isNew bool, err error) {
-	if toolName == "" {
-		return false, fmt.Errorf("toolName required")
+func (s *PostgresStore) GroupToolFailure(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
 	}
-	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassToolFailures, toolName)
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassToolFailures, signature)
 }
 
 // FindFirstThrottlingSignal is the Postgres twin of the SQLite method
@@ -2754,32 +2759,37 @@ func (s *PostgresStore) GetExecutionTopology(
 func (s *PostgresStore) FindFirstFailedValidator(
 	ctx context.Context,
 	executionID string,
-) (validatorName, severityHint string, err error) {
+) (validatorName, severityHint, category string, err error) {
 	var name sql.NullString
 	var sev sql.NullString
+	var cat sql.NullString
 	err = s.db.QueryRowContext(ctx, `
 		SELECT (payload::jsonb->>'name'),
-		       (payload::jsonb->>'severity')
+		       (payload::jsonb->>'severity'),
+		       (payload::jsonb->>'category')
 		FROM events
 		WHERE execution_id = $1
 		  AND event_type = 'validator_result'
 		  AND (payload::jsonb->>'passed') = 'false'
 		ORDER BY sequence ASC
 		LIMIT 1
-	`, executionID).Scan(&name, &sev)
+	`, executionID).Scan(&name, &sev, &cat)
 	if err == sql.ErrNoRows {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("find first failed validator: %w", err)
+		return "", "", "", fmt.Errorf("find first failed validator: %w", err)
 	}
 	if !name.Valid {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	if sev.Valid {
 		severityHint = sev.String
 	}
-	return name.String, severityHint, nil
+	if cat.Valid {
+		category = cat.String
+	}
+	return name.String, severityHint, category, nil
 }
 
 // UpdateFailureGroupSeverityHint — Postgres twin (validator_failures.G1).

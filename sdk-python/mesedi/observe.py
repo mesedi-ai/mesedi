@@ -42,6 +42,11 @@ from mesedi.events import Event, EventType, utcnow_rfc3339
 # pathological agent that pastes a 10MB JSON diff to blow up the
 # events table.
 _MAX_VALIDATOR_MSG = 500
+# Granular-signature wave: customer-supplied validator category gets
+# concatenated into the failure_group signature backend-side as
+# "<name>:<category>". 80 chars matches the backend's
+# signaturePartMaxLen helper; longer values are truncated.
+_MAX_VALIDATOR_CATEGORY = 80
 
 # Truncation budgets for manually-emitted llm_call events. Match the
 # values in anthropic_integration.py so wire-format payloads from the
@@ -103,12 +108,13 @@ def validator_result(
     passed: bool,
     message: str = "",
     severity: str = "error",
+    category: str = "",
 ) -> None:
     """Report a validator outcome as a ``validator_result`` event.
 
     Validators are checks the agent (or its framework) runs against
     intermediate or final outputs: schema conformance, factuality,
-    relevance, safety. The result of each check, pass or fail , 
+    relevance, safety. The result of each check, pass or fail ,
     becomes a discrete event so Phase-3 detection can spot patterns
     like "validator X has been failing 90% of the time on this
     model".
@@ -123,6 +129,18 @@ def validator_result(
             backend how aggressively to surface a failing validator
             on the dashboard; the SDK doesn't enforce values today
             but the dashboard will color-code in Phase 6.
+        category: Optional sub-classification of WHY the validator
+            failed (e.g. "schema_mismatch", "hallucination",
+            "missing_required_field"). When supplied, the backend
+            concatenates it into the failure_group signature as
+            "<name>:<category>" so a single ``quality_check``
+            validator failing for 50 different reasons surfaces as
+            50 clusters instead of one impossibly-coarse cluster.
+            Truncated to 80 chars + control characters stripped
+            backend-side. Backward-compat: empty category (the
+            default) preserves the original "<name>"-only signature
+            shape, so existing customers see zero behavior change
+            until they opt in.
 
     Outside @wrap: no-op.
     """
@@ -143,6 +161,11 @@ def validator_result(
     }
     if message:
         payload["message"] = message[:_MAX_VALIDATOR_MSG]
+    if category:
+        # Truncate client-side so the wire payload stays bounded;
+        # backend re-sanitizes (strips control chars + re-caps) as
+        # defense-in-depth.
+        payload["category"] = category[:_MAX_VALIDATOR_CATEGORY]
 
     client.submit_event(Event(
         event_id=f"evt-{uuid.uuid4().hex[:12]}",
