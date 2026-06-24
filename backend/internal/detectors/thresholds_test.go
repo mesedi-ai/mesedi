@@ -357,6 +357,112 @@ func Test_Loops_SimilarCallBadConfigFallsBackToDefaults(t *testing.T) {
 	_, _ = DetectSimilarCallLoopWithThresholds(clusterMsgs, badDist)
 }
 
+// ─────────────────────────────────────────────────────────────────
+// grounding_failure per-evaluator floors (Theme B extensions wave —
+// closes grounding_failure.G3)
+// ─────────────────────────────────────────────────────────────────
+
+func Test_GroundingFailure_PerEvaluatorOverrideFires(t *testing.T) {
+	// ragas faithfulness scored 0.6 with global floor 0.5: under
+	// global default, doesn't fire (0.6 >= 0.5). With per-evaluator
+	// floor 0.7 on ragas:faithfulness, fires (0.6 < 0.7).
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"evaluator_id":"ragas","metric_type":"faithfulness","score":0.6,"higher_is_better":true,"passed":true}`),
+	}
+	if _, fired := DetectGroundingFailureWithThresholds(payloads, DefaultGroundingFailureThresholds()); fired {
+		t.Errorf("global floor 0.5 should not fire on score 0.6")
+	}
+	custom := GroundingFailureThresholds{
+		MeanFloor: 0.5,
+		PerEvaluatorFloors: map[string]float64{
+			"ragas:faithfulness": 0.7,
+		},
+	}
+	if _, fired := DetectGroundingFailureWithThresholds(payloads, custom); !fired {
+		t.Errorf("per-evaluator floor 0.7 should fire on score 0.6")
+	}
+}
+
+func Test_GroundingFailure_PerEvaluatorFallsBackToMeanFloor(t *testing.T) {
+	// vectara hhem scored 0.4 with global floor 0.5: fires under
+	// global default (0.4 < 0.5). Per-evaluator map specifies a
+	// DIFFERENT evaluator (ragas), so vectara should still use the
+	// global floor and fire.
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"evaluator_id":"vectara","metric_type":"hhem","score":0.4,"higher_is_better":true,"passed":true}`),
+	}
+	custom := GroundingFailureThresholds{
+		MeanFloor: 0.5,
+		PerEvaluatorFloors: map[string]float64{
+			"ragas:faithfulness": 0.7, // unrelated key
+		},
+	}
+	if _, fired := DetectGroundingFailureWithThresholds(payloads, custom); !fired {
+		t.Errorf("vectara key not in PerEvaluatorFloors; should fall back to MeanFloor 0.5 and fire on 0.4")
+	}
+}
+
+func Test_GroundingFailure_BadPerEvaluatorValueFallsBack(t *testing.T) {
+	// Per-evaluator value outside [0, 1] is invalid; detector should
+	// fall back to MeanFloor for that key.
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"evaluator_id":"ragas","metric_type":"faithfulness","score":0.6,"higher_is_better":true,"passed":true}`),
+	}
+	bad := GroundingFailureThresholds{
+		MeanFloor: 0.5,
+		PerEvaluatorFloors: map[string]float64{
+			"ragas:faithfulness": 1.5, // invalid
+		},
+	}
+	// Bad override → falls back to MeanFloor 0.5. Score 0.6 >= 0.5
+	// so no fire (matches global-default behavior).
+	if _, fired := DetectGroundingFailureWithThresholds(payloads, bad); fired {
+		t.Errorf("bad per-evaluator value should fall back to MeanFloor; score 0.6 should not fire under floor 0.5")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────
+// cascading_failure (Theme B extensions wave — closes G2 + G3)
+// ─────────────────────────────────────────────────────────────────
+
+func Test_CascadingFailure_DefaultMatchesHardcoded(t *testing.T) {
+	d := DefaultCascadingFailureThresholds()
+	if d.CascadeWindowSeconds != 86400 {
+		t.Errorf("default CascadeWindowSeconds = %d, want 86400", d.CascadeWindowSeconds)
+	}
+	if d.ExcludeSpawnHandoffs != false {
+		t.Errorf("default ExcludeSpawnHandoffs = %v, want false", d.ExcludeSpawnHandoffs)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────
+// hitl_rejection_spike (Theme B extensions wave — closes G3)
+// ─────────────────────────────────────────────────────────────────
+
+func Test_HITLRejectionSpike_DefaultMatchesHardcoded(t *testing.T) {
+	d := DefaultHITLRejectionSpikeThresholds()
+	if d.MeasurementWindowMinutes != 60 {
+		t.Errorf("default MeasurementWindowMinutes = %d, want 60",
+			d.MeasurementWindowMinutes)
+	}
+}
+
+func Test_HITLRejectionSpike_BadWindowFallsBackToDefault(t *testing.T) {
+	// Window outside [5, 1440] should fall back to 60.
+	bad := HITLRejectionSpikeThresholds{MeasurementWindowMinutes: 0}
+	if got := bad.EffectiveWindowMinutes(); got != 60 {
+		t.Errorf("bad window (0) should fall back to default 60; got %d", got)
+	}
+	bad2 := HITLRejectionSpikeThresholds{MeasurementWindowMinutes: 99999}
+	if got := bad2.EffectiveWindowMinutes(); got != 60 {
+		t.Errorf("bad window (99999) should fall back to default 60; got %d", got)
+	}
+	good := HITLRejectionSpikeThresholds{MeasurementWindowMinutes: 120}
+	if got := good.EffectiveWindowMinutes(); got != 120 {
+		t.Errorf("valid window (120) should be preserved; got %d", got)
+	}
+}
+
 func Test_Loops_SimilarCallLegacyWrapperUsesDefaults(t *testing.T) {
 	// Legacy DetectSimilarCallLoop must produce byte-identical
 	// behavior to DetectSimilarCallLoopWithThresholds(..., defaults).

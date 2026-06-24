@@ -64,6 +64,14 @@ type ProjectDetectorThresholds struct {
 	// directly at the handler call site (literal comparisons);
 	// similar_call_loop consumes via DetectSimilarCallLoopWithThresholds.
 	Loops detectors.LoopsThresholds
+	// CascadingFailure bundles cascade-window + spawn-handoff
+	// treatment knobs (Theme B extensions wave — closes G2 + G3).
+	CascadingFailure detectors.CascadingFailureThresholds
+	// HITLRejectionSpike carries the measurement-window-minutes knob
+	// (Theme B extensions wave — closes G3). Detector itself takes
+	// pre-aggregated counts; the window value flows into the
+	// handler's store-query window.
+	HITLRejectionSpike detectors.HITLRejectionSpikeThresholds
 }
 
 // DefaultProjectDetectorThresholds returns the all-defaults aggregate
@@ -72,13 +80,15 @@ type ProjectDetectorThresholds struct {
 // the detector's historical hardcoded values.
 func DefaultProjectDetectorThresholds() ProjectDetectorThresholds {
 	return ProjectDetectorThresholds{
-		SemanticLoop:     detectors.DefaultSemanticLoopThresholds(),
-		TokenWaste:       detectors.DefaultTokenWasteThresholds(),
-		ToolSchemaDrift:  detectors.DefaultToolSchemaDriftThresholds(),
-		GroundingFailure: detectors.DefaultGroundingFailureThresholds(),
-		Drift:            detectors.DefaultDriftThresholds(),
-		ContextOverflow:  detectors.DefaultContextOverflowThresholds(),
-		Loops:            detectors.DefaultLoopsThresholds(),
+		SemanticLoop:       detectors.DefaultSemanticLoopThresholds(),
+		TokenWaste:         detectors.DefaultTokenWasteThresholds(),
+		ToolSchemaDrift:    detectors.DefaultToolSchemaDriftThresholds(),
+		GroundingFailure:   detectors.DefaultGroundingFailureThresholds(),
+		Drift:              detectors.DefaultDriftThresholds(),
+		ContextOverflow:    detectors.DefaultContextOverflowThresholds(),
+		Loops:              detectors.DefaultLoopsThresholds(),
+		CascadingFailure:   detectors.DefaultCascadingFailureThresholds(),
+		HITLRejectionSpike: detectors.DefaultHITLRejectionSpikeThresholds(),
 	}
 }
 
@@ -112,6 +122,8 @@ func LoadProjectDetectorThresholds(
 		"drift",
 		"context_overflow",
 		"loops",
+		"cascading_failure",
+		"hitl_rejection_spike",
 	} {
 		rows, err := st.ListProjectDetectorThresholds(ctx, projectID, detector)
 		if err != nil {
@@ -192,9 +204,14 @@ func applyDetectorThresholdValue(
 			}
 		}
 	case "grounding_failure":
-		if key == "mean_floor" {
+		switch key {
+		case "mean_floor":
 			if v, ok := value.(float64); ok {
 				out.GroundingFailure.MeanFloor = v
+			}
+		case "per_evaluator_floors":
+			if v, ok := value.(map[string]float64); ok {
+				out.GroundingFailure.PerEvaluatorFloors = v
 			}
 		}
 	case "drift":
@@ -240,6 +257,23 @@ func applyDetectorThresholdValue(
 		case "similar_call_min_cluster_size":
 			if v, ok := value.(int); ok {
 				out.Loops.SimilarCallMinClusterSize = v
+			}
+		}
+	case "cascading_failure":
+		switch key {
+		case "cascade_window_seconds":
+			if v, ok := value.(int); ok {
+				out.CascadingFailure.CascadeWindowSeconds = v
+			}
+		case "exclude_spawn_handoffs":
+			if v, ok := value.(bool); ok {
+				out.CascadingFailure.ExcludeSpawnHandoffs = v
+			}
+		}
+	case "hitl_rejection_spike":
+		if key == "measurement_window_minutes" {
+			if v, ok := value.(int); ok {
+				out.HITLRejectionSpike.MeasurementWindowMinutes = v
 			}
 		}
 	}

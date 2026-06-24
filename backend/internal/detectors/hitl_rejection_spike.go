@@ -54,6 +54,31 @@ const (
 	EditSpikeRateBp = 3_000
 )
 
+// HITLRejectionSpikeThresholds carries the per-project tunable knobs
+// for this detector (Theme B extensions wave — closes G3).
+// MeasurementWindowMinutes bounds the recency window over which the
+// handler aggregates HITL outcomes; default 60 (1h) matches the
+// historical hardcoded posture in handlers.go.
+type HITLRejectionSpikeThresholds struct {
+	MeasurementWindowMinutes int
+}
+
+// DefaultHITLRejectionSpikeThresholds returns the historical
+// hardcoded window (60 minutes).
+func DefaultHITLRejectionSpikeThresholds() HITLRejectionSpikeThresholds {
+	return HITLRejectionSpikeThresholds{MeasurementWindowMinutes: 60}
+}
+
+// EffectiveWindowMinutes returns the validated window value —
+// defensive against bad config that escaped the validators registry.
+// Reverts to default 60 on out-of-bounds values.
+func (t HITLRejectionSpikeThresholds) EffectiveWindowMinutes() int {
+	if t.MeasurementWindowMinutes < 5 || t.MeasurementWindowMinutes > 1440 {
+		return 60
+	}
+	return t.MeasurementWindowMinutes
+}
+
 // DetectHITLRejectionSpike consumes the project-window aggregate
 // (rejected count, edited count, total HITL count) and reports
 // the first firing variant. Rejected wins over edited because a

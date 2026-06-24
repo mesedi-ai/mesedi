@@ -1325,7 +1325,10 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else if len(handoffs) > 0 {
-			if sig, fired := detectors.DetectCascadingFailure(handoffs); fired {
+			// Theme B extensions wave — cascading_failure.G2 + G3.
+			// Per-project cascade-window + spawn-handoff exclusion
+			// flow in via detectorThresholds.CascadingFailure.
+			if sig, fired := detectors.DetectCascadingFailureWithThresholds(handoffs, detectorThresholds.CascadingFailure); fired {
 				isNew, gErr := h.Store.GroupCascadingFailure(r.Context(), executionID, authProjectID, sig)
 				if gErr != nil {
 					h.Logger.Warn("cascading-failure grouping failed (continuing)",
@@ -1531,11 +1534,12 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// this when THIS execution itself recorded at least
 			// one human_intervention event (no point asking
 			// "did rejections spike" if we have no fresh HITL
-			// data anyway). The 1-hour window matches the
-			// provider_incident posture: recent enough to be
-			// actionable, wide enough to accumulate a meaningful
-			// sample.
-			since := time.Now().Add(-1 * time.Hour)
+			// data anyway). Default 60-minute window matches the
+			// provider_incident posture; per-project tunable via
+			// the Theme B detector_thresholds primitive (Theme B
+			// extensions wave — closes hitl_rejection_spike.G3).
+			windowMinutes := detectorThresholds.HITLRejectionSpike.EffectiveWindowMinutes()
+			since := time.Now().Add(-time.Duration(windowMinutes) * time.Minute)
 			counts, sErr := h.Store.CountHITLOutcomesInWindow(r.Context(), authProjectID, since)
 			if sErr != nil {
 				h.Logger.Warn("count hitl outcomes in window failed",

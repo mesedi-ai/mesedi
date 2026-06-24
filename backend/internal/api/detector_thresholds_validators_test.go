@@ -33,6 +33,13 @@ func Test_DetectorThresholds_RegistryHasExpectedDetectors(t *testing.T) {
 		"loops:identical_call_min_repeats",
 		"loops:similar_call_distance_threshold",
 		"loops:similar_call_min_cluster_size",
+		// Theme B extensions wave: introduces 'bool' + 'json'
+		// ValueTypes. Closes grounding_failure.G3 +
+		// cascading_failure.G2/G3 + hitl_rejection_spike.G3.
+		"grounding_failure:per_evaluator_floors",
+		"cascading_failure:cascade_window_seconds",
+		"cascading_failure:exclude_spawn_handoffs",
+		"hitl_rejection_spike:measurement_window_minutes",
 	}
 	for _, key := range want {
 		if _, ok := detectorThresholdRegistry[key]; !ok {
@@ -53,8 +60,9 @@ func Test_DetectorThresholds_AllSpecsPopulated(t *testing.T) {
 		if spec.ThresholdKey == "" {
 			t.Errorf("%s: ThresholdKey empty", k)
 		}
-		if spec.ValueType != "int" && spec.ValueType != "float" {
-			t.Errorf("%s: ValueType=%q, want int|float", k, spec.ValueType)
+		if spec.ValueType != "int" && spec.ValueType != "float" &&
+			spec.ValueType != "bool" && spec.ValueType != "json" {
+			t.Errorf("%s: ValueType=%q, want int|float|bool|json", k, spec.ValueType)
 		}
 		if spec.Description == "" {
 			t.Errorf("%s: Description empty", k)

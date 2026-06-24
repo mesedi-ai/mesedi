@@ -337,6 +337,94 @@ func init() {
 			return v, nil
 		},
 	})
+	// ─────────────────────────────────────────────────────────────
+	// Theme B extensions wave — closes grounding_failure.G3 +
+	// cascading_failure.G2 + cascading_failure.G3 + hitl_rejection_
+	// spike.G3. Introduces two new ValueTypes ('bool' and 'json')
+	// to the validators registry. After this wave, the Theme B
+	// primitive supports the full {int, float, bool, json} value
+	// space — any future detector with structured config can ride
+	// it without inventing new storage.
+	// ─────────────────────────────────────────────────────────────
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "grounding_failure",
+		ThresholdKey: "per_evaluator_floors",
+		ValueType:    "json",
+		Description: "Per-evaluator floor overrides keyed " +
+			"\"evaluator_id:metric_type\" → float in [0, 1]. " +
+			"Unspecified evaluator:metric pairs fall back to the " +
+			"global mean_floor (default 0.5). Max 50 entries.",
+		Default: map[string]float64{},
+		Parse: func(valueJSON, _ string) (any, error) {
+			m, err := parseJSONMap(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundJSONMap(m, 50, 0.0, 1.0, "per_evaluator_floors"); err != nil {
+				return nil, err
+			}
+			return m, nil
+		},
+	})
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "cascading_failure",
+		ThresholdKey: "cascade_window_seconds",
+		ValueType:    "int",
+		Description: "Maximum seconds between handoff_emitted_at and " +
+			"child_ended_at for a cascading failure to count. Default " +
+			"86400 (24h) preserves the historical 'no-window' behavior; " +
+			"customers can tighten to e.g. 300 (5min) to avoid grouping " +
+			"long-lived spawn handoffs whose children fail hours later.",
+		Default: 86400,
+		Parse: func(valueJSON, _ string) (any, error) {
+			v, err := parseIntJSON(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundInt(v, 10, 86400, "cascade_window_seconds"); err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "cascading_failure",
+		ThresholdKey: "exclude_spawn_handoffs",
+		ValueType:    "bool",
+		Description: "When true, skip rows where handoff_kind = 'spawn' " +
+			"before scoring. Spawn handoffs are fire-and-forget; a " +
+			"parent that succeeded while a spawn child failed later is " +
+			"arguably a supervision gap, not a cascade. Default false " +
+			"preserves the historical behavior.",
+		Default: false,
+		Parse: func(valueJSON, _ string) (any, error) {
+			v, err := parseBoolJSON(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "hitl_rejection_spike",
+		ThresholdKey: "measurement_window_minutes",
+		ValueType:    "int",
+		Description: "Recency window (minutes) over which the detector " +
+			"aggregates HITL outcomes. Default 60 (1h) matches the " +
+			"existing posture; tighten for high-volume projects, widen " +
+			"for low-volume projects with sparse HITL signal.",
+		Default: 60,
+		Parse: func(valueJSON, _ string) (any, error) {
+			v, err := parseIntJSON(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundInt(v, 5, 1440, "measurement_window_minutes"); err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
 }
 
 // registerThresholdSpec adds a spec to the registry. Panics on
@@ -447,6 +535,60 @@ func capFloat(v, cap float64, name, tier string) error {
 	if v > cap {
 		return fmt.Errorf("%s exceeds %s tier cap of %g: %g",
 			name, normalizeTier(tier), cap, v)
+	}
+	return nil
+}
+
+// parseBoolJSON unmarshals a JSON-encoded boolean. Used by Theme B
+// extensions wave 'bool' ValueType for simple per-project toggle
+// knobs (e.g. cascading_failure.exclude_spawn_handoffs).
+func parseBoolJSON(valueJSON string) (bool, error) {
+	valueJSON = strings.TrimSpace(valueJSON)
+	if valueJSON == "" {
+		return false, fmt.Errorf("empty value")
+	}
+	var b bool
+	if err := json.Unmarshal([]byte(valueJSON), &b); err != nil {
+		return false, fmt.Errorf("expected bool, got %q: %w", valueJSON, err)
+	}
+	return b, nil
+}
+
+// parseJSONMap unmarshals a JSON-encoded object whose values are
+// numeric (float64-coerced). Used by Theme B extensions wave 'json'
+// ValueType for structured per-project config (e.g.
+// grounding_failure.per_evaluator_floors).
+func parseJSONMap(valueJSON string) (map[string]float64, error) {
+	valueJSON = strings.TrimSpace(valueJSON)
+	if valueJSON == "" {
+		return nil, fmt.Errorf("empty value")
+	}
+	var m map[string]float64
+	if err := json.Unmarshal([]byte(valueJSON), &m); err != nil {
+		return nil, fmt.Errorf("expected object {string: number}, got %q: %w", valueJSON, err)
+	}
+	if m == nil {
+		m = map[string]float64{}
+	}
+	return m, nil
+}
+
+// boundJSONMap enforces structural bounds on a parsed map: max key
+// count + per-value range. Designed for the per_evaluator_floors
+// shape (50-key cap, value range [0, 1]) but generic enough that
+// future json-ValueType specs can reuse it. Returns the first
+// violation encountered (deterministic by Go map iteration order
+// would be non-deterministic, so we collect violators if any).
+func boundJSONMap(m map[string]float64, maxKeys int, lo, hi float64, name string) error {
+	if len(m) > maxKeys {
+		return fmt.Errorf("%s map has %d entries; max is %d",
+			name, len(m), maxKeys)
+	}
+	for k, v := range m {
+		if v < lo || v > hi {
+			return fmt.Errorf("%s[%s]=%g out of range [%g, %g]",
+				name, k, v, lo, hi)
+		}
 	}
 	return nil
 }

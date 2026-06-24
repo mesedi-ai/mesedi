@@ -39,17 +39,40 @@ import (
 // evaluator's own verdict outranks our heuristic interpretation
 // of its numeric output.
 // GroundingFailureThresholds carries the per-project tunable values
-// for this detector (Theme B.b). MeanFloor defaults to 0.5 — half
-// the evaluator's pass band. Customers who don't tune see the
-// historical behavior.
+// for this detector. MeanFloor (Theme B.b) is the global default
+// floor used for any evaluator:metric pair not present in
+// PerEvaluatorFloors. PerEvaluatorFloors (Theme B extensions wave —
+// closes grounding_failure.G3) is the per-(evaluator_id:metric_type)
+// override map; lookups fall back to MeanFloor when a key is absent.
+// Customers who don't tune see the historical behavior.
 type GroundingFailureThresholds struct {
-	MeanFloor float64
+	MeanFloor          float64
+	PerEvaluatorFloors map[string]float64
 }
 
 // DefaultGroundingFailureThresholds returns the historical hardcoded
-// default. Used by legacy call sites and tests.
+// default. Used by legacy call sites and tests. PerEvaluatorFloors
+// defaults to nil — equivalent to an empty map; every evaluator
+// falls back to MeanFloor.
 func DefaultGroundingFailureThresholds() GroundingFailureThresholds {
 	return GroundingFailureThresholds{MeanFloor: 0.5}
+}
+
+// effectiveFloor returns the floor for the given evaluator:metric
+// key — the per-evaluator override if present and in range, else
+// the global MeanFloor. Defensive against bad config that escaped
+// the validators registry (out-of-range values fall through to
+// MeanFloor with no panic).
+func (t GroundingFailureThresholds) effectiveFloor(evaluatorMetricKey string) float64 {
+	if t.PerEvaluatorFloors != nil {
+		if v, ok := t.PerEvaluatorFloors[evaluatorMetricKey]; ok && v >= 0.0 && v <= 1.0 {
+			return v
+		}
+	}
+	if t.MeanFloor < 0.0 || t.MeanFloor > 1.0 {
+		return 0.5
+	}
+	return t.MeanFloor
 }
 
 // DetectGroundingFailure scans eval_score payloads for grounding
@@ -80,10 +103,6 @@ func DetectGroundingFailureAllMatchesWithThresholds(
 	payloads []json.RawMessage,
 	t GroundingFailureThresholds,
 ) []string {
-	floor := t.MeanFloor
-	if floor < 0.0 || floor > 1.0 {
-		floor = 0.5
-	}
 	if len(payloads) == 0 {
 		return nil
 	}
@@ -167,6 +186,10 @@ func DetectGroundingFailureAllMatchesWithThresholds(
 			continue
 		}
 		mean := r.sum / float64(r.count)
+		// Per-evaluator floor lookup (Theme B extensions wave —
+		// closes grounding_failure.G3). Falls back to MeanFloor when
+		// no per-evaluator override exists for this key.
+		floor := t.effectiveFloor(key)
 		if mean >= floor {
 			continue
 		}
@@ -201,10 +224,6 @@ func DetectGroundingFailureWithThresholds(
 	payloads []json.RawMessage,
 	t GroundingFailureThresholds,
 ) (signature string, detected bool) {
-	floor := t.MeanFloor
-	if floor < 0.0 || floor > 1.0 {
-		floor = 0.5
-	}
 	if len(payloads) == 0 {
 		return "", false
 	}
@@ -263,6 +282,10 @@ func DetectGroundingFailureWithThresholds(
 			continue
 		}
 		mean := r.sum / float64(r.count)
+		// Per-evaluator floor lookup (Theme B extensions wave —
+		// closes grounding_failure.G3). Falls back to MeanFloor when
+		// no per-evaluator override exists for this key.
+		floor := t.effectiveFloor(key)
 		if mean >= floor {
 			continue
 		}
