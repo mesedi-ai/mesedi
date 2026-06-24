@@ -2135,29 +2135,59 @@ func (s *PostgresStore) GroupInfrastructureThrottled(ctx context.Context, execut
 }
 
 // FindFirstDLPSignal is the Postgres twin of the SQLite method of
-// the same name. Uses jsonb operators instead of json1.
+// the same name. LEGACY — delegates to FindFirstDLPSignalForSeverities
+// with the historical default.
 func (s *PostgresStore) FindFirstDLPSignal(ctx context.Context, executionID string) (string, error) {
-	var ruleID sql.NullString
-	err := s.db.QueryRowContext(ctx, `
+	return s.FindFirstDLPSignalForSeverities(ctx, executionID,
+		[]string{"critical", "high"})
+}
+
+// FindFirstDLPSignalForSeverities — Postgres twin (data_leakage.G5
+// wave). Same shape as the sqlite version: builds the IN clause
+// dynamically from the customer's allowed-severity slice. Postgres
+// numbered placeholders ($1, $2, ...) drive the IN clause; the
+// CASE ORDER BY is constant so priority remains deterministic.
+func (s *PostgresStore) FindFirstDLPSignalForSeverities(
+	ctx context.Context,
+	executionID string,
+	allowed []string,
+) (string, error) {
+	if len(allowed) == 0 {
+		return "", fmt.Errorf("FindFirstDLPSignalForSeverities: allowed severities slice required")
+	}
+	// Postgres uses numbered placeholders; execution_id is $1, then
+	// each severity is $2, $3, ... Build the IN clause to match.
+	placeholders := make([]string, len(allowed))
+	args := make([]any, 0, len(allowed)+1)
+	args = append(args, executionID)
+	for i, sev := range allowed {
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		args = append(args, sev)
+	}
+	query := `
 		SELECT (payload::jsonb #>> '{hits,0,rule_id}')
 		FROM events
 		WHERE execution_id = $1
 		  AND event_type = 'dlp_scan_result'
-		  AND (payload::jsonb->>'highest_severity') IN ('critical', 'high')
+		  AND (payload::jsonb->>'highest_severity') IN (` +
+		strings.Join(placeholders, ",") + `)
 		ORDER BY
 			CASE (payload::jsonb->>'highest_severity')
 				WHEN 'critical' THEN 0
 				WHEN 'high'     THEN 1
-				ELSE 2
+				WHEN 'medium'   THEN 2
+				ELSE 3
 			END ASC,
 			sequence ASC
 		LIMIT 1
-	`, executionID).Scan(&ruleID)
+	`
+	var ruleID sql.NullString
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&ruleID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("find first dlp signal: %w", err)
+		return "", fmt.Errorf("find first dlp signal for severities: %w", err)
 	}
 	if !ruleID.Valid {
 		return "", nil

@@ -425,6 +425,38 @@ func init() {
 			return v, nil
 		},
 	})
+	// data_leakage.G5 — per-project severity-firing policy. Closed
+	// set ["critical", "high", "medium"]; default ["critical", "high"]
+	// matches the historical hardcoded posture in
+	// store.FindFirstDLPSignal's IN clause. NO tier cap — security
+	// policy is customer judgment, not a cost knob (same posture as
+	// custom DLP patterns + allowlist + prompt-injection patterns).
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "data_leakage",
+		ThresholdKey: "severity_policy",
+		ValueType:    "json",
+		Description: "Severities whose dlp_scan_result hits promote " +
+			"to a data_leakage failure_group. Closed set " +
+			"[\"critical\", \"high\", \"medium\"]. Default " +
+			"[\"critical\", \"high\"] matches the historical posture; " +
+			"regulated-industry projects can tighten to include " +
+			"\"medium\" so PII patterns page; low-noise projects can " +
+			"restrict to [\"critical\"]. The full rule set scans " +
+			"regardless — this knob only controls firing.",
+		Default: []string{"critical", "high"},
+		Parse: func(valueJSON, _ string) (any, error) {
+			v, err := parseJSONStringSlice(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundStringSliceSubset(v,
+				[]string{"critical", "high", "medium"},
+				"severity_policy"); err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
 }
 
 // registerThresholdSpec adds a spec to the registry. Panics on
@@ -588,6 +620,47 @@ func boundJSONMap(m map[string]float64, maxKeys int, lo, hi float64, name string
 		if v < lo || v > hi {
 			return fmt.Errorf("%s[%s]=%g out of range [%g, %g]",
 				name, k, v, lo, hi)
+		}
+	}
+	return nil
+}
+
+// parseJSONStringSlice unmarshals a JSON-encoded array of strings.
+// Used by data_leakage.G5 for the closed-set severity_policy knob;
+// generic enough for any future "set of allowed values" registry
+// entry (e.g. provider_incident allowed_provider_ids).
+func parseJSONStringSlice(valueJSON string) ([]string, error) {
+	valueJSON = strings.TrimSpace(valueJSON)
+	if valueJSON == "" {
+		return nil, fmt.Errorf("empty value")
+	}
+	var s []string
+	if err := json.Unmarshal([]byte(valueJSON), &s); err != nil {
+		return nil, fmt.Errorf("expected array of strings, got %q: %w", valueJSON, err)
+	}
+	return s, nil
+}
+
+// boundStringSliceSubset enforces that every element of s is one of
+// the values in `allowed`. Empty slice is rejected (caller should
+// surface "use the default instead" via the registry's Default
+// field, not via empty-array semantics which are too easy to misread
+// as "disable detection entirely"). Duplicate elements are accepted
+// since the downstream consumer dedups via map membership; rejecting
+// them would force the customer to deduplicate before write.
+func boundStringSliceSubset(s, allowed []string, name string) error {
+	if len(s) == 0 {
+		return fmt.Errorf("%s must contain at least one value; "+
+			"use the default by deleting the override instead", name)
+	}
+	allowSet := make(map[string]struct{}, len(allowed))
+	for _, a := range allowed {
+		allowSet[a] = struct{}{}
+	}
+	for _, v := range s {
+		if _, ok := allowSet[v]; !ok {
+			return fmt.Errorf("%s contains invalid value %q; "+
+				"allowed values: %v", name, v, allowed)
 		}
 	}
 	return nil

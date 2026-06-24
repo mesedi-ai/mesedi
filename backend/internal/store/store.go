@@ -1667,7 +1667,24 @@ type Store interface {
 	// dlp_scan_result on this execution, or empty string when none
 	// fired. medium-severity hits never cluster and are filtered
 	// out at the query level.
+	//
+	// LEGACY: preserved for backward compat. New call sites should
+	// use FindFirstDLPSignalForSeverities (data_leakage.G5 wave).
+	// This method is now a thin wrapper that calls
+	// FindFirstDLPSignalForSeverities with the historical default
+	// ["critical", "high"].
 	FindFirstDLPSignal(ctx context.Context, executionID string) (string, error)
+	// FindFirstDLPSignalForSeverities returns the rule_id of the
+	// highest-priority dlp_scan_result on this execution whose
+	// `highest_severity` is in the customer-supplied allowed slice.
+	// Empty allowed slice is rejected (caller must pass at least one
+	// severity); callers reading from per-project thresholds should
+	// invoke EffectiveAllowedSeverities() first to guarantee the
+	// slice is well-formed. Closes data_leakage.G5: lets
+	// regulated-industry projects include "medium" to fire on PII
+	// patterns the default skips. Same priority ordering as the
+	// legacy method (critical wins over high, etc.).
+	FindFirstDLPSignalForSeverities(ctx context.Context, executionID string, allowed []string) (string, error)
 	// GroupDataLeakage upserts a failure_group with
 	// failure_class=data_leakage and signature=ruleID. One group per
 	// rule per project so SecOps sees per-secret-type aggregation.

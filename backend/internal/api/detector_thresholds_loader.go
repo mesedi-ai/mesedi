@@ -72,6 +72,12 @@ type ProjectDetectorThresholds struct {
 	// pre-aggregated counts; the window value flows into the
 	// handler's store-query window.
 	HITLRejectionSpike detectors.HITLRejectionSpikeThresholds
+	// DataLeakage carries the per-project severity-firing policy
+	// (data_leakage.G5 wave). The handler reads
+	// EffectiveAllowedSeverities() and passes it to the store's
+	// FindFirstDLPSignalForSeverities method to control which
+	// severities promote to a failure_group.
+	DataLeakage detectors.DataLeakageThresholds
 }
 
 // DefaultProjectDetectorThresholds returns the all-defaults aggregate
@@ -89,6 +95,7 @@ func DefaultProjectDetectorThresholds() ProjectDetectorThresholds {
 		Loops:              detectors.DefaultLoopsThresholds(),
 		CascadingFailure:   detectors.DefaultCascadingFailureThresholds(),
 		HITLRejectionSpike: detectors.DefaultHITLRejectionSpikeThresholds(),
+		DataLeakage:        detectors.DefaultDataLeakageThresholds(),
 	}
 }
 
@@ -124,6 +131,7 @@ func LoadProjectDetectorThresholds(
 		"loops",
 		"cascading_failure",
 		"hitl_rejection_spike",
+		"data_leakage",
 	} {
 		rows, err := st.ListProjectDetectorThresholds(ctx, projectID, detector)
 		if err != nil {
@@ -274,6 +282,12 @@ func applyDetectorThresholdValue(
 		if key == "measurement_window_minutes" {
 			if v, ok := value.(int); ok {
 				out.HITLRejectionSpike.MeasurementWindowMinutes = v
+			}
+		}
+	case "data_leakage":
+		if key == "severity_policy" {
+			if v, ok := value.([]string); ok {
+				out.DataLeakage.AllowedSeverities = v
 			}
 		}
 	}

@@ -40,6 +40,9 @@ func Test_DetectorThresholds_RegistryHasExpectedDetectors(t *testing.T) {
 		"cascading_failure:cascade_window_seconds",
 		"cascading_failure:exclude_spawn_handoffs",
 		"hitl_rejection_spike:measurement_window_minutes",
+		// data_leakage.G5 wave: per-project severity-firing policy
+		// (closed set; first json-string-slice ValueType usage).
+		"data_leakage:severity_policy",
 	}
 	for _, key := range want {
 		if _, ok := detectorThresholdRegistry[key]; !ok {

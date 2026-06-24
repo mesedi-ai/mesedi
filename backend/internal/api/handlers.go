@@ -1182,7 +1182,11 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// classifier is a no-op once a higher one has claimed the
 	// execution.
 	if isTerminalStatus(patch.Status) {
-		dlpSig, err := h.Store.FindFirstDLPSignal(r.Context(), executionID)
+		// data_leakage.G5 — per-project severity-firing policy.
+		// EffectiveAllowedSeverities() handles defensive fallback to
+		// the historical default ["critical", "high"] on bad config.
+		allowedSeverities := detectorThresholds.DataLeakage.EffectiveAllowedSeverities()
+		dlpSig, err := h.Store.FindFirstDLPSignalForSeverities(r.Context(), executionID, allowedSeverities)
 		if err != nil {
 			h.Logger.Warn("find dlp signal for detection failed",
 				"execution_id", executionID,

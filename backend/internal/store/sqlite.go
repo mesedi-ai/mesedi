@@ -2844,33 +2844,60 @@ func (s *SQLiteStore) FindFirstDLPSignal(
 	ctx context.Context,
 	executionID string,
 ) (string, error) {
-	var ruleID sql.NullString
-	// JSON1 path: payload.highest_severity tells us at the event
-	// level whether to even consider it. payload.hits is a sorted
-	// array; the first element's rule_id is the canonical signature
-	// (Summarize() sorts alphabetically so reads are deterministic).
-	// We CASE on severity so a single SQL pass returns the
-	// best-priority signal across all DLP events on this execution.
-	err := s.db.QueryRowContext(ctx, `
+	// LEGACY: delegate to the new ForSeverities method with the
+	// historical default. Preserves backward compat for any caller
+	// or test fixture still hitting this signature directly.
+	return s.FindFirstDLPSignalForSeverities(ctx, executionID,
+		[]string{"critical", "high"})
+}
+
+// FindFirstDLPSignalForSeverities — SQLite implementation
+// (data_leakage.G5 wave). Builds the IN clause dynamically from
+// the customer's allowed-severity slice. The CASE ORDER BY is
+// constant (critical < high < medium < other) so priority remains
+// deterministic regardless of which severities are in scope.
+func (s *SQLiteStore) FindFirstDLPSignalForSeverities(
+	ctx context.Context,
+	executionID string,
+	allowed []string,
+) (string, error) {
+	if len(allowed) == 0 {
+		return "", fmt.Errorf("FindFirstDLPSignalForSeverities: allowed severities slice required")
+	}
+	// Build ?-placeholder list for the IN clause. args slice holds
+	// the execution_id first followed by every allowed severity in
+	// the same order they appear in the IN clause.
+	placeholders := make([]string, len(allowed))
+	args := make([]any, 0, len(allowed)+1)
+	args = append(args, executionID)
+	for i, sev := range allowed {
+		placeholders[i] = "?"
+		args = append(args, sev)
+	}
+	query := `
 		SELECT json_extract(payload, '$.hits[0].rule_id')
 		FROM events
 		WHERE execution_id = ?
 		  AND event_type = 'dlp_scan_result'
-		  AND json_extract(payload, '$.highest_severity') IN ('critical', 'high')
+		  AND json_extract(payload, '$.highest_severity') IN (` +
+		strings.Join(placeholders, ",") + `)
 		ORDER BY
 			CASE json_extract(payload, '$.highest_severity')
 				WHEN 'critical' THEN 0
 				WHEN 'high'     THEN 1
-				ELSE 2
+				WHEN 'medium'   THEN 2
+				ELSE 3
 			END ASC,
 			sequence ASC
 		LIMIT 1
-	`, executionID).Scan(&ruleID)
+	`
+	var ruleID sql.NullString
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&ruleID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("find first dlp signal: %w", err)
+		return "", fmt.Errorf("find first dlp signal for severities: %w", err)
 	}
 	if !ruleID.Valid {
 		return "", nil

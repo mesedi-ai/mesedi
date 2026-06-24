@@ -447,6 +447,58 @@ func Test_HITLRejectionSpike_DefaultMatchesHardcoded(t *testing.T) {
 	}
 }
 
+// ─────────────────────────────────────────────────────────────────
+// data_leakage severity policy (data_leakage.G5 wave)
+// ─────────────────────────────────────────────────────────────────
+
+func Test_DataLeakage_DefaultMatchesHardcoded(t *testing.T) {
+	d := DefaultDataLeakageThresholds()
+	want := []string{"critical", "high"}
+	if len(d.AllowedSeverities) != len(want) {
+		t.Errorf("default AllowedSeverities length = %d, want %d",
+			len(d.AllowedSeverities), len(want))
+	}
+	for i, sev := range want {
+		if i >= len(d.AllowedSeverities) || d.AllowedSeverities[i] != sev {
+			t.Errorf("default AllowedSeverities[%d] = %q, want %q",
+				i, d.AllowedSeverities[i], sev)
+		}
+	}
+}
+
+func Test_DataLeakage_EffectiveAllowedSeverities_AcceptsCustom(t *testing.T) {
+	cases := [][]string{
+		{"critical"},
+		{"critical", "high"},
+		{"critical", "high", "medium"},
+		{"medium"},
+	}
+	for _, c := range cases {
+		got := (DataLeakageThresholds{AllowedSeverities: c}).EffectiveAllowedSeverities()
+		if len(got) != len(c) {
+			t.Errorf("input %v: got %v, want %v", c, got, c)
+		}
+	}
+}
+
+func Test_DataLeakage_EffectiveAllowedSeverities_FallsBackOnBadValues(t *testing.T) {
+	bad := []DataLeakageThresholds{
+		{AllowedSeverities: nil},                              // nil
+		{AllowedSeverities: []string{}},                       // empty
+		{AllowedSeverities: []string{"hi"}},                   // typo
+		{AllowedSeverities: []string{"low"}},                  // not defined in code
+		{AllowedSeverities: []string{"critical", "invalid"}},  // partial-bad
+	}
+	want := []string{"critical", "high"}
+	for _, c := range bad {
+		got := c.EffectiveAllowedSeverities()
+		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("bad input %v: got %v, want fallback %v",
+				c.AllowedSeverities, got, want)
+		}
+	}
+}
+
 func Test_HITLRejectionSpike_BadWindowFallsBackToDefault(t *testing.T) {
 	// Window outside [5, 1440] should fall back to 60.
 	bad := HITLRejectionSpikeThresholds{MeasurementWindowMinutes: 0}

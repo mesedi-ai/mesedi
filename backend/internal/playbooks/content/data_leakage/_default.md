@@ -2,7 +2,7 @@
 
 Mesedi's DLP scanner caught a credential, signed token, or PII pattern in an outbound payload from this execution. The detector scans every `llm_call` (system prompt, user prompt, response) and every `tool_call` (arguments, return value) against thirteen built-in rules covering AWS, GCP, Stripe, GitHub, Slack, OpenAI keys, JWTs, SSNs, credit cards, and private-key PEM blocks, plus any custom regex rules you configured for this project.
 
-The signature is `data_leakage:<rule_id>` — one failure_group per pattern that matched in this project. The matching rule's severity is recorded on the sibling `dlp_scan_result` event (not in the signature) so each rule clusters cleanly regardless of severity. Critical and high severities fire the alert; medium and low are scanned but not paged unless the project's policy is tightened.
+The signature is `data_leakage:<rule_id>` — one failure_group per pattern that matched in this project. The matching rule's severity is recorded on the sibling `dlp_scan_result` event (not in the signature) so each rule clusters cleanly regardless of severity. By default `critical` and `high` severities fire the alert; `medium` is scanned but not paged. Customers can tighten this via the per-project `data_leakage.severity_policy` threshold (e.g. `["critical", "high", "medium"]` to fire on PII patterns the default skips, or `["critical"]` for less noise). The full rule set scans regardless — the policy knob only controls firing.
 
 ## What's usually happening
 
