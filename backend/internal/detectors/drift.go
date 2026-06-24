@@ -425,6 +425,20 @@ const (
 	// identical_call threshold; smaller would trip on coincidence,
 	// larger would miss short loops.
 	SimilarCallMinClusterSize = 3
+
+	// MaxSimilarCallScanWindow caps the most-recent N user_messages
+	// scanned by DetectSimilarCallLoopWithThresholds. Closes
+	// loops.G9: the pairwise O(N²) cosine-distance scan is otherwise
+	// unbounded — an ReAct agent emitting 10K LLM calls would pay
+	// ~100M trigram-distance computations per execution-close
+	// (seconds of compute). Cap at 200 → max 40K comparisons,
+	// sub-second worst case. Recent-N preserves signal: stuck loops
+	// are by definition recent activity, so the historical tail
+	// of a long session adds no detection value vs. its compute
+	// cost. Future iteration can swap to LSH / ball-tree for true
+	// O(N log N) if customer workloads warrant; the audit row
+	// itself called that out as the post-launch path.
+	MaxSimilarCallScanWindow = 200
 )
 
 // LoopsThresholds carries the per-project tunable values for the
@@ -499,6 +513,14 @@ func DetectSimilarCallLoopWithThresholds(
 		minCluster = SimilarCallMinClusterSize
 	}
 
+	// loops.G9 — cap N at the most-recent MaxSimilarCallScanWindow
+	// before the pairwise O(N²) scan. Stuck loops are recent
+	// activity; the historical tail of a long session adds compute
+	// cost without detection value. Pre-cap so bag building also
+	// stays bounded.
+	if len(userMessages) > MaxSimilarCallScanWindow {
+		userMessages = userMessages[len(userMessages)-MaxSimilarCallScanWindow:]
+	}
 	n := len(userMessages)
 	if n < minCluster {
 		return "", false

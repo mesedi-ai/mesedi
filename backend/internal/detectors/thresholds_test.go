@@ -8,7 +8,10 @@
 package detectors
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -669,6 +672,41 @@ func Test_HITLRejectionSpike_BadWindowFallsBackToDefault(t *testing.T) {
 	good := HITLRejectionSpikeThresholds{MeasurementWindowMinutes: 120}
 	if got := good.EffectiveWindowMinutes(); got != 120 {
 		t.Errorf("valid window (120) should be preserved; got %d", got)
+	}
+}
+
+func Test_Loops_SimilarCallScanWindowCap(t *testing.T) {
+	// loops.G9 — when N > MaxSimilarCallScanWindow, only the most
+	// recent MaxSimilarCallScanWindow messages are scanned. A
+	// distinctive 3-message cluster in the OLDEST messages of a
+	// 500-message session should NOT fire under the cap (those
+	// messages are outside the recent window); the same cluster
+	// in the NEWEST messages SHOULD fire.
+	//
+	// Filler messages use hex(sha256(idx)) so they're pairwise
+	// trigram-distinct — without this the filler messages would
+	// cluster among themselves and confound the test.
+	makeMessages := func(clusterAtIndex int) []string {
+		msgs := make([]string, 500)
+		for i := range msgs {
+			h := sha256.Sum256([]byte(fmt.Sprintf("filler-%d", i)))
+			msgs[i] = hex.EncodeToString(h[:])
+		}
+		// Insert 3 near-duplicate cluster messages at the target index.
+		msgs[clusterAtIndex] = "Please summarize the quarterly earnings report for Acme Corporation."
+		msgs[clusterAtIndex+1] = "Please summarize the quarterly earnings report for Acme Corp."
+		msgs[clusterAtIndex+2] = "Please summarize the quarterly earnings report for Acme Co."
+		return msgs
+	}
+	// Cluster at index 0 — outside the most-recent 200 window. No fire.
+	oldCluster := makeMessages(0)
+	if _, fired := DetectSimilarCallLoopWithThresholds(oldCluster, DefaultLoopsThresholds()); fired {
+		t.Errorf("cluster in oldest 3 messages of 500-message session should be outside the scan window; should not fire")
+	}
+	// Cluster at index 497-499 — inside the most-recent 200 window. Fire.
+	recentCluster := makeMessages(497)
+	if _, fired := DetectSimilarCallLoopWithThresholds(recentCluster, DefaultLoopsThresholds()); !fired {
+		t.Errorf("cluster in newest 3 messages of 500-message session should be inside the scan window; should fire")
 	}
 }
 
