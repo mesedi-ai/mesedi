@@ -302,6 +302,13 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /me/allowlist-stats", h.HandleGetAllowlistStats)
 	// Task #270.c, per-project truncation-rate telemetry.
 	mux.HandleFunc("GET /me/tool-return-value-stats", h.HandleGetToolReturnValueStats)
+	// Empty-states wave A — detector-status surface. Generic per-
+	// detector observability metadata the dashboard uses to render
+	// "you haven't instrumented X yet" / "drift detection priming"
+	// empty states. Closes the backend half of semantic_loop.G2 +
+	// tool_schema_drift.G2. Extensible to future detectors via new
+	// response fields, not new endpoints.
+	mux.HandleFunc("GET /v1/detector-status", h.HandleGetDetectorStatus)
 	// Task #276.d, per-project config-fallback telemetry.
 	mux.HandleFunc("GET /me/config-fallback-stats", h.HandleGetConfigFallbackStats)
 	// Task #263, Team / multi-seat. Admin-gated endpoints for

@@ -1677,6 +1677,24 @@ type Store interface {
 	// semantic_loop detector to feed its canonical-state hash chain.
 	// The returned slice's index order matches the events' sequence.
 	ListCheckpointPayloads(ctx context.Context, executionID string) ([][]byte, error)
+	// CountCheckpointEventsForProject returns the total count of
+	// checkpoint events across all executions for the project, plus
+	// the most-recent timestamp. Used by the detector-status surface
+	// to render the semantic_loop "no checkpoint data yet" empty
+	// state — count=0 + lastAt=nil means the customer has never
+	// instrumented mesedi.checkpoint() and the semantic_loop detector
+	// is therefore invisible to them. Empty-states wave (closes the
+	// backend half of semantic_loop.G2).
+	CountCheckpointEventsForProject(ctx context.Context, projectID string) (count int, lastAt *time.Time, err error)
+	// ListToolCallCountsForProject returns the per-tool count of
+	// non-failed tool_call events across all executions for the
+	// project. Used by the detector-status surface to render the
+	// tool_schema_drift "priming — N/min_history_calls observed"
+	// state per tool — tools below min_history_calls don't yet
+	// trigger drift detection by design, but customers don't see
+	// that progress today. Empty-states wave (closes the backend
+	// half of tool_schema_drift.G2).
+	ListToolCallCountsForProject(ctx context.Context, projectID string) ([]ToolCallCount, error)
 	// GroupSemanticLoop upserts a failure_group with
 	// failure_class=semantic_loop and the detector-supplied signature
 	// (semantic_loop:<hex8>). Returns isNew=true on first occurrence.

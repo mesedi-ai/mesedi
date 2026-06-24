@@ -721,6 +721,11 @@ func main() {
 	mux.Handle("PATCH /me/allowlist/{detector}/{allowlist_id}", privateHandler)
 	mux.Handle("DELETE /me/allowlist/{detector}/{allowlist_id}", privateHandler)
 	mux.Handle("GET /me/allowlist-stats", privateHandler)
+	// Empty-states wave A — detector-status observability surface.
+	// Generic per-detector empty-state + priming metadata the
+	// dashboard reads on overview-page load. Closes the backend half
+	// of semantic_loop.G2 + tool_schema_drift.G2.
+	mux.Handle("GET /v1/detector-status", privateHandler)
 	// #252 — customer-facing 2FA / TOTP. All five live on
 	// privateHandler because they manage the calling customer's own
 	// authenticator-app enrollment and need the session cookie.

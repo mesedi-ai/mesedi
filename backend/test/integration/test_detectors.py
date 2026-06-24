@@ -839,6 +839,60 @@ def test_provider_incident_openai(backend: Backend, configured_sdk):
     )
 
 
+def test_detector_status_endpoint(backend: Backend, configured_sdk):
+    """Empty-states wave A: smoke test for GET /v1/detector-status.
+
+    Hits the endpoint against a fresh project and asserts the
+    response shape is what the dashboard DetectorStatusSection
+    expects:
+      - project_id present
+      - semantic_loop.has_checkpoint_data is False (no checkpoint
+        events on a brand-new project)
+      - semantic_loop.checkpoint_count == 0
+      - tool_schema_drift.tools is an empty list (no tool calls)
+      - tool_schema_drift.min_history_calls is the default 10
+
+    Real triggering paths (emit a checkpoint, fire 10+ tool calls)
+    are covered separately by the semantic_loop + tool_schema_drift
+    detector tests above. This smoke test guards the wire format,
+    auth, route registration, and store query path.
+    """
+    resp = requests.get(
+        f"{backend.base_url}/v1/detector-status",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        timeout=5.0,
+    )
+    assert resp.status_code == 200, (
+        f"failed to get detector-status: "
+        f"status={resp.status_code} body={resp.text}"
+    )
+    body = resp.json()
+    assert body.get("project_id"), f"missing project_id: {body}"
+
+    sem = body.get("semantic_loop")
+    assert sem is not None, f"missing semantic_loop: {body}"
+    assert sem.get("has_checkpoint_data") is False, (
+        f"fresh project should report has_checkpoint_data=False, got {sem}"
+    )
+    assert sem.get("checkpoint_count") == 0, (
+        f"fresh project should report checkpoint_count=0, got {sem}"
+    )
+    # last_checkpoint_at is omitted when nil (omitempty on the Go
+    # side), so it may or may not be present; what matters is that
+    # if present it's a string (RFC3339 timestamp).
+    if "last_checkpoint_at" in sem:
+        assert isinstance(sem["last_checkpoint_at"], str)
+
+    drift = body.get("tool_schema_drift")
+    assert drift is not None, f"missing tool_schema_drift: {body}"
+    assert drift.get("tools") == [], (
+        f"fresh project should have no tools, got {drift}"
+    )
+    assert drift.get("min_history_calls") == 10, (
+        f"default min_history_calls should be 10, got {drift}"
+    )
+
+
 def test_config_fallback_stats_endpoint(backend: Backend, configured_sdk):
     """#276.d: smoke test for GET /me/config-fallback-stats.
 
