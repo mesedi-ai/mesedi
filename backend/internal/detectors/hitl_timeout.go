@@ -33,9 +33,63 @@ import (
 	"encoding/json"
 )
 
+// DetectHITLTimeoutAllMatches returns BOTH signatures when both
+// firing conditions are present in the execution's human_intervention
+// payloads (explicit timeout + SLA exceeded). Closes hitl_timeout.G3:
+// the legacy first-match-only variant suppressed the SLA-exceeded
+// cluster when an explicit timeout was also present; customers
+// running multi-intervention executions where both kinds occur now
+// see both clusters.
+//
+// At most 2 signatures returned (explicit + sla_exceeded). Ordering
+// is deterministic: explicit before sla_exceeded when both fire.
+func DetectHITLTimeoutAllMatches(payloads []json.RawMessage) []string {
+	if len(payloads) == 0 {
+		return nil
+	}
+	var sigs []string
+	// Explicit timeout: any payload with response_kind=timeout.
+	for _, raw := range payloads {
+		var p struct {
+			ResponseKind string `json:"response_kind"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			continue
+		}
+		if p.ResponseKind == "timeout" {
+			sigs = append(sigs, "hitl_timeout:explicit")
+			break
+		}
+	}
+	// SLA exceeded: any payload whose wait_duration_ms exceeds
+	// sla_seconds*1000. Only fires when sla_seconds > 0; without
+	// a customer-declared SLA we cannot detect a breach.
+	for _, raw := range payloads {
+		var p struct {
+			SLASeconds     int64 `json:"sla_seconds"`
+			WaitDurationMs int64 `json:"wait_duration_ms"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			continue
+		}
+		if p.SLASeconds <= 0 {
+			continue
+		}
+		if p.WaitDurationMs > p.SLASeconds*1000 {
+			sigs = append(sigs, "hitl_timeout:sla_exceeded")
+			break
+		}
+	}
+	return sigs
+}
+
 // DetectHITLTimeout scans the supplied human_intervention payloads
 // and returns the first failure signature. Returns ("", false)
 // when no payload represents an SLA breach.
+//
+// LEGACY first-match-wins API kept for backward-compat with existing
+// tests. The handler now uses DetectHITLTimeoutAllMatches per the
+// all-matches-recorded wave (hitl_timeout.G3).
 func DetectHITLTimeout(payloads []json.RawMessage) (signature string, detected bool) {
 	if len(payloads) == 0 {
 		return "", false

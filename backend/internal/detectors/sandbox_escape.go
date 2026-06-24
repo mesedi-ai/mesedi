@@ -129,6 +129,104 @@ func DetectSandboxEscape(toolPayloads []json.RawMessage) (signature string, dete
 	return sig, fired
 }
 
+// SandboxEscapeMatch is one entry in the all-matches result set.
+// Used by DetectSandboxEscapeAllMatchesWithCustom; the handler
+// emits one failure_group per match.
+type SandboxEscapeMatch struct {
+	// Signature is the fully-formed failure_group signature
+	// ("sandbox_escape:python_os_import",
+	// "sandbox_escape:custom:<pattern_id>").
+	Signature string
+	// MatchedPatternID is non-empty only for custom-pattern matches.
+	// The handler uses it to call IncrementPatternMatchCount so the
+	// dashboard editor's match_count column reflects every fire,
+	// not just the first.
+	MatchedPatternID string
+}
+
+// MaxSandboxEscapeMatchesPerExecution caps the per-execution emit
+// to defensive 20. Real executions can hit at most 9 built-in
+// patterns + N custom patterns; 20 leaves headroom without unbounded
+// growth.
+const MaxSandboxEscapeMatchesPerExecution = 20
+
+// DetectSandboxEscapeAllMatchesWithCustom returns ALL distinct
+// pattern matches found across the execution's tool_call payloads,
+// up to MaxSandboxEscapeMatchesPerExecution. Closes sandbox_escape.G1:
+// the legacy first-match-wins variant loses multi-vector attack
+// visibility (an execution that hits both python_os_import AND
+// host_secret_read produces 2 failure_groups now, was 1).
+//
+// Built-ins emit before custom patterns, in the order
+// sandboxPatterns is defined (alphabetical by id; same as the
+// legacy function). Custom patterns emit in slice order. A pattern
+// that matches multiple payloads within the same execution is
+// counted once (signature-dedup via map).
+//
+// custom may be nil.
+func DetectSandboxEscapeAllMatchesWithCustom(
+	toolPayloads []json.RawMessage,
+	custom []*CustomPattern,
+) []SandboxEscapeMatch {
+	if len(toolPayloads) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var matches []SandboxEscapeMatch
+	for _, raw := range toolPayloads {
+		if len(matches) >= MaxSandboxEscapeMatchesPerExecution {
+			break
+		}
+		var p struct {
+			Arguments   json.RawMessage `json:"arguments,omitempty"`
+			ReturnValue json.RawMessage `json:"return_value,omitempty"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			continue
+		}
+		for _, sp := range sandboxPatterns {
+			sig := "sandbox_escape:" + sp.id
+			if seen[sig] {
+				continue
+			}
+			matched := (len(p.Arguments) > 0 && sp.regex.Match(p.Arguments)) ||
+				(len(p.ReturnValue) > 0 && sp.regex.Match(p.ReturnValue))
+			if matched {
+				seen[sig] = true
+				matches = append(matches, SandboxEscapeMatch{Signature: sig})
+				if len(matches) >= MaxSandboxEscapeMatchesPerExecution {
+					break
+				}
+			}
+		}
+		if len(matches) >= MaxSandboxEscapeMatchesPerExecution {
+			break
+		}
+		for _, c := range custom {
+			if c == nil || c.Compiled == nil {
+				continue
+			}
+			sig := "sandbox_escape:custom:" + c.PatternID
+			if seen[sig] {
+				continue
+			}
+			matched := (len(p.Arguments) > 0 && c.Compiled.Match(p.Arguments)) ||
+				(len(p.ReturnValue) > 0 && c.Compiled.Match(p.ReturnValue))
+			if matched {
+				seen[sig] = true
+				matches = append(matches, SandboxEscapeMatch{
+					Signature:        sig,
+					MatchedPatternID: c.PatternID,
+				})
+				if len(matches) >= MaxSandboxEscapeMatchesPerExecution {
+					break
+				}
+			}
+		}
+	}
+	return matches
+}
+
 // DetectSandboxEscapeWithCustom is the per-project-aware variant.
 // Built-ins first (preserves legacy first-match-wins ordering), then
 // custom patterns. Returns (signature, matchedPatternID, fired);
@@ -137,6 +235,10 @@ func DetectSandboxEscape(toolPayloads []json.RawMessage) (signature string, dete
 // IncrementPatternMatchCount.
 //
 // custom may be nil.
+//
+// LEGACY first-match-wins API kept for backward-compat with existing
+// tests. The handler now uses DetectSandboxEscapeAllMatchesWithCustom
+// per the all-matches-recorded wave (sandbox_escape.G1).
 func DetectSandboxEscapeWithCustom(
 	toolPayloads []json.RawMessage,
 	custom []*CustomPattern,

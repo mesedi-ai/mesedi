@@ -60,9 +60,143 @@ func DetectGroundingFailure(payloads []json.RawMessage) (signature string, detec
 	return DetectGroundingFailureWithThresholds(payloads, DefaultGroundingFailureThresholds())
 }
 
+// MaxGroundingFailureMatchesPerExecution caps the per-execution
+// emit to defensive 20. Real executions evaluate ~1-5 evaluators;
+// 20 leaves headroom without unbounded growth.
+const MaxGroundingFailureMatchesPerExecution = 20
+
+// DetectGroundingFailureAllMatchesWithThresholds returns ALL
+// distinct (evaluator, metric) failures found in the execution's
+// eval_score payloads, up to MaxGroundingFailureMatchesPerExecution.
+// Closes grounding_failure.G2: the legacy first-failing-evaluator-
+// wins variant loses the multi-judge picture (a RAG pipeline
+// failing 3 evaluators surfaces 3 clusters now, was 1).
+//
+// Combines both legacy paths: explicit pass=false matches AND
+// mean-below-floor matches across higher_is_better evaluators.
+// Dedup by (evaluator, metric) so a single evaluator with both
+// signals fires once.
+func DetectGroundingFailureAllMatchesWithThresholds(
+	payloads []json.RawMessage,
+	t GroundingFailureThresholds,
+) []string {
+	floor := t.MeanFloor
+	if floor < 0.0 || floor > 1.0 {
+		floor = 0.5
+	}
+	if len(payloads) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var sigs []string
+	add := func(evaluator, metric string) {
+		if evaluator == "" {
+			return
+		}
+		key := evaluator + ":" + metric
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		sigs = append(sigs, "grounding_failure:"+key)
+	}
+	// First pass: explicit pass=false events.
+	for _, raw := range payloads {
+		if len(sigs) >= MaxGroundingFailureMatchesPerExecution {
+			return sigs
+		}
+		var p struct {
+			EvaluatorID string `json:"evaluator_id"`
+			MetricType  string `json:"metric_type"`
+			Passed      bool   `json:"passed"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			continue
+		}
+		if !p.Passed {
+			add(p.EvaluatorID, p.MetricType)
+		}
+	}
+	// Second pass: mean-below-floor rollup. Only higher_is_better
+	// scores participate; inverse metrics need their own threshold
+	// semantics (banked).
+	type rollup struct {
+		sum   float64
+		count int
+	}
+	per := map[string]*rollup{}
+	keyToEval := map[string]string{}
+	keyToMetric := map[string]string{}
+	for _, raw := range payloads {
+		var p struct {
+			EvaluatorID    string  `json:"evaluator_id"`
+			MetricType     string  `json:"metric_type"`
+			Score          float64 `json:"score"`
+			HigherIsBetter bool    `json:"higher_is_better"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			continue
+		}
+		if !p.HigherIsBetter || p.EvaluatorID == "" {
+			continue
+		}
+		key := p.EvaluatorID + ":" + p.MetricType
+		r, ok := per[key]
+		if !ok {
+			r = &rollup{}
+			per[key] = r
+			keyToEval[key] = p.EvaluatorID
+			keyToMetric[key] = p.MetricType
+		}
+		r.sum += p.Score
+		r.count++
+	}
+	// Iterate per map in lexicographic order so result ordering
+	// is deterministic across runs (Go map iteration is randomized).
+	var orderedKeys []string
+	for key := range per {
+		orderedKeys = append(orderedKeys, key)
+	}
+	sortStringsLex(orderedKeys)
+	for _, key := range orderedKeys {
+		if len(sigs) >= MaxGroundingFailureMatchesPerExecution {
+			break
+		}
+		r := per[key]
+		if r.count == 0 {
+			continue
+		}
+		mean := r.sum / float64(r.count)
+		if mean >= floor {
+			continue
+		}
+		add(keyToEval[key], keyToMetric[key])
+	}
+	return sigs
+}
+
+// sortStringsLex sorts in lexicographic order. Inlined to avoid
+// pulling sort into this file (the package already imports
+// sort elsewhere; this is just a tiny local helper for the
+// all-matches result determinism).
+func sortStringsLex(s []string) {
+	// Insertion sort — fast for tiny slices (typical N ≤ 5
+	// evaluators per execution).
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
+}
+
 // DetectGroundingFailureWithThresholds is the per-project-aware
 // variant. Defensive: MeanFloor outside [0.0, 1.0] reverts to the
 // 0.5 default (validators registry rejects this at write time).
+//
+// LEGACY first-match-wins API kept for backward-compat with existing
+// tests. The handler now uses
+// DetectGroundingFailureAllMatchesWithThresholds per the
+// all-matches-recorded wave (grounding_failure.G2).
 func DetectGroundingFailureWithThresholds(
 	payloads []json.RawMessage,
 	t GroundingFailureThresholds,

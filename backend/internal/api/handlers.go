@@ -1139,20 +1139,26 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			customPatterns, _ := h.loadCustomPatternsForDetector(
 				r.Context(), authProjectID, "sandbox_escape",
 			)
-			sig, matchedPatternID, fired := detectors.DetectSandboxEscapeWithCustom(
+			// all-matches-recorded wave (sandbox_escape.G1): emit one
+			// failure_group per matched pattern instead of stopping
+			// at first. A defense-in-depth security test exercising
+			// 9 built-in patterns now surfaces 9 clusters (was 1).
+			// Capped at MaxSandboxEscapeMatchesPerExecution = 20.
+			matches := detectors.DetectSandboxEscapeAllMatchesWithCustom(
 				rawPayloads, customPatterns,
 			)
-			if fired {
-				isNew, gErr := h.Store.GroupSandboxEscape(r.Context(), executionID, authProjectID, sig)
+			for _, m := range matches {
+				isNew, gErr := h.Store.GroupSandboxEscape(r.Context(), executionID, authProjectID, m.Signature)
 				if gErr != nil {
 					h.Logger.Warn("sandbox-escape grouping failed (continuing)",
 						"execution_id", executionID,
-						"signature", sig,
+						"signature", m.Signature,
 						"error", gErr.Error(),
 					)
+					continue
 				}
-				h.maybeFireWebhook(r, authProjectID, store.FailureClassSandboxEscape, sig, isNew, gErr)
-				h.incrementCustomPatternMatch(r.Context(), authProjectID, matchedPatternID)
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassSandboxEscape, m.Signature, isNew, gErr)
+				h.incrementCustomPatternMatch(r.Context(), authProjectID, m.MatchedPatternID)
 			}
 		}
 	}
@@ -1269,7 +1275,14 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			for i, p := range evalPayloads {
 				rawPayloads[i] = json.RawMessage(p)
 			}
-			if sig, fired := detectors.DetectGroundingFailureWithThresholds(rawPayloads, detectorThresholds.GroundingFailure); fired {
+			// all-matches-recorded wave (grounding_failure.G2): emit
+			// one failure_group per failing (evaluator, metric) pair
+			// instead of stopping at first. A RAG pipeline failing
+			// faithfulness + answer_relevance + factuality now
+			// surfaces 3 clusters (was 1). Capped at
+			// MaxGroundingFailureMatchesPerExecution = 20.
+			sigs := detectors.DetectGroundingFailureAllMatchesWithThresholds(rawPayloads, detectorThresholds.GroundingFailure)
+			for _, sig := range sigs {
 				isNew, gErr := h.Store.GroupGroundingFailure(r.Context(), executionID, authProjectID, sig)
 				if gErr != nil {
 					h.Logger.Warn("grounding-failure grouping failed (continuing)",
@@ -1277,6 +1290,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 						"signature", sig,
 						"error", gErr.Error(),
 					)
+					continue
 				}
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassGroundingFailure, sig, isNew, gErr)
 			}
@@ -1482,7 +1496,13 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			for i, p := range hiPayloads {
 				raw[i] = json.RawMessage(p)
 			}
-			if sig, fired := detectors.DetectHITLTimeout(raw); fired {
+			// all-matches-recorded wave (hitl_timeout.G3): emit both
+			// explicit AND sla_exceeded clusters when both firing
+			// conditions are present in the same execution. Legacy
+			// first-match-wins suppressed the SLA-exceeded view
+			// when an explicit timeout also fired.
+			sigs := detectors.DetectHITLTimeoutAllMatches(raw)
+			for _, sig := range sigs {
 				isNew, gErr := h.Store.GroupHITLTimeout(r.Context(), executionID, authProjectID, sig)
 				if gErr != nil {
 					h.Logger.Warn("hitl-timeout grouping failed (continuing)",
@@ -1490,6 +1510,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 						"signature", sig,
 						"error", gErr.Error(),
 					)
+					continue
 				}
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassHITLTimeout, sig, isNew, gErr)
 			}
