@@ -2336,7 +2336,33 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 			"group_id", groupID, "error", err.Error())
 	}
 
-	prompt := buildFailureGroupAnalysisPrompt(group, sampleExecs)
+	// Pull the events for the FIRST (most recent) sample execution so
+	// the AI can reference specific tool_call return shapes, llm_call
+	// prompts/responses, dlp_scan_result fields, and checkpoint payloads
+	// rather than just execution metadata. Wave K.2 — this is where the
+	// AI's analysis becomes structurally different from the playbook:
+	// instead of "your agent might have a token_waste pattern" the AI
+	// can say "your prompts share this 1.8K-char prefix verbatim across
+	// 3 llm_call events; enable prompt caching."
+	//
+	// Best-effort: if the event fetch fails (transient DB issue, no
+	// captured events, etc.) we proceed with empty events and the
+	// prompt builder skips the events section. Analysis still runs;
+	// it just falls back to the metadata-only (Wave K-level) output.
+	var sampleEvents []*events.Event
+	if len(sampleExecs) > 0 && sampleExecs[0] != nil {
+		evs, eerr := h.Store.ListEventsForExecution(r.Context(), sampleExecs[0].ExecutionID)
+		if eerr != nil {
+			h.Logger.Warn("analyze: sample events fetch failed",
+				"group_id", groupID,
+				"execution_id", sampleExecs[0].ExecutionID,
+				"error", eerr.Error())
+		} else {
+			sampleEvents = evs
+		}
+	}
+
+	prompt := buildFailureGroupAnalysisPrompt(group, sampleExecs, sampleEvents)
 
 	model := "claude-haiku-4-5"
 	res, err := h.Anthropic.Call(r.Context(), anthropic.CallOptions{
@@ -2411,11 +2437,30 @@ func newAIAnalysisID() string {
 	return "ai_" + newAuditEventID()[len("audit_"):]
 }
 
+// MaxSampleEventsInPrompt caps how many events from the first sample
+// execution we render into the AI analysis prompt. Wave K.2 — 30 is
+// chosen to keep total input tokens under ~10K (~6K for events at
+// 200 tokens each + ~3K for playbook + ~500 for metadata + ~500 for
+// task instruction) while still capturing the diagnostic-relevant
+// portion of most agent traces. Events are emitted in chronological
+// order; capping at 30 takes the FIRST 30 by sequence, which is
+// usually where the failure is set up. (If the failure is at event
+// #500, the operator should click into the execution directly; the
+// AI analysis isn't trying to replace that workflow.)
+const MaxSampleEventsInPrompt = 30
+
+// MaxEventPayloadCharsInPrompt caps how much of each event's payload
+// is rendered. 500 chars is enough to capture the relevant JSON keys
+// + the first value or two; longer payloads get a ...[truncated]
+// suffix. Customers needing the full payload click into the execution
+// detail page.
+const MaxEventPayloadCharsInPrompt = 500
+
 // buildFailureGroupAnalysisPrompt assembles the structured prompt
 // sent to the LLM. Kept small so the input bill stays bounded and
 // the model's output stays focused.
 //
-// The prompt has three parts in order:
+// The prompt has four parts in order:
 //
 //  1. The canonical Mesedi playbook for the (failure_class, signature)
 //     pair, loaded via playbooks.Load. This is the interpretation
@@ -2429,16 +2474,26 @@ func newAIAnalysisID() string {
 //
 //  2. The specific failure group's metadata + sample executions.
 //
-//  3. A task instruction telling the model to APPLY the playbook to
+//  3. (Wave K.2) Sample events from the first sample execution, with
+//     each event's payload truncated to MaxEventPayloadCharsInPrompt
+//     chars. This is where the model gets actual data to reason
+//     about — tool_call return shapes, llm_call prompts/responses,
+//     dlp_scan_result rule IDs + matched fields, checkpoint state.
+//
+//  4. A task instruction telling the model to APPLY the playbook to
 //     this specific failure group rather than invent generic
 //     speculation.
 //
 // If the playbook lookup fails (very rare — every shipping detector
 // class has a registered playbook), the prompt falls back to its
-// pre-playbook shape so the analysis still runs.
+// pre-playbook shape so the analysis still runs. If sampleEvents is
+// nil/empty (Wave K.2 event-fetch failed, or execution has no events),
+// the events section is omitted and the prompt looks identical to its
+// pre-K.2 shape.
 func buildFailureGroupAnalysisPrompt(
 	group *store.FailureGroup,
 	sampleExecs []*events.Execution,
+	sampleEvents []*events.Event,
 ) string {
 	var sb strings.Builder
 
@@ -2486,7 +2541,51 @@ func buildFailureGroupAnalysisPrompt(
 		}
 	}
 
-	// Part 3: the task instruction. Phrasing is deliberate — the
+	// Part 3 (Wave K.2): sample events from the first execution. This
+	// is the data layer that makes the AI analysis structurally
+	// different from the static playbook — the model can now point
+	// to specific tool_call return shapes, llm_call prompt/response
+	// content, dlp_scan_result rule IDs + matched fields, etc.
+	//
+	// Cap: MaxSampleEventsInPrompt events (chronologically first).
+	// Each payload truncated to MaxEventPayloadCharsInPrompt chars
+	// with a ...[truncated] suffix. We use the raw JSON bytes from
+	// event.Payload so the model sees exactly what the SDK shipped —
+	// no re-serialization, no field selection.
+	if len(sampleEvents) > 0 && len(sampleExecs) > 0 && sampleExecs[0] != nil {
+		sb.WriteString(fmt.Sprintf("\n## Sample events from execution %s\n\n",
+			sampleExecs[0].ExecutionID))
+		eventLimit := len(sampleEvents)
+		if eventLimit > MaxSampleEventsInPrompt {
+			eventLimit = MaxSampleEventsInPrompt
+		}
+		for i := 0; i < eventLimit; i++ {
+			ev := sampleEvents[i]
+			if ev == nil {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("### event %d: %s (seq=%d)\n\n",
+				i+1, ev.EventType, ev.Sequence))
+			sb.WriteString(fmt.Sprintf("- timestamp: %s\n", ev.Timestamp.Format(time.RFC3339)))
+			if ev.DurationMs > 0 {
+				sb.WriteString(fmt.Sprintf("- duration_ms: %d\n", ev.DurationMs))
+			}
+			payloadStr := string(ev.Payload)
+			if len(payloadStr) > MaxEventPayloadCharsInPrompt {
+				payloadStr = payloadStr[:MaxEventPayloadCharsInPrompt] + "...[truncated]"
+			}
+			if payloadStr != "" {
+				sb.WriteString(fmt.Sprintf("- payload: %s\n", payloadStr))
+			}
+			sb.WriteString("\n")
+		}
+		if len(sampleEvents) > MaxSampleEventsInPrompt {
+			sb.WriteString(fmt.Sprintf("_(showing first %d of %d events; click into the execution for the full timeline)_\n\n",
+				MaxSampleEventsInPrompt, len(sampleEvents)))
+		}
+	}
+
+	// Part 4: the task instruction. Phrasing is deliberate — the
 	// model is told to USE the playbook as its framework, not to
 	// invent a root cause from scratch. Two-hypothesis remediation
 	// stays the existing contract; the difference is that the
