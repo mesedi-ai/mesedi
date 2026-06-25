@@ -2113,6 +2113,35 @@ func (h *Handlers) HandleGetFailureGroup(w http.ResponseWriter, r *http.Request)
 // "not configured" message rather than a 500, so the dashboard can
 // surface a friendly "AI analysis is not enabled on this
 // deployment" state.
+
+// analysisSystemPrompt is the system message sent to the LLM on every
+// AI root-cause analysis call. Extracted as a named constant so the
+// wording is editable in one place and unit-testable.
+//
+// The two tail sentences (per-project tuning knobs + signature
+// decomposition) are the difference between B-grade and A-grade
+// analyses in the Wave K post-audit
+// (internal-extract/ai-analyses-vs-playbooks-audit.md). Without them
+// the model sees Mesedi-specific knobs like custom_model_windows /
+// severity_policy / detector thresholds in the playbook but doesn't
+// surface them in remediation, and it treats decomposable signatures
+// like cost_$0.10+ or context_overflow:warn:claude-haiku-4-5 as
+// opaque strings rather than reading the bucket / level / model.
+const analysisSystemPrompt = "You are Mesedi's senior on-call engineer for AI agent reliability. " +
+	"You read structured failure-group telemetry and write a concise root-cause " +
+	"analysis with two concrete remediation suggestions. Output is rendered as " +
+	"Markdown in a dashboard card. Be precise, opinionated, and honest about " +
+	"uncertainty. Never claim a specific fix will resolve the issue; frame " +
+	"recommendations as hypotheses the operator should test. " +
+	"When the playbook mentions per-project tuning knobs (thresholds, allowlists, " +
+	"custom model windows, severity policies), reference them by name in your " +
+	"remediation hypotheses when they apply to this customer's situation. " +
+	"When the signature decomposes into meaningful parts (the bucket in " +
+	"cost_$0.10+, the level + model in context_overflow:warn:claude-haiku-4-5, " +
+	"the agent pair in coordination_deadlock:critique_agent:planner_agent), " +
+	"interpret those parts explicitly rather than treating the signature as " +
+	"an opaque string."
+
 func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Request) {
 	groupID := r.PathValue("id")
 	if groupID == "" {
@@ -2311,13 +2340,8 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 
 	model := "claude-haiku-4-5"
 	res, err := h.Anthropic.Call(r.Context(), anthropic.CallOptions{
-		Model: model,
-		System: "You are Mesedi's senior on-call engineer for AI agent reliability. " +
-			"You read structured failure-group telemetry and write a concise root-cause " +
-			"analysis with two concrete remediation suggestions. Output is rendered as " +
-			"Markdown in a dashboard card. Be precise, opinionated, and honest about " +
-			"uncertainty. Never claim a specific fix will resolve the issue; frame " +
-			"recommendations as hypotheses the operator should test.",
+		Model:       model,
+		System:      analysisSystemPrompt,
 		User:        prompt,
 		MaxTokens:   1024,
 		Temperature: 0.2,

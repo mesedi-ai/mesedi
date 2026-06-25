@@ -126,6 +126,47 @@ func TestBuildFailureGroupAnalysisPrompt_FallsBackWhenPlaybookMissing(t *testing
 	}
 }
 
+func TestAnalysisSystemPrompt_MentionsKnobsAndSignatureDecomposition(t *testing.T) {
+	t.Parallel()
+	// Wave K.1 — the two tail sentences in analysisSystemPrompt are
+	// what lift the two B-grade analyses (context_overflow,
+	// cost_velocity) to A- in the post-audit. If either of these
+	// sentences ever drops out of the constant, this test fails
+	// loudly so the system-prompt regression doesn't ship silently.
+
+	// (1) The per-project tuning knobs nudge. The exact phrasing
+	//     matters less than the keywords — if the wording changes,
+	//     update the test to match, but the intent (mention knobs
+	//     by name when relevant) must remain.
+	if !strings.Contains(analysisSystemPrompt, "per-project tuning knobs") {
+		t.Errorf("expected analysisSystemPrompt to mention 'per-project tuning knobs'; got:\n%s", analysisSystemPrompt)
+	}
+	if !strings.Contains(analysisSystemPrompt, "custom model windows") {
+		t.Errorf("expected analysisSystemPrompt to name custom_model_windows as a sample knob; got:\n%s", analysisSystemPrompt)
+	}
+
+	// (2) The signature decomposition nudge. Examples used in the
+	//     prompt act as anchors so the model parses bucket / level /
+	//     model / agent pair rather than treating the signature as
+	//     an opaque string.
+	if !strings.Contains(analysisSystemPrompt, "signature decomposes") {
+		t.Errorf("expected analysisSystemPrompt to mention 'signature decomposes'; got:\n%s", analysisSystemPrompt)
+	}
+	if !strings.Contains(analysisSystemPrompt, "cost_$0.10+") {
+		t.Errorf("expected analysisSystemPrompt to use cost_$0.10+ as an anchor example; got:\n%s", analysisSystemPrompt)
+	}
+
+	// (3) The existing system prompt directives are preserved
+	//     (regression guard — the new instructions extend, they
+	//     don't replace).
+	if !strings.Contains(analysisSystemPrompt, "Be precise, opinionated") {
+		t.Errorf("expected pre-existing 'Be precise, opinionated' directive to remain; got:\n%s", analysisSystemPrompt)
+	}
+	if !strings.Contains(analysisSystemPrompt, "frame recommendations as hypotheses") {
+		t.Errorf("expected pre-existing 'frame recommendations as hypotheses' directive to remain; got:\n%s", analysisSystemPrompt)
+	}
+}
+
 func TestBuildFailureGroupAnalysisPrompt_HandlesSubSignaturePlaybook(t *testing.T) {
 	t.Parallel()
 	// The playbooks registry maps loops/similar_call_<hex> →
