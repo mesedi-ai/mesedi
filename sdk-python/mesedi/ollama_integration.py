@@ -83,7 +83,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 
 from mesedi._context import current_execution_context
 from mesedi.client import get_client
-from mesedi.errors import ErrorClass
+from mesedi.errors import classify_ollama_exception
 from mesedi.events import Event, EventType, utcnow_rfc3339
 
 # Stable lowercase provider identifier shipped on every llm_call
@@ -400,16 +400,16 @@ def _build_failure_event(
     exc: BaseException,
 ) -> Event:
     """Construct the shared failure-path llm_call event from an Ollama
-    exception. ``error_class`` defaults to ``UNKNOWN`` in this sub-wave;
-    Wave 2.5.2 ships ``classify_ollama_exception`` which gets swapped
-    into this helper without touching the patch wrappers."""
+    exception. Uses ``classify_ollama_exception`` (Wave 2.5.2) to map
+    the raised exception into the canonical 8-class ErrorClass
+    vocabulary the backend's provider_incident detector clusters on."""
     failure_payload: Dict[str, Any] = {
         "provider": _PROVIDER,
         "model": model,
         "system_prompt": _truncate(system_text, _MAX_SYSTEM),
         "user_message": _truncate(user_message, _MAX_USER_MSG),
         "status": "failed",
-        "error_class": ErrorClass.UNKNOWN,
+        "error_class": classify_ollama_exception(exc),
         "exception_type": type(exc).__name__,
         "exception_message": _truncate(str(exc), _MAX_EXC_MSG),
     }

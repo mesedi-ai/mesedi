@@ -43,6 +43,7 @@
 
 import { getClient } from "./client.js";
 import { currentExecutionContext, newEventId } from "./context.js";
+import { classifyOllamaException } from "./errors.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
 
 const MAX_SYSTEM = 1000;
@@ -269,9 +270,7 @@ function buildFailureEvent(a: FailureEventArgs): Event {
     system_prompt: truncate(a.systemText, MAX_SYSTEM),
     user_message: truncate(a.userMessage, MAX_USER_MSG),
     status: "failed",
-    // Wave 2.5.2 will ship classifyOllamaException and swap this
-    // hardcoded UNKNOWN for the canonical error class.
-    error_class: "unknown",
+    error_class: classifyOllamaException(a.err),
     exception_type: errObj?.name ?? "Error",
     exception_message: truncate(String(errObj?.message ?? a.err), MAX_EXC_MSG),
   };

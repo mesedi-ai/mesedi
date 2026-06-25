@@ -16,6 +16,7 @@ from mesedi.errors import (
     classify_anthropic_exception,
     classify_cohere_exception,
     classify_gemini_exception,
+    classify_ollama_exception,
     classify_openai_exception,
     extract_http_status,
     extract_retry_after,
@@ -426,3 +427,129 @@ def test_gemini_quota_case_insensitive() -> None:
 
 def test_classify_gemini_unknown_exception_falls_back_to_unknown() -> None:
     assert classify_gemini_exception(ValueError("not gemini")) == ErrorClass.UNKNOWN
+
+
+# ──────────────────────────────────────────────────────────────────────
+# classify_ollama_exception (Wave 2.5.2)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _fake_response_error(status_code) -> Exception:
+    """Stand-in for ollama.ResponseError. The real class exposes
+    .status_code; we mimic the shape without depending on the
+    ollama package."""
+    cls = type("ResponseError", (Exception,), {})
+    exc = cls("HTTP error")
+    exc.status_code = status_code
+    return exc
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        # 4xx → CLIENT_ERROR (customer's fault: bad model name,
+        # malformed messages, missing required field)
+        (400, ErrorClass.CLIENT_ERROR),
+        (404, ErrorClass.CLIENT_ERROR),  # model not pulled
+        (422, ErrorClass.CLIENT_ERROR),
+        (499, ErrorClass.CLIENT_ERROR),
+        # 503 → SERVICE_UNAVAILABLE (Ollama server overloaded)
+        (503, ErrorClass.SERVICE_UNAVAILABLE),
+        # Other 5xx → INTERNAL_ERROR (CUDA OOM, model crash, etc.)
+        (500, ErrorClass.INTERNAL_ERROR),
+        (502, ErrorClass.INTERNAL_ERROR),
+        (504, ErrorClass.INTERNAL_ERROR),
+        (599, ErrorClass.INTERNAL_ERROR),
+    ],
+)
+def test_classify_ollama_response_error_bucketed_by_status_code(
+    status: int, expected: str,
+) -> None:
+    """ResponseError carries a status_code; the classifier buckets it
+    by HTTP-code range so detectors can distinguish customer-fault
+    from server-fault from overload."""
+    assert classify_ollama_exception(_fake_response_error(status)) == expected
+
+
+def test_classify_ollama_response_error_with_no_status_code_falls_back_to_unknown() -> None:
+    """Defensive: a malformed ResponseError without a status_code
+    attribute returns UNKNOWN rather than crashing the classifier."""
+    cls = type("ResponseError", (Exception,), {})
+    exc = cls("missing status")
+    assert classify_ollama_exception(exc) == ErrorClass.UNKNOWN
+
+
+def test_classify_ollama_response_error_with_non_int_status_falls_back_to_unknown() -> None:
+    """Defensive: a string status_code (from a misbehaving proxy)
+    returns UNKNOWN rather than misclassifying."""
+    assert classify_ollama_exception(_fake_response_error("503")) == ErrorClass.UNKNOWN
+
+
+def test_classify_ollama_response_error_with_status_out_of_http_range() -> None:
+    """Status codes outside the standard HTTP range (< 400 or >= 600)
+    fall through to UNKNOWN. The classifier is conservative."""
+    assert classify_ollama_exception(_fake_response_error(200)) == ErrorClass.UNKNOWN
+    assert classify_ollama_exception(_fake_response_error(600)) == ErrorClass.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "class_name,expected",
+    [
+        # Ollama-native request layer
+        ("RequestError", ErrorClass.CLIENT_ERROR),
+        # httpx transport layer — the two dominant failures for
+        # local-runtime customers
+        ("ConnectError", ErrorClass.SERVICE_UNAVAILABLE),
+        ("ConnectTimeout", ErrorClass.SERVICE_UNAVAILABLE),
+        ("TimeoutException", ErrorClass.TIMEOUT),
+        ("ReadTimeout", ErrorClass.TIMEOUT),
+    ],
+)
+def test_classify_ollama_transport_layer_mapping(
+    class_name: str, expected: str,
+) -> None:
+    """Wave 2.5.2 1B: the dominant local-runtime failure for Ollama
+    customers is 'I forgot to start ollama serve' — an httpx
+    ConnectError. Mapping it means infrastructure_throttled and
+    provider_incident get useful signal exactly when customers most
+    need diagnostic help."""
+    assert classify_ollama_exception(_fake(class_name)) == expected
+
+
+def test_classify_ollama_unknown_exception_falls_back_to_unknown() -> None:
+    """Non-Ollama / non-httpx exceptions (a customer's own ValueError
+    bubbling up through the integration) reach UNKNOWN rather than
+    being misattributed."""
+    assert classify_ollama_exception(ValueError("not ollama")) == ErrorClass.UNKNOWN
+
+
+def test_ollama_classification_does_NOT_map_to_rate_limited() -> None:
+    """Ollama is a local runtime: no per-minute rate limiting, no
+    quota. The classifier must NEVER return RATE_LIMITED or
+    QUOTA_EXHAUSTED for any Ollama exception — those buckets stay
+    quiet for Ollama-only projects, which is the correct empty-state
+    for local inference. This regression guard fails loudly if a
+    future refactor accidentally adds those mappings."""
+    # Sweep across every possible mapping and assert none returns
+    # RATE_LIMITED / QUOTA_EXHAUSTED / INVALID_API_KEY (also absent
+    # for the same local-runtime reason).
+    forbidden = {
+        ErrorClass.RATE_LIMITED,
+        ErrorClass.QUOTA_EXHAUSTED,
+        ErrorClass.INVALID_API_KEY,
+    }
+    for status in [400, 401, 403, 404, 429, 500, 503, 504]:
+        result = classify_ollama_exception(_fake_response_error(status))
+        assert result not in forbidden, (
+            f"status_code {status} mapped to {result!r}; Ollama is local-"
+            f"runtime and must not classify into {forbidden!r}"
+        )
+    for class_name in [
+        "RequestError", "ConnectError", "ConnectTimeout",
+        "TimeoutException", "ReadTimeout",
+    ]:
+        result = classify_ollama_exception(_fake(class_name))
+        assert result not in forbidden, (
+            f"{class_name} mapped to {result!r}; Ollama is local-"
+            f"runtime and must not classify into {forbidden!r}"
+        )

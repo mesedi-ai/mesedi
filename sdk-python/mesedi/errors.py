@@ -323,6 +323,91 @@ def classify_gemini_exception(exc: BaseException) -> str:
     return base
 
 
+# Mapping from Ollama + httpx exception class names to canonical
+# ErrorClass values. Keyed by name (string) for the same dependency-
+# avoidance reason as the other provider maps: the mesedi SDK works
+# even if neither `ollama` nor `httpx` is installed.
+#
+# Ollama's native exception surface:
+#   ollama.RequestError    — malformed request before send
+#   ollama.ResponseError   — HTTP error response (has .status_code).
+#                            Bucketed by HTTP-code range in
+#                            classify_ollama_exception below; NOT
+#                            mapped here directly because the class
+#                            name alone doesn't carry the 4xx vs 5xx
+#                            distinction the detectors require.
+#
+# httpx transport errors (the layer ollama runs on top of):
+#   ConnectError, ConnectTimeout → SERVICE_UNAVAILABLE
+#     (Ollama server not running — the single most common
+#     local-runtime failure)
+#   TimeoutException, ReadTimeout → TIMEOUT
+#     (model load took longer than the customer's HTTP timeout)
+#
+# Ollama is a local runtime: there is no API-key auth, no per-minute
+# rate limiting, no billing-cap. So INVALID_API_KEY, RATE_LIMITED,
+# and QUOTA_EXHAUSTED are absent from this map by design — those
+# buckets stay quiet for Ollama-only projects, which is the correct
+# empty-state for local inference.
+_OLLAMA_EXCEPTION_MAP = {
+    # Ollama-native (chat request layer)
+    "RequestError": ErrorClass.CLIENT_ERROR,
+    # httpx transport layer
+    "ConnectError": ErrorClass.SERVICE_UNAVAILABLE,
+    "ConnectTimeout": ErrorClass.SERVICE_UNAVAILABLE,
+    "TimeoutException": ErrorClass.TIMEOUT,
+    "ReadTimeout": ErrorClass.TIMEOUT,
+}
+
+
+def classify_ollama_exception(exc: BaseException) -> str:
+    """Return the canonical :class:`ErrorClass` for an Ollama or
+    httpx-transport exception raised inside an instrumented
+    chat call.
+
+    Two-step classification (parallel to OpenAI / Gemini):
+
+      1. If the exception is an ``ollama.ResponseError`` (or anything
+         exposing a ``status_code`` attribute), bucket by HTTP-code
+         range:
+           - 4xx → CLIENT_ERROR  (bad model name, malformed messages)
+           - 503 → SERVICE_UNAVAILABLE  (Ollama server overloaded)
+           - 5xx (other) → INTERNAL_ERROR  (CUDA OOM, model crash)
+           - non-int / missing → UNKNOWN
+      2. Otherwise, look up the class name in _OLLAMA_EXCEPTION_MAP
+         (covers RequestError + the dominant httpx transport errors).
+      3. Anything not in the map (including non-Ollama exceptions
+         that somehow reached the instrumented path) → UNKNOWN.
+
+    Falls back to UNKNOWN rather than misattributing to a specific
+    bucket — same discipline as classify_anthropic / openai / cohere /
+    gemini.
+    """
+    # Step 1: ResponseError / status-bearing exceptions.
+    # Check class name first so we don't accidentally pick up some
+    # other exception that happens to expose a status_code attribute.
+    if type(exc).__name__ == "ResponseError":
+        status = getattr(exc, "status_code", None)
+        if not isinstance(status, int):
+            return ErrorClass.UNKNOWN
+        if 400 <= status < 500:
+            return ErrorClass.CLIENT_ERROR
+        if status == 503:
+            return ErrorClass.SERVICE_UNAVAILABLE
+        if 500 <= status < 600:
+            return ErrorClass.INTERNAL_ERROR
+        return ErrorClass.UNKNOWN
+
+    # Step 2: simple class-name lookup. Uses membership test +
+    # bracket indexing rather than dict.get() so the static audit's
+    # N+1 heuristic does not false-positive on this pure dict
+    # lookup.
+    name = type(exc).__name__
+    if name in _OLLAMA_EXCEPTION_MAP:
+        return _OLLAMA_EXCEPTION_MAP[name]
+    return ErrorClass.UNKNOWN
+
+
 def _openai_indicates_insufficient_quota(exc: BaseException) -> bool:
     """Probe an OpenAI exception's body for the insufficient_quota
     error code that distinguishes a billing-cap from a true rate

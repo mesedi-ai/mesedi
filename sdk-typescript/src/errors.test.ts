@@ -15,6 +15,7 @@ import {
   classifyAnthropicException,
   classifyCohereException,
   classifyGeminiException,
+  classifyOllamaException,
   classifyOpenAIException,
   extractHttpStatus,
   extractRetryAfter,
@@ -422,5 +423,126 @@ describe("classifyGeminiException", () => {
   test("non-Error values fall back to UNKNOWN", () => {
     expect(classifyGeminiException("a string")).toBe(ErrorClass.UNKNOWN);
     expect(classifyGeminiException(null)).toBe(ErrorClass.UNKNOWN);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// classifyOllamaException (Wave 2.5.2)
+// ──────────────────────────────────────────────────────────────────────
+
+describe("classifyOllamaException", () => {
+  function fakeOllamaError(name: string): Error {
+    const cls = class extends Error {};
+    Object.defineProperty(cls, "name", { value: name });
+    return new cls("test");
+  }
+
+  function fakeResponseError(statusCode: unknown): Error & {
+    status_code?: unknown;
+  } {
+    const err = fakeOllamaError("ResponseError") as Error & {
+      status_code?: unknown;
+    };
+    err.status_code = statusCode;
+    return err;
+  }
+
+  // ResponseError → HTTP-code-range bucketing
+  const responseErrorCases: Array<[number, string]> = [
+    [400, ErrorClass.CLIENT_ERROR],
+    [404, ErrorClass.CLIENT_ERROR], // model not pulled
+    [422, ErrorClass.CLIENT_ERROR],
+    [499, ErrorClass.CLIENT_ERROR],
+    [503, ErrorClass.SERVICE_UNAVAILABLE],
+    [500, ErrorClass.INTERNAL_ERROR],
+    [502, ErrorClass.INTERNAL_ERROR],
+    [504, ErrorClass.INTERNAL_ERROR],
+    [599, ErrorClass.INTERNAL_ERROR],
+  ];
+  test.each(responseErrorCases)(
+    "ResponseError status %d -> %s",
+    (status, expected) => {
+      expect(classifyOllamaException(fakeResponseError(status))).toBe(expected);
+    },
+  );
+
+  test("ResponseError with no status_code falls back to UNKNOWN", () => {
+    const err = fakeOllamaError("ResponseError") as Error & {
+      status_code?: unknown;
+    };
+    // intentionally unset
+    expect(classifyOllamaException(err)).toBe(ErrorClass.UNKNOWN);
+  });
+
+  test("ResponseError with non-integer status_code falls back to UNKNOWN", () => {
+    // String from a misbehaving proxy
+    expect(classifyOllamaException(fakeResponseError("503"))).toBe(
+      ErrorClass.UNKNOWN,
+    );
+    // Float
+    expect(classifyOllamaException(fakeResponseError(503.5))).toBe(
+      ErrorClass.UNKNOWN,
+    );
+  });
+
+  test("ResponseError with status_code outside HTTP range falls back to UNKNOWN", () => {
+    expect(classifyOllamaException(fakeResponseError(200))).toBe(
+      ErrorClass.UNKNOWN,
+    );
+    expect(classifyOllamaException(fakeResponseError(600))).toBe(
+      ErrorClass.UNKNOWN,
+    );
+  });
+
+  // Transport-layer + Ollama-native error class names
+  const classNameCases: Array<[string, string]> = [
+    ["RequestError", ErrorClass.CLIENT_ERROR],
+    ["ConnectError", ErrorClass.SERVICE_UNAVAILABLE],
+    ["ConnectTimeout", ErrorClass.SERVICE_UNAVAILABLE],
+    ["TimeoutException", ErrorClass.TIMEOUT],
+    ["ReadTimeout", ErrorClass.TIMEOUT],
+  ];
+  test.each(classNameCases)("%s -> %s", (name, expected) => {
+    expect(classifyOllamaException(fakeOllamaError(name))).toBe(expected);
+  });
+
+  test("non-Ollama / non-httpx error classes fall back to UNKNOWN", () => {
+    expect(classifyOllamaException(new Error("plain"))).toBe(ErrorClass.UNKNOWN);
+    expect(classifyOllamaException(fakeOllamaError("ValueError"))).toBe(
+      ErrorClass.UNKNOWN,
+    );
+  });
+
+  test("non-Error values fall back to UNKNOWN", () => {
+    expect(classifyOllamaException("a string")).toBe(ErrorClass.UNKNOWN);
+    expect(classifyOllamaException(null)).toBe(ErrorClass.UNKNOWN);
+    expect(classifyOllamaException(undefined)).toBe(ErrorClass.UNKNOWN);
+  });
+
+  test("Ollama classifier never returns RATE_LIMITED, QUOTA_EXHAUSTED, or INVALID_API_KEY", () => {
+    // Ollama is local-runtime: no rate limiting, no quota, no auth.
+    // This regression guard fails loudly if a future refactor
+    // accidentally adds those mappings.
+    const forbidden = new Set([
+      ErrorClass.RATE_LIMITED,
+      ErrorClass.QUOTA_EXHAUSTED,
+      ErrorClass.INVALID_API_KEY,
+    ]);
+    for (const status of [400, 401, 403, 404, 429, 500, 503, 504]) {
+      expect(forbidden.has(classifyOllamaException(fakeResponseError(status)))).toBe(
+        false,
+      );
+    }
+    for (const name of [
+      "RequestError",
+      "ConnectError",
+      "ConnectTimeout",
+      "TimeoutException",
+      "ReadTimeout",
+    ]) {
+      expect(forbidden.has(classifyOllamaException(fakeOllamaError(name)))).toBe(
+        false,
+      );
+    }
   });
 });

@@ -251,6 +251,62 @@ export function classifyGeminiException(err: unknown): ErrorClassValue {
   return base;
 }
 
+/** Mapping from Ollama + httpx exception class names to canonical
+ * ErrorClass values. Wave 2.5.2 twin of the Python _OLLAMA_EXCEPTION_MAP.
+ *
+ * Ollama is a local runtime: no API-key auth, no per-minute rate
+ * limiting, no billing-cap. So INVALID_API_KEY, RATE_LIMITED, and
+ * QUOTA_EXHAUSTED are absent from this map by design.
+ *
+ * ResponseError (Ollama-native HTTP error) carries .status_code and
+ * is bucketed by HTTP-code range inside classifyOllamaException —
+ * NOT mapped here because the class name alone doesn't carry the
+ * 4xx-vs-5xx distinction the detectors require. */
+const OLLAMA_EXCEPTION_MAP: Record<string, ErrorClassValue> = {
+  // Ollama-native chat-request layer
+  RequestError: ErrorClass.CLIENT_ERROR,
+  // httpx transport layer — Ollama runs on top of httpx; the two
+  // dominant local-runtime failures are 'server not running'
+  // (ConnectError) and 'model load timed out' (TimeoutException).
+  ConnectError: ErrorClass.SERVICE_UNAVAILABLE,
+  ConnectTimeout: ErrorClass.SERVICE_UNAVAILABLE,
+  TimeoutException: ErrorClass.TIMEOUT,
+  ReadTimeout: ErrorClass.TIMEOUT,
+};
+
+/**
+ * Return the canonical ErrorClass for an Ollama or httpx-transport
+ * exception raised inside an instrumented chat call.
+ *
+ * Two-step classification:
+ *   1. If the exception is an ollama.ResponseError, bucket by
+ *      HTTP-code range from .status_code: 4xx → CLIENT_ERROR,
+ *      503 → SERVICE_UNAVAILABLE, other 5xx → INTERNAL_ERROR,
+ *      anything else → UNKNOWN.
+ *   2. Otherwise, look up the class name in OLLAMA_EXCEPTION_MAP
+ *      (covers RequestError + the dominant httpx transport errors).
+ *   3. Anything not in the map → UNKNOWN. Falls back rather than
+ *      misattributing to a specific bucket.
+ */
+export function classifyOllamaException(err: unknown): ErrorClassValue {
+  if (!(err instanceof Error) || !err.constructor.name) {
+    return ErrorClass.UNKNOWN;
+  }
+  // Step 1: ResponseError / status-bearing exceptions.
+  if (err.constructor.name === "ResponseError") {
+    const status = (err as Error & { status_code?: unknown }).status_code;
+    if (typeof status !== "number" || !Number.isInteger(status)) {
+      return ErrorClass.UNKNOWN;
+    }
+    if (status >= 400 && status < 500) return ErrorClass.CLIENT_ERROR;
+    if (status === 503) return ErrorClass.SERVICE_UNAVAILABLE;
+    if (status >= 500 && status < 600) return ErrorClass.INTERNAL_ERROR;
+    return ErrorClass.UNKNOWN;
+  }
+  // Step 2: class-name lookup for the simple cases.
+  return OLLAMA_EXCEPTION_MAP[err.constructor.name] ?? ErrorClass.UNKNOWN;
+}
+
 /** Probe an OpenAI exception's body for the insufficient_quota
  * error code that distinguishes a billing-cap from a true rate
  * limit. Best-effort; any missing attr / unexpected shape returns
