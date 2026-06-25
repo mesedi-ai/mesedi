@@ -136,3 +136,46 @@ describe("instrument_* wiring", () => {
     expect(geminiIntegration).toHaveProperty("instrumentGemini");
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Wave 2.5.3 — Ollama intentional omission guard
+//
+// instrument_ollama must NOT import _maybeEmitThrottlingEvent. Ollama
+// is a local runtime: no per-minute rate limiting, no quota exhaustion.
+// Wave 2.5.2 ships a regression-guard test asserting
+// classifyOllamaException NEVER returns RATE_LIMITED or
+// QUOTA_EXHAUSTED. Wiring the helper into instrument_ollama would be
+// a function call this codebase proves can never produce an event.
+// That's symmetry-by-copy-paste, not symmetry-by-meaning, and the
+// FOUNDATION ZERO SHORTCUTS principle says no.
+//
+// This source-string assertion fires if a future engineer adds the
+// import to ollama_integration.ts without engaging with the
+// architectural decision.
+// ──────────────────────────────────────────────────────────────────────
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+describe("Ollama no-throttling guard (Wave 2.5.3)", () => {
+  test("ollama_integration.ts does NOT import _maybeEmitThrottlingEvent", () => {
+    // Resolve the source file path next to this test file.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const sourcePath = join(here, "ollama_integration.ts");
+    const source = readFileSync(sourcePath, "utf8");
+    // Strip comments before scanning — the source contains a
+    // documented intentional reference to _maybeEmitThrottlingEvent
+    // in the comment block explaining the omission. We assert the
+    // import / call site itself is not present.
+    const stripped = source.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(stripped).not.toContain("_maybeEmitThrottlingEvent");
+  });
+
+  test("ollama_integration exposes instrumentOllama", async () => {
+    // The positive half: even though throttling auto-emit is omitted,
+    // the integration's primary export must still ship.
+    const ollamaIntegration = await import("./ollama_integration.js");
+    expect(ollamaIntegration).toHaveProperty("instrumentOllama");
+  });
+});

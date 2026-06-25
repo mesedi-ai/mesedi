@@ -165,10 +165,15 @@ def test_zero_retry_after_does_not_get_converted_to_negative(
 
 
 def test_each_integration_module_imports_the_helper() -> None:
-    """Each instrument_* module must import _maybe_emit_throttling_event
-    from mesedi.observe; without the import the auto-emit silently
-    no-ops. This test fails if a future refactor accidentally drops
-    the import from any one module."""
+    """Each commercial-provider instrument_* module must import
+    _maybe_emit_throttling_event from mesedi.observe; without the
+    import the auto-emit silently no-ops. This test fails if a
+    future refactor accidentally drops the import from any one
+    module.
+
+    Note: instrument_ollama is intentionally NOT in this list. See
+    test_ollama_integration_does_NOT_import_throttling_helper below
+    for the architectural rationale (Wave 2.5.3)."""
     from mesedi import (
         anthropic_integration,
         cohere_integration,
@@ -186,3 +191,41 @@ def test_each_integration_module_imports_the_helper() -> None:
             f"{mod.__name__} did not import _maybe_emit_throttling_event; "
             "the Wave 1.4 auto-emit will silently no-op for this provider."
         )
+
+
+def test_ollama_integration_does_NOT_import_throttling_helper() -> None:
+    """Wave 2.5.3 — instrument_ollama must NOT import
+    _maybe_emit_throttling_event. Ollama is a local runtime: no
+    per-minute rate limiting, no quota exhaustion. Wave 2.5.2's
+    regression-guard test asserts classify_ollama_exception NEVER
+    returns RATE_LIMITED or QUOTA_EXHAUSTED, so wiring the helper
+    into instrument_ollama would be a function call this codebase
+    proves can never produce an event. That's symmetry-by-copy-paste,
+    not symmetry-by-meaning, and the FOUNDATION ZERO SHORTCUTS
+    principle says no.
+
+    This negative assertion fires if a future engineer adds the
+    import to instrument_ollama without engaging with the
+    architectural decision. The right responses to a failing test:
+
+      (a) Remove the import (default — Ollama is local-runtime).
+      (b) If a future shared-tenant Ollama-Cloud-like service ever
+          introduces rate limiting AND the classifier is updated to
+          return RATE_LIMITED, delete this test as a conscious
+          decision AND update
+          test_each_integration_module_imports_the_helper to include
+          ollama_integration.
+
+    Either way the engineer thinks about it. Architectural drift
+    cannot happen silently."""
+    from mesedi import ollama_integration
+
+    assert not hasattr(ollama_integration, "_maybe_emit_throttling_event"), (
+        "instrument_ollama imported _maybe_emit_throttling_event; this "
+        "is either (a) accidental copy-paste from another instrument_* "
+        "module and should be removed, OR (b) intentional because "
+        "Ollama gained a rate-limit story and you should remove this "
+        "test + add ollama_integration to "
+        "test_each_integration_module_imports_the_helper. Either way, "
+        "engage with the decision rather than ignoring this test."
+    )

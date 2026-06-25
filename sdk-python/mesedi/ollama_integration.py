@@ -234,6 +234,17 @@ def _patch_chat(cls: Type[Any]) -> None:
                 user_message=user_message,
                 exc=exc,
             ))
+            # Wave 2.5.3 — intentional omission of the Wave 1.4
+            # _maybe_emit_throttling_event auto-emit call. The other
+            # four instrument_* modules call it here; instrument_ollama
+            # does not because Ollama is a local runtime — no per-
+            # minute rate limiting, no quota exhaustion. Wave 2.5.2
+            # shipped a regression-guard test asserting
+            # classify_ollama_exception NEVER returns RATE_LIMITED or
+            # QUOTA_EXHAUSTED, so this call would be guaranteed-dead
+            # code. tests/test_instrument_throttling.py contains a
+            # paired negative assertion that fails loudly if a future
+            # refactor adds the import without removing the guard.
             raise
 
         if is_stream:
@@ -316,6 +327,17 @@ def _patch_async_chat(cls: Type[Any]) -> None:
                 user_message=user_message,
                 exc=exc,
             ))
+            # Wave 2.5.3 — intentional omission of the Wave 1.4
+            # _maybe_emit_throttling_event auto-emit call. The other
+            # four instrument_* modules call it here; instrument_ollama
+            # does not because Ollama is a local runtime — no per-
+            # minute rate limiting, no quota exhaustion. Wave 2.5.2
+            # shipped a regression-guard test asserting
+            # classify_ollama_exception NEVER returns RATE_LIMITED or
+            # QUOTA_EXHAUSTED, so this call would be guaranteed-dead
+            # code. tests/test_instrument_throttling.py contains a
+            # paired negative assertion that fails loudly if a future
+            # refactor adds the import without removing the guard.
             raise
 
         if is_stream:

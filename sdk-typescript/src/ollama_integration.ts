@@ -210,6 +210,16 @@ function patchChat(cls: OllamaClassLike): void {
           err,
         }),
       );
+      // Wave 2.5.3 — intentional omission of the Wave 1.4
+      // _maybeEmitThrottlingEvent auto-emit call. The other four
+      // instrumentation modules call it here; instrumentOllama does
+      // not because Ollama is a local runtime — no per-minute rate
+      // limiting, no quota exhaustion. Wave 2.5.2 shipped a
+      // regression-guard test asserting classifyOllamaException
+      // NEVER returns RATE_LIMITED or QUOTA_EXHAUSTED, so this call
+      // would be guaranteed-dead code. instrument_throttling.test.ts
+      // contains a paired negative assertion that fails loudly if a
+      // future refactor adds the import without removing the guard.
       throw err;
     }
   } as ChatFn;
