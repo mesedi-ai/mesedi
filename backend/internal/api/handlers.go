@@ -2390,11 +2390,46 @@ func newAIAnalysisID() string {
 // buildFailureGroupAnalysisPrompt assembles the structured prompt
 // sent to the LLM. Kept small so the input bill stays bounded and
 // the model's output stays focused.
+//
+// The prompt has three parts in order:
+//
+//  1. The canonical Mesedi playbook for the (failure_class, signature)
+//     pair, loaded via playbooks.Load. This is the interpretation
+//     framework — what the signature means, the named causes, the
+//     diagnostic surface, the recommended fixes, the per-project
+//     tuning knobs, the related-detector cross-links. Without this,
+//     the model produces generic distributed-systems advice that
+//     misses Mesedi-specific features (allowlists, thresholds,
+//     redaction-at-ingest, topology view, etc.) — see audit at
+//     internal-extract/ai-analyses-vs-playbooks-audit.md.
+//
+//  2. The specific failure group's metadata + sample executions.
+//
+//  3. A task instruction telling the model to APPLY the playbook to
+//     this specific failure group rather than invent generic
+//     speculation.
+//
+// If the playbook lookup fails (very rare — every shipping detector
+// class has a registered playbook), the prompt falls back to its
+// pre-playbook shape so the analysis still runs.
 func buildFailureGroupAnalysisPrompt(
 	group *store.FailureGroup,
 	sampleExecs []*events.Execution,
 ) string {
 	var sb strings.Builder
+
+	// Part 1: the canonical playbook. The model treats this as its
+	// interpretation framework; the task instruction below names it
+	// explicitly so the model anchors its analysis on the playbook's
+	// causes + fixes rather than its own training-data priors.
+	playbookContent, playbookErr := playbooks.Load(group.FailureClass, group.Signature)
+	if playbookErr == nil && playbookContent != "" {
+		sb.WriteString("# Mesedi playbook for this failure class\n\n")
+		sb.WriteString(playbookContent)
+		sb.WriteString("\n\n---\n\n")
+	}
+
+	// Part 2: failure group metadata + sample executions.
 	sb.WriteString("# Failure group context\n\n")
 	sb.WriteString(fmt.Sprintf("- **failure_class**: %s\n", group.FailureClass))
 	sb.WriteString(fmt.Sprintf("- **signature**: %s\n", group.Signature))
@@ -2426,7 +2461,28 @@ func buildFailureGroupAnalysisPrompt(
 			sb.WriteString("\n")
 		}
 	}
+
+	// Part 3: the task instruction. Phrasing is deliberate — the
+	// model is told to USE the playbook as its framework, not to
+	// invent a root cause from scratch. Two-hypothesis remediation
+	// stays the existing contract; the difference is that the
+	// hypotheses are now drawn from the playbook's named fixes
+	// applied to this customer's specific data, not from generic
+	// distributed-systems training.
 	sb.WriteString("\n## Task\n\n")
+	if playbookErr == nil && playbookContent != "" {
+		sb.WriteString("Use the Mesedi playbook above as your interpretation framework. " +
+			"For this specific failure group, identify which of the playbook's " +
+			"named causes most plausibly fits the signature and sample executions, " +
+			"then propose two concrete remediation hypotheses drawn from the " +
+			"playbook's recommended fixes — applied to this customer's specific " +
+			"data, not stated in the abstract. Reference the playbook's " +
+			"diagnostic surfaces (events to read, fields to inspect, related " +
+			"detectors to cross-check, per-project knobs to tune) when they " +
+			"apply. If the sample executions are too sparse to discriminate " +
+			"between the playbook's causes, say so explicitly and name the " +
+			"specific additional data the operator should collect.\n\n")
+	}
 	sb.WriteString("Write a short Markdown analysis with three sections:\n")
 	sb.WriteString("1. **Likely cause** — one paragraph naming the most plausible root cause given the signature and the sample executions.\n")
 	sb.WriteString("2. **Two remediation hypotheses** — two bullet items, each a concrete action the operator can test.\n")
