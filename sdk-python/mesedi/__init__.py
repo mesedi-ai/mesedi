@@ -60,6 +60,7 @@ from mesedi.anthropic_integration import instrument_anthropic
 from mesedi.openai_integration import instrument_openai
 from mesedi.cohere_integration import instrument_cohere
 from mesedi.gemini_integration import instrument_gemini
+from mesedi.ollama_integration import instrument_ollama
 from mesedi.client import MesediClient, configure, flush, get_client
 from mesedi.events import (
     Event,
@@ -110,6 +111,7 @@ __all__ = [
     "instrument_anthropic",
     "instrument_cohere",
     "instrument_gemini",
+    "instrument_ollama",
     "instrument_openai",
     "pause_for_human",
     "request_human_intervention",
