@@ -49,6 +49,12 @@ Out of scope (filed as follow-ups in the Ollama arc):
     a generator/async generator; chunk aggregation needs the same
     StreamIteratorWrapper pattern the OpenAI integration uses for
     Anthropic/Cohere/Gemini parity. Deferred to a follow-up sub-wave.
+    Until that wave ships, streaming calls **emit no llm_call event
+    at all** (Wave 2.5.1.a correction) — the prior placeholder zero-
+    token event polluted cost_velocity / token_waste telemetry with
+    misleading data. The customer's stream still works; only the
+    Mesedi observation is deferred. A one-time INFO log explains
+    why the streaming calls aren't appearing in the dashboard.
   - Embeddings (``Client.embed``). Not on the provider_incident
     hot path; deferred to non-chat surface coverage.
   - Generate API (``Client.generate``). Single-prompt completion
@@ -100,6 +106,32 @@ _MAX_EXC_MSG = 500
 # distinct fake classes injected in tests don't falsely trip the
 # idempotency check.
 _patched_classes: set = set()
+
+# Wave 2.5.1.a — one-time warning guard for streaming calls. The
+# streaming chunk-aggregating wrapper ships in a follow-up sub-wave;
+# until then, calls with stream=True emit no llm_call event AND log a
+# single INFO message so customers understand why their streaming
+# calls don't appear in the Mesedi dashboard.
+_streaming_warning_emitted = False
+
+
+def _maybe_warn_streaming_unsupported() -> None:
+    """Log a one-time INFO message explaining that streaming calls
+    don't yet produce llm_call telemetry. Guarded by a module-level
+    flag so the warning fires exactly once per process — multiple
+    workers each log once."""
+    global _streaming_warning_emitted
+    if _streaming_warning_emitted:
+        return
+    _streaming_warning_emitted = True
+    logger.info(
+        "mesedi: instrument_ollama observed a chat(stream=True) call; "
+        "the chunk-aggregating wrapper for streaming responses ships in "
+        "a follow-up sub-wave, so no llm_call event will be recorded "
+        "for streaming calls until then. Non-streaming calls are "
+        "unaffected. Your stream still works; only Mesedi observation "
+        "is deferred."
+    )
 
 
 def instrument_ollama(
@@ -204,24 +236,16 @@ def _patch_chat(cls: Type[Any]) -> None:
             ))
             raise
 
-        duration_ms = int((time.perf_counter() - start) * 1000)
         if is_stream:
-            # Streaming path — emit a placeholder event with the call
-            # metadata and zero tokens. Wave 2.5.x streaming sub-wave
-            # will replace this with a chunk-aggregating wrapper.
-            client.submit_event(_build_ok_event(
-                event_id=event_id,
-                execution_id=ctx.execution_id,
-                sequence=sequence,
-                duration_ms=duration_ms,
-                model=model,
-                system_text=system_text,
-                user_message=user_message,
-                response_text="",
-                input_tokens=0,
-                output_tokens=0,
-            ))
+            # Wave 2.5.1.a — no event emission for streaming calls.
+            # Emitting a placeholder zero-token event would corrupt
+            # cost_velocity / token_waste telemetry by recording the
+            # call as a successful zero-cost call. Honest gap: no
+            # observation until the chunk-aggregating wrapper lands.
+            _maybe_warn_streaming_unsupported()
             return response
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
 
         response_text, input_tokens, output_tokens = (
             _extract_response_fields(response)
@@ -294,22 +318,13 @@ def _patch_async_chat(cls: Type[Any]) -> None:
             ))
             raise
 
-        duration_ms = int((time.perf_counter() - start) * 1000)
         if is_stream:
-            client.submit_event(_build_ok_event(
-                event_id=event_id,
-                execution_id=ctx.execution_id,
-                sequence=sequence,
-                duration_ms=duration_ms,
-                model=model,
-                system_text=system_text,
-                user_message=user_message,
-                response_text="",
-                input_tokens=0,
-                output_tokens=0,
-            ))
+            # Wave 2.5.1.a — no event emission for streaming calls.
+            # See _patch_chat sync twin for the rationale.
+            _maybe_warn_streaming_unsupported()
             return response
 
+        duration_ms = int((time.perf_counter() - start) * 1000)
         response_text, input_tokens, output_tokens = (
             _extract_response_fields(response)
         )

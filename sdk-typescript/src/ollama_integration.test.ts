@@ -204,3 +204,41 @@ describe("instrumentOllama", () => {
     expect(FakeOllama.prototype.chat).toBe(firstPatched);
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Wave 2.5.1.a — streaming no-op + one-time console.info contract
+// ──────────────────────────────────────────────────────────────────────
+
+import { vi } from "vitest";
+
+describe("streaming warning helper", () => {
+  test("logs exactly one console.info regardless of how many times streaming is observed", () => {
+    _testing.resetStreamingWarningGuard();
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      _testing.maybeWarnStreamingUnsupported();
+      _testing.maybeWarnStreamingUnsupported();
+      _testing.maybeWarnStreamingUnsupported();
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      // The message names "stream" so customers can grep for it in
+      // their logs without false positives.
+      const message = infoSpy.mock.calls[0]?.[0] as string;
+      expect(message).toContain("stream");
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  test("after reset, the warning fires again on the next observation", () => {
+    _testing.resetStreamingWarningGuard();
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      _testing.maybeWarnStreamingUnsupported();
+      _testing.resetStreamingWarningGuard();
+      _testing.maybeWarnStreamingUnsupported();
+      expect(infoSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+});

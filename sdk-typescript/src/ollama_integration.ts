@@ -26,7 +26,13 @@
  * Out of scope (filed as follow-ups in the Ollama arc):
  *   - Streaming (stream: true returns AsyncIterable). Aggregation
  *     wrapper deferred to a follow-up sub-wave, same way OpenAI
- *     streaming landed in its own #271.i sub-wave.
+ *     streaming landed in its own #271.i sub-wave. Until that wave
+ *     ships, streaming calls **emit no llm_call event at all** (Wave
+ *     2.5.1.a correction) — the prior placeholder zero-token event
+ *     polluted cost_velocity / token_waste telemetry with misleading
+ *     data. The customer's stream still works; only the Mesedi
+ *     observation is deferred. A one-time console.info explains why
+ *     the streaming calls aren't appearing in the dashboard.
  *   - Embeddings (ollama.embed)
  *   - Generate API (ollama.generate)
  *
@@ -51,6 +57,26 @@ const MAX_EXC_MSG = 500;
 const PROVIDER = "ollama";
 
 const _patched = new WeakSet<object>();
+
+/** Wave 2.5.1.a — one-time guard for streaming calls. The
+ * chunk-aggregating wrapper for streaming responses ships in a
+ * follow-up sub-wave; until then, calls with stream: true emit NO
+ * llm_call event AND log a single console.info so customers
+ * understand why their streaming calls don't appear in the Mesedi
+ * dashboard. */
+let _streamingWarningEmitted = false;
+
+function maybeWarnStreamingUnsupported(): void {
+  if (_streamingWarningEmitted) return;
+  _streamingWarningEmitted = true;
+  console.info(
+    "mesedi: instrumentOllama observed a chat({ stream: true }) call; " +
+      "the chunk-aggregating wrapper for streaming responses ships in " +
+      "a follow-up sub-wave, so no llm_call event will be recorded for " +
+      "streaming calls until then. Non-streaming calls are unaffected. " +
+      "Your stream still works; only Mesedi observation is deferred.",
+  );
+}
 
 export interface OllamaClassLike {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,34 +161,20 @@ function patchChat(cls: OllamaClassLike): void {
     const messages = Array.isArray(firstArg.messages) ? firstArg.messages : [];
     const systemText = extractFirstSystemMessage(messages);
     const userMessage = extractLastUserMessage(messages);
-    // Streaming defers to a follow-up sub-wave (see module docstring).
-    // For now we emit a placeholder event with zero tokens — honest
-    // about the gap rather than silently broken.
+    // Wave 2.5.1.a — streaming calls skip event emission entirely.
+    // See module docstring for the rationale.
     const isStream = firstArg.stream === true;
 
     const start = performance.now();
     try {
       const response = (await originalChat.apply(this, args)) as OllamaChatResponse;
-      const durationMs = Math.round(performance.now() - start);
 
       if (isStream) {
-        client.submitEvent(
-          buildOkEvent({
-            eventId,
-            executionId: ctx.executionId,
-            sequence,
-            durationMs,
-            model,
-            systemText,
-            userMessage,
-            responseText: "",
-            inputTokens: 0,
-            outputTokens: 0,
-          }),
-        );
+        maybeWarnStreamingUnsupported();
         return response;
       }
 
+      const durationMs = Math.round(performance.now() - start);
       const { responseText, inputTokens, outputTokens } =
         extractResponseFields(response);
       if (ctx.budgetTracker) {
@@ -342,4 +354,15 @@ export const _testing = {
   extractResponseFields,
   numberOrZero,
   truncate,
+  /** Resets the one-time streaming-warning flag so tests can assert
+   * the warning fires on first stream call after a reset. Not part
+   * of the public API. */
+  resetStreamingWarningGuard: (): void => {
+    _streamingWarningEmitted = false;
+  },
+  /** The streaming-warning function itself, exposed so unit tests
+   * can verify the once-per-process contract without spinning up a
+   * full wrap() + chat() integration scaffold. Not part of the
+   * public API. */
+  maybeWarnStreamingUnsupported,
 };

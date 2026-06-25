@@ -278,6 +278,31 @@ def test_instrument_ollama_is_idempotent_per_class() -> None:
     assert _FakeSyncClient.chat is first_patched
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Wave 2.5.1.a — streaming no-op + one-time warning contract
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_streaming_warning_helper_is_one_time(caplog) -> None:
+    """The streaming warning fires exactly once per process — multiple
+    calls don't spam the log. Test the helper directly so we don't
+    have to spin up a full @wrap context."""
+    # Reset the module-level flag so the test is order-independent.
+    ollama_mod._streaming_warning_emitted = False
+    import logging
+    with caplog.at_level(logging.INFO, logger="mesedi.ollama"):
+        ollama_mod._maybe_warn_streaming_unsupported()
+        ollama_mod._maybe_warn_streaming_unsupported()
+        ollama_mod._maybe_warn_streaming_unsupported()
+    streaming_logs = [
+        r for r in caplog.records if "streaming" in r.getMessage().lower()
+    ]
+    assert len(streaming_logs) == 1, (
+        f"streaming warning should fire exactly once; got "
+        f"{len(streaming_logs)} log records"
+    )
+
+
 def test_instrument_ollama_returns_false_when_nothing_patched() -> None:
     """When neither class is provided AND the ollama package can't
     be imported, instrument_ollama returns False so the caller can
