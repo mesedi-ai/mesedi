@@ -75,6 +75,8 @@ export { instrumentCohere } from "./cohere_integration.js";
 export type { CohereClientLike } from "./cohere_integration.js";
 export { instrumentGemini } from "./gemini_integration.js";
 export type { GenerativeModelClassLike } from "./gemini_integration.js";
+export { instrumentVertexGemini } from "./vertex_gemini_integration.js";
+export type { VertexGenerativeModelClassLike } from "./vertex_gemini_integration.js";
 export { instrumentOllama } from "./ollama_integration.js";
 export type { OllamaClassLike } from "./ollama_integration.js";
 export { MesediHalt, isMesediHalt } from "./halt.js";
