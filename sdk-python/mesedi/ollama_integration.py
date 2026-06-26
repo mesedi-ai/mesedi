@@ -259,6 +259,7 @@ class _OllamaStreamIteratorWrapper:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": self._model,
                 "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
                 "user_message": _truncate(self._user_message, _MAX_USER_MSG),
@@ -590,6 +591,7 @@ def _build_ok_event(
         duration_ms=duration_ms,
         payload={
             "provider": _PROVIDER,
+            "surface": "chat",
             "model": model,
             "system_prompt": _truncate(system_text, _MAX_SYSTEM),
             "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -611,6 +613,7 @@ def _build_failure_event(
     system_text: str,
     user_message: str,
     exc: BaseException,
+    surface: str = "chat",
 ) -> Event:
     """Construct the shared failure-path llm_call event from an Ollama
     exception. Uses ``classify_ollama_exception`` (Wave 2.5.2) to map
@@ -618,6 +621,7 @@ def _build_failure_event(
     vocabulary the backend's provider_incident detector clusters on."""
     failure_payload: Dict[str, Any] = {
         "provider": _PROVIDER,
+        "surface": surface,
         "model": model,
         "system_prompt": _truncate(system_text, _MAX_SYSTEM),
         "user_message": _truncate(user_message, _MAX_USER_MSG),

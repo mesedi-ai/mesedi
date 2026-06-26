@@ -198,6 +198,7 @@ def _instrument_sync_anthropic(messages_class: Optional[Type[Any]]) -> bool:
             # subclasses do, connection / timeout errors don't).
             failure_payload = {
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -259,6 +260,7 @@ def _instrument_sync_anthropic(messages_class: Optional[Type[Any]]) -> bool:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -336,6 +338,7 @@ def _instrument_async_anthropic(async_messages_class: Optional[Type[Any]]) -> bo
             duration_ms = int((time.perf_counter() - start) * 1000)
             failure_payload = {
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -385,6 +388,7 @@ def _instrument_async_anthropic(async_messages_class: Optional[Type[Any]]) -> bo
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -671,6 +675,7 @@ class _AnthropicStreamManagerWrapper:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": self._model,
                 "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
                 "user_message": _truncate(self._user_message, _MAX_USER_MSG),
@@ -704,6 +709,7 @@ def _emit_anthropic_stream_failure(
     """
     failure_payload = {
         "provider": _PROVIDER,
+        "surface": "chat",
         "model": model,
         "system_prompt": _truncate(system_text, _MAX_SYSTEM),
         "user_message": _truncate(user_message, _MAX_USER_MSG),

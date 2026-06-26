@@ -101,7 +101,13 @@ def instrument_gemini(model_class: Optional[Type[Any]] = None) -> bool:
 
     sync_ok = _patch_gemini_sync(model_class)
     async_ok = _patch_gemini_async(model_class)
-    return sync_ok or async_ok
+
+    # #271.j: also patch module-level embed_content (+ async) when
+    # google.generativeai is importable. Returns True silently when
+    # neither attribute exists on the module (very old SDK versions).
+    embed_ok = instrument_gemini_embed()
+
+    return sync_ok or async_ok or embed_ok
 
 
 def _patch_gemini_sync(model_class: Type[Any]) -> bool:
@@ -191,6 +197,7 @@ def _patch_gemini_sync(model_class: Type[Any]) -> bool:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -298,6 +305,7 @@ def _patch_gemini_async(model_class: Type[Any]) -> bool:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -328,9 +336,11 @@ def _build_failure_event(
     system_text: str,
     user_message: str,
     exc: BaseException,
+    surface: str = "chat",
 ) -> Event:
     failure_payload: Dict[str, Any] = {
         "provider": _PROVIDER,
+        "surface": surface,
         "model": model,
         "system_prompt": _truncate(system_text, _MAX_SYSTEM),
         "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -537,6 +547,7 @@ class _GeminiStreamIteratorWrapper:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": self._model,
                 "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
                 "user_message": _truncate(self._user_message, _MAX_USER_MSG),
@@ -591,6 +602,7 @@ def _emit_gemini_stream_failure(
     """Shared failure-event emitter for streaming exceptions."""
     failure_payload = {
         "provider": _PROVIDER,
+        "surface": "chat",
         "model": model,
         "system_prompt": _truncate(system_text, _MAX_SYSTEM),
         "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -622,3 +634,207 @@ def _emit_gemini_stream_failure(
         retry_after_seconds=retry_after,
         endpoint="/v1/models/generateContent",
     )
+
+
+## ── #271.j non-chat surfaces (embed_content) ──────────────────────────
+
+
+# Module-level patching state — Gemini's embed_content lives on the
+# google.generativeai module directly (unlike chat which is a method
+# on GenerativeModel). Two booleans keep sync vs async re-patching
+# idempotent independent of each other.
+_embed_sync_patched = False
+_embed_async_patched = False
+
+
+def _extract_embed_content_input(content: Any) -> str:
+    """Gemini embed_content ``content`` is str | google.ai.Content |
+    list[...]. Stringify for the user_message field; truncated
+    downstream by _MAX_USER_MSG."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        if content and isinstance(content[0], str):
+            return "\n".join(str(c) for c in content)
+        return f"<{len(content)} embed input(s)>"
+    return _stringify_gemini_content(content)
+
+
+def _extract_embed_response_tokens(response: Any) -> int:
+    """Gemini embed_content returns dict-like {'embedding': [...]}
+    without usage metadata. Token count not available — return 0."""
+    return 0
+
+
+def instrument_gemini_embed(genai_module: Optional[Any] = None) -> bool:
+    """Patch ``google.generativeai.embed_content`` +
+    ``embed_content_async`` (when available) to emit
+    surface='embeddings' llm_call events.
+
+    Args:
+        genai_module: Override module to patch. When None, imports
+            ``google.generativeai``.
+
+    Returns:
+        True if at least one of the embed surfaces was patched.
+    """
+    global _embed_sync_patched, _embed_async_patched
+    if genai_module is None:
+        try:
+            import google.generativeai as _genai
+            genai_module = _genai
+        except ImportError:
+            logger.debug(
+                "mesedi: google-generativeai not importable; "
+                "skipping embed_content patch."
+            )
+            return False
+
+    patched_any = False
+
+    if not _embed_sync_patched and hasattr(genai_module, "embed_content"):
+        original_embed = genai_module.embed_content
+
+        def patched_embed(*args: Any, **kwargs: Any) -> Any:
+            ctx = current_execution_context()
+            if ctx is None:
+                return original_embed(*args, **kwargs)
+            ctx.check_budget()
+            client = get_client()
+            sequence = ctx.next_sequence()
+            event_id = f"evt-{uuid.uuid4().hex[:12]}"
+            if ctx.budget_tracker is not None:
+                ctx.budget_tracker.increment_steps()
+
+            model = kwargs.get("model", "unknown")
+            content = kwargs.get("content")
+            if content is None and args:
+                # Positional: embed_content(model, content). Best-effort.
+                content = args[1] if len(args) >= 2 else None
+            user_message = _extract_embed_content_input(content)
+
+            start = time.perf_counter()
+            try:
+                response = original_embed(*args, **kwargs)
+            except BaseException as exc:
+                duration_ms = int((time.perf_counter() - start) * 1000)
+                client.submit_event(_build_failure_event(
+                    event_id=event_id,
+                    execution_id=ctx.execution_id,
+                    sequence=sequence,
+                    duration_ms=duration_ms,
+                    model=model,
+                    system_text="",
+                    user_message=user_message,
+                    exc=exc,
+                    surface="embeddings",
+                ))
+                _maybe_emit_throttling_event(
+                    provider=_PROVIDER,
+                    error_class=classify_gemini_exception(exc),
+                    http_status=extract_http_status(exc),
+                    retry_after_seconds=extract_retry_after(exc),
+                    endpoint="/v1/models/embedContent",
+                )
+                raise
+
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(Event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                event_type=EventType.LLM_CALL,
+                sequence=sequence,
+                timestamp=utcnow_rfc3339(),
+                duration_ms=duration_ms,
+                payload={
+                    "provider": _PROVIDER,
+                    "surface": "embeddings",
+                    "model": model,
+                    "user_message": _truncate(user_message, _MAX_USER_MSG),
+                    "response_text": "<embedding vectors>",
+                    "status": "ok",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                },
+            ))
+            return response
+
+        patched_embed.__name__ = "embed_content"
+        patched_embed.__doc__ = getattr(original_embed, "__doc__", None)
+        genai_module.embed_content = patched_embed
+        _embed_sync_patched = True
+        patched_any = True
+
+    if not _embed_async_patched and hasattr(genai_module, "embed_content_async"):
+        original_embed_async = genai_module.embed_content_async
+
+        async def patched_embed_async(*args: Any, **kwargs: Any) -> Any:
+            ctx = current_execution_context()
+            if ctx is None:
+                return await original_embed_async(*args, **kwargs)
+            ctx.check_budget()
+            client = get_client()
+            sequence = ctx.next_sequence()
+            event_id = f"evt-{uuid.uuid4().hex[:12]}"
+            if ctx.budget_tracker is not None:
+                ctx.budget_tracker.increment_steps()
+
+            model = kwargs.get("model", "unknown")
+            content = kwargs.get("content")
+            if content is None and args:
+                content = args[1] if len(args) >= 2 else None
+            user_message = _extract_embed_content_input(content)
+
+            start = time.perf_counter()
+            try:
+                response = await original_embed_async(*args, **kwargs)
+            except BaseException as exc:
+                duration_ms = int((time.perf_counter() - start) * 1000)
+                client.submit_event(_build_failure_event(
+                    event_id=event_id,
+                    execution_id=ctx.execution_id,
+                    sequence=sequence,
+                    duration_ms=duration_ms,
+                    model=model,
+                    system_text="",
+                    user_message=user_message,
+                    exc=exc,
+                    surface="embeddings",
+                ))
+                _maybe_emit_throttling_event(
+                    provider=_PROVIDER,
+                    error_class=classify_gemini_exception(exc),
+                    http_status=extract_http_status(exc),
+                    retry_after_seconds=extract_retry_after(exc),
+                    endpoint="/v1/models/embedContent",
+                )
+                raise
+
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(Event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                event_type=EventType.LLM_CALL,
+                sequence=sequence,
+                timestamp=utcnow_rfc3339(),
+                duration_ms=duration_ms,
+                payload={
+                    "provider": _PROVIDER,
+                    "surface": "embeddings",
+                    "model": model,
+                    "user_message": _truncate(user_message, _MAX_USER_MSG),
+                    "response_text": "<embedding vectors>",
+                    "status": "ok",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                },
+            ))
+            return response
+
+        patched_embed_async.__name__ = "embed_content_async"
+        patched_embed_async.__doc__ = getattr(original_embed_async, "__doc__", None)
+        genai_module.embed_content_async = patched_embed_async
+        _embed_async_patched = True
+        patched_any = True
+
+    return patched_any

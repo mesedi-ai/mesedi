@@ -152,6 +152,19 @@ def instrument_cohere(
     if async_client_v2_class is not None:
         _patch_async_v2_stream(async_client_v2_class)
 
+    # #271.j: also patch embed on each available class. Same embed
+    # shape v1+v2 (texts=[str], model=, input_type=), so the patcher
+    # is shared. Separate _embed_patched_classes set keeps embed
+    # patching idempotent independent of chat/streaming patching.
+    if client_v1_class is not None:
+        _patch_embed_sync(client_v1_class)
+    if client_v2_class is not None:
+        _patch_embed_sync(client_v2_class)
+    if async_client_v1_class is not None:
+        _patch_embed_async(async_client_v1_class)
+    if async_client_v2_class is not None:
+        _patch_embed_async(async_client_v2_class)
+
     return patched_any
 
 
@@ -474,6 +487,7 @@ def _success_event(
     response_text: str,
     input_tokens: int,
     output_tokens: int,
+    surface: str = "chat",
 ) -> Event:
     return Event(
         event_id=event_id,
@@ -484,6 +498,7 @@ def _success_event(
         duration_ms=duration_ms,
         payload={
             "provider": _PROVIDER,
+            "surface": surface,
             "model": model,
             "system_prompt": _truncate(system_text, _MAX_SYSTEM),
             "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -505,9 +520,11 @@ def _build_failure_event(
     system_text: str,
     user_message: str,
     exc: BaseException,
+    surface: str = "chat",
 ) -> Event:
     failure_payload: Dict[str, Any] = {
         "provider": _PROVIDER,
+        "surface": surface,
         "model": model,
         "system_prompt": _truncate(system_text, _MAX_SYSTEM),
         "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -913,6 +930,7 @@ class _CohereStreamIteratorWrapper:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": self._model,
                 "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
                 "user_message": _truncate(self._user_message, _MAX_USER_MSG),
@@ -1018,6 +1036,7 @@ def _emit_cohere_stream_failure(
     streaming exceptions."""
     failure_payload = {
         "provider": _PROVIDER,
+        "surface": "chat",
         "model": model,
         "system_prompt": _truncate(system_text, _MAX_SYSTEM),
         "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -1049,3 +1068,181 @@ def _emit_cohere_stream_failure(
         retry_after_seconds=retry_after,
         endpoint=endpoint,
     )
+
+
+## ── #271.j non-chat surfaces (embeddings) ─────────────────────────────
+
+
+_embed_patched_classes: set = set()
+
+
+def _extract_embed_input(kwargs: Dict[str, Any]) -> str:
+    """Cohere embed accepts ``texts=[str, ...]`` (v1+v2) or ``inputs=``
+    (v2 multi-modal). Stringify so user_message records the input."""
+    texts = kwargs.get("texts") or kwargs.get("inputs") or []
+    if isinstance(texts, str):
+        return texts
+    if isinstance(texts, list):
+        if texts and isinstance(texts[0], str):
+            return "\n".join(str(t) for t in texts)
+        return f"<{len(texts)} embed input(s)>"
+    return repr(texts)
+
+
+def _extract_embed_response_tokens(response: Any) -> int:
+    """Pull billed input tokens from EmbedResponse.meta.billed_units."""
+    try:
+        meta = getattr(response, "meta", None)
+        if meta is not None:
+            billed = getattr(meta, "billed_units", None)
+            if billed is not None:
+                return int(getattr(billed, "input_tokens", 0) or 0)
+    except Exception as exc:
+        logger.debug("mesedi: cohere embed usage extraction failed: %s", exc)
+    return 0
+
+
+def _patch_embed_sync(cls: Type[Any]) -> None:
+    """Wrap cls.embed to emit surface='embeddings' llm_call events."""
+    if cls in _embed_patched_classes:
+        return
+    original_embed = cls.embed
+
+    def patched_embed(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return original_embed(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        user_message = _extract_embed_input(kwargs)
+
+        start = time.perf_counter()
+        try:
+            response = original_embed(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text="",
+                user_message=user_message,
+                exc=exc,
+                surface="embeddings",
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_cohere_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/embed",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        input_tokens = _extract_embed_response_tokens(response)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=0,
+            )
+        client.submit_event(_success_event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            sequence=sequence,
+            duration_ms=duration_ms,
+            model=model,
+            system_text="",
+            user_message=user_message,
+            response_text="<embedding vectors>",
+            input_tokens=input_tokens,
+            output_tokens=0,
+            surface="embeddings",
+        ))
+        return response
+
+    patched_embed.__name__ = getattr(original_embed, "__name__", "embed")
+    patched_embed.__doc__ = getattr(original_embed, "__doc__", None)
+    cls.embed = patched_embed  # type: ignore[assignment]
+    _embed_patched_classes.add(cls)
+
+
+def _patch_embed_async(cls: Type[Any]) -> None:
+    """Async twin of _patch_embed_sync — AsyncClient[V2].embed."""
+    if cls in _embed_patched_classes:
+        return
+    original_embed = cls.embed
+
+    async def patched_embed(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return await original_embed(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        user_message = _extract_embed_input(kwargs)
+
+        start = time.perf_counter()
+        try:
+            response = await original_embed(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text="",
+                user_message=user_message,
+                exc=exc,
+                surface="embeddings",
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_cohere_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/embed",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        input_tokens = _extract_embed_response_tokens(response)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=0,
+            )
+        client.submit_event(_success_event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            sequence=sequence,
+            duration_ms=duration_ms,
+            model=model,
+            system_text="",
+            user_message=user_message,
+            response_text="<embedding vectors>",
+            input_tokens=input_tokens,
+            output_tokens=0,
+            surface="embeddings",
+        ))
+        return response
+
+    patched_embed.__name__ = getattr(original_embed, "__name__", "embed")
+    patched_embed.__doc__ = getattr(original_embed, "__doc__", None)
+    cls.embed = patched_embed  # type: ignore[assignment]
+    _embed_patched_classes.add(cls)

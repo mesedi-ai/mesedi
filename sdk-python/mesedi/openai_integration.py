@@ -52,9 +52,9 @@ Out of scope (filed as follow-ups):
   - Streaming responses (``stream=True``). Both Anthropic and
     OpenAI streaming need a separate observer that drains chunks
     without buffering the whole response in memory.
-  - Embeddings / image generation / audio. The provider_incident
-    detector is most valuable on chat-completions; other endpoints
-    can be added as customer demand surfaces.
+  - Image generation, audio (Whisper STT + TTS). Filed as follow-up
+    sub-waves of #271.j; same surface-discriminator pattern as
+    embeddings, separate patch sites per endpoint.
 
 Patching is idempotent per class object.
 
@@ -109,6 +109,8 @@ def instrument_openai(
     responses_class: Optional[Type[Any]] = None,
     async_completions_class: Optional[Type[Any]] = None,
     async_responses_class: Optional[Type[Any]] = None,
+    embeddings_class: Optional[Type[Any]] = None,
+    async_embeddings_class: Optional[Type[Any]] = None,
 ) -> bool:
     """Patch the OpenAI SDK's chat-completions and Responses APIs to
     emit llm_call events. Patches both sync + async surfaces (#271.h
@@ -201,6 +203,38 @@ def instrument_openai(
         _patch_async_responses(async_responses_class)
         patched_any = True
 
+    # #271.j: embeddings surface — non-chat but provider_incident-
+    # relevant. Sync + async classes auto-located.
+    if embeddings_class is None:
+        try:
+            from openai.resources.embeddings import Embeddings as _Embeddings
+            embeddings_class = _Embeddings
+        except ImportError:
+            logger.debug(
+                "mesedi: openai.resources.embeddings not importable; "
+                "skipping embeddings patch."
+            )
+
+    if embeddings_class is not None:
+        _patch_embeddings(embeddings_class)
+        patched_any = True
+
+    if async_embeddings_class is None:
+        try:
+            from openai.resources.embeddings import (
+                AsyncEmbeddings as _AsyncEmbeddings,
+            )
+            async_embeddings_class = _AsyncEmbeddings
+        except ImportError:
+            logger.debug(
+                "mesedi: openai AsyncEmbeddings not importable; "
+                "skipping async embeddings patch."
+            )
+
+    if async_embeddings_class is not None:
+        _patch_async_embeddings(async_embeddings_class)
+        patched_any = True
+
     return patched_any
 
 
@@ -291,6 +325,7 @@ def _patch_chat_completions(cls: Type[Any]) -> None:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -404,6 +439,7 @@ def _patch_responses(cls: Type[Any]) -> None:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -505,6 +541,7 @@ def _patch_async_chat_completions(cls: Type[Any]) -> None:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -604,6 +641,7 @@ def _patch_async_responses(cls: Type[Any]) -> None:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": "chat",
                 "model": model,
                 "system_prompt": _truncate(system_text, _MAX_SYSTEM),
                 "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -631,14 +669,23 @@ def _build_failure_event(
     system_text: str,
     user_message: str,
     exc: BaseException,
+    surface: str = "chat",
 ) -> Event:
     """Construct the shared failure-path llm_call event from an OpenAI
     exception. Same shape as anthropic_integration's failure payload —
     backend detectors fingerprint on the canonical fields, not on
     per-provider quirks.
+
+    The ``surface`` field (added 2026-06-26 in #271.j) distinguishes
+    which OpenAI API was called: "chat" (chat completions + Responses
+    API), "embeddings", "image", "audio_stt" (transcribe + translate),
+    "audio_tts" (speech), or future values. Backend provider_incident
+    detector ignores ``surface`` — a provider outage clusters across
+    surfaces. Per-surface analytics consume the field separately.
     """
     failure_payload: Dict[str, Any] = {
         "provider": _PROVIDER,
+        "surface": surface,
         "model": model,
         "system_prompt": _truncate(system_text, _MAX_SYSTEM),
         "user_message": _truncate(user_message, _MAX_USER_MSG),
@@ -935,6 +982,7 @@ class _OpenAIStreamIteratorWrapper:
             duration_ms=duration_ms,
             payload={
                 "provider": _PROVIDER,
+                "surface": getattr(self, "_surface", "chat"),
                 "model": self._model,
                 "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
                 "user_message": _truncate(self._user_message, _MAX_USER_MSG),
@@ -953,6 +1001,7 @@ class _OpenAIStreamIteratorWrapper:
         duration_ms = int((time.perf_counter() - self._start) * 1000)
         failure_payload = {
             "provider": _PROVIDER,
+            "surface": "chat",
             "model": self._model,
             "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
             "user_message": _truncate(self._user_message, _MAX_USER_MSG),
@@ -1067,3 +1116,194 @@ def _accumulate_responses_chunk(chunk: Any, state: Dict[str, Any]) -> None:
                 state["output_tokens"] = int(getattr(usage, "output_tokens", 0) or 0)
             except Exception:
                 pass
+
+
+## ── #271.j non-chat surfaces (embeddings) ─────────────────────────────
+
+
+def _extract_embeddings_input(input_field: Any) -> str:
+    """OpenAI embeddings ``input`` is a str | list[str] | list[int] |
+    list[list[int]]. Stringify for the user_message field so the DLP
+    scanner + provider_incident clustering still work; truncated
+    downstream by _MAX_USER_MSG."""
+    if isinstance(input_field, str):
+        return input_field
+    if isinstance(input_field, list):
+        # list[str]: join; list[int] (token IDs): show first few + count.
+        if input_field and isinstance(input_field[0], str):
+            return "\n".join(str(x) for x in input_field)
+        return f"<{len(input_field)} token-id input(s)>"
+    return repr(input_field)
+
+
+def _extract_embeddings_response_tokens(response: Any) -> int:
+    """Pull prompt_tokens from an OpenAI CreateEmbeddingResponse.
+    Embeddings have NO output tokens — return only the input count."""
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            return int(getattr(usage, "prompt_tokens", 0) or 0)
+    except Exception as exc:
+        logger.debug("mesedi: openai embeddings usage extraction failed: %s", exc)
+    return 0
+
+
+def _patch_embeddings(cls: Type[Any]) -> None:
+    """Wrap cls.create to emit surface='embeddings' llm_call events.
+    Mirrors _patch_chat_completions but extracts the embeddings-shaped
+    request + response. Auto-emits infrastructure_event on throttling-
+    class exceptions (Wave 1.4)."""
+    if cls in _patched_classes:
+        return
+
+    original_create = cls.create
+
+    def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return original_create(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        user_message = _extract_embeddings_input(kwargs.get("input", ""))
+
+        start = time.perf_counter()
+        try:
+            response = original_create(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text="",
+                user_message=user_message,
+                exc=exc,
+                surface="embeddings",
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_openai_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/embeddings",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        input_tokens = _extract_embeddings_response_tokens(response)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=0,
+            )
+        client.submit_event(Event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "surface": "embeddings",
+                "model": model,
+                "user_message": _truncate(user_message, _MAX_USER_MSG),
+                "response_text": "<embedding vectors>",
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": 0,
+            },
+        ))
+        return response
+
+    patched_create.__name__ = getattr(original_create, "__name__", "create")
+    patched_create.__doc__ = getattr(original_create, "__doc__", None)
+    cls.create = patched_create  # type: ignore[assignment]
+    _patched_classes.add(cls)
+
+
+def _patch_async_embeddings(cls: Type[Any]) -> None:
+    """Async twin of _patch_embeddings — AsyncEmbeddings.create."""
+    if cls in _patched_classes:
+        return
+
+    original_create = cls.create
+
+    async def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return await original_create(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        user_message = _extract_embeddings_input(kwargs.get("input", ""))
+
+        start = time.perf_counter()
+        try:
+            response = await original_create(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text="",
+                user_message=user_message,
+                exc=exc,
+                surface="embeddings",
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_openai_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/embeddings",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        input_tokens = _extract_embeddings_response_tokens(response)
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=0,
+            )
+        client.submit_event(Event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "surface": "embeddings",
+                "model": model,
+                "user_message": _truncate(user_message, _MAX_USER_MSG),
+                "response_text": "<embedding vectors>",
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": 0,
+            },
+        ))
+        return response
+
+    patched_create.__name__ = getattr(original_create, "__name__", "create")
+    patched_create.__doc__ = getattr(original_create, "__doc__", None)
+    cls.create = patched_create  # type: ignore[assignment]
+    _patched_classes.add(cls)
