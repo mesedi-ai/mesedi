@@ -142,7 +142,7 @@ func (h *Handlers) lookupOrgIDForProject(
 }
 
 // ResolveTimeBudgetMs returns the effective time_budget threshold
-// in milliseconds for projectID, walking the cascade.
+// in milliseconds, walking the cascade described above.
 func (h *Handlers) ResolveTimeBudgetMs(
 	ctx context.Context, projectID string,
 ) (int, ResolutionSource) {
@@ -155,7 +155,7 @@ func (h *Handlers) ResolveTimeBudgetMs(
 }
 
 // ResolveProviderIncidentMinTenants returns the effective
-// minimum-tenants threshold for projectID, walking the cascade.
+// minimum-tenants threshold, walking the cascade.
 func (h *Handlers) ResolveProviderIncidentMinTenants(
 	ctx context.Context, projectID string,
 ) (int, ResolutionSource) {
@@ -168,7 +168,7 @@ func (h *Handlers) ResolveProviderIncidentMinTenants(
 }
 
 // ResolveToolReturnValueMaxBytes returns the effective
-// max-bytes threshold for projectID, walking the cascade.
+// max-bytes threshold, walking the cascade.
 func (h *Handlers) ResolveToolReturnValueMaxBytes(
 	ctx context.Context, projectID string,
 ) (int, ResolutionSource) {

@@ -1,5 +1,7 @@
 package api
 
+import "context"
+
 // Tier-aware caps for per-project configuration knobs (#276.b).
 //
 // Some per-project configs map directly to cost or abuse vectors
@@ -115,4 +117,20 @@ func tierCapTokenWastePrefixWindow(tier string) int {
 	default:
 		return tierCapTokenWastePrefixWindowHobby
 	}
+}
+
+// lookupProjectTier resolves the project's tier as a normalized
+// string (TierHobby / TierTeam / TierEnterprise). Falls back to
+// TierHobby on any error — strictest cap, safest default. Used by
+// the time_budget / tool_return_value handlers (and any future
+// tier-aware endpoint) to wire the tier_caps constants into the
+// API surface.
+func (h *Handlers) lookupProjectTier(
+	ctx context.Context, projectID string,
+) string {
+	proj, err := h.Store.GetProject(ctx, projectID)
+	if err != nil || proj == nil {
+		return TierHobby
+	}
+	return normalizeTier(proj.Tier)
 }

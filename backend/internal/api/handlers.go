@@ -3689,9 +3689,17 @@ func (h *Handlers) HandleGetTimeBudgetConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "could not load time_budget config")
 		return
 	}
+	// Wire #276.b tier-cap constants into the response. The dashboard
+	// reads tier + max_ms_for_tier to render the cap label and clamp
+	// over-cap input. Before this fix the endpoint returned neither,
+	// so the dashboard showed 'tier (unknown)' and silently fell back
+	// to the highest cap.
+	tier := h.lookupProjectTier(r.Context(), authProjectID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"project_id":   authProjectID,
-		"threshold_ms": n,
+		"project_id":      authProjectID,
+		"threshold_ms":    n,
+		"tier":            tier,
+		"max_ms_for_tier": TierCapTimeBudgetMs(tier),
 	})
 }
 
@@ -3731,6 +3739,19 @@ func (h *Handlers) HandleSetTimeBudgetConfig(w http.ResponseWriter, r *http.Requ
 	if body.ThresholdMs > maxThresholdMs {
 		writeError(w, http.StatusBadRequest,
 			"threshold_ms must be <= 86400000 (24 hours)")
+		return
+	}
+	// Tier-aware enforcement. Today's tier-cap helper falls back to
+	// Hobby (strictest) for unknown tiers; that's the safest default
+	// — better to refuse a save and let the customer ask support than
+	// to silently allow Enterprise budgets on a Hobby plan.
+	projectTier := h.lookupProjectTier(r.Context(), authProjectID)
+	tierCap := TierCapTimeBudgetMs(projectTier)
+	if body.ThresholdMs > tierCap {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf(
+			"threshold_ms %d exceeds your tier cap of %d ms (%s tier)",
+			body.ThresholdMs, tierCap, projectTier,
+		))
 		return
 	}
 	if err := h.Store.SetProjectTimeBudgetMs(
@@ -4035,9 +4056,12 @@ func (h *Handlers) HandleGetToolReturnValueConfig(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, "could not load tool_return_value config")
 		return
 	}
+	tier := h.lookupProjectTier(r.Context(), authProjectID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"project_id": authProjectID,
-		"max_bytes":  n,
+		"project_id":         authProjectID,
+		"max_bytes":          n,
+		"tier":               tier,
+		"max_bytes_for_tier": TierCapToolReturnValueBytes(tier),
 	})
 }
 
@@ -4072,6 +4096,18 @@ func (h *Handlers) HandleSetToolReturnValueConfig(w http.ResponseWriter, r *http
 	const oneMegabyte = 1 << 20
 	if body.MaxBytes > oneMegabyte {
 		writeError(w, http.StatusBadRequest, "max_bytes must be <= 1048576 (the wire-format payload cap)")
+		return
+	}
+	// Tier-aware enforcement (#276.b finally wired). Hobby 4KB, Team
+	// 32KB, Enterprise 1MB. Helper falls back to Hobby on unknown
+	// tier — same safe default as time_budget.
+	projectTier := h.lookupProjectTier(r.Context(), authProjectID)
+	tierCap := TierCapToolReturnValueBytes(projectTier)
+	if body.MaxBytes > tierCap {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf(
+			"max_bytes %d exceeds your tier cap of %d bytes (%s tier)",
+			body.MaxBytes, tierCap, projectTier,
+		))
 		return
 	}
 	if err := h.Store.SetProjectToolReturnValueMaxBytes(
