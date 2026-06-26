@@ -260,6 +260,7 @@ function buildOkEvent(a: OkEventArgs): Event {
     duration_ms: a.durationMs,
     payload: {
       provider: PROVIDER,
+      surface: "chat",
       model: a.model,
       system_prompt: truncate(a.systemText, MAX_SYSTEM),
       user_message: truncate(a.userMessage, MAX_USER_MSG),
@@ -286,6 +287,7 @@ function buildFailureEvent(a: FailureEventArgs): Event {
   const errObj = a.err as { name?: string; message?: string; status_code?: number };
   const payload: Record<string, unknown> = {
     provider: PROVIDER,
+    surface: "chat",
     model: a.model,
     system_prompt: truncate(a.systemText, MAX_SYSTEM),
     user_message: truncate(a.userMessage, MAX_USER_MSG),
@@ -418,6 +420,7 @@ function wrapStreamingResponse(args: StreamingWrapArgs): AsyncIterable<OllamaCha
       duration_ms: durationMs,
       payload: {
         provider: PROVIDER,
+        surface: "chat",
         model: args.model,
         system_prompt: truncate(args.systemText, MAX_SYSTEM),
         user_message: truncate(args.userMessage, MAX_USER_MSG),

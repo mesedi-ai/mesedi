@@ -97,28 +97,60 @@ interface ResponsesResponse {
 export async function instrumentOpenAI(
   completionsClass?: CompletionsClassLike,
   responsesClass?: ResponsesClassLike,
+  opts?: {
+    embeddingsClass?: EndpointClassLike;
+    imagesClass?: EndpointClassLike;
+    audioTranscriptionsClass?: EndpointClassLike;
+    audioTranslationsClass?: EndpointClassLike;
+    audioSpeechClass?: EndpointClassLike;
+  },
 ): Promise<boolean> {
   let patchedAny = false;
 
   let completions = completionsClass;
   let responses = responsesClass;
+  let embeddings = opts?.embeddingsClass;
+  let images = opts?.imagesClass;
+  let audioTranscriptions = opts?.audioTranscriptionsClass;
+  let audioTranslations = opts?.audioTranslationsClass;
+  let audioSpeech = opts?.audioSpeechClass;
 
-  if (!completions || !responses) {
+  // Auto-locate any class the caller didn't inject. Single dynamic
+  // import so #271.j non-chat surfaces share the same fail-open
+  // posture as chat — package absent = no-op, no crash.
+  if (
+    !completions ||
+    !responses ||
+    !embeddings ||
+    !images ||
+    !audioTranscriptions ||
+    !audioTranslations ||
+    !audioSpeech
+  ) {
     try {
-      // Dynamic import so the mesedi SDK has no hard runtime
-      // dependency on `openai`. Both Completions and Responses live
-      // off OpenAI.Chat / OpenAI.Responses on the default export.
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore — package may not be installed; this is by design.
       const mod = (await import("openai")) as unknown as {
         OpenAI?: {
           Chat?: { Completions?: CompletionsClassLike };
           Responses?: ResponsesClassLike;
+          Embeddings?: EndpointClassLike;
+          Images?: EndpointClassLike;
+          Audio?: {
+            Transcriptions?: EndpointClassLike;
+            Translations?: EndpointClassLike;
+            Speech?: EndpointClassLike;
+          };
         };
       };
       const openai = mod?.OpenAI;
       if (!completions) completions = openai?.Chat?.Completions;
       if (!responses) responses = openai?.Responses;
+      if (!embeddings) embeddings = openai?.Embeddings;
+      if (!images) images = openai?.Images;
+      if (!audioTranscriptions) audioTranscriptions = openai?.Audio?.Transcriptions;
+      if (!audioTranslations) audioTranslations = openai?.Audio?.Translations;
+      if (!audioSpeech) audioSpeech = openai?.Audio?.Speech;
     } catch {
       console.warn(
         "mesedi: openai package not installed; instrumentOpenAI() is a no-op. " +
@@ -134,6 +166,26 @@ export async function instrumentOpenAI(
   }
   if (responses) {
     patchResponses(responses);
+    patchedAny = true;
+  }
+  if (embeddings) {
+    patchEmbeddings(embeddings);
+    patchedAny = true;
+  }
+  if (images) {
+    patchImages(images);
+    patchedAny = true;
+  }
+  if (audioTranscriptions) {
+    patchAudioTranscriptions(audioTranscriptions);
+    patchedAny = true;
+  }
+  if (audioTranslations) {
+    patchAudioTranslations(audioTranslations);
+    patchedAny = true;
+  }
+  if (audioSpeech) {
+    patchAudioSpeech(audioSpeech);
     patchedAny = true;
   }
   return patchedAny;
@@ -180,6 +232,7 @@ function patchChatCompletions(cls: CompletionsClassLike): void {
         duration_ms: durationMs,
         payload: {
           provider: PROVIDER,
+          surface: "chat",
           model,
           system_prompt: truncate(systemText, MAX_SYSTEM),
           user_message: truncate(userMessage, MAX_USER_MSG),
@@ -263,6 +316,7 @@ function patchResponses(cls: ResponsesClassLike): void {
         duration_ms: durationMs,
         payload: {
           provider: PROVIDER,
+          surface: "chat",
           model,
           system_prompt: truncate(systemText, MAX_SYSTEM),
           user_message: truncate(userMessage, MAX_USER_MSG),
@@ -312,11 +366,13 @@ interface FailureEventArgs {
   systemText: string;
   userMessage: string;
   err: unknown;
+  surface?: string;
 }
 
 function buildFailureEvent(args: FailureEventArgs): Event {
   const failurePayload: Record<string, unknown> = {
     provider: PROVIDER,
+    surface: args.surface ?? "chat",
     model: args.model,
     system_prompt: truncate(args.systemText, MAX_SYSTEM),
     user_message: truncate(args.userMessage, MAX_USER_MSG),
@@ -456,3 +512,193 @@ function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 3) + "...";
 }
+
+// ── #271.j non-chat surfaces (TS twin) ────────────────────────────────
+
+interface EndpointClassLike {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  prototype: { create: (...args: any[]) => Promise<any> };
+}
+
+/** Factory: build a patch function for any non-chat OpenAI surface
+ * whose method signature is `create(args, options?)` returning a
+ * Promise. Each call site supplies the surface tag, the
+ * infrastructure_event endpoint string, request/response field
+ * extractors, and a constant response-text sentinel (image / audio
+ * responses are binary/URL blobs we don't store verbatim). */
+function makeNonChatPatcher(opts: {
+  surface: string;
+  endpoint: string;
+  extractUserMessage: (args: Record<string, unknown>) => string;
+  extractInputTokens: (response: unknown) => number;
+  responseText: string;
+}): (cls: EndpointClassLike) => void {
+  return function patch(cls: EndpointClassLike): void {
+    if (_patched.has(cls)) return;
+    const originalCreate = cls.prototype.create as CreateFn;
+
+    cls.prototype.create = async function patchedCreate(
+      this: unknown,
+      ...args: unknown[]
+    ): Promise<unknown> {
+      const ctx = currentExecutionContext();
+      if (!ctx) return originalCreate.apply(this, args);
+      ctx.checkBudget();
+      if (ctx.budgetTracker) ctx.budgetTracker.incrementSteps();
+
+      const client = getClient();
+      const sequence = ctx.nextSequence();
+      const eventId = newEventId();
+
+      const firstArg = (args[0] ?? {}) as Record<string, unknown>;
+      const model = (firstArg.model as string) ?? "unknown";
+      const userMessage = opts.extractUserMessage(firstArg);
+
+      const start = performance.now();
+      try {
+        const response = await originalCreate.apply(this, args);
+        const durationMs = Math.round(performance.now() - start);
+        const inputTokens = opts.extractInputTokens(response);
+        if (ctx.budgetTracker) {
+          ctx.budgetTracker.addTokens(inputTokens, 0);
+        }
+        client.submitEvent({
+          event_id: eventId,
+          execution_id: ctx.executionId,
+          event_type: EventType.LLM_CALL,
+          sequence,
+          timestamp: utcNowRfc3339(),
+          duration_ms: durationMs,
+          payload: {
+            provider: PROVIDER,
+            surface: opts.surface,
+            model,
+            user_message: truncate(userMessage, MAX_USER_MSG),
+            response_text: opts.responseText,
+            status: "ok",
+            input_tokens: inputTokens,
+            output_tokens: 0,
+          },
+        });
+        return response;
+      } catch (err) {
+        const durationMs = Math.round(performance.now() - start);
+        client.submitEvent(
+          buildFailureEvent({
+            eventId,
+            executionId: ctx.executionId,
+            sequence,
+            durationMs,
+            model,
+            systemText: "",
+            userMessage,
+            err,
+            surface: opts.surface,
+          }),
+        );
+        _maybeEmitThrottlingEvent({
+          provider: PROVIDER,
+          errorClass: classifyOpenAIException(err),
+          httpStatus: extractHttpStatus(err),
+          retryAfterSeconds: extractRetryAfter(err),
+          endpoint: opts.endpoint,
+        });
+        throw err;
+      }
+    } as CreateFn;
+
+    _patched.add(cls);
+  };
+}
+
+// Per-surface extractors.
+
+function extractEmbeddingsInput(args: Record<string, unknown>): string {
+  const input = args.input;
+  if (typeof input === "string") return input;
+  if (Array.isArray(input)) {
+    if (input.length > 0 && typeof input[0] === "string") {
+      return input.map((x) => String(x)).join("\n");
+    }
+    return `<${input.length} token-id input(s)>`;
+  }
+  return String(input ?? "");
+}
+
+function extractImagePrompt(args: Record<string, unknown>): string {
+  const prompt = args.prompt;
+  return typeof prompt === "string" ? prompt : String(prompt ?? "");
+}
+
+function extractAudioInputFile(args: Record<string, unknown>): string {
+  const f = args.file;
+  if (typeof f === "string") return `<audio input: ${f}>`;
+  return "<audio input>";
+}
+
+function extractAudioSpeechInput(args: Record<string, unknown>): string {
+  const input = args.input;
+  return typeof input === "string" ? input : String(input ?? "");
+}
+
+function noTokens(_response: unknown): number {
+  return 0;
+}
+
+function extractEmbeddingsTokens(response: unknown): number {
+  try {
+    const r = response as { usage?: { prompt_tokens?: number } };
+    return Number(r?.usage?.prompt_tokens ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function extractAudioTokens(response: unknown): number {
+  try {
+    const r = response as { usage?: { input_tokens?: number } };
+    return Number(r?.usage?.input_tokens ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export const patchEmbeddings = makeNonChatPatcher({
+  surface: "embeddings",
+  endpoint: "/v1/embeddings",
+  extractUserMessage: extractEmbeddingsInput,
+  extractInputTokens: extractEmbeddingsTokens,
+  responseText: "<embedding vectors>",
+});
+
+export const patchImages = makeNonChatPatcher({
+  surface: "image",
+  endpoint: "/v1/images/generations",
+  extractUserMessage: extractImagePrompt,
+  extractInputTokens: noTokens,
+  responseText: "<image output>",
+});
+
+export const patchAudioTranscriptions = makeNonChatPatcher({
+  surface: "audio_stt",
+  endpoint: "/v1/audio/transcriptions",
+  extractUserMessage: extractAudioInputFile,
+  extractInputTokens: extractAudioTokens,
+  responseText: "<audio transcription>",
+});
+
+export const patchAudioTranslations = makeNonChatPatcher({
+  surface: "audio_stt",
+  endpoint: "/v1/audio/translations",
+  extractUserMessage: extractAudioInputFile,
+  extractInputTokens: extractAudioTokens,
+  responseText: "<audio translation>",
+});
+
+export const patchAudioSpeech = makeNonChatPatcher({
+  surface: "audio_tts",
+  endpoint: "/v1/audio/speech",
+  extractUserMessage: extractAudioSpeechInput,
+  extractInputTokens: noTokens,
+  responseText: "<audio output>",
+});

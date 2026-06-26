@@ -183,6 +183,7 @@ export async function instrumentAnthropic(
         duration_ms: durationMs,
         payload: {
           provider: PROVIDER,
+          surface: "chat",
           model,
           system_prompt: truncate(systemText, MAX_SYSTEM),
           user_message: truncate(userMessage, MAX_USER_MSG),
@@ -203,6 +204,7 @@ export async function instrumentAnthropic(
       // http_status is included when the exception exposes it.
       const failurePayload: Record<string, unknown> = {
         provider: PROVIDER,
+        surface: "chat",
         model,
         system_prompt: truncate(systemText, MAX_SYSTEM),
         user_message: truncate(userMessage, MAX_USER_MSG),

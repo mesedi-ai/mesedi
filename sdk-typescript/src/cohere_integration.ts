@@ -267,6 +267,7 @@ interface SuccessEventArgs extends EventArgsCommon {
   responseText: string;
   inputTokens: number;
   outputTokens: number;
+  surface?: string;
 }
 
 function successEvent(args: SuccessEventArgs): Event {
@@ -279,6 +280,7 @@ function successEvent(args: SuccessEventArgs): Event {
     duration_ms: args.durationMs,
     payload: {
       provider: PROVIDER,
+      surface: args.surface ?? "chat",
       model: args.model,
       system_prompt: truncate(args.systemText, MAX_SYSTEM),
       user_message: truncate(args.userMessage, MAX_USER_MSG),
@@ -292,11 +294,13 @@ function successEvent(args: SuccessEventArgs): Event {
 
 interface FailureEventArgs extends EventArgsCommon {
   err: unknown;
+  surface?: string;
 }
 
 function failureEvent(args: FailureEventArgs): Event {
   const payload: Record<string, unknown> = {
     provider: PROVIDER,
+    surface: args.surface ?? "chat",
     model: args.model,
     system_prompt: truncate(args.systemText, MAX_SYSTEM),
     user_message: truncate(args.userMessage, MAX_USER_MSG),
@@ -359,3 +363,207 @@ function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 3) + "...";
 }
+
+// ── #271.j non-chat surfaces — embed + rerank (TS twin) ──────────────
+
+export interface CohereEmbedClassLike {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  prototype: { embed: (...args: any[]) => Promise<any> };
+}
+export interface CohereRerankClassLike {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  prototype: { rerank: (...args: any[]) => Promise<any> };
+}
+
+const _embedPatched = new WeakSet<object>();
+const _rerankPatched = new WeakSet<object>();
+
+function extractEmbedInput(args: Record<string, unknown>): string {
+  const texts = (args.texts ?? args.inputs) as unknown;
+  if (typeof texts === "string") return texts;
+  if (Array.isArray(texts)) {
+    if (texts.length > 0 && typeof texts[0] === "string") {
+      return texts.map((t) => String(t)).join("\n");
+    }
+    return `<${texts.length} embed input(s)>`;
+  }
+  return String(texts ?? "");
+}
+
+function extractEmbedTokens(response: unknown): number {
+  try {
+    const r = response as { meta?: { billed_units?: { input_tokens?: number } } };
+    return Number(r?.meta?.billed_units?.input_tokens ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function extractRerankInput(args: Record<string, unknown>): string {
+  const query = (args.query as string) ?? "";
+  const docs = args.documents as unknown;
+  if (Array.isArray(docs) && docs.length > 0 && typeof docs[0] === "string") {
+    return `query: ${query}\n---\ndocs:\n${docs.map((d) => String(d)).join("\n")}`;
+  }
+  const n = Array.isArray(docs) ? docs.length : 0;
+  return `query: ${query} (docs: ${n})`;
+}
+
+function rerankResultCount(response: unknown): number {
+  try {
+    const r = response as { results?: unknown[] };
+    return Array.isArray(r?.results) ? r.results.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function patchEmbedSync(cls: CohereEmbedClassLike): void {
+  if (_embedPatched.has(cls)) return;
+  const originalEmbed = cls.prototype.embed as (
+    this: unknown,
+    ...args: unknown[]
+  ) => Promise<unknown>;
+
+  cls.prototype.embed = async function patchedEmbed(
+    this: unknown,
+    ...args: unknown[]
+  ): Promise<unknown> {
+    const ctx = currentExecutionContext();
+    if (!ctx) return originalEmbed.apply(this, args);
+    ctx.checkBudget();
+    if (ctx.budgetTracker) ctx.budgetTracker.incrementSteps();
+
+    const client = getClient();
+    const sequence = ctx.nextSequence();
+    const eventId = newEventId();
+
+    const firstArg = (args[0] ?? {}) as Record<string, unknown>;
+    const model = (firstArg.model as string) ?? "unknown";
+    const userMessage = extractEmbedInput(firstArg);
+
+    const start = performance.now();
+    try {
+      const response = await originalEmbed.apply(this, args);
+      const durationMs = Math.round(performance.now() - start);
+      const inputTokens = extractEmbedTokens(response);
+      if (ctx.budgetTracker) ctx.budgetTracker.addTokens(inputTokens, 0);
+      client.submitEvent(
+        successEvent({
+          eventId,
+          executionId: ctx.executionId,
+          sequence,
+          durationMs,
+          model,
+          systemText: "",
+          userMessage,
+          responseText: "<embedding vectors>",
+          inputTokens,
+          outputTokens: 0,
+          surface: "embeddings",
+        }),
+      );
+      return response;
+    } catch (err) {
+      const durationMs = Math.round(performance.now() - start);
+      client.submitEvent(
+        failureEvent({
+          eventId,
+          executionId: ctx.executionId,
+          sequence,
+          durationMs,
+          model,
+          systemText: "",
+          userMessage,
+          err,
+          surface: "embeddings",
+        }),
+      );
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: classifyCohereException(err),
+        httpStatus: extractHttpStatus(err),
+        retryAfterSeconds: extractRetryAfter(err),
+        endpoint: "/v1/embed",
+      });
+      throw err;
+    }
+  } as (this: unknown, ...args: unknown[]) => Promise<unknown>;
+  _embedPatched.add(cls);
+}
+
+function patchRerankSync(cls: CohereRerankClassLike): void {
+  if (_rerankPatched.has(cls)) return;
+  const originalRerank = cls.prototype.rerank as (
+    this: unknown,
+    ...args: unknown[]
+  ) => Promise<unknown>;
+
+  cls.prototype.rerank = async function patchedRerank(
+    this: unknown,
+    ...args: unknown[]
+  ): Promise<unknown> {
+    const ctx = currentExecutionContext();
+    if (!ctx) return originalRerank.apply(this, args);
+    ctx.checkBudget();
+    if (ctx.budgetTracker) ctx.budgetTracker.incrementSteps();
+
+    const client = getClient();
+    const sequence = ctx.nextSequence();
+    const eventId = newEventId();
+
+    const firstArg = (args[0] ?? {}) as Record<string, unknown>;
+    const model = (firstArg.model as string) ?? "unknown";
+    const userMessage = extractRerankInput(firstArg);
+
+    const start = performance.now();
+    try {
+      const response = await originalRerank.apply(this, args);
+      const durationMs = Math.round(performance.now() - start);
+      const n = rerankResultCount(response);
+      client.submitEvent(
+        successEvent({
+          eventId,
+          executionId: ctx.executionId,
+          sequence,
+          durationMs,
+          model,
+          systemText: "",
+          userMessage,
+          responseText: `<rerank results: ${n}>`,
+          inputTokens: 0,
+          outputTokens: 0,
+          surface: "rerank",
+        }),
+      );
+      return response;
+    } catch (err) {
+      const durationMs = Math.round(performance.now() - start);
+      client.submitEvent(
+        failureEvent({
+          eventId,
+          executionId: ctx.executionId,
+          sequence,
+          durationMs,
+          model,
+          systemText: "",
+          userMessage,
+          err,
+          surface: "rerank",
+        }),
+      );
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: classifyCohereException(err),
+        httpStatus: extractHttpStatus(err),
+        retryAfterSeconds: extractRetryAfter(err),
+        endpoint: "/v1/rerank",
+      });
+      throw err;
+    }
+  } as (this: unknown, ...args: unknown[]) => Promise<unknown>;
+  _rerankPatched.add(cls);
+}
+
+export { patchEmbedSync as patchEmbedV1, patchEmbedSync as patchEmbedV2 };
+export { patchRerankSync as patchRerankV1, patchRerankSync as patchRerankV2 };

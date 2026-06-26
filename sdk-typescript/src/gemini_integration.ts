@@ -130,6 +130,7 @@ export async function instrumentGemini(
         duration_ms: durationMs,
         payload: {
           provider: PROVIDER,
+          surface: "chat",
           model,
           system_prompt: truncate(systemText, MAX_SYSTEM),
           user_message: truncate(userMessage, MAX_USER_MSG),
@@ -144,6 +145,7 @@ export async function instrumentGemini(
       const durationMs = Math.round(performance.now() - start);
       const failurePayload: Record<string, unknown> = {
         provider: PROVIDER,
+        surface: "chat",
         model,
         system_prompt: truncate(systemText, MAX_SYSTEM),
         user_message: truncate(userMessage, MAX_USER_MSG),
@@ -265,4 +267,128 @@ function extractResponseFields(response: GeminiResponse): {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 3) + "...";
+}
+
+// ── #271.j non-chat surface — embedContent (TS twin) ─────────────────
+
+export interface GenerativeModelEmbedClassLike {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  prototype: { embedContent: (...args: any[]) => Promise<any> };
+}
+
+const _embedPatched = new WeakSet<object>();
+
+function extractEmbedContentInput(arg: unknown): string {
+  if (typeof arg === "string") return arg;
+  if (arg && typeof arg === "object") {
+    const obj = arg as { content?: unknown };
+    if (obj.content !== undefined) {
+      const c = obj.content;
+      if (typeof c === "string") return c;
+      return stringifyContent(c);
+    }
+    return stringifyContent(arg);
+  }
+  return "";
+}
+
+/** Patch GenerativeModel.embedContent to emit
+ * surface='embeddings' llm_call events. Idempotent per class. */
+export function patchGeminiEmbedContent(
+  cls: GenerativeModelEmbedClassLike,
+): void {
+  if (_embedPatched.has(cls)) return;
+  const originalEmbed = cls.prototype.embedContent as (
+    this: unknown,
+    ...args: unknown[]
+  ) => Promise<unknown>;
+
+  cls.prototype.embedContent = async function patchedEmbed(
+    this: unknown,
+    ...args: unknown[]
+  ): Promise<unknown> {
+    const ctx = currentExecutionContext();
+    if (!ctx) return originalEmbed.apply(this, args);
+    ctx.checkBudget();
+    if (ctx.budgetTracker) ctx.budgetTracker.incrementSteps();
+
+    const client = getClient();
+    const sequence = ctx.nextSequence();
+    const eventId = newEventId();
+
+    const selfRecord = this as Record<string, unknown>;
+    const model =
+      typeof selfRecord.model === "string"
+        ? selfRecord.model
+        : typeof selfRecord.modelName === "string"
+          ? selfRecord.modelName
+          : "unknown";
+    const userMessage = extractEmbedContentInput(args[0]);
+
+    const start = performance.now();
+    try {
+      const response = await originalEmbed.apply(this, args);
+      const durationMs = Math.round(performance.now() - start);
+      client.submitEvent({
+        event_id: eventId,
+        execution_id: ctx.executionId,
+        event_type: EventType.LLM_CALL,
+        sequence,
+        timestamp: utcNowRfc3339(),
+        duration_ms: durationMs,
+        payload: {
+          provider: PROVIDER,
+          surface: "embeddings",
+          model,
+          user_message: truncate(userMessage, MAX_USER_MSG),
+          response_text: "<embedding vectors>",
+          status: "ok",
+          input_tokens: 0,
+          output_tokens: 0,
+        },
+      });
+      return response;
+    } catch (err) {
+      const durationMs = Math.round(performance.now() - start);
+      const failurePayload: Record<string, unknown> = {
+        provider: PROVIDER,
+        surface: "embeddings",
+        model,
+        user_message: truncate(userMessage, MAX_USER_MSG),
+        status: "failed",
+        error_class: classifyGeminiException(err),
+        exception_type:
+          err instanceof Error && err.constructor.name
+            ? err.constructor.name
+            : typeof err,
+        exception_message: truncate(
+          err instanceof Error ? err.message : String(err),
+          MAX_EXC_MSG,
+        ),
+      };
+      const httpStatus = extractHttpStatus(err);
+      if (httpStatus !== undefined) failurePayload.http_status = httpStatus;
+      const retryAfter = extractRetryAfter(err);
+      if (retryAfter !== undefined) failurePayload.retry_after_seconds = retryAfter;
+      client.submitEvent({
+        event_id: eventId,
+        execution_id: ctx.executionId,
+        event_type: EventType.LLM_CALL,
+        sequence,
+        timestamp: utcNowRfc3339(),
+        duration_ms: durationMs,
+        payload: failurePayload,
+      });
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: failurePayload.error_class as string,
+        httpStatus,
+        retryAfterSeconds: retryAfter,
+        endpoint: "/v1/models/embedContent",
+      });
+      throw err;
+    }
+  } as (this: unknown, ...args: unknown[]) => Promise<unknown>;
+
+  _embedPatched.add(cls);
 }
