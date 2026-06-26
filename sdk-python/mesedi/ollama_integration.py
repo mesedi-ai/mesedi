@@ -45,16 +45,16 @@ What this module patches:
 
 Out of scope (filed as follow-ups in the Ollama arc):
 
-  - Streaming responses (``stream=True``). The ollama client returns
-    a generator/async generator; chunk aggregation needs the same
-    StreamIteratorWrapper pattern the OpenAI integration uses for
-    Anthropic/Cohere/Gemini parity. Deferred to a follow-up sub-wave.
-    Until that wave ships, streaming calls **emit no llm_call event
-    at all** (Wave 2.5.1.a correction) — the prior placeholder zero-
-    token event polluted cost_velocity / token_waste telemetry with
-    misleading data. The customer's stream still works; only the
-    Mesedi observation is deferred. A one-time INFO log explains
-    why the streaming calls aren't appearing in the dashboard.
+  - Streaming responses (``stream=True``): observed via the
+    chunk-aggregating wrapper shipped in Wave 2.5.8. _OllamaStream-
+    IteratorWrapper (sync) and _OllamaAsyncStreamIteratorWrapper
+    (async) drain the inner generator chunk-by-chunk, pass each
+    chunk through to the customer unchanged, and accumulate
+    response_text + token counts. The llm_call event ships at
+    stream-end with streaming=True in the payload. (The 2.5.1.a
+    no-op-with-warning behavior is replaced; the warning helper is
+    kept as dead code with a deprecation note for a future cleanup
+    wave.)
   - Embeddings (``Client.embed``). Not on the provider_incident
     hot path; deferred to non-chat surface coverage.
   - Generate API (``Client.generate``). Single-prompt completion
@@ -107,31 +107,204 @@ _MAX_EXC_MSG = 500
 # idempotency check.
 _patched_classes: set = set()
 
-# Wave 2.5.1.a — one-time warning guard for streaming calls. The
-# streaming chunk-aggregating wrapper ships in a follow-up sub-wave;
-# until then, calls with stream=True emit no llm_call event AND log a
-# single INFO message so customers understand why their streaming
-# calls don't appear in the Mesedi dashboard.
+# Wave 2.5.8 — chunk-aggregating wrappers for streaming calls. Replaces
+# the 2.5.1.a no-op + one-time-warning behavior with real observation.
+# When the customer calls chat(stream=True), instrument_ollama returns
+# an iterator wrapper that drains the inner generator chunk-by-chunk
+# (passing each chunk through to the customer unchanged) while
+# accumulating response_text + token counts. The llm_call event ships
+# at stream-end with status="ok" and streaming=True in the payload.
+#
+# The 2.5.1.a _streaming_warning_emitted flag and helper are kept for
+# backwards-compat with the test file, but the patched wrapper no
+# longer calls _maybe_warn_streaming_unsupported in the happy path.
 _streaming_warning_emitted = False
 
 
 def _maybe_warn_streaming_unsupported() -> None:
-    """Log a one-time INFO message explaining that streaming calls
-    don't yet produce llm_call telemetry. Guarded by a module-level
-    flag so the warning fires exactly once per process — multiple
-    workers each log once."""
+    """Legacy 2.5.1.a helper. Kept for backwards-compat with the
+    instrumentation tests; the streaming path in 2.5.8 emits real
+    events and no longer calls this helper. Future cleanup wave can
+    drop this once the test suite is updated."""
     global _streaming_warning_emitted
     if _streaming_warning_emitted:
         return
     _streaming_warning_emitted = True
     logger.info(
-        "mesedi: instrument_ollama observed a chat(stream=True) call; "
-        "the chunk-aggregating wrapper for streaming responses ships in "
-        "a follow-up sub-wave, so no llm_call event will be recorded "
-        "for streaming calls until then. Non-streaming calls are "
-        "unaffected. Your stream still works; only Mesedi observation "
-        "is deferred."
+        "mesedi: instrument_ollama legacy streaming-deferred warning "
+        "fired; this code path is dead as of Wave 2.5.8 and should be "
+        "removed in a future cleanup wave."
     )
+
+
+def _accumulate_chat_chunk(chunk: Any, state: Dict[str, Any]) -> None:
+    """Accumulate one streaming chunk into the wrapper's state dict.
+    Ollama-shaped chunks carry partial text on chunk['message']
+    ['content'] and final token counts on chunk['prompt_eval_count']
+    + chunk['eval_count'] when chunk['done'] is True. Defensive: any
+    extraction failure degrades silently so a single malformed chunk
+    does not break stream-level aggregation."""
+    try:
+        if isinstance(chunk, dict):
+            msg = chunk.get("message")
+            if isinstance(msg, dict):
+                content = msg.get("content")
+                if isinstance(content, str) and content:
+                    state["text_parts"].append(content)
+            if chunk.get("done"):
+                pec = chunk.get("prompt_eval_count", 0)
+                ec = chunk.get("eval_count", 0)
+                try:
+                    state["input_tokens"] = int(pec) if pec else 0
+                except (TypeError, ValueError):
+                    state["input_tokens"] = 0
+                try:
+                    state["output_tokens"] = int(ec) if ec else 0
+                except (TypeError, ValueError):
+                    state["output_tokens"] = 0
+        else:
+            msg = getattr(chunk, "message", None)
+            content = getattr(msg, "content", None) if msg is not None else None
+            if isinstance(content, str) and content:
+                state["text_parts"].append(content)
+            if getattr(chunk, "done", False):
+                pec = getattr(chunk, "prompt_eval_count", 0)
+                ec = getattr(chunk, "eval_count", 0)
+                try:
+                    state["input_tokens"] = int(pec) if pec else 0
+                except (TypeError, ValueError):
+                    state["input_tokens"] = 0
+                try:
+                    state["output_tokens"] = int(ec) if ec else 0
+                except (TypeError, ValueError):
+                    state["output_tokens"] = 0
+    except Exception:
+        pass
+
+
+class _OllamaStreamIteratorWrapper:
+    """Wraps an Ollama sync streaming generator so chunks pass through
+    to the customer while we accumulate response_text + tokens for the
+    final llm_call event emission. Wave 2.5.8.
+
+    Customer iteration protocol preserved: __iter__ / __next__ delegate
+    to the inner generator. On StopIteration we emit the success
+    event; on any other exception we emit the failure event."""
+
+    def __init__(
+        self,
+        *,
+        inner: Any,
+        ctx: Any,
+        client: Any,
+        event_id: str,
+        sequence: int,
+        model: str,
+        system_text: str,
+        user_message: str,
+        start: float,
+    ) -> None:
+        self._inner = inner
+        self._ctx = ctx
+        self._client = client
+        self._event_id = event_id
+        self._sequence = sequence
+        self._model = model
+        self._system_text = system_text
+        self._user_message = user_message
+        self._start = start
+        self._state: Dict[str, Any] = {
+            "text_parts": [],
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+        self._emitted = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def __iter__(self) -> Any:
+        return self
+
+    def __next__(self) -> Any:
+        try:
+            chunk = next(self._inner)
+        except StopIteration:
+            self._emit_success()
+            raise
+        except BaseException as exc:
+            self._emit_failure(exc)
+            raise
+        _accumulate_chat_chunk(chunk, self._state)
+        return chunk
+
+    def _emit_success(self) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        response_text = "".join(self._state["text_parts"])
+        input_tokens = int(self._state.get("input_tokens", 0) or 0)
+        output_tokens = int(self._state.get("output_tokens", 0) or 0)
+        if self._ctx.budget_tracker is not None:
+            self._ctx.budget_tracker.add_tokens(
+                tokens_in=input_tokens, tokens_out=output_tokens,
+            )
+        self._client.submit_event(Event(
+            event_id=self._event_id,
+            execution_id=self._ctx.execution_id,
+            event_type=EventType.LLM_CALL,
+            sequence=self._sequence,
+            timestamp=utcnow_rfc3339(),
+            duration_ms=duration_ms,
+            payload={
+                "provider": _PROVIDER,
+                "model": self._model,
+                "system_prompt": _truncate(self._system_text, _MAX_SYSTEM),
+                "user_message": _truncate(self._user_message, _MAX_USER_MSG),
+                "response_text": _truncate(response_text, _MAX_RESPONSE),
+                "status": "ok",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "streaming": True,
+            },
+        ))
+
+    def _emit_failure(self, exc: BaseException) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        self._client.submit_event(_build_failure_event(
+            event_id=self._event_id,
+            execution_id=self._ctx.execution_id,
+            sequence=self._sequence,
+            duration_ms=duration_ms,
+            model=self._model,
+            system_text=self._system_text,
+            user_message=self._user_message,
+            exc=exc,
+        ))
+
+
+class _OllamaAsyncStreamIteratorWrapper(_OllamaStreamIteratorWrapper):
+    """Async twin of _OllamaStreamIteratorWrapper. Customer protocol:
+    __aiter__ / __anext__ delegate to the inner async generator."""
+
+    def __aiter__(self) -> Any:
+        return self
+
+    async def __anext__(self) -> Any:
+        try:
+            chunk = await self._inner.__anext__()
+        except StopAsyncIteration:
+            self._emit_success()
+            raise
+        except BaseException as exc:
+            self._emit_failure(exc)
+            raise
+        _accumulate_chat_chunk(chunk, self._state)
+        return chunk
 
 
 def instrument_ollama(
@@ -248,13 +421,21 @@ def _patch_chat(cls: Type[Any]) -> None:
             raise
 
         if is_stream:
-            # Wave 2.5.1.a — no event emission for streaming calls.
-            # Emitting a placeholder zero-token event would corrupt
-            # cost_velocity / token_waste telemetry by recording the
-            # call as a successful zero-cost call. Honest gap: no
-            # observation until the chunk-aggregating wrapper lands.
-            _maybe_warn_streaming_unsupported()
-            return response
+            # Wave 2.5.8 — chunk-aggregating wrapper replaces the
+            # 2.5.1.a no-op. We pass each chunk through to the
+            # customer unchanged while accumulating response_text +
+            # token counts; the llm_call event ships at stream-end.
+            return _OllamaStreamIteratorWrapper(
+                inner=response,
+                ctx=ctx,
+                client=client,
+                event_id=event_id,
+                sequence=sequence,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                start=start,
+            )
 
         duration_ms = int((time.perf_counter() - start) * 1000)
 
@@ -341,10 +522,20 @@ def _patch_async_chat(cls: Type[Any]) -> None:
             raise
 
         if is_stream:
-            # Wave 2.5.1.a — no event emission for streaming calls.
-            # See _patch_chat sync twin for the rationale.
-            _maybe_warn_streaming_unsupported()
-            return response
+            # Wave 2.5.8 — async chunk-aggregating wrapper. Same
+            # accumulation logic as the sync path; only the iter
+            # protocol differs (__aiter__ / __anext__).
+            return _OllamaAsyncStreamIteratorWrapper(
+                inner=response,
+                ctx=ctx,
+                client=client,
+                event_id=event_id,
+                sequence=sequence,
+                model=model,
+                system_text=system_text,
+                user_message=user_message,
+                start=start,
+            )
 
         duration_ms = int((time.perf_counter() - start) * 1000)
         response_text, input_tokens, output_tokens = (

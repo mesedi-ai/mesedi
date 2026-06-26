@@ -303,6 +303,57 @@ def test_streaming_warning_helper_is_one_time(caplog) -> None:
     )
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Wave 2.5.8 — streaming chunk-aggregation
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_accumulate_chat_chunk_builds_response_text_and_tokens() -> None:
+    """The _accumulate_chat_chunk helper handles the Ollama
+    streaming-chunk shape: partial text on chunk['message']['content']
+    for non-final chunks + token counts on chunk['prompt_eval_count'] /
+    chunk['eval_count'] when chunk['done'] is True."""
+    state = {"text_parts": [], "input_tokens": 0, "output_tokens": 0}
+    chunks = [
+        {"message": {"role": "assistant", "content": "Hello "}, "done": False},
+        {"message": {"role": "assistant", "content": "world"}, "done": False},
+        {"message": {"role": "assistant", "content": "!"}, "done": False},
+        {
+            "message": {"role": "assistant", "content": ""},
+            "done": True,
+            "prompt_eval_count": 42,
+            "eval_count": 17,
+        },
+    ]
+    for c in chunks:
+        ollama_mod._accumulate_chat_chunk(c, state)
+    assert "".join(state["text_parts"]) == "Hello world!"
+    assert state["input_tokens"] == 42
+    assert state["output_tokens"] == 17
+
+
+def test_accumulate_chat_chunk_tolerates_malformed_chunks() -> None:
+    """Defensive: a single malformed chunk must not break aggregation
+    for the rest of the stream. The state machine just skips bad
+    chunks."""
+    state = {"text_parts": [], "input_tokens": 0, "output_tokens": 0}
+    # Malformed shapes: missing message, non-dict, None.
+    ollama_mod._accumulate_chat_chunk(None, state)
+    ollama_mod._accumulate_chat_chunk("not a dict", state)
+    ollama_mod._accumulate_chat_chunk({}, state)
+    ollama_mod._accumulate_chat_chunk({"message": "not a dict"}, state)
+    # Good chunk after the malformed ones — aggregation still works.
+    ollama_mod._accumulate_chat_chunk(
+        {"message": {"content": "hi"}, "done": False}, state,
+    )
+    ollama_mod._accumulate_chat_chunk(
+        {"done": True, "prompt_eval_count": 5, "eval_count": 3}, state,
+    )
+    assert "".join(state["text_parts"]) == "hi"
+    assert state["input_tokens"] == 5
+    assert state["output_tokens"] == 3
+
+
 def test_instrument_ollama_returns_false_when_nothing_patched() -> None:
     """When neither class is provided AND the ollama package can't
     be imported, instrument_ollama returns False so the caller can

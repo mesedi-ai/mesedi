@@ -24,15 +24,12 @@
  *   - ollama.Ollama.prototype.chat
  *
  * Out of scope (filed as follow-ups in the Ollama arc):
- *   - Streaming (stream: true returns AsyncIterable). Aggregation
- *     wrapper deferred to a follow-up sub-wave, same way OpenAI
- *     streaming landed in its own #271.i sub-wave. Until that wave
- *     ships, streaming calls **emit no llm_call event at all** (Wave
- *     2.5.1.a correction) — the prior placeholder zero-token event
- *     polluted cost_velocity / token_waste telemetry with misleading
- *     data. The customer's stream still works; only the Mesedi
- *     observation is deferred. A one-time console.info explains why
- *     the streaming calls aren't appearing in the dashboard.
+ *   - Streaming (stream: true returns AsyncIterable): observed via
+ *     wrapStreamingResponse (Wave 2.5.8). Chunks pass through to the
+ *     customer's `for await` loop unchanged; the llm_call event ships
+ *     at stream-end with streaming=true in the payload. (The 2.5.1.a
+ *     maybeWarnStreamingUnsupported helper is kept as dead code with
+ *     a deprecation note for a future cleanup wave.)
  *   - Embeddings (ollama.embed)
  *   - Generate API (ollama.generate)
  *
@@ -162,22 +159,35 @@ function patchChat(cls: OllamaClassLike): void {
     const messages = Array.isArray(firstArg.messages) ? firstArg.messages : [];
     const systemText = extractFirstSystemMessage(messages);
     const userMessage = extractLastUserMessage(messages);
-    // Wave 2.5.1.a — streaming calls skip event emission entirely.
-    // See module docstring for the rationale.
+    // Wave 2.5.8 — chunk-aggregating wrapper for streaming calls
+    // (replaces the 2.5.1.a no-op). When stream:true, response is
+    // an AsyncIterable<OllamaChatChunk>; we wrap it so chunks pass
+    // through to the customer while accumulating response_text +
+    // token counts, then emit the llm_call event at stream-end.
     const isStream = firstArg.stream === true;
 
     const start = performance.now();
     try {
-      const response = (await originalChat.apply(this, args)) as OllamaChatResponse;
+      const response = await originalChat.apply(this, args);
 
       if (isStream) {
-        maybeWarnStreamingUnsupported();
-        return response;
+        return wrapStreamingResponse({
+          inner: response as AsyncIterable<OllamaChatChunk>,
+          client,
+          executionId: ctx.executionId,
+          eventId,
+          sequence,
+          model,
+          systemText,
+          userMessage,
+          start,
+          budgetTracker: ctx.budgetTracker ?? null,
+        });
       }
 
       const durationMs = Math.round(performance.now() - start);
       const { responseText, inputTokens, outputTokens } =
-        extractResponseFields(response);
+        extractResponseFields(response as OllamaChatResponse);
       if (ctx.budgetTracker) {
         ctx.budgetTracker.addTokens(inputTokens, outputTokens);
       }
@@ -353,6 +363,135 @@ function truncate(s: string, limit: number): string {
   return s.slice(0, limit) + "...[truncated]";
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Wave 2.5.8 — streaming chunk-aggregation
+// ──────────────────────────────────────────────────────────────────────
+
+/** One chunk yielded by the ollama client's streaming generator.
+ * Partial text on .message.content for non-final chunks; final
+ * chunk carries .prompt_eval_count + .eval_count + .done=true. */
+interface OllamaChatChunk {
+  model?: string;
+  message?: { role?: string; content?: string };
+  done?: boolean;
+  prompt_eval_count?: number;
+  eval_count?: number;
+}
+
+interface StreamingWrapArgs {
+  inner: AsyncIterable<OllamaChatChunk>;
+  client: ReturnType<typeof getClient>;
+  executionId: string;
+  eventId: string;
+  sequence: number;
+  model: string;
+  systemText: string;
+  userMessage: string;
+  start: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  budgetTracker: any;
+}
+
+/** Wraps an Ollama AsyncIterable streaming response so chunks pass
+ * through to the customer while we accumulate response_text + tokens
+ * for the final llm_call event emission. The returned object is an
+ * AsyncIterable (Symbol.asyncIterator) the customer can `for await`
+ * over identically to the original response. */
+function wrapStreamingResponse(args: StreamingWrapArgs): AsyncIterable<OllamaChatChunk> {
+  const state = { textParts: [] as string[], inputTokens: 0, outputTokens: 0 };
+  let emitted = false;
+
+  const emitSuccess = () => {
+    if (emitted) return;
+    emitted = true;
+    const durationMs = Math.round(performance.now() - args.start);
+    const responseText = state.textParts.join("");
+    if (args.budgetTracker) {
+      args.budgetTracker.addTokens(state.inputTokens, state.outputTokens);
+    }
+    args.client.submitEvent({
+      event_id: args.eventId,
+      execution_id: args.executionId,
+      event_type: EventType.LLM_CALL,
+      sequence: args.sequence,
+      timestamp: utcNowRfc3339(),
+      duration_ms: durationMs,
+      payload: {
+        provider: PROVIDER,
+        model: args.model,
+        system_prompt: truncate(args.systemText, MAX_SYSTEM),
+        user_message: truncate(args.userMessage, MAX_USER_MSG),
+        response_text: truncate(responseText, MAX_RESPONSE),
+        status: "ok",
+        input_tokens: state.inputTokens,
+        output_tokens: state.outputTokens,
+        streaming: true,
+      },
+    });
+  };
+
+  const emitFailure = (err: unknown) => {
+    if (emitted) return;
+    emitted = true;
+    const durationMs = Math.round(performance.now() - args.start);
+    args.client.submitEvent(
+      buildFailureEvent({
+        eventId: args.eventId,
+        executionId: args.executionId,
+        sequence: args.sequence,
+        durationMs,
+        model: args.model,
+        systemText: args.systemText,
+        userMessage: args.userMessage,
+        err,
+      }),
+    );
+  };
+
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<OllamaChatChunk> {
+      const inner = args.inner[Symbol.asyncIterator]();
+      return {
+        async next(): Promise<IteratorResult<OllamaChatChunk>> {
+          try {
+            const result = await inner.next();
+            if (result.done) {
+              emitSuccess();
+              return result;
+            }
+            accumulateChunk(result.value, state);
+            return result;
+          } catch (err) {
+            emitFailure(err);
+            throw err;
+          }
+        },
+      };
+    },
+  };
+}
+
+/** Apply one streaming chunk to the wrapper's state. Defensive: any
+ * extraction failure degrades silently so a single malformed chunk
+ * does not break stream-level aggregation. */
+function accumulateChunk(
+  chunk: OllamaChatChunk,
+  state: { textParts: string[]; inputTokens: number; outputTokens: number },
+): void {
+  try {
+    const content = chunk?.message?.content;
+    if (typeof content === "string" && content.length > 0) {
+      state.textParts.push(content);
+    }
+    if (chunk?.done) {
+      state.inputTokens = numberOrZero(chunk.prompt_eval_count);
+      state.outputTokens = numberOrZero(chunk.eval_count);
+    }
+  } catch {
+    // Swallow — one bad chunk shouldn't break stream-level aggregation.
+  }
+}
+
 // Exported helpers for unit tests. Not part of the public API; tests
 // import these to verify field translation and message extraction.
 export const _testing = {
@@ -374,4 +513,7 @@ export const _testing = {
    * full wrap() + chat() integration scaffold. Not part of the
    * public API. */
   maybeWarnStreamingUnsupported,
+  /** Wave 2.5.8 — exposed for unit tests of the streaming chunk-
+   * aggregation logic. Not part of the public API. */
+  accumulateChunk,
 };
