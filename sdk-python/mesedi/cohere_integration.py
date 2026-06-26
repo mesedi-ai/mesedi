@@ -165,6 +165,19 @@ def instrument_cohere(
     if async_client_v2_class is not None:
         _patch_embed_async(async_client_v2_class)
 
+    # #271.j sub-ship 2: also patch rerank on each available class.
+    # Rerank shape is v1+v2 identical (query=, documents=[], model=).
+    # Separate _rerank_patched_classes set keeps it idempotent
+    # independent of chat/streaming/embed patching on the same class.
+    if client_v1_class is not None:
+        _patch_rerank_sync(client_v1_class)
+    if client_v2_class is not None:
+        _patch_rerank_sync(client_v2_class)
+    if async_client_v1_class is not None:
+        _patch_rerank_async(async_client_v1_class)
+    if async_client_v2_class is not None:
+        _patch_rerank_async(async_client_v2_class)
+
     return patched_any
 
 
@@ -1246,3 +1259,178 @@ def _patch_embed_async(cls: Type[Any]) -> None:
     patched_embed.__doc__ = getattr(original_embed, "__doc__", None)
     cls.embed = patched_embed  # type: ignore[assignment]
     _embed_patched_classes.add(cls)
+
+
+## ── #271.j sub-ship 2 — rerank surface ───────────────────────────────
+
+
+_rerank_patched_classes: set = set()
+
+
+def _extract_rerank_input(kwargs: Dict[str, Any]) -> str:
+    """Cohere rerank kwargs: ``query=str`` + ``documents=[str, ...]``.
+    Stringify both so DLP scanning still has signal; downstream
+    _MAX_USER_MSG truncation caps the size."""
+    query = kwargs.get("query", "")
+    docs = kwargs.get("documents", []) or []
+    if not isinstance(query, str):
+        query = repr(query)
+    if isinstance(docs, list) and docs and isinstance(docs[0], str):
+        docs_preview = "\n".join(str(d) for d in docs)
+        return f"query: {query}\n---\ndocs:\n{docs_preview}"
+    return f"query: {query} (docs: {len(docs) if isinstance(docs, list) else 'n/a'})"
+
+
+def _extract_rerank_response_tokens(response: Any) -> int:
+    """Cohere rerank does not bill tokens — it bills search_units.
+    Return 0 so cost computation routes through rerank-specific
+    pricing when that lands (separate wave)."""
+    return 0
+
+
+def _extract_rerank_results_count(response: Any) -> int:
+    try:
+        results = getattr(response, "results", None)
+        if isinstance(results, list):
+            return len(results)
+    except Exception:
+        pass
+    return 0
+
+
+def _patch_rerank_sync(cls: Type[Any]) -> None:
+    """Wrap cls.rerank to emit surface='rerank' llm_call events."""
+    if cls in _rerank_patched_classes:
+        return
+    original_rerank = cls.rerank
+
+    def patched_rerank(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return original_rerank(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        user_message = _extract_rerank_input(kwargs)
+
+        start = time.perf_counter()
+        try:
+            response = original_rerank(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text="",
+                user_message=user_message,
+                exc=exc,
+                surface="rerank",
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_cohere_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/rerank",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        n_results = _extract_rerank_results_count(response)
+        client.submit_event(_success_event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            sequence=sequence,
+            duration_ms=duration_ms,
+            model=model,
+            system_text="",
+            user_message=user_message,
+            response_text=f"<rerank results: {n_results}>",
+            input_tokens=0,
+            output_tokens=0,
+            surface="rerank",
+        ))
+        return response
+
+    patched_rerank.__name__ = getattr(original_rerank, "__name__", "rerank")
+    patched_rerank.__doc__ = getattr(original_rerank, "__doc__", None)
+    cls.rerank = patched_rerank
+    _rerank_patched_classes.add(cls)
+
+
+def _patch_rerank_async(cls: Type[Any]) -> None:
+    """Async twin of _patch_rerank_sync — AsyncClient[V2].rerank."""
+    if cls in _rerank_patched_classes:
+        return
+    original_rerank = cls.rerank
+
+    async def patched_rerank(self: Any, *args: Any, **kwargs: Any) -> Any:
+        ctx = current_execution_context()
+        if ctx is None:
+            return await original_rerank(self, *args, **kwargs)
+        ctx.check_budget()
+
+        client = get_client()
+        sequence = ctx.next_sequence()
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.increment_steps()
+
+        model = kwargs.get("model", "unknown")
+        user_message = _extract_rerank_input(kwargs)
+
+        start = time.perf_counter()
+        try:
+            response = await original_rerank(self, *args, **kwargs)
+        except BaseException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            client.submit_event(_build_failure_event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                sequence=sequence,
+                duration_ms=duration_ms,
+                model=model,
+                system_text="",
+                user_message=user_message,
+                exc=exc,
+                surface="rerank",
+            ))
+            _maybe_emit_throttling_event(
+                provider=_PROVIDER,
+                error_class=classify_cohere_exception(exc),
+                http_status=extract_http_status(exc),
+                retry_after_seconds=extract_retry_after(exc),
+                endpoint="/v1/rerank",
+            )
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        n_results = _extract_rerank_results_count(response)
+        client.submit_event(_success_event(
+            event_id=event_id,
+            execution_id=ctx.execution_id,
+            sequence=sequence,
+            duration_ms=duration_ms,
+            model=model,
+            system_text="",
+            user_message=user_message,
+            response_text=f"<rerank results: {n_results}>",
+            input_tokens=0,
+            output_tokens=0,
+            surface="rerank",
+        ))
+        return response
+
+    patched_rerank.__name__ = getattr(original_rerank, "__name__", "rerank")
+    patched_rerank.__doc__ = getattr(original_rerank, "__doc__", None)
+    cls.rerank = patched_rerank
+    _rerank_patched_classes.add(cls)

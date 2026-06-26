@@ -111,6 +111,14 @@ def instrument_openai(
     async_responses_class: Optional[Type[Any]] = None,
     embeddings_class: Optional[Type[Any]] = None,
     async_embeddings_class: Optional[Type[Any]] = None,
+    images_class: Optional[Type[Any]] = None,
+    async_images_class: Optional[Type[Any]] = None,
+    audio_transcriptions_class: Optional[Type[Any]] = None,
+    async_audio_transcriptions_class: Optional[Type[Any]] = None,
+    audio_translations_class: Optional[Type[Any]] = None,
+    async_audio_translations_class: Optional[Type[Any]] = None,
+    audio_speech_class: Optional[Type[Any]] = None,
+    async_audio_speech_class: Optional[Type[Any]] = None,
 ) -> bool:
     """Patch the OpenAI SDK's chat-completions and Responses APIs to
     emit llm_call events. Patches both sync + async surfaces (#271.h
@@ -233,6 +241,97 @@ def instrument_openai(
 
     if async_embeddings_class is not None:
         _patch_async_embeddings(async_embeddings_class)
+        patched_any = True
+
+    # #271.j sub-ship 2: image + audio surfaces. Each one is fail-open
+    # on auto-locate — older openai versions that don't ship a given
+    # endpoint just don't get that surface patched.
+    if images_class is None:
+        try:
+            from openai.resources.images import Images as _Images
+            images_class = _Images
+        except ImportError:
+            logger.debug("mesedi: openai Images not importable; skipping image patch.")
+    if images_class is not None:
+        _patch_openai_images_sync(images_class)
+        patched_any = True
+
+    if async_images_class is None:
+        try:
+            from openai.resources.images import AsyncImages as _AsyncImages
+            async_images_class = _AsyncImages
+        except ImportError:
+            logger.debug("mesedi: openai AsyncImages not importable; skipping.")
+    if async_images_class is not None:
+        _patch_openai_images_async(async_images_class)
+        patched_any = True
+
+    if audio_transcriptions_class is None:
+        try:
+            from openai.resources.audio.transcriptions import (
+                Transcriptions as _Transcriptions,
+            )
+            audio_transcriptions_class = _Transcriptions
+        except ImportError:
+            logger.debug("mesedi: openai Transcriptions not importable; skipping.")
+    if audio_transcriptions_class is not None:
+        _patch_openai_audio_transcriptions_sync(audio_transcriptions_class)
+        patched_any = True
+
+    if async_audio_transcriptions_class is None:
+        try:
+            from openai.resources.audio.transcriptions import (
+                AsyncTranscriptions as _AsyncTranscriptions,
+            )
+            async_audio_transcriptions_class = _AsyncTranscriptions
+        except ImportError:
+            logger.debug("mesedi: openai AsyncTranscriptions not importable; skipping.")
+    if async_audio_transcriptions_class is not None:
+        _patch_openai_audio_transcriptions_async(async_audio_transcriptions_class)
+        patched_any = True
+
+    if audio_translations_class is None:
+        try:
+            from openai.resources.audio.translations import (
+                Translations as _Translations,
+            )
+            audio_translations_class = _Translations
+        except ImportError:
+            logger.debug("mesedi: openai Translations not importable; skipping.")
+    if audio_translations_class is not None:
+        _patch_openai_audio_translations_sync(audio_translations_class)
+        patched_any = True
+
+    if async_audio_translations_class is None:
+        try:
+            from openai.resources.audio.translations import (
+                AsyncTranslations as _AsyncTranslations,
+            )
+            async_audio_translations_class = _AsyncTranslations
+        except ImportError:
+            logger.debug("mesedi: openai AsyncTranslations not importable; skipping.")
+    if async_audio_translations_class is not None:
+        _patch_openai_audio_translations_async(async_audio_translations_class)
+        patched_any = True
+
+    if audio_speech_class is None:
+        try:
+            from openai.resources.audio.speech import Speech as _Speech
+            audio_speech_class = _Speech
+        except ImportError:
+            logger.debug("mesedi: openai Speech not importable; skipping.")
+    if audio_speech_class is not None:
+        _patch_openai_audio_speech_sync(audio_speech_class)
+        patched_any = True
+
+    if async_audio_speech_class is None:
+        try:
+            from openai.resources.audio.speech import AsyncSpeech as _AsyncSpeech
+            async_audio_speech_class = _AsyncSpeech
+        except ImportError:
+            logger.debug("mesedi: openai AsyncSpeech not importable; skipping.")
+    if async_audio_speech_class is not None:
+        _patch_openai_audio_speech_async(async_audio_speech_class)
         patched_any = True
 
     return patched_any
@@ -1307,3 +1406,285 @@ def _patch_async_embeddings(cls: Type[Any]) -> None:
     patched_create.__doc__ = getattr(original_create, "__doc__", None)
     cls.create = patched_create  # type: ignore[assignment]
     _patched_classes.add(cls)
+
+
+## ── #271.j sub-ship 2 — image + audio surfaces ────────────────────────
+
+
+def _make_non_chat_sync_patcher(
+    *,
+    surface: str,
+    endpoint: str,
+    extract_user_message: Any,
+    extract_input_tokens: Any,
+    response_text: str,
+) -> Any:
+    """Build a sync patcher for any non-chat OpenAI surface that
+    follows the standard create()-returns-response shape. Each
+    per-surface call site supplies the surface tag, the
+    infrastructure_event endpoint string, request/response token
+    extractors, and a constant response-text sentinel (image / audio
+    responses are binary or URL blobs we don't store verbatim).
+    """
+    def _patcher(cls: Type[Any]) -> None:
+        if cls in _patched_classes:
+            return
+        original_create = cls.create
+
+        def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
+            ctx = current_execution_context()
+            if ctx is None:
+                return original_create(self, *args, **kwargs)
+            ctx.check_budget()
+
+            client = get_client()
+            sequence = ctx.next_sequence()
+            event_id = f"evt-{uuid.uuid4().hex[:12]}"
+            if ctx.budget_tracker is not None:
+                ctx.budget_tracker.increment_steps()
+
+            model = kwargs.get("model", "unknown")
+            user_message = extract_user_message(kwargs)
+
+            start = time.perf_counter()
+            try:
+                response = original_create(self, *args, **kwargs)
+            except BaseException as exc:
+                duration_ms = int((time.perf_counter() - start) * 1000)
+                client.submit_event(_build_failure_event(
+                    event_id=event_id,
+                    execution_id=ctx.execution_id,
+                    sequence=sequence,
+                    duration_ms=duration_ms,
+                    model=model,
+                    system_text="",
+                    user_message=user_message,
+                    exc=exc,
+                    surface=surface,
+                ))
+                _maybe_emit_throttling_event(
+                    provider=_PROVIDER,
+                    error_class=classify_openai_exception(exc),
+                    http_status=extract_http_status(exc),
+                    retry_after_seconds=extract_retry_after(exc),
+                    endpoint=endpoint,
+                )
+                raise
+
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            input_tokens = extract_input_tokens(response)
+            if ctx.budget_tracker is not None:
+                ctx.budget_tracker.add_tokens(tokens_in=input_tokens, tokens_out=0)
+            client.submit_event(Event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                event_type=EventType.LLM_CALL,
+                sequence=sequence,
+                timestamp=utcnow_rfc3339(),
+                duration_ms=duration_ms,
+                payload={
+                    "provider": _PROVIDER,
+                    "surface": surface,
+                    "model": model,
+                    "user_message": _truncate(user_message, _MAX_USER_MSG),
+                    "response_text": response_text,
+                    "status": "ok",
+                    "input_tokens": input_tokens,
+                    "output_tokens": 0,
+                },
+            ))
+            return response
+
+        patched_create.__name__ = getattr(original_create, "__name__", "create")
+        patched_create.__doc__ = getattr(original_create, "__doc__", None)
+        cls.create = patched_create
+        _patched_classes.add(cls)
+
+    return _patcher
+
+
+def _make_non_chat_async_patcher(
+    *,
+    surface: str,
+    endpoint: str,
+    extract_user_message: Any,
+    extract_input_tokens: Any,
+    response_text: str,
+) -> Any:
+    """Async twin of _make_non_chat_sync_patcher."""
+    def _patcher(cls: Type[Any]) -> None:
+        if cls in _patched_classes:
+            return
+        original_create = cls.create
+
+        async def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
+            ctx = current_execution_context()
+            if ctx is None:
+                return await original_create(self, *args, **kwargs)
+            ctx.check_budget()
+
+            client = get_client()
+            sequence = ctx.next_sequence()
+            event_id = f"evt-{uuid.uuid4().hex[:12]}"
+            if ctx.budget_tracker is not None:
+                ctx.budget_tracker.increment_steps()
+
+            model = kwargs.get("model", "unknown")
+            user_message = extract_user_message(kwargs)
+
+            start = time.perf_counter()
+            try:
+                response = await original_create(self, *args, **kwargs)
+            except BaseException as exc:
+                duration_ms = int((time.perf_counter() - start) * 1000)
+                client.submit_event(_build_failure_event(
+                    event_id=event_id,
+                    execution_id=ctx.execution_id,
+                    sequence=sequence,
+                    duration_ms=duration_ms,
+                    model=model,
+                    system_text="",
+                    user_message=user_message,
+                    exc=exc,
+                    surface=surface,
+                ))
+                _maybe_emit_throttling_event(
+                    provider=_PROVIDER,
+                    error_class=classify_openai_exception(exc),
+                    http_status=extract_http_status(exc),
+                    retry_after_seconds=extract_retry_after(exc),
+                    endpoint=endpoint,
+                )
+                raise
+
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            input_tokens = extract_input_tokens(response)
+            if ctx.budget_tracker is not None:
+                ctx.budget_tracker.add_tokens(tokens_in=input_tokens, tokens_out=0)
+            client.submit_event(Event(
+                event_id=event_id,
+                execution_id=ctx.execution_id,
+                event_type=EventType.LLM_CALL,
+                sequence=sequence,
+                timestamp=utcnow_rfc3339(),
+                duration_ms=duration_ms,
+                payload={
+                    "provider": _PROVIDER,
+                    "surface": surface,
+                    "model": model,
+                    "user_message": _truncate(user_message, _MAX_USER_MSG),
+                    "response_text": response_text,
+                    "status": "ok",
+                    "input_tokens": input_tokens,
+                    "output_tokens": 0,
+                },
+            ))
+            return response
+
+        patched_create.__name__ = getattr(original_create, "__name__", "create")
+        patched_create.__doc__ = getattr(original_create, "__doc__", None)
+        cls.create = patched_create
+        _patched_classes.add(cls)
+
+    return _patcher
+
+
+def _extract_image_prompt(kwargs: Dict[str, Any]) -> str:
+    prompt = kwargs.get("prompt", "")
+    return prompt if isinstance(prompt, str) else repr(prompt)
+
+
+def _extract_audio_input_file(kwargs: Dict[str, Any]) -> str:
+    """Audio.transcriptions/translations take ``file=<bytes|path>``;
+    record a sentinel so payload size stays bounded."""
+    f = kwargs.get("file")
+    if isinstance(f, str):
+        return f"<audio input: {f}>"
+    return "<audio input>"
+
+
+def _extract_audio_speech_input(kwargs: Dict[str, Any]) -> str:
+    """Audio.speech takes the text to read in ``input=``."""
+    inp = kwargs.get("input", "")
+    return inp if isinstance(inp, str) else repr(inp)
+
+
+def _no_tokens(_response: Any) -> int:
+    return 0
+
+
+def _extract_audio_response_tokens(response: Any) -> int:
+    """Newer OpenAI transcription models (gpt-4o-transcribe) return
+    usage info; older Whisper does not. Defensive extraction."""
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            return int(getattr(usage, "input_tokens", 0) or 0)
+    except Exception as exc:
+        logger.debug("mesedi: openai audio usage extraction failed: %s", exc)
+    return 0
+
+
+_patch_openai_images_sync = _make_non_chat_sync_patcher(
+    surface="image",
+    endpoint="/v1/images/generations",
+    extract_user_message=_extract_image_prompt,
+    extract_input_tokens=_no_tokens,
+    response_text="<image output>",
+)
+
+_patch_openai_audio_transcriptions_sync = _make_non_chat_sync_patcher(
+    surface="audio_stt",
+    endpoint="/v1/audio/transcriptions",
+    extract_user_message=_extract_audio_input_file,
+    extract_input_tokens=_extract_audio_response_tokens,
+    response_text="<audio transcription>",
+)
+
+_patch_openai_audio_translations_sync = _make_non_chat_sync_patcher(
+    surface="audio_stt",
+    endpoint="/v1/audio/translations",
+    extract_user_message=_extract_audio_input_file,
+    extract_input_tokens=_extract_audio_response_tokens,
+    response_text="<audio translation>",
+)
+
+_patch_openai_audio_speech_sync = _make_non_chat_sync_patcher(
+    surface="audio_tts",
+    endpoint="/v1/audio/speech",
+    extract_user_message=_extract_audio_speech_input,
+    extract_input_tokens=_no_tokens,
+    response_text="<audio output>",
+)
+
+_patch_openai_images_async = _make_non_chat_async_patcher(
+    surface="image",
+    endpoint="/v1/images/generations",
+    extract_user_message=_extract_image_prompt,
+    extract_input_tokens=_no_tokens,
+    response_text="<image output>",
+)
+
+_patch_openai_audio_transcriptions_async = _make_non_chat_async_patcher(
+    surface="audio_stt",
+    endpoint="/v1/audio/transcriptions",
+    extract_user_message=_extract_audio_input_file,
+    extract_input_tokens=_extract_audio_response_tokens,
+    response_text="<audio transcription>",
+)
+
+_patch_openai_audio_translations_async = _make_non_chat_async_patcher(
+    surface="audio_stt",
+    endpoint="/v1/audio/translations",
+    extract_user_message=_extract_audio_input_file,
+    extract_input_tokens=_extract_audio_response_tokens,
+    response_text="<audio translation>",
+)
+
+_patch_openai_audio_speech_async = _make_non_chat_async_patcher(
+    surface="audio_tts",
+    endpoint="/v1/audio/speech",
+    extract_user_message=_extract_audio_speech_input,
+    extract_input_tokens=_no_tokens,
+    response_text="<audio output>",
+)

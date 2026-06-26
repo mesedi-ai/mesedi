@@ -20,19 +20,43 @@ from typing import Any, Dict, List
 
 import pytest
 
+import sys
+
 import mesedi
 from mesedi import openai_integration, cohere_integration, gemini_integration
+
+# mesedi/__init__.py does `from mesedi.wrap import wrap`, which shadows
+# the `wrap` submodule name on the mesedi package with the function. To
+# monkeypatch the submodule's `get_client` we have to reach it via
+# sys.modules where the submodule object still lives.
+wrap_mod = sys.modules["mesedi.wrap"]
 
 
 class _CapturedClient:
     """Test double for the SDK shipper. Records every submit_event call
-    so tests can introspect the emitted payload."""
+    so tests can introspect the emitted payload. Also no-ops
+    submit_execution_start / submit_execution_end so @mesedi.wrap's
+    lifecycle calls don't escape to the real backend during testing."""
 
     def __init__(self) -> None:
         self.events: List[Any] = []
+        # Mirror the real client surface enough for wrap() not to crash
+        # AND to stay confined to this in-memory double.
+        self.base_url = ""
+        self.api_key = ""
 
     def submit_event(self, event: Any) -> None:
         self.events.append(event)
+
+    def submit_execution_start(self, _execution: Any) -> None:
+        # CRITICAL: do nothing. mesedi.wrap calls this; if we let the
+        # real shipper handle it, every wrap'd test agent posts a real
+        # execution to api.mesedi.ai. Failure-path tests then surface
+        # as production "crashes" failure_groups with Discord alerts.
+        return
+
+    def submit_execution_end(self, _execution: Any) -> None:
+        return
 
 
 def _setup_capture(monkeypatch: pytest.MonkeyPatch) -> _CapturedClient:
@@ -49,6 +73,11 @@ def _setup_capture(monkeypatch: pytest.MonkeyPatch) -> _CapturedClient:
     monkeypatch.setattr(openai_integration, "get_client", _get)
     monkeypatch.setattr(cohere_integration, "get_client", _get)
     monkeypatch.setattr(gemini_integration, "get_client", _get)
+    # mesedi.wrap also calls get_client() to ship
+    # submit_execution_start/end. Patching it here prevents the
+    # @mesedi.wrap fixture from leaking real "executions" to
+    # production when a test's fake exception bubbles up.
+    monkeypatch.setattr(wrap_mod, "get_client", _get)
     return cap
 
 
@@ -320,6 +349,188 @@ def test_gemini_embed_content_failure(monkeypatch):
     ]
     assert len(failures) == 1
     assert failures[0]["provider"] == "gemini"
+
+
+# ── #271.j sub-ship 2 — OpenAI image + audio + Cohere rerank ─────────
+
+
+class _FakeOpenAIImages:
+    raise_exc: Exception = None  # type: ignore[assignment]
+
+    def create(self, *_args: Any, **kwargs: Any) -> Any:
+        if self.raise_exc is not None:
+            raise self.raise_exc
+        class _R:
+            data: List[Any] = []
+        return _R()
+
+
+def test_openai_images_success_emits_surface(monkeypatch):
+    cap = _setup_capture(monkeypatch)
+    cls = type("I", (_FakeOpenAIImages,), {})
+    openai_integration._patch_openai_images_sync(cls)
+
+    @mesedi.wrap
+    def agent() -> Any:
+        return cls().create(model="gpt-image-1", prompt="a red apple")
+
+    agent()
+    payloads = _llm_call_payloads(cap)
+    imgs = [p for p in payloads if p.get("surface") == "image"]
+    assert len(imgs) == 1
+    assert imgs[0]["provider"] == "openai"
+    assert imgs[0]["user_message"] == "a red apple"
+    assert imgs[0]["response_text"] == "<image output>"
+
+
+def test_openai_images_failure_emits_surface(monkeypatch):
+    cap = _setup_capture(monkeypatch)
+
+    class _Err(Exception):
+        pass
+
+    cls = type("I2", (_FakeOpenAIImages,), {"raise_exc": _Err("nope")})
+    openai_integration._patch_openai_images_sync(cls)
+
+    @mesedi.wrap
+    def agent() -> Any:
+        return cls().create(model="gpt-image-1", prompt="x")
+
+    with pytest.raises(_Err):
+        agent()
+    payloads = _llm_call_payloads(cap)
+    failures = [
+        p for p in payloads
+        if p.get("surface") == "image" and p.get("status") == "failed"
+    ]
+    assert len(failures) == 1
+
+
+class _FakeAudioTranscriptions:
+    def create(self, *_args: Any, **kwargs: Any) -> Any:
+        class _R:
+            text = "hello world"
+        return _R()
+
+
+def test_openai_audio_transcriptions_success(monkeypatch):
+    cap = _setup_capture(monkeypatch)
+    cls = type("T", (_FakeAudioTranscriptions,), {})
+    openai_integration._patch_openai_audio_transcriptions_sync(cls)
+
+    @mesedi.wrap
+    def agent() -> Any:
+        return cls().create(model="whisper-1", file="audio.mp3")
+
+    agent()
+    payloads = _llm_call_payloads(cap)
+    stts = [p for p in payloads if p.get("surface") == "audio_stt"]
+    assert len(stts) == 1
+    assert stts[0]["response_text"] == "<audio transcription>"
+    assert "audio.mp3" in stts[0]["user_message"]
+
+
+class _FakeAudioSpeech:
+    def create(self, *_args: Any, **kwargs: Any) -> Any:
+        class _R:
+            pass
+        return _R()
+
+
+def test_openai_audio_speech_success(monkeypatch):
+    cap = _setup_capture(monkeypatch)
+    cls = type("S", (_FakeAudioSpeech,), {})
+    openai_integration._patch_openai_audio_speech_sync(cls)
+
+    @mesedi.wrap
+    def agent() -> Any:
+        return cls().create(
+            model="gpt-4o-mini-tts", voice="alloy", input="read this aloud",
+        )
+
+    agent()
+    payloads = _llm_call_payloads(cap)
+    ttss = [p for p in payloads if p.get("surface") == "audio_tts"]
+    assert len(ttss) == 1
+    assert ttss[0]["user_message"] == "read this aloud"
+    assert ttss[0]["response_text"] == "<audio output>"
+
+
+class _FakeCohereRerank:
+    raise_exc: Exception = None  # type: ignore[assignment]
+
+    def rerank(self, *_args: Any, **kwargs: Any) -> Any:
+        if self.raise_exc is not None:
+            raise self.raise_exc
+        class _Item:
+            pass
+        class _R:
+            results = [_Item(), _Item(), _Item()]
+        return _R()
+
+
+def test_cohere_rerank_success_emits_surface(monkeypatch):
+    cap = _setup_capture(monkeypatch)
+    cls = type("R", (_FakeCohereRerank,), {})
+    cohere_integration._patch_rerank_sync(cls)
+
+    @mesedi.wrap
+    def agent() -> Any:
+        return cls().rerank(
+            query="best apples",
+            documents=["red", "green", "blue"],
+            model="rerank-english-v3.0",
+        )
+
+    agent()
+    payloads = _llm_call_payloads(cap)
+    rrs = [p for p in payloads if p.get("surface") == "rerank"]
+    assert len(rrs) == 1
+    assert rrs[0]["response_text"] == "<rerank results: 3>"
+    assert "best apples" in rrs[0]["user_message"]
+
+
+def test_cohere_rerank_failure(monkeypatch):
+    cap = _setup_capture(monkeypatch)
+
+    class _Err(Exception):
+        pass
+
+    cls = type("R2", (_FakeCohereRerank,), {"raise_exc": _Err("x")})
+    cohere_integration._patch_rerank_sync(cls)
+
+    @mesedi.wrap
+    def agent() -> Any:
+        return cls().rerank(
+            query="q", documents=["a"], model="rerank-english-v3.0",
+        )
+
+    with pytest.raises(_Err):
+        agent()
+    payloads = _llm_call_payloads(cap)
+    failures = [
+        p for p in payloads
+        if p.get("surface") == "rerank" and p.get("status") == "failed"
+    ]
+    assert len(failures) == 1
+
+
+def test_openai_audio_async_patcher_runs():
+    class _Async:
+        async def create(self, *_args: Any, **kwargs: Any) -> Any:
+            return None
+    original = _Async.create
+    openai_integration._patch_openai_audio_transcriptions_async(_Async)
+    assert _Async.create is not original
+
+
+def test_cohere_rerank_async_patcher_runs():
+    class _Async:
+        async def rerank(self, *_args: Any, **kwargs: Any) -> Any:
+            return None
+    original = _Async.rerank
+    cohere_integration._patch_rerank_async(_Async)
+    assert _Async.rerank is not original
 
 
 def test_gemini_embed_content_async_patcher_runs() -> None:
