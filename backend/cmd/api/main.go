@@ -693,6 +693,10 @@ func main() {
 	mux.Handle("GET /me/tool-return-value-stats", privateHandler)
 	// Task #276.d, per-project config-fallback telemetry.
 	mux.Handle("GET /me/config-fallback-stats", privateHandler)
+	// Wave #276.a + .g, org-level cascading defaults + rollup.
+	mux.Handle("GET /me/organization/defaults", privateHandler)
+	mux.Handle("PUT /me/organization/defaults", privateHandler)
+	mux.Handle("GET /me/organization/config-fallback-rollup", privateHandler)
 	// Wave 2.1.a, per-project custom security patterns for the 3
 	// security detectors (prompt_injection, data_leakage,
 	// sandbox_escape). Without these explicit forwards the routes

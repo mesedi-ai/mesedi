@@ -311,6 +311,10 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/detector-status", h.HandleGetDetectorStatus)
 	// Task #276.d, per-project config-fallback telemetry.
 	mux.HandleFunc("GET /me/config-fallback-stats", h.HandleGetConfigFallbackStats)
+	// Wave #276.a + .g, org-level cascading defaults + rollup.
+	mux.HandleFunc("GET /me/organization/defaults", h.HandleGetOrgDefaults)
+	mux.HandleFunc("PUT /me/organization/defaults", h.HandlePutOrgDefault)
+	mux.HandleFunc("GET /me/organization/config-fallback-rollup", h.HandleGetOrgConfigFallbackRollup)
 	// Task #263, Team / multi-seat. Admin-gated endpoints for
 	// managing the org + members + invites under the auth project's
 	// tenant_id. resolveAdminContext() guards each handler.
@@ -966,26 +970,10 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// mirroring the SDK's "<truncated>" sentinel). Default
 			// 8192 on store error so a transient DB blip can't
 			// silence the detector entirely.
-			maxBytes := 8192
-			if mb, mbErr := h.Store.GetProjectToolReturnValueMaxBytes(r.Context(), authProjectID); mbErr == nil {
-				maxBytes = mb
-			} else {
-				h.Logger.Warn("get tool_return_value_max_bytes failed; using default",
-					"execution_id", executionID,
-					"project_id", authProjectID,
-					"error", mbErr.Error(),
-				)
-				// #276.d: durable telemetry — surfaces in dashboard.
-				h.recordSystemEventForProject(
-					r.Context(),
-					authProjectID, "config_fallback",
-					"config_fallback", "project_config", "tool_return_value_max_bytes",
-					map[string]any{
-						"error":          mbErr.Error(),
-						"fallback_value": maxBytes,
-					},
-				)
-			}
+			// #276.a: cascading resolver walks project → org default →
+			// hardcoded constant, emitting a config_fallback
+			// system_event internally on store-layer errors.
+			maxBytes, _ := h.ResolveToolReturnValueMaxBytes(r.Context(), authProjectID)
 			for _, toolName := range toolNames {
 				// Current-execution shape: query the most recent
 				// successful tool_call for this tool on THIS
@@ -1430,31 +1418,13 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				seen[[2]string{p.Provider, p.ErrorClass}] = struct{}{}
 			}
 			// Per-project threshold (#270/#271 migration 040).
-			// Default 2 matches the historical hardcoded constant;
-			// single-tenant customers set this to 1 in their
-			// project settings so any provider error from a single
-			// agent fires the detector.
-			threshold, tErr := h.Store.GetProjectProviderIncidentMinTenants(
+			// #276.a: cascading resolver walks project → org default
+			// → hardcoded constant (which is the same value as
+			// detectors.MinTenantsForProviderIncident). Records a
+			// config_fallback system_event internally on errors.
+			threshold, _ := h.ResolveProviderIncidentMinTenants(
 				r.Context(), authProjectID,
 			)
-			if tErr != nil {
-				h.Logger.Warn("get provider_incident_min_tenants failed; using default",
-					"execution_id", executionID,
-					"project_id", authProjectID,
-					"error", tErr.Error(),
-				)
-				threshold = detectors.MinTenantsForProviderIncident
-				// #276.d: durable telemetry — surfaces in dashboard.
-				h.recordSystemEventForProject(
-					r.Context(),
-					authProjectID, "config_fallback",
-					"config_fallback", "project_config", "provider_incident_min_tenants",
-					map[string]any{
-						"error":          tErr.Error(),
-						"fallback_value": threshold,
-					},
-				)
-			}
 			// Look back 15 minutes — long enough to span a
 			// rolling provider blip, short enough to keep the
 			// signal current. The constant is intentionally not
@@ -1884,30 +1854,11 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// 041). Default 60_000 ms matches the historical
 			// hardcoded constant; a chat-agent project can lower it
 			// to 30_000, a research-agent project can raise it to
-			// 300_000. Falls back to the default on store error so a
-			// transient DB blip never silences the detector.
-			thresholdMs := 60_000
-			if tbMs, tbErr := h.Store.GetProjectTimeBudgetMs(r.Context(), authProjectID); tbErr == nil {
-				thresholdMs = tbMs
-			} else {
-				h.Logger.Warn("get time_budget_ms failed; using default",
-					"execution_id", executionID,
-					"project_id", authProjectID,
-					"error", tbErr.Error(),
-				)
-				// #276.d: durable telemetry so a silent column-drop
-				// or persistent DB issue surfaces in the dashboard
-				// instead of only the Warn log.
-				h.recordSystemEventForProject(
-					r.Context(),
-					authProjectID, "config_fallback",
-					"config_fallback", "project_config", "time_budget_ms",
-					map[string]any{
-						"error":          tbErr.Error(),
-						"fallback_value": thresholdMs,
-					},
-				)
-			}
+			// 300_000. #276.a: cascading resolver walks
+			// project → org default → hardcoded constant, emitting
+			// a config_fallback system_event on store-layer
+			// errors so silent degradation surfaces in the dashboard.
+			thresholdMs, _ := h.ResolveTimeBudgetMs(r.Context(), authProjectID)
 			if isTerminalStatus(patch.Status) && effectiveDurationMs >= int64(thresholdMs) {
 				isNew, err := h.Store.GroupTimeBudgetExceedance(r.Context(), executionID, authProjectID, effectiveDurationMs)
 				if err != nil {

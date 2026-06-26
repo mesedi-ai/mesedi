@@ -808,6 +808,19 @@ type Store interface {
 	// the customer-visible audit_events trail. Best-effort: callers
 	// log on failure rather than fail the underlying business action.
 	InsertSystemEvent(ctx context.Context, e *SystemEvent) error
+
+	// Organization-level defaults (#276.a, migration 051). One row
+	// per (org_id, default_key). The handler's resolver reads the
+	// project-level value first, then the org default, then a
+	// hardcoded constant. Known default_key values are validated at
+	// the API layer; the store accepts any string.
+	GetOrgDefaults(ctx context.Context, orgID string) (map[string]string, error)
+	SetOrgDefault(ctx context.Context, orgID, defaultKey, valueJSON string) error
+
+	// GetOrgConfigFallbackRollup aggregates system_events
+	// action="config_fallback" rows across every project owned by
+	// orgID over the recent window (#276.g).
+	GetOrgConfigFallbackRollup(ctx context.Context, orgID string, windowHours int) (OrgConfigFallbackRollup, error)
 	// PurgeAuditEventsForClosedProject hard-deletes every audit row
 	// owned by projectID (#219 GDPR Article 17 right-to-be-forgotten).
 	//
