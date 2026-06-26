@@ -39,10 +39,24 @@ type DetectorStatusResponse struct {
 	ProjectID       string                       `json:"project_id"`
 	SemanticLoop    SemanticLoopStatus           `json:"semantic_loop"`
 	ToolSchemaDrift ToolSchemaDriftStatus        `json:"tool_schema_drift"`
+	// Wave 2.5.5 — skip-reason chips for the 3 N/A detectors when
+	// project is Ollama-only. SkipReason is empty when the detector
+	// is firing normally; populated with a customer-facing string
+	// when the detector is architecturally inapplicable.
+	ProviderIncident         DetectorSkipStatus `json:"provider_incident"`
+	InfrastructureThrottled  DetectorSkipStatus `json:"infrastructure_throttled"`
+	CostVelocity             DetectorSkipStatus `json:"cost_velocity"`
 	// Error is populated when the underlying store reads failed but
 	// the response was still rendered so the dashboard can show a
 	// non-crashing fallback. Empty when all data loaded cleanly.
 	Error string `json:"error,omitempty"`
+}
+
+// DetectorSkipStatus carries a customer-facing reason a detector is
+// quiet because of project shape, not because nothing is wrong.
+// Empty SkipReason means the detector is firing normally.
+type DetectorSkipStatus struct {
+	SkipReason string `json:"skip_reason,omitempty"`
 }
 
 // SemanticLoopStatus carries the two signals the dashboard needs to
@@ -148,6 +162,35 @@ func (h *Handlers) HandleGetDetectorStatus(w http.ResponseWriter, r *http.Reques
 			})
 		}
 		resp.ToolSchemaDrift.Tools = api
+	}
+
+	// Wave 2.5.5 — derive skip-reason chips for the 3 N/A detectors
+	// from llm_call provider mix over the last 7 days. Logic:
+	// ollama-in-use AND zero commercial providers → architecturally
+	// N/A for local runtimes. Mixed projects don't get the chip
+	// because the commercial provider's calls WOULD fire these
+	// detectors.
+	since := time.Now().Add(-7 * 24 * time.Hour)
+	providers, perr := h.Store.CountLLMCallsByProviderSince(r.Context(), authProjectID, since)
+	if perr != nil {
+		h.Logger.Warn("detector-status: provider counts failed (skip-chips unavailable)",
+			"project_id", authProjectID, "error", perr.Error())
+	} else {
+		commercialCount := 0
+		ollamaCount := 0
+		for p, n := range providers {
+			if p == "ollama" {
+				ollamaCount += n
+				continue
+			}
+			commercialCount += n
+		}
+		if ollamaCount > 0 && commercialCount == 0 {
+			const localRuntimeSkip = "No upstream provider — local runtime (Ollama)"
+			resp.ProviderIncident.SkipReason = localRuntimeSkip
+			resp.InfrastructureThrottled.SkipReason = localRuntimeSkip
+			resp.CostVelocity.SkipReason = localRuntimeSkip
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)

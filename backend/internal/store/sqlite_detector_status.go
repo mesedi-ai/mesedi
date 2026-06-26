@@ -61,6 +61,53 @@ func (s *SQLiteStore) CountCheckpointEventsForProject(
 	return count, lastAt, nil
 }
 
+// CountLLMCallsByProviderSince — SQLite implementation. Returns a
+// map of provider → count of llm_call events for the project over
+// the last `since` window. Used by the detector-status surface
+// (Wave 2.5.5) to determine whether a project is Ollama-only and
+// should show skip-reason chips on the 3 N/A detectors
+// (provider_incident, infrastructure_throttled, cost_velocity).
+// Empty map → no llm_call activity in the window.
+func (s *SQLiteStore) CountLLMCallsByProviderSince(
+	ctx context.Context,
+	projectID string,
+	since time.Time,
+) (map[string]int, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("projectID required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT COALESCE(json_extract(ev.payload, '$.provider'), '') AS provider,
+		       COUNT(*) AS cnt
+		FROM events ev
+		JOIN executions ex ON ex.execution_id = ev.execution_id
+		WHERE ex.project_id = ?
+		  AND ev.event_type = 'llm_call'
+		  AND ev.timestamp >= ?
+		GROUP BY provider
+	`, projectID, since.UTC().Format("2006-01-02T15:04:05Z"))
+	if err != nil {
+		return nil, fmt.Errorf("count llm_calls by provider: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var provider string
+		var cnt int
+		if err := rows.Scan(&provider, &cnt); err != nil {
+			return nil, fmt.Errorf("scan provider count: %w", err)
+		}
+		if provider == "" {
+			continue
+		}
+		out[provider] = cnt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate provider counts: %w", err)
+	}
+	return out, nil
+}
+
 // ListToolCallCountsForProject — SQLite implementation. Returns the
 // per-tool count of non-failed tool_call events across all
 // executions for the project. Ordered by call_count DESC, tool_name

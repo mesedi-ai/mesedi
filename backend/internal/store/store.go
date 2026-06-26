@@ -1703,6 +1703,12 @@ type Store interface {
 	// is therefore invisible to them. Empty-states wave (closes the
 	// backend half of semantic_loop.G2).
 	CountCheckpointEventsForProject(ctx context.Context, projectID string) (count int, lastAt *time.Time, err error)
+	// CountLLMCallsByProviderSince returns provider → llm_call count
+	// for the project over the given window. Used by detector-status
+	// (Wave 2.5.5) to detect Ollama-only projects and render skip-
+	// reason chips on the 3 N/A detectors (provider_incident,
+	// infrastructure_throttled, cost_velocity).
+	CountLLMCallsByProviderSince(ctx context.Context, projectID string, since time.Time) (map[string]int, error)
 	// ListToolCallCountsForProject returns the per-tool count of
 	// non-failed tool_call events across all executions for the
 	// project. Used by the detector-status surface to render the

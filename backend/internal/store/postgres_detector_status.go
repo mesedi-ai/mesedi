@@ -38,6 +38,48 @@ func (s *PostgresStore) CountCheckpointEventsForProject(
 	return count, lastAt, nil
 }
 
+// CountLLMCallsByProviderSince — Postgres twin. See SQLite version
+// for semantics. Wave 2.5.5.
+func (s *PostgresStore) CountLLMCallsByProviderSince(
+	ctx context.Context,
+	projectID string,
+	since time.Time,
+) (map[string]int, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("projectID required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT COALESCE(ev.payload::jsonb->>'provider', '') AS provider,
+		       COUNT(*) AS cnt
+		FROM events ev
+		JOIN executions ex ON ex.execution_id = ev.execution_id
+		WHERE ex.project_id = $1
+		  AND ev.event_type = 'llm_call'
+		  AND ev.timestamp >= $2
+		GROUP BY provider
+	`, projectID, since)
+	if err != nil {
+		return nil, fmt.Errorf("count llm_calls by provider: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var provider string
+		var cnt int
+		if err := rows.Scan(&provider, &cnt); err != nil {
+			return nil, fmt.Errorf("scan provider count: %w", err)
+		}
+		if provider == "" {
+			continue
+		}
+		out[provider] = cnt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate provider counts: %w", err)
+	}
+	return out, nil
+}
+
 // ListToolCallCountsForProject — Postgres twin.
 func (s *PostgresStore) ListToolCallCountsForProject(
 	ctx context.Context,
