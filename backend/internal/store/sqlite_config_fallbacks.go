@@ -1,9 +1,9 @@
 package store
 
-// Config-fallback telemetry queries (#276.d). Reads from the
-// audit_events table where action="config_fallback" was written by
-// handlers.go when a per-project config read hit an error and fell
-// back to the hardcoded default.
+// Config-fallback telemetry queries (#276.d). Since #276.f
+// (migration 050) these rows live in the dedicated system_events
+// table instead of audit_events — they're operational telemetry,
+// not customer-initiated admin actions.
 //
 // Surfaces in the dashboard so customers see when their config is
 // being silently ignored — e.g. a bad migration that drops a column
@@ -36,7 +36,7 @@ type ConfigFallbackStats struct {
 	DetectorThresholdsCount int
 }
 
-// GetConfigFallbackStats counts audit_events rows where
+// GetConfigFallbackStats counts system_events rows where
 // action="config_fallback" and project_id matches, grouped by
 // target_id (which records the config column name). Returns zero
 // counts for projects with no fallback events.
@@ -51,7 +51,7 @@ func (s *SQLiteStore) GetConfigFallbackStats(
 	stats := ConfigFallbackStats{WindowHours: windowHours}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT target_id, COUNT(*) AS n
-		FROM audit_events
+		FROM system_events
 		WHERE project_id = ?
 		  AND action = 'config_fallback'
 		  AND target_type = 'project_config'

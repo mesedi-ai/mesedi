@@ -16,8 +16,9 @@ import (
 )
 
 // openMinimalFallbackStatsStore creates a SQLite store with just
-// the audit_events table — the only table GetConfigFallbackStats
-// reads from. Schema matches the relevant subset of migration 031.
+// the system_events table — the only table GetConfigFallbackStats
+// reads from after migration 050 (#276.f). Schema matches the
+// relevant subset of migration 050.
 func openMinimalFallbackStatsStore(t *testing.T) *SQLiteStore {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,14 +31,14 @@ func openMinimalFallbackStatsStore(t *testing.T) *SQLiteStore {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
-	if _, err := db.Exec(`CREATE TABLE audit_events (
+	if _, err := db.Exec(`CREATE TABLE system_events (
 			event_id     TEXT PRIMARY KEY,
 			project_id   TEXT NOT NULL,
-			actor_email  TEXT,
+			actor        TEXT NOT NULL,
 			action       TEXT NOT NULL,
-			target_type  TEXT,
-			target_id    TEXT,
-			metadata_json TEXT,
+			target_type  TEXT NOT NULL,
+			target_id    TEXT NOT NULL,
+			payload_json TEXT,
 			created_at   TIMESTAMP NOT NULL
 		)`); err != nil {
 		t.Fatalf("schema: %v", err)
@@ -50,9 +51,9 @@ func openMinimalFallbackStatsStore(t *testing.T) *SQLiteStore {
 // ids collide when calls happen within the same microsecond.
 var _fallbackEventCounter int
 
-// insertFallback seeds one audit_events row mimicking what
-// handlers.go's recordAuditEventForProject(... "config_fallback" ...)
-// would write.
+// insertFallback seeds one system_events row mimicking what
+// handlers.go's recordSystemEventForProject(... "config_fallback" ...)
+// would write (after migration 050 / #276.f).
 func insertFallback(
 	t *testing.T, st *SQLiteStore,
 	projectID, targetID string, createdAt time.Time,
@@ -65,9 +66,9 @@ func insertFallback(
 		// inserts share a microsecond.
 		intToStr(_fallbackEventCounter)
 	_, err := st.db.ExecContext(context.Background(), `
-		INSERT INTO audit_events (
-			event_id, project_id, action, target_type, target_id, created_at
-		) VALUES (?, ?, 'config_fallback', 'project_config', ?, ?)
+		INSERT INTO system_events (
+			event_id, project_id, actor, action, target_type, target_id, created_at
+		) VALUES (?, ?, 'config_fallback', 'config_fallback', 'project_config', ?, ?)
 	`, eventID, projectID, targetID, createdAt.UTC())
 	if err != nil {
 		t.Fatalf("insert fallback: %v", err)
@@ -190,12 +191,12 @@ func TestGetConfigFallbackStats_WindowExcludesOldEvents(t *testing.T) {
 func TestGetConfigFallbackStats_IgnoresNonConfigFallbackActions(t *testing.T) {
 	st := openMinimalFallbackStatsStore(t)
 	now := time.Now().UTC()
-	// Insert an unrelated audit_events row that happens to have
+	// Insert an unrelated system_events row that happens to have
 	// the same target_id. GetConfigFallbackStats must filter on
 	// action='config_fallback' AND target_type='project_config'.
 	if _, err := st.db.Exec(`
-		INSERT INTO audit_events (event_id, project_id, action, target_type, target_id, created_at)
-		VALUES ('evt-x', 'proj-a', 'api_key.created', 'project', 'time_budget_ms', ?)
+		INSERT INTO system_events (event_id, project_id, actor, action, target_type, target_id, created_at)
+		VALUES ('evt-x', 'proj-a', 'pricing', 'pricing_unknown_model', 'execution', 'time_budget_ms', ?)
 	`, now); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

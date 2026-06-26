@@ -181,6 +181,55 @@ func (h *Handlers) recordAuditEventForProject(
 	}
 }
 
+// recordSystemEventForProject is the system_events counterpart of
+// recordAuditEventForProject (#276.f). Used by code paths that need
+// to record operational telemetry — config_fallback, future
+// system-actor events — without polluting the customer-visible
+// audit_events trail. Mirrors the best-effort posture: a write
+// failure is logged at WARN and swallowed so the calling business
+// logic (e.g., a detector firing) is not affected. Empty projectID
+// is a silent no-op rather than a panic.
+//
+// actor is the subsystem name ("config_fallback" for now); action,
+// targetType, targetID, metadata follow the same convention the
+// audit-trail helpers use so the on-disk shape stays comparable.
+func (h *Handlers) recordSystemEventForProject(
+	ctx context.Context,
+	projectID, actor string,
+	action, targetType, targetID string,
+	metadata map[string]any,
+) {
+	if projectID == "" {
+		return
+	}
+
+	var payloadJSON string
+	if metadata != nil {
+		if b, err := json.Marshal(metadata); err == nil {
+			payloadJSON = string(b)
+		}
+	}
+
+	event := &store.SystemEvent{
+		EventID:     newAuditEventID(),
+		ProjectID:   projectID,
+		Actor:       actor,
+		Action:      action,
+		TargetType:  targetType,
+		TargetID:    targetID,
+		PayloadJSON: payloadJSON,
+		CreatedAt:   time.Now().UTC(),
+	}
+
+	if err := h.Store.InsertSystemEvent(ctx, event); err != nil {
+		h.Logger.Warn("system event write failed",
+			"project_id", projectID,
+			"actor", actor,
+			"action", action,
+			"error", err.Error())
+	}
+}
+
 // newAuditEventID produces a "audit_<32 hex chars>" identifier.
 // 128 bits of entropy is overkill for an audit row id but matches
 // the prefix-+-random pattern used elsewhere in Mesedi (api keys,

@@ -801,6 +801,13 @@ type Store interface {
 	SnapshotAuditEventsForClosedProject(ctx context.Context, projectID, projectName string) error
 	SearchClosedProjectAuditEvents(ctx context.Context, filter ClosedProjectAuditFilter) ([]*AuditEvent, error)
 	DeleteClosedProjectAuditEventsOlderThan(ctx context.Context, cutoff time.Time) (deleted int64, err error)
+
+	// InsertSystemEvent inserts one row into the system_events table
+	// (#276.f, migration 050). Used by handlers.go to record
+	// operational events (config_fallback, etc.) WITHOUT polluting
+	// the customer-visible audit_events trail. Best-effort: callers
+	// log on failure rather than fail the underlying business action.
+	InsertSystemEvent(ctx context.Context, e *SystemEvent) error
 	// PurgeAuditEventsForClosedProject hard-deletes every audit row
 	// owned by projectID (#219 GDPR Article 17 right-to-be-forgotten).
 	//

@@ -741,9 +741,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			for k, v := range metadata {
 				meta[k] = v
 			}
-			h.recordAuditEventForProject(
+			h.recordSystemEventForProject(
 				r.Context(),
-				authProjectID, "system",
+				authProjectID, "config_fallback",
 				"config_fallback", "project_config",
 				"detector_threshold:"+detector+":"+thresholdKey,
 				meta,
@@ -976,9 +976,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					"error", mbErr.Error(),
 				)
 				// #276.d: durable telemetry — surfaces in dashboard.
-				h.recordAuditEventForProject(
+				h.recordSystemEventForProject(
 					r.Context(),
-					authProjectID, "system",
+					authProjectID, "config_fallback",
 					"config_fallback", "project_config", "tool_return_value_max_bytes",
 					map[string]any{
 						"error":          mbErr.Error(),
@@ -1445,9 +1445,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				)
 				threshold = detectors.MinTenantsForProviderIncident
 				// #276.d: durable telemetry — surfaces in dashboard.
-				h.recordAuditEventForProject(
+				h.recordSystemEventForProject(
 					r.Context(),
-					authProjectID, "system",
+					authProjectID, "config_fallback",
 					"config_fallback", "project_config", "provider_incident_min_tenants",
 					map[string]any{
 						"error":          tErr.Error(),
@@ -1633,9 +1633,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				}
 			}
 			if len(unknownModels) > 0 {
-				h.recordAuditEventForProject(
+				h.recordSystemEventForProject(
 					r.Context(),
-					authProjectID, "system",
+					authProjectID, "pricing",
 					"pricing_unknown_model", "execution", executionID,
 					map[string]any{
 						"models":         unknownModels,
@@ -1754,9 +1754,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 						"project_id", authProjectID,
 						"error", cvErr.Error(),
 					)
-					h.recordAuditEventForProject(
+					h.recordSystemEventForProject(
 						r.Context(),
-						authProjectID, "system",
+						authProjectID, "config_fallback",
 						"config_fallback", "project_config", "cost_velocity_threshold_usd",
 						map[string]any{
 							"error":          cvErr.Error(),
@@ -1803,9 +1803,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					"project_id", authProjectID,
 					"error", rcErr.Error(),
 				)
-				h.recordAuditEventForProject(
+				h.recordSystemEventForProject(
 					r.Context(),
-					authProjectID, "system",
+					authProjectID, "config_fallback",
 					"config_fallback", "project_config", "cost_velocity_rate_config",
 					map[string]any{
 						"error":                 rcErr.Error(),
@@ -1827,9 +1827,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					"window_minutes", rateCfg.WindowMinutes,
 					"error", rcAggErr.Error(),
 				)
-				h.recordAuditEventForProject(
+				h.recordSystemEventForProject(
 					r.Context(),
-					authProjectID, "system",
+					authProjectID, "config_fallback",
 					"config_fallback", "project_config", "cost_velocity_rate_aggregator",
 					map[string]any{
 						"error": rcAggErr.Error(),
@@ -1898,9 +1898,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				// #276.d: durable telemetry so a silent column-drop
 				// or persistent DB issue surfaces in the dashboard
 				// instead of only the Warn log.
-				h.recordAuditEventForProject(
+				h.recordSystemEventForProject(
 					r.Context(),
-					authProjectID, "system",
+					authProjectID, "config_fallback",
 					"config_fallback", "project_config", "time_budget_ms",
 					map[string]any{
 						"error":          tbErr.Error(),
@@ -4226,7 +4226,21 @@ func (h *Handlers) HandleGetConfigFallbackStats(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusUnauthorized, "no project context")
 		return
 	}
-	stats, err := h.Store.GetConfigFallbackStats(r.Context(), authProjectID, 24)
+	// #276.j: optional ?window_hours=<int> query param. Range 1..168
+	// (1 hour to 7 days). Default 24 when absent. Out-of-range
+	// returns 400 with an explicit message so dashboard callers
+	// don't silently get the default for typo'd values.
+	windowHours := 24
+	if raw := r.URL.Query().Get("window_hours"); raw != "" {
+		parsed, perr := strconv.Atoi(raw)
+		if perr != nil || parsed < 1 || parsed > 168 {
+			writeError(w, http.StatusBadRequest,
+				"window_hours must be an integer in range 1..168")
+			return
+		}
+		windowHours = parsed
+	}
+	stats, err := h.Store.GetConfigFallbackStats(r.Context(), authProjectID, windowHours)
 	if err != nil {
 		h.Logger.Error("get config_fallback stats failed",
 			"project_id", authProjectID, "error", err.Error())

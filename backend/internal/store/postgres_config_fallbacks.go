@@ -9,9 +9,10 @@ import (
 	"time"
 )
 
-// GetConfigFallbackStats counts audit_events rows where
+// GetConfigFallbackStats counts system_events rows where
 // action="config_fallback" and project_id matches, grouped by
 // target_id. Postgres twin of the SQLite implementation.
+// Reads from system_events after migration 050 (#276.f).
 func (s *PostgresStore) GetConfigFallbackStats(
 	ctx context.Context,
 	projectID string,
@@ -24,7 +25,7 @@ func (s *PostgresStore) GetConfigFallbackStats(
 	cutoff := time.Now().UTC().Add(-time.Duration(windowHours) * time.Hour)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT target_id, COUNT(*) AS n
-		FROM audit_events
+		FROM system_events
 		WHERE project_id = $1
 		  AND action = 'config_fallback'
 		  AND target_type = 'project_config'
