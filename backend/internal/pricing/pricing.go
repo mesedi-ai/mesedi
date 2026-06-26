@@ -212,6 +212,38 @@ var priceTable = map[string]modelPrice{
 //	cost := ComputeLLMCost("claude-opus-4-6", 1200, 800)
 //	// = 1200/1_000_000 * 15.00 + 800/1_000_000 * 75.00
 //	// = 0.018 + 0.060 = $0.078
+// ModelPriceOverride is the per-tenant override shape carried by the
+// per-project custom_model_pricing knob (Wave 2.5.4.b). Both rates
+// are USD per 1M tokens — same units as the canonical priceTable so
+// the override slots in without conversion. JSON tags pin the request
+// body shape exposed via the per-project detector-thresholds REST
+// surface.
+type ModelPriceOverride struct {
+	InputPer1M  float64 `json:"input_per_1m"`
+	OutputPer1M float64 `json:"output_per_1m"`
+}
+
+// ComputeLLMCostWithOverrides is the per-project pricing path. If
+// overrides has an exact-name match for the model, that override
+// wins outright (no tier-flip logic — overrides are bare rate
+// declarations). Otherwise the call falls through to the existing
+// ComputeLLMCost canonical-priceTable path, which preserves prefix
+// matching + Gemini Pro tier flipping for known commercial models.
+// Wave 2.5.4.b.
+func ComputeLLMCostWithOverrides(
+	model string,
+	inputTokens, outputTokens int,
+	overrides map[string]ModelPriceOverride,
+) float64 {
+	if model != "" {
+		if o, ok := overrides[model]; ok {
+			return (float64(inputTokens)/1_000_000.0)*o.InputPer1M +
+				(float64(outputTokens)/1_000_000.0)*o.OutputPer1M
+		}
+	}
+	return ComputeLLMCost(model, inputTokens, outputTokens)
+}
+
 func ComputeLLMCost(model string, inputTokens, outputTokens int) float64 {
 	p, ok := lookup(model)
 	if !ok {

@@ -27,6 +27,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"mesedi/backend/internal/pricing"
 )
 
 // DetectorThresholdSpec describes one tunable knob. Parse turns
@@ -489,6 +491,45 @@ func init() {
 			return m, nil
 		},
 	})
+	// Wave 2.5.4.b — per-project custom_model_pricing override.
+	// Slots into the project_detector_thresholds bag under the
+	// "pricing" detector key. Wins over the canonical priceTable for
+	// the exact model name; per-prefix family entries in the
+	// priceTable remain the default for everything else. Use to
+	// declare non-zero rates for Ollama fine-tunes (GPU/electricity
+	// amortization) or to ship pricing for an obscure commercial
+	// provider Mesedi does not yet ship priceTable entries for.
+	// NO tier cap — observability of self-hosted costs is a
+	// Hobby-tier feature.
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "pricing",
+		ThresholdKey: "custom_model_pricing",
+		ValueType:    "json",
+		Description: "Per-model pricing overrides keyed by " +
+			"model_id → {input_per_1m, output_per_1m} USD rates. " +
+			"Wins over the canonical priceTable for exact-name " +
+			"matches. Use to declare non-zero rates for Ollama " +
+			"fine-tunes or to ship pricing for an obscure commercial " +
+			"provider Mesedi does not yet ship entries for. " +
+			"Default empty map; per-entry rates in [0.0, 10000.0] " +
+			"USD per 1M tokens (Mesedi's most expensive commercial " +
+			"rate today is $75/1M for Claude Opus output; the cap " +
+			"is set 100x higher to bound input sanity); max 50 " +
+			"entries; model_id ≤ 200 chars without colon or " +
+			"whitespace (signature stability).",
+		Default: map[string]ModelPriceOverride{},
+		Parse: func(valueJSON, _ string) (any, error) {
+			m, err := parseJSONModelPricingMap(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			if err := boundModelPricingMap(m, 50, 0.0, 10000.0,
+				"custom_model_pricing"); err != nil {
+				return nil, err
+			}
+			return m, nil
+		},
+	})
 	// data_leakage.G5 — per-project severity-firing policy. Closed
 	// set ["critical", "high", "medium"]; default ["critical", "high"]
 	// matches the historical hardcoded posture in
@@ -774,6 +815,63 @@ func boundJSONIntMap(m map[string]int, maxKeys, lo, hi int, name string) error {
 		if strings.ContainsAny(k, ": \t\n\r") {
 			return fmt.Errorf("%s key %q contains forbidden character "+
 				"(colon or whitespace); these break signature parsing", name, k)
+		}
+	}
+	return nil
+}
+
+// ModelPriceOverride re-exports the pricing package's type so the
+// validators registry can declare its Default map type without
+// importing the pricing package at every call site. The two types
+// are the same struct; this re-export prevents the duplicate-
+// definition smell. Wave 2.5.4.b.
+type ModelPriceOverride = pricing.ModelPriceOverride
+
+// parseJSONModelPricingMap accepts a JSON object whose values are
+// {input_per_1m, output_per_1m} pairs. Returns a typed map ready for
+// bounds checking. Wave 2.5.4.b.
+func parseJSONModelPricingMap(valueJSON string) (map[string]ModelPriceOverride, error) {
+	valueJSON = strings.TrimSpace(valueJSON)
+	if valueJSON == "" {
+		return nil, fmt.Errorf("empty value")
+	}
+	var m map[string]ModelPriceOverride
+	if err := json.Unmarshal([]byte(valueJSON), &m); err != nil {
+		return nil, fmt.Errorf("expected object {string: {input_per_1m, "+
+			"output_per_1m}}, got %q: %w", valueJSON, err)
+	}
+	if m == nil {
+		m = map[string]ModelPriceOverride{}
+	}
+	return m, nil
+}
+
+// boundModelPricingMap enforces the same structural bounds as
+// boundJSONIntMap (max-key-count + per-key 200-char-without-colon
+// shape) plus per-rate range on BOTH input and output rates.
+// Wave 2.5.4.b.
+func boundModelPricingMap(m map[string]ModelPriceOverride,
+	maxKeys int, lo, hi float64, name string) error {
+	if len(m) > maxKeys {
+		return fmt.Errorf("%s map has %d entries; max is %d",
+			name, len(m), maxKeys)
+	}
+	for k, v := range m {
+		if len(k) == 0 || len(k) > 200 {
+			return fmt.Errorf("%s key %q has length %d; max 200, min 1",
+				name, k, len(k))
+		}
+		if strings.ContainsAny(k, ": \t\n\r") {
+			return fmt.Errorf("%s key %q contains forbidden character "+
+				"(colon or whitespace); these break signature parsing", name, k)
+		}
+		if v.InputPer1M < lo || v.InputPer1M > hi {
+			return fmt.Errorf("%s[%s].input_per_1m=%v out of range [%v, %v]",
+				name, k, v.InputPer1M, lo, hi)
+		}
+		if v.OutputPer1M < lo || v.OutputPer1M > hi {
+			return fmt.Errorf("%s[%s].output_per_1m=%v out of range [%v, %v]",
+				name, k, v.OutputPer1M, lo, hi)
 		}
 	}
 	return nil

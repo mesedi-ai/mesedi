@@ -233,6 +233,86 @@ func TestIsKnownModel_OllamaFamilies(t *testing.T) {
 	}
 }
 
+// TestComputeLLMCostWithOverrides — Wave 2.5.4.b. Per-project
+// overrides win outright for exact-name matches; misses fall
+// through to the canonical priceTable (preserving prefix matching
+// and Gemini Pro tier flipping).
+func TestComputeLLMCostWithOverrides(t *testing.T) {
+	t.Parallel()
+	overrides := map[string]ModelPriceOverride{
+		// A fine-tuned variant the customer is paying for.
+		"my-fine-tuned-llama": {InputPer1M: 0.50, OutputPer1M: 1.00},
+		// A hardware-amortized rate for an Ollama family the
+		// customer wants tracked as non-zero.
+		"llama3.1:8b": {InputPer1M: 0.05, OutputPer1M: 0.10},
+		// A high-cost custom model.
+		"my-custom-gpt": {InputPer1M: 100.00, OutputPer1M: 200.00},
+	}
+	cases := []struct {
+		name   string
+		model  string
+		inTok  int
+		outTok int
+		want   float64
+	}{
+		// Override hits — exact-name match beats everything else.
+		{"override custom model", "my-fine-tuned-llama", 1_000_000, 1_000_000, 0.50 + 1.00},
+		{"override over ollama prefix", "llama3.1:8b", 2_000_000, 1_000_000, 0.10 + 0.10},
+		{"override expensive custom", "my-custom-gpt", 100_000, 100_000, 10.0 + 20.0},
+		// Miss — falls through to canonical priceTable.
+		{"miss falls through to canonical claude", "claude-haiku-4-5", 1_000_000, 1_000_000, 1.00 + 5.00},
+		{"miss falls through to canonical ollama prefix", "qwen2.5-coder:32b", 1_000_000, 1_000_000, 0},
+		// Empty model defensive.
+		{"empty model", "", 1_000_000, 1_000_000, 0},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := ComputeLLMCostWithOverrides(c.model, c.inTok, c.outTok, overrides)
+			if got != c.want {
+				t.Errorf("ComputeLLMCostWithOverrides(%q, %d, %d) = %v; want %v",
+					c.model, c.inTok, c.outTok, got, c.want)
+			}
+		})
+	}
+}
+
+// TestComputeLLMCostWithOverrides_NilMapIsSafe — defensive: a nil
+// overrides map (the most common case in production for projects
+// that haven't configured anything) must not panic or behave
+// differently than ComputeLLMCost.
+func TestComputeLLMCostWithOverrides_NilMapIsSafe(t *testing.T) {
+	t.Parallel()
+	got := ComputeLLMCostWithOverrides("claude-haiku-4-5", 1_000_000, 1_000_000, nil)
+	want := ComputeLLMCost("claude-haiku-4-5", 1_000_000, 1_000_000)
+	if got != want {
+		t.Errorf("nil overrides map should match ComputeLLMCost; got %v want %v",
+			got, want)
+	}
+}
+
+// TestComputeLLMCostWithOverrides_ZeroRateOverrideWins — a
+// customer wanting to force $0 for a specific known model (e.g.
+// their Anthropic spend is paid by an enterprise contract and
+// they want cost_velocity to ignore it) can set both rates to 0
+// and the override wins over the canonical priceTable.
+func TestComputeLLMCostWithOverrides_ZeroRateOverrideWins(t *testing.T) {
+	t.Parallel()
+	overrides := map[string]ModelPriceOverride{
+		"claude-haiku-4-5": {InputPer1M: 0, OutputPer1M: 0},
+	}
+	got := ComputeLLMCostWithOverrides("claude-haiku-4-5", 1_000_000, 1_000_000, overrides)
+	if got != 0 {
+		t.Errorf("zero-rate override should force $0; got %v", got)
+	}
+	// Sanity: without the override, the canonical rate applies.
+	want := ComputeLLMCost("claude-haiku-4-5", 1_000_000, 1_000_000)
+	if want == 0 {
+		t.Fatal("regression: claude-haiku-4-5 should be priced non-zero in the canonical table")
+	}
+}
+
 // TestPricingTableVersion_BumpedForOllama — sanity check that the
 // version stamp was bumped when this wave landed. If the version
 // reverts to an earlier date, the priceTable Ollama entries may

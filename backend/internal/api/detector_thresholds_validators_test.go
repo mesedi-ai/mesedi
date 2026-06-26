@@ -51,6 +51,11 @@ func Test_DetectorThresholds_RegistryHasExpectedDetectors(t *testing.T) {
 		// Second consumer of the json-string-slice helpers from
 		// data_leakage.G5.
 		"hitl_timeout:fire_modes",
+		// Wave 2.5.4.b — per-project custom_model_pricing override.
+		// First non-detector entry in the registry (pricing is read
+		// at execution close, not by any specific detector). Rides
+		// the same JSON-keyed-map shape as custom_model_windows.
+		"pricing:custom_model_pricing",
 	}
 	for _, key := range want {
 		if _, ok := detectorThresholdRegistry[key]; !ok {

@@ -1603,7 +1603,13 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// execution, not per event) so the dashboard's existing
 			// config-fallback chip can show "Mesedi doesn't know how
 			// to price model X — using SDK fallback" tile.
-			cost, unknownModels := computeExecutionCost(evts)
+			// Wave 2.5.4.b — pass the per-project pricing overrides
+			// loaded earlier in this handler (line ~752) so any
+			// (detector="pricing", threshold_key="custom_model_pricing")
+			// row beats the canonical priceTable for exact-name matches.
+			cost, unknownModels := computeExecutionCost(
+				evts, detectorThresholds.Pricing.CustomModelPricing,
+			)
 			effectiveCost := cost
 			if effectiveCost == 0 {
 				effectiveCost = patch.EstimatedCostUSD
@@ -4453,7 +4459,10 @@ func (h *Handlers) HandleDeleteClassSeverity(w http.ResponseWriter, r *http.Requ
 // Events whose payload fails to unmarshal are skipped silently — a
 // single malformed event shouldn't break cost computation for the
 // whole execution.
-func computeExecutionCost(evts []*events.Event) (totalUSD float64, unknownModels []string) {
+func computeExecutionCost(
+	evts []*events.Event,
+	customPricing map[string]pricing.ModelPriceOverride,
+) (totalUSD float64, unknownModels []string) {
 	seenUnknown := map[string]struct{}{}
 	for _, e := range evts {
 		if e.EventType != events.EventTypeLLMCall {
@@ -4478,6 +4487,18 @@ func computeExecutionCost(evts []*events.Event) (totalUSD float64, unknownModels
 		}
 		if p.OutputTokens < 0 {
 			p.OutputTokens = 0
+		}
+		// Wave 2.5.4.b — per-project override wins outright, even
+		// when the model is otherwise unknown to the canonical
+		// priceTable. This is the path that lets a customer running
+		// a fine-tuned variant of a model Mesedi never shipped
+		// pricing for (e.g. "my-llama-3-fine-tune") declare a real
+		// rate and have cost_velocity work correctly for it.
+		if _, hasOverride := customPricing[p.Model]; hasOverride {
+			totalUSD += pricing.ComputeLLMCostWithOverrides(
+				p.Model, p.InputTokens, p.OutputTokens, customPricing,
+			)
+			continue
 		}
 		if pricing.IsKnownModel(p.Model) {
 			totalUSD += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)

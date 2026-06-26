@@ -83,6 +83,24 @@ type ProjectDetectorThresholds struct {
 	// DetectHITLTimeoutAllMatchesWithThresholds to control which
 	// timeout modes promote to failure_groups.
 	HITLTimeout detectors.HITLTimeoutThresholds
+	// Pricing carries the per-project custom_model_pricing override
+	// (Wave 2.5.4.b). Not really a "detector threshold" — pricing is
+	// read at execution close by ComputeLLMCostWithOverrides — but it
+	// rides this same per-project config table because the
+	// architectural shape (model-keyed JSON map) is identical to
+	// custom_model_windows. A future cleanup wave may rename this
+	// whole struct to ProjectModelOverrides to match.
+	Pricing PricingThresholds
+}
+
+// PricingThresholds is the typed view of the (detector="pricing")
+// rows of the project_detector_thresholds bag. Wave 2.5.4.b.
+type PricingThresholds struct {
+	// CustomModelPricing maps exact-name model identifiers to
+	// per-tenant input/output rates that win over the canonical
+	// priceTable lookup. Empty map → every cost lookup falls through
+	// to ComputeLLMCost (canonical), matching pre-2.5.4.b behavior.
+	CustomModelPricing map[string]ModelPriceOverride
 }
 
 // DefaultProjectDetectorThresholds returns the all-defaults aggregate
@@ -257,6 +275,15 @@ func applyDetectorThresholdValue(
 		case "custom_model_windows":
 			if v, ok := value.(map[string]int); ok {
 				out.ContextOverflow.CustomModelWindows = v
+			}
+		}
+	case "pricing":
+		// Wave 2.5.4.b — per-project custom_model_pricing override.
+		// Loaded into ProjectDetectorThresholds.Pricing.CustomModelPricing
+		// and read at execution close by ComputeLLMCostWithOverrides.
+		if key == "custom_model_pricing" {
+			if v, ok := value.(map[string]ModelPriceOverride); ok {
+				out.Pricing.CustomModelPricing = v
 			}
 		}
 	case "loops":
