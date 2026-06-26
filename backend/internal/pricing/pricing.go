@@ -39,7 +39,7 @@ import (
 // reviewed. Bump when editing prices below so reviewers + customers can
 // see staleness. Exposed via GET /me/pricing-info so customers can see
 // which prices Mesedi is using.
-const PricingTableVersion = "2026-06-22"
+const PricingTableVersion = "2026-06-25"
 
 // modelPrice is the cost structure for one model: input + output rate
 // per 1 million tokens, plus optional long-context tier rates that
@@ -168,17 +168,35 @@ var priceTable = map[string]modelPrice{
 	"mistral-nemo":       {InputPer1M: 0.15, OutputPer1M: 0.15},
 	"codestral":          {InputPer1M: 0.30, OutputPer1M: 0.90},
 
-	// ── Ollama (local; no API cost) ──────────────────────────────────
-	// Ollama is locally-hosted with zero per-token API cost. The
-	// identifiers below match the canonical Llama / Mistral names; if
-	// a customer is running an Ollama model via instrument_ollama with
-	// a tag-style identifier (e.g. "llama3.2:3b" instead of
-	// "llama-3.2-90b"), it will land in the unknown-model fallback
-	// path. Wave 2.5.4 extends this table with Ollama-tag-style
-	// identifiers as part of the instrument_ollama work.
-	// (Entries above under "Meta Llama" already cover llama-*; this
-	// block is a placeholder for future Ollama-specific tags so the
-	// reviewer sees the intent.)
+	// ── Ollama (local runtime — ollama.com/library) ──────────────────
+	// Local-runtime $0 is the honest answer. Customers paying for
+	// GPU / electricity / hardware amortization have real costs, but
+	// those are not per-token costs and Mesedi should not invent a
+	// number. The per-project custom_model_pricing override (Wave
+	// 2.5.4.b) lets customers wanting hardware amortization opt in
+	// to a non-zero rate per fine-tuned model.
+	//
+	// The prefix-match-longest-key lookup means a bare model string
+	// like "llama3.1:8b" (Ollama tag-style) resolves to the "llama3"
+	// entry below. Commercial-provider variants like
+	// "meta-llama/Llama-3.1-8B-Instruct" land in OpenRouter-style
+	// qualified names and don't false-positive against these entries.
+	//
+	// Coverage: the dominant Ollama model families as of 2026-06.
+	// Update when ollama.com/library ships a new family that gets
+	// material adoption.
+	"llama3":          {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"llama4":          {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"qwen2":           {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"qwen3":           {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"deepseek-r1":     {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"deepseek-v3":     {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"deepseek-coder":  {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"gemma2":          {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"gemma3":          {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"phi3":            {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"phi4":            {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"codellama":       {InputPer1M: 0.00, OutputPer1M: 0.00},
 }
 
 // ComputeLLMCost returns the estimated USD cost of a single LLM call

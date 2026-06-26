@@ -109,8 +109,11 @@ func TestIsKnownModel(t *testing.T) {
 		// Garbage values.
 		{"", false},
 		{"made-up-model", false},
-		// Ollama-tag-style identifier — known-unknown until Wave 2.5.4.
-		{"llama3.2:3b", false},
+		// Wave 2.5.4.a — Ollama tag-style identifiers now resolve via
+		// prefix match against the family entries (llama3, qwen2, etc).
+		{"llama3.2:3b", true},
+		{"qwen2.5-coder:32b", true},
+		{"deepseek-r1:14b", true},
 	}
 	for _, c := range cases {
 		got := IsKnownModel(c.model)
@@ -166,6 +169,83 @@ func TestLastUpdated_DeprecatedAlias(t *testing.T) {
 	if LastUpdated() != PricingTableVersion {
 		t.Errorf("LastUpdated() should equal PricingTableVersion; got %v vs %v",
 			LastUpdated(), PricingTableVersion)
+	}
+}
+
+// TestComputeLLMCost_OllamaModelsAreZero — Wave 2.5.4.a. Local-runtime
+// $0 is the canonical answer for Ollama. Tag-style identifiers like
+// "llama3.1:8b" resolve via prefix match against the family entries
+// added to priceTable.
+func TestComputeLLMCost_OllamaModelsAreZero(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		model string
+	}{
+		{"llama3 tag", "llama3.1:8b"},
+		{"llama3.2 small tag", "llama3.2:1b"},
+		{"llama3.3 70b tag", "llama3.3:70b"},
+		{"llama4 future tag", "llama4:scout"},
+		{"qwen2.5 coder tag", "qwen2.5-coder:32b"},
+		{"qwen3 tag", "qwen3:8b"},
+		{"deepseek-r1 reasoning tag", "deepseek-r1:14b"},
+		{"deepseek-v3 tag", "deepseek-v3:67b"},
+		{"deepseek-coder tag", "deepseek-coder:6.7b"},
+		{"gemma2 tag", "gemma2:9b"},
+		{"gemma3 tag", "gemma3:1b"},
+		{"phi3 tag", "phi3:medium"},
+		{"phi4 tag", "phi4:14b"},
+		{"codellama tag", "codellama:7b-instruct"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := ComputeLLMCost(c.model, 10_000, 10_000)
+			if got != 0 {
+				t.Errorf("Ollama model %q: expected $0 (local runtime); got $%v",
+					c.model, got)
+			}
+		})
+	}
+}
+
+// TestIsKnownModel_OllamaFamilies — paired with the cost-zero test
+// above. Asserts the family-prefix entries make IsKnownModel return
+// true for the dominant Ollama tag shapes, so the dashboard correctly
+// distinguishes "we know this model and the cost is $0" from "unknown
+// model, fell back to SDK-shipped per-event cost."
+func TestIsKnownModel_OllamaFamilies(t *testing.T) {
+	t.Parallel()
+	cases := []string{
+		"llama3.1:8b",
+		"qwen3:8b",
+		"deepseek-r1:14b",
+		"gemma2:9b",
+		"phi4:14b",
+		"codellama:7b-instruct",
+	}
+	for _, model := range cases {
+		if !IsKnownModel(model) {
+			t.Errorf("Ollama tag %q should resolve via family prefix; "+
+				"IsKnownModel returned false", model)
+		}
+	}
+}
+
+// TestPricingTableVersion_BumpedForOllama — sanity check that the
+// version stamp was bumped when this wave landed. If the version
+// reverts to an earlier date, the priceTable Ollama entries may
+// have been reverted with it; this regression guard fires loudly.
+func TestPricingTableVersion_BumpedForOllama(t *testing.T) {
+	t.Parallel()
+	// 2026-06-25 is the Wave 2.5.4.a ship date. A future wave bump
+	// supersedes this — the test should be edited at the same time
+	// the version stamp is, so we only assert "not older than the
+	// ship date of Ollama entries."
+	if PricingTableVersion < "2026-06-25" {
+		t.Errorf("PricingTableVersion %q predates Wave 2.5.4.a; "+
+			"Ollama entries may have been reverted", PricingTableVersion)
 	}
 }
 

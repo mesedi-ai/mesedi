@@ -175,6 +175,28 @@ var windowByModel = map[string]int{
 	"command-r-plus-08-2024": 128_000,
 	"command-light":          4_096,
 	"command":                4_096,
+
+	// ── Ollama (local runtime; Wave 2.5.4.a) ──────────────────────
+	// Family-prefix entries matching the priceTable. Window values
+	// are conservative upper-end-of-family defaults — many Ollama
+	// variants ship with smaller context windows. Customers running
+	// the smaller variants override per-project via the existing
+	// custom_model_windows knob (context_overflow.G3); the dashboard
+	// prompt in Wave 2.5.5 makes the override path discoverable.
+	// Setting the upper-end here minimizes false-positive
+	// context_overflow firing as the default state.
+	"llama3":         128_000,
+	"llama4":         10_000_000,
+	"qwen2":          128_000,
+	"qwen3":          128_000,
+	"deepseek-r1":    128_000,
+	"deepseek-v3":    64_000,
+	"deepseek-coder": 16_000,
+	"gemma2":         8_192,
+	"gemma3":         8_192,
+	"phi3":           128_000,
+	"phi4":           16_384,
+	"codellama":      100_000,
 }
 
 // providerByModel groups each model under its vendor for cross-tenant
@@ -244,4 +266,19 @@ var providerByModel = map[string]string{
 	"command-r-plus-08-2024": "cohere",
 	"command-light":          "cohere",
 	"command":                "cohere",
+	// Ollama (local runtime; Wave 2.5.4.a). Provider="ollama" matches
+	// the _PROVIDER constant pinned in sdk-python/mesedi/ollama_integration.py
+	// and sdk-typescript/src/ollama_integration.ts.
+	"llama3":         "ollama",
+	"llama4":         "ollama",
+	"qwen2":          "ollama",
+	"qwen3":          "ollama",
+	"deepseek-r1":    "ollama",
+	"deepseek-v3":    "ollama",
+	"deepseek-coder": "ollama",
+	"gemma2":         "ollama",
+	"gemma3":         "ollama",
+	"phi3":           "ollama",
+	"phi4":           "ollama",
+	"codellama":      "ollama",
 }
