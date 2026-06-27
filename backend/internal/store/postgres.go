@@ -1606,7 +1606,22 @@ func (s *PostgresStore) SaveEvents(ctx context.Context, batch []events.Event) er
 // like in SQLite — scanning into time.Time directly is correct here.)
 // ─────────────────────────────────────────────────────────────────────────
 
-func (s *PostgresStore) ListExecutions(ctx context.Context, projectID string, limit, offset int) ([]*events.Execution, error) {
+func (s *PostgresStore) ListExecutions(ctx context.Context, projectID string, q string, limit, offset int) ([]*events.Execution, error) {
+	// Search filter (list-search-paginate wave): when q is non-empty,
+	// restrict to rows whose execution_id OR crash_signature ILIKE q.
+	// Postgres' ILIKE is case-insensitive by definition (vs SQLite's
+	// LOWER(col) LIKE LOWER(?)) — twin behavior, different SQL.
+	args := []any{projectID}
+	whereClause := "project_id = $1"
+	if q != "" {
+		whereClause += " AND (execution_id ILIKE '%' || $2 || '%'" +
+			" OR crash_signature ILIKE '%' || $2 || '%')"
+		args = append(args, q)
+	}
+	args = append(args, limit, offset)
+	limitPlaceholder := fmt.Sprintf("$%d", len(args)-1)
+	offsetPlaceholder := fmt.Sprintf("$%d", len(args))
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			execution_id, project_id, status,
@@ -1614,10 +1629,10 @@ func (s *PostgresStore) ListExecutions(ctx context.Context, projectID string, li
 			duration_ms, total_tokens_in, total_tokens_out,
 			estimated_cost_usd, sdk_language, sdk_version, crash_signature
 		FROM executions
-		WHERE project_id = $1
+		WHERE `+whereClause+`
 		ORDER BY started_at DESC
-		LIMIT $2 OFFSET $3
-	`, projectID, limit, offset)
+		LIMIT `+limitPlaceholder+` OFFSET `+offsetPlaceholder+`
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query executions: %w", err)
 	}
@@ -3053,7 +3068,22 @@ func (s *PostgresStore) ListLLMUserMessagesForProjectSince(ctx context.Context, 
 	return out, rows.Err()
 }
 
-func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string, limit, offset int) ([]*FailureGroup, error) {
+func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string, q string, limit, offset int) ([]*FailureGroup, error) {
+	// Search filter (list-search-paginate wave): when q is non-empty,
+	// restrict to rows whose signature OR failure_class ILIKE q.
+	// ILIKE is Postgres' native case-insensitive substring; the
+	// SQLite twin uses LOWER() + LIKE for the same effect.
+	args := []any{projectID}
+	whereClause := "fg.project_id = $1"
+	if q != "" {
+		whereClause += " AND (fg.signature ILIKE '%' || $2 || '%'" +
+			" OR fg.failure_class ILIKE '%' || $2 || '%')"
+		args = append(args, q)
+	}
+	args = append(args, limit, offset)
+	limitPlaceholder := fmt.Sprintf("$%d", len(args)-1)
+	offsetPlaceholder := fmt.Sprintf("$%d", len(args))
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			fg.group_id, fg.project_id, fg.failure_class, fg.signature,
@@ -3065,15 +3095,15 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 			fg.severity_hint
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
-		WHERE fg.project_id = $1
+		WHERE `+whereClause+`
 		GROUP BY fg.group_id, fg.project_id, fg.failure_class, fg.signature,
 		         fg.first_seen, fg.last_seen, fg.event_count,
 		         fg.affected_executions, fg.sample_execution_id,
 		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
 		         fg.severity_hint
 		ORDER BY fg.last_seen DESC
-		LIMIT $2 OFFSET $3
-	`, projectID, limit, offset)
+		LIMIT `+limitPlaceholder+` OFFSET `+offsetPlaceholder+`
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query failure_groups: %w", err)
 	}

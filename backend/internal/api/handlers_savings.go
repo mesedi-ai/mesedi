@@ -163,7 +163,7 @@ func (h *Handlers) HandleSavings(w http.ResponseWriter, r *http.Request) {
 	// is the seed data for the loop and drift buckets. Pagination
 	// not relevant here: even an enormously failure-rich account
 	// has at most a few hundred groups per month.
-	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, 1000, 0)
+	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, "", 1000, 0)
 	if err != nil {
 		h.Logger.Error("savings: list failure groups failed",
 			"project_id", projectID, "error", err.Error())

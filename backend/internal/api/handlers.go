@@ -1982,6 +1982,32 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// normalizeListQuery sanitizes a list-endpoint search query string for
+// safe SQL use. Trims whitespace, drops control characters, caps at 256
+// bytes (a search for hundreds of chars is almost certainly an exploit
+// attempt or a paste accident). The SQL layer parameterizes the value
+// so there's no injection risk; this is purely about response sanity
+// and avoiding pathological substring scans.
+func normalizeListQuery(raw string) string {
+	const maxLen = 256
+	out := strings.TrimSpace(raw)
+	if out == "" {
+		return ""
+	}
+	// Strip control chars (0x00-0x1F + 0x7F) which can't appear in
+	// meaningful customer-visible signature or execution_id text.
+	out = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7F {
+			return -1
+		}
+		return r
+	}, out)
+	if len(out) > maxLen {
+		out = out[:maxLen]
+	}
+	return out
+}
+
 // HandleListFailureGroups returns the calling project's failure groups,
 // sorted by most-recent first. Supports `limit` (default 50, max 200) and
 // `offset` (default 0) via query string.
@@ -1994,8 +2020,9 @@ func (h *Handlers) HandleListFailureGroups(w http.ResponseWriter, r *http.Reques
 
 	limit := parseIntQuery(r, "limit", 50, 1, 200)
 	offset := parseIntQuery(r, "offset", 0, 0, 1_000_000)
+	q := normalizeListQuery(r.URL.Query().Get("q"))
 
-	groups, err := h.Store.ListFailureGroups(r.Context(), authProjectID, limit, offset)
+	groups, err := h.Store.ListFailureGroups(r.Context(), authProjectID, q, limit, offset)
 	if err != nil {
 		h.Logger.Error("list failure_groups failed",
 			"project_id", authProjectID,
@@ -2011,6 +2038,7 @@ func (h *Handlers) HandleListFailureGroups(w http.ResponseWriter, r *http.Reques
 		"count":          len(groups),
 		"limit":          limit,
 		"offset":         offset,
+		"q":              q,
 	})
 }
 
@@ -2736,8 +2764,9 @@ func writeError(w http.ResponseWriter, status int, message string) {
 }
 
 // HandleListExecutions returns the calling project's executions, sorted
-// by started_at DESC. Supports `limit` (default 50, max 200) and `offset`
-// (default 0).
+// by started_at DESC. Supports `limit` (default 50, max 200), `offset`
+// (default 0), and `q` (server-side case-insensitive substring search on
+// execution_id + crash_signature, max 256 chars).
 func (h *Handlers) HandleListExecutions(w http.ResponseWriter, r *http.Request) {
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
@@ -2746,8 +2775,9 @@ func (h *Handlers) HandleListExecutions(w http.ResponseWriter, r *http.Request) 
 	}
 	limit := parseIntQuery(r, "limit", 50, 1, 200)
 	offset := parseIntQuery(r, "offset", 0, 0, 1_000_000)
+	q := normalizeListQuery(r.URL.Query().Get("q"))
 
-	execs, err := h.Store.ListExecutions(r.Context(), authProjectID, limit, offset)
+	execs, err := h.Store.ListExecutions(r.Context(), authProjectID, q, limit, offset)
 	if err != nil {
 		h.Logger.Error("list executions failed", "error", err.Error())
 		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
@@ -2760,6 +2790,7 @@ func (h *Handlers) HandleListExecutions(w http.ResponseWriter, r *http.Request) 
 		"count":      len(execs),
 		"limit":      limit,
 		"offset":     offset,
+		"q":          q,
 	})
 }
 
@@ -3070,7 +3101,7 @@ func (h *Handlers) HandleStats(w http.ResponseWriter, r *http.Request) {
 		h.Logger.Warn("count completed failed", "error", err.Error())
 	}
 
-	groups, err := h.Store.ListFailureGroups(ctx, authProjectID, 1000, 0)
+	groups, err := h.Store.ListFailureGroups(ctx, authProjectID, "", 1000, 0)
 	if err != nil {
 		h.Logger.Warn("list failure_groups for stats failed", "error", err.Error())
 	}

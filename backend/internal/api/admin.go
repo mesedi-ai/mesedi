@@ -278,12 +278,12 @@ func (h *Handlers) HandleAdminGetProjectDetail(w http.ResponseWriter, r *http.Re
 	// failing we log + continue with an empty slice rather than 500-ing
 	// the whole detail page. Founder needs to see SOMETHING even if
 	// one source is unhappy.
-	executions, err := h.Store.ListExecutions(ctx, projectID, 20, 0)
+	executions, err := h.Store.ListExecutions(ctx, projectID, "", 20, 0)
 	if err != nil {
 		h.Logger.Warn("admin: list executions failed", "project_id", projectID, "error", err.Error())
 		executions = nil
 	}
-	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, 20, 0)
+	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, "", 20, 0)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		h.Logger.Warn("admin: list failure groups failed", "project_id", projectID, "error", err.Error())
 		failureGroups = nil
@@ -376,7 +376,7 @@ func (h *Handlers) HandleAdminExportProject(w http.ResponseWriter, r *http.Reque
 
 	// 1,000,000 is "all" for any project at our current scale. If
 	// real customers ever exceed this we'll add streaming.
-	executions, err := h.Store.ListExecutions(ctx, projectID, 1_000_000, 0)
+	executions, err := h.Store.ListExecutions(ctx, projectID, "", 1_000_000, 0)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list executions: "+err.Error())
 		return
@@ -397,7 +397,7 @@ func (h *Handlers) HandleAdminExportProject(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
-	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, 1_000_000, 0)
+	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, "", 1_000_000, 0)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, "list failure groups: "+err.Error())
 		return

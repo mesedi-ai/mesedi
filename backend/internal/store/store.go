@@ -1199,7 +1199,11 @@ type Store interface {
 	ResumeExecution(ctx context.Context, executionID, projectID string, resumedAt time.Time) error
 	// ListExecutions returns the project's executions sorted by
 	// started_at DESC (most recent first). Pagination via limit/offset.
-	ListExecutions(ctx context.Context, projectID string, limit, offset int) ([]*events.Execution, error)
+	// When q is non-empty, results are filtered to rows where
+	// execution_id OR crash_signature contains q (case-insensitive
+	// substring). Server-side search powers the dashboard's
+	// list-search-paginate wave; pass "" for the unfiltered list.
+	ListExecutions(ctx context.Context, projectID string, q string, limit, offset int) ([]*events.Execution, error)
 	// ListExecutionsByFailureGroup returns executions whose
 	// failure_group_id matches groupID, sorted by started_at DESC.
 	// Caller should verify (group.project_id == auth_project_id) BEFORE
@@ -1978,8 +1982,12 @@ type Store interface {
 	ListLLMUserMessagesForProjectSince(ctx context.Context, projectID string, cutoff time.Time, excludeExecutionID string, limit int) ([]string, error)
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). For pagination, pass limit +
-	// offset; default to limit=50 in callers.
-	ListFailureGroups(ctx context.Context, projectID string, limit, offset int) ([]*FailureGroup, error)
+	// offset; default to limit=50 in callers. When q is non-empty,
+	// results are filtered to rows where signature OR failure_class
+	// contains q (case-insensitive substring). Server-side search
+	// powers the dashboard's list-search-paginate wave; pass "" for
+	// the unfiltered list.
+	ListFailureGroups(ctx context.Context, projectID string, q string, limit, offset int) ([]*FailureGroup, error)
 	// GetFailureGroup returns a single failure_group by id. Returns
 	// ErrNotFound if absent.
 	GetFailureGroup(ctx context.Context, groupID string) (*FailureGroup, error)

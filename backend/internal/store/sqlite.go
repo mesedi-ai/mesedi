@@ -2040,8 +2040,24 @@ func nullFloat(v float64) any {
 func (s *SQLiteStore) ListExecutions(
 	ctx context.Context,
 	projectID string,
+	q string,
 	limit, offset int,
 ) ([]*events.Execution, error) {
+	// Search filter (list-search-paginate wave): when q is non-empty,
+	// restrict to rows whose execution_id OR crash_signature contains
+	// q, case-insensitively. Parameterized query — safe against
+	// injection. Empty q skips the predicate entirely so existing
+	// internal callers (admin export, savings report) keep their
+	// fast unfiltered path.
+	args := []any{projectID}
+	whereClause := "project_id = ?"
+	if q != "" {
+		whereClause += " AND (LOWER(execution_id) LIKE '%' || LOWER(?) || '%'" +
+			" OR LOWER(crash_signature) LIKE '%' || LOWER(?) || '%')"
+		args = append(args, q, q)
+	}
+	args = append(args, limit, offset)
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			execution_id, project_id, status,
@@ -2049,10 +2065,10 @@ func (s *SQLiteStore) ListExecutions(
 			duration_ms, total_tokens_in, total_tokens_out,
 			estimated_cost_usd, sdk_language, sdk_version, crash_signature
 		FROM executions
-		WHERE project_id = ?
+		WHERE `+whereClause+`
 		ORDER BY started_at DESC
 		LIMIT ? OFFSET ?
-	`, projectID, limit, offset)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query executions: %w", err)
 	}
@@ -4022,8 +4038,23 @@ func (s *SQLiteStore) ListLLMUserMessagesForProjectSince(
 func (s *SQLiteStore) ListFailureGroups(
 	ctx context.Context,
 	projectID string,
+	q string,
 	limit, offset int,
 ) ([]*FailureGroup, error) {
+	// Search filter (list-search-paginate wave): when q is non-empty,
+	// restrict to rows whose signature OR failure_class contains q,
+	// case-insensitively. Parameterized — safe against injection.
+	// Empty q skips the predicate entirely so internal callers stay
+	// on the unfiltered fast path.
+	args := []any{projectID}
+	whereClause := "fg.project_id = ?"
+	if q != "" {
+		whereClause += " AND (LOWER(fg.signature) LIKE '%' || LOWER(?) || '%'" +
+			" OR LOWER(fg.failure_class) LIKE '%' || LOWER(?) || '%')"
+		args = append(args, q, q)
+	}
+	args = append(args, limit, offset)
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			fg.group_id, fg.project_id, fg.failure_class, fg.signature,
@@ -4035,11 +4066,11 @@ func (s *SQLiteStore) ListFailureGroups(
 			fg.severity_hint
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
-		WHERE fg.project_id = ?
+		WHERE `+whereClause+`
 		GROUP BY fg.group_id
 		ORDER BY fg.last_seen DESC
 		LIMIT ? OFFSET ?
-	`, projectID, limit, offset)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query failure_groups: %w", err)
 	}
