@@ -617,6 +617,13 @@ func main() {
 	// Mesedi #27, LLM-assisted root-cause analysis (auth-required).
 	// Cached on the failure_group row; ?regenerate=1 forces a refresh.
 	mux.Handle("POST /failure-groups/{id}/analyze", privateHandler)
+	// failure-group-resolve wave — customer-initiated resolve /
+	// unresolve. Auth-required. The inner mux's HandleResolveFailureGroup
+	// / HandleUnresolveFailureGroup are unreachable from the outer
+	// dispatch table without these forwards (see the top-level mux
+	// dispatch lesson in MESEDI_TASK_INVENTORY.md).
+	mux.Handle("POST /failure-groups/{id}/resolve", privateHandler)
+	mux.Handle("POST /failure-groups/{id}/unresolve", privateHandler)
 	// Mesedi #5, cost-by-tenant attribution report (auth-required).
 	mux.Handle("GET /reports/cost-by-tenant", privateHandler)
 	// Phase 3b sub-slice 18, API key management (auth-required).

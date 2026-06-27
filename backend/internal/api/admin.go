@@ -283,7 +283,10 @@ func (h *Handlers) HandleAdminGetProjectDetail(w http.ResponseWriter, r *http.Re
 		h.Logger.Warn("admin: list executions failed", "project_id", projectID, "error", err.Error())
 		executions = nil
 	}
-	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, "", 20, 0)
+	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, store.ListFailureGroupsOpts{
+		Limit:           20,
+		IncludeResolved: true,
+	})
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		h.Logger.Warn("admin: list failure groups failed", "project_id", projectID, "error", err.Error())
 		failureGroups = nil
@@ -397,7 +400,10 @@ func (h *Handlers) HandleAdminExportProject(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
-	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, "", 1_000_000, 0)
+	failureGroups, err := h.Store.ListFailureGroups(ctx, projectID, store.ListFailureGroupsOpts{
+		Limit:           1_000_000,
+		IncludeResolved: true,
+	})
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, "list failure groups: "+err.Error())
 		return

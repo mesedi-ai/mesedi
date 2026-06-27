@@ -57,6 +57,13 @@ const (
 	// survives the deletion itself. Metadata field carries
 	// rows_purged + reason.
 	AuditAuditGDPRPurge = "audit.gdpr_purge"
+	// failure-group-resolve wave — customer-initiated resolve /
+	// unresolve actions on failure groups. Target type
+	// "failure_group", target id = group_id. Metadata empty by
+	// default; future additions (resolution reason, customer notes)
+	// land here without a new action slug.
+	AuditFailureGroupResolve   = "failure_group.resolved"
+	AuditFailureGroupUnresolve = "failure_group.unresolved"
 )
 
 // AuditActorPlatformAdmin is the synthetic actor_email written by

@@ -3068,19 +3068,24 @@ func (s *PostgresStore) ListLLMUserMessagesForProjectSince(ctx context.Context, 
 	return out, rows.Err()
 }
 
-func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string, q string, limit, offset int) ([]*FailureGroup, error) {
-	// Search filter (list-search-paginate wave): when q is non-empty,
-	// restrict to rows whose signature OR failure_class ILIKE q.
-	// ILIKE is Postgres' native case-insensitive substring; the
-	// SQLite twin uses LOWER() + LIKE for the same effect.
+func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string, opts ListFailureGroupsOpts) ([]*FailureGroup, error) {
+	// Search + resolved-visibility filters (list-search-paginate
+	// + failure-group-resolve waves). When Q is non-empty: ILIKE
+	// substring on signature + failure_class. When IncludeResolved
+	// is false (default): WHERE resolved_at IS NULL hides resolved
+	// rows. ILIKE is Postgres' native case-insensitive substring;
+	// the SQLite twin uses LOWER() + LIKE for the same effect.
 	args := []any{projectID}
 	whereClause := "fg.project_id = $1"
-	if q != "" {
+	if opts.Q != "" {
 		whereClause += " AND (fg.signature ILIKE '%' || $2 || '%'" +
 			" OR fg.failure_class ILIKE '%' || $2 || '%')"
-		args = append(args, q)
+		args = append(args, opts.Q)
 	}
-	args = append(args, limit, offset)
+	if !opts.IncludeResolved {
+		whereClause += " AND fg.resolved_at IS NULL"
+	}
+	args = append(args, opts.Limit, opts.Offset)
 	limitPlaceholder := fmt.Sprintf("$%d", len(args)-1)
 	offsetPlaceholder := fmt.Sprintf("$%d", len(args))
 
@@ -3092,7 +3097,8 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
-			fg.severity_hint
+			fg.severity_hint,
+			fg.resolved_at, fg.resolved_by
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE `+whereClause+`
@@ -3100,7 +3106,7 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 		         fg.first_seen, fg.last_seen, fg.event_count,
 		         fg.affected_executions, fg.sample_execution_id,
 		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
-		         fg.severity_hint
+		         fg.severity_hint, fg.resolved_at, fg.resolved_by
 		ORDER BY fg.last_seen DESC
 		LIMIT `+limitPlaceholder+` OFFSET `+offsetPlaceholder+`
 	`, args...)
@@ -3120,6 +3126,54 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 	return out, rows.Err()
 }
 
+// ResolveFailureGroup — Postgres twin of SQLiteStore.ResolveFailureGroup.
+// See that method's doc comment.
+func (s *PostgresStore) ResolveFailureGroup(
+	ctx context.Context,
+	groupID, projectID, actorUserID string,
+) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE failure_groups
+		SET resolved_at = NOW(), resolved_by = $1
+		WHERE group_id = $2 AND project_id = $3
+	`, actorUserID, groupID, projectID)
+	if err != nil {
+		return fmt.Errorf("resolve failure_group: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("resolve failure_group rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UnresolveFailureGroup — Postgres twin of
+// SQLiteStore.UnresolveFailureGroup. See that method's doc comment.
+func (s *PostgresStore) UnresolveFailureGroup(
+	ctx context.Context,
+	groupID, projectID string,
+) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE failure_groups
+		SET resolved_at = NULL, resolved_by = NULL
+		WHERE group_id = $1 AND project_id = $2
+	`, groupID, projectID)
+	if err != nil {
+		return fmt.Errorf("unresolve failure_group: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("unresolve failure_group rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) GetFailureGroup(ctx context.Context, groupID string) (*FailureGroup, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
@@ -3129,7 +3183,8 @@ func (s *PostgresStore) GetFailureGroup(ctx context.Context, groupID string) (*F
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
-			fg.severity_hint
+			fg.severity_hint,
+			fg.resolved_at, fg.resolved_by
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.group_id = $1
@@ -3137,7 +3192,7 @@ func (s *PostgresStore) GetFailureGroup(ctx context.Context, groupID string) (*F
 		         fg.first_seen, fg.last_seen, fg.event_count,
 		         fg.affected_executions, fg.sample_execution_id,
 		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
-		         fg.severity_hint
+		         fg.severity_hint, fg.resolved_at, fg.resolved_by
 	`, groupID)
 	g, err := scanFailureGroup(row)
 	if err == sql.ErrNoRows {

@@ -336,6 +336,12 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// failure_group row for 24h or until last_seen advances; force
 	// regenerate with ?regenerate=1.
 	mux.HandleFunc("POST /failure-groups/{id}/analyze", h.HandleAnalyzeFailureGroup)
+	// failure-group-resolve wave: customer-facing resolve / unresolve
+	// actions. Both Bearer-gated, both emit audit_events. POST chosen
+	// over PATCH for browser-form compatibility — Next.js fetch from
+	// the dashboard can POST without preflight CORS overhead.
+	mux.HandleFunc("POST /failure-groups/{id}/resolve", h.HandleResolveFailureGroup)
+	mux.HandleFunc("POST /failure-groups/{id}/unresolve", h.HandleUnresolveFailureGroup)
 	// Phase 3b sub-slice 18, API key management surface.
 	mux.HandleFunc("GET /api-keys", h.HandleListAPIKeys)
 	mux.HandleFunc("POST /api-keys", h.HandleCreateAPIKey)
@@ -2021,8 +2027,14 @@ func (h *Handlers) HandleListFailureGroups(w http.ResponseWriter, r *http.Reques
 	limit := parseIntQuery(r, "limit", 50, 1, 200)
 	offset := parseIntQuery(r, "offset", 0, 0, 1_000_000)
 	q := normalizeListQuery(r.URL.Query().Get("q"))
+	includeResolved := r.URL.Query().Get("include_resolved") == "true"
 
-	groups, err := h.Store.ListFailureGroups(r.Context(), authProjectID, q, limit, offset)
+	groups, err := h.Store.ListFailureGroups(r.Context(), authProjectID, store.ListFailureGroupsOpts{
+		Q:               q,
+		IncludeResolved: includeResolved,
+		Limit:           limit,
+		Offset:          offset,
+	})
 	if err != nil {
 		h.Logger.Error("list failure_groups failed",
 			"project_id", authProjectID,
@@ -2033,12 +2045,13 @@ func (h *Handlers) HandleListFailureGroups(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":             true,
-		"failure_groups": groups,
-		"count":          len(groups),
-		"limit":          limit,
-		"offset":         offset,
-		"q":              q,
+		"ok":               true,
+		"failure_groups":   groups,
+		"count":            len(groups),
+		"limit":            limit,
+		"offset":           offset,
+		"q":                q,
+		"include_resolved": includeResolved,
 	})
 }
 
@@ -2080,6 +2093,92 @@ func (h *Handlers) HandleGetFailureGroup(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, group)
+}
+
+// HandleResolveFailureGroup marks a failure_group as resolved
+// (failure-group-resolve wave). Tenant-scoped via the project
+// predicate on the store update. Idempotent. Emits an
+// audit_events row for compliance ("failure_group.resolved").
+func (h *Handlers) HandleResolveFailureGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := r.PathValue("id")
+	if groupID == "" {
+		writeError(w, http.StatusBadRequest, "group_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	actorUserID := userIDFromContextOrEmpty(r)
+
+	if err := h.Store.ResolveFailureGroup(r.Context(), groupID, authProjectID, actorUserID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			// Same 404 shape as GetFailureGroup — no leak of
+			// group_id existence across tenants.
+			writeError(w, http.StatusNotFound, "failure group not found")
+			return
+		}
+		h.Logger.Error("resolve failure_group failed",
+			"group_id", groupID,
+			"project_id", authProjectID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Audit emission is best-effort; a write failure here doesn't
+	// fail the customer's resolve action.
+	h.recordAuditEvent(r, AuditFailureGroupResolve, "failure_group", groupID, nil)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"group_id": groupID,
+		"resolved": true,
+	})
+}
+
+// HandleUnresolveFailureGroup clears the resolved state on a
+// failure_group (failure-group-resolve wave). Same contracts as
+// HandleResolveFailureGroup: tenant-scoped, idempotent, audited.
+func (h *Handlers) HandleUnresolveFailureGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := r.PathValue("id")
+	if groupID == "" {
+		writeError(w, http.StatusBadRequest, "group_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	// recordAuditEvent reads the actor from request context; no
+	// separate actorUserID needed at the handler layer (the store
+	// method does not record who unresolved, only that the row was
+	// cleared — the audit log is the source of truth for "who").
+
+	if err := h.Store.UnresolveFailureGroup(r.Context(), groupID, authProjectID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "failure group not found")
+			return
+		}
+		h.Logger.Error("unresolve failure_group failed",
+			"group_id", groupID,
+			"project_id", authProjectID,
+			"error", err.Error(),
+		)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.recordAuditEvent(r, AuditFailureGroupUnresolve, "failure_group", groupID, nil)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"group_id": groupID,
+		"resolved": false,
+	})
 }
 
 // HandleAnalyzeFailureGroup runs the LLM-assisted root-cause
@@ -3101,7 +3200,10 @@ func (h *Handlers) HandleStats(w http.ResponseWriter, r *http.Request) {
 		h.Logger.Warn("count completed failed", "error", err.Error())
 	}
 
-	groups, err := h.Store.ListFailureGroups(ctx, authProjectID, "", 1000, 0)
+	groups, err := h.Store.ListFailureGroups(ctx, authProjectID, store.ListFailureGroupsOpts{
+		Limit:           1000,
+		IncludeResolved: true,
+	})
 	if err != nil {
 		h.Logger.Warn("list failure_groups for stats failed", "error", err.Error())
 	}

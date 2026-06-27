@@ -4038,22 +4038,26 @@ func (s *SQLiteStore) ListLLMUserMessagesForProjectSince(
 func (s *SQLiteStore) ListFailureGroups(
 	ctx context.Context,
 	projectID string,
-	q string,
-	limit, offset int,
+	opts ListFailureGroupsOpts,
 ) ([]*FailureGroup, error) {
-	// Search filter (list-search-paginate wave): when q is non-empty,
-	// restrict to rows whose signature OR failure_class contains q,
-	// case-insensitively. Parameterized — safe against injection.
-	// Empty q skips the predicate entirely so internal callers stay
-	// on the unfiltered fast path.
+	// Search filter (list-search-paginate wave): when Q is non-empty,
+	// restrict to rows whose signature OR failure_class contains it,
+	// case-insensitively. Resolved-visibility filter
+	// (failure-group-resolve wave): when IncludeResolved is false
+	// (default), drop rows with non-NULL resolved_at. Parameterized
+	// — safe against injection. Empty opts skips both predicates so
+	// internal callers stay on the unfiltered fast path.
 	args := []any{projectID}
 	whereClause := "fg.project_id = ?"
-	if q != "" {
+	if opts.Q != "" {
 		whereClause += " AND (LOWER(fg.signature) LIKE '%' || LOWER(?) || '%'" +
 			" OR LOWER(fg.failure_class) LIKE '%' || LOWER(?) || '%')"
-		args = append(args, q, q)
+		args = append(args, opts.Q, opts.Q)
 	}
-	args = append(args, limit, offset)
+	if !opts.IncludeResolved {
+		whereClause += " AND fg.resolved_at IS NULL"
+	}
+	args = append(args, opts.Limit, opts.Offset)
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
@@ -4063,7 +4067,8 @@ func (s *SQLiteStore) ListFailureGroups(
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
-			fg.severity_hint
+			fg.severity_hint,
+			fg.resolved_at, fg.resolved_by
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE `+whereClause+`
@@ -4101,7 +4106,8 @@ func (s *SQLiteStore) GetFailureGroup(
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
-			fg.severity_hint
+			fg.severity_hint,
+			fg.resolved_at, fg.resolved_by
 		FROM failure_groups fg
 		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
 		WHERE fg.group_id = ?
@@ -4115,6 +4121,58 @@ func (s *SQLiteStore) GetFailureGroup(
 		return nil, fmt.Errorf("query failure_group: %w", err)
 	}
 	return g, nil
+}
+
+// ResolveFailureGroup marks the group resolved (sets resolved_at +
+// resolved_by). Tenant-scoped: the WHERE clause requires both
+// group_id AND project_id, so a resolve attempt on another
+// project's group returns ErrNotFound — no leak of group_id
+// existence across tenants (same pattern as GetFailureGroup).
+// Idempotent: re-resolving refreshes the timestamp.
+func (s *SQLiteStore) ResolveFailureGroup(
+	ctx context.Context,
+	groupID, projectID, actorUserID string,
+) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE failure_groups
+		SET resolved_at = ?, resolved_by = ?
+		WHERE group_id = ? AND project_id = ?
+	`, time.Now().UTC().Format(time.RFC3339), actorUserID, groupID, projectID)
+	if err != nil {
+		return fmt.Errorf("resolve failure_group: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("resolve failure_group rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UnresolveFailureGroup clears resolved_at + resolved_by. Same
+// tenant-scope contract as ResolveFailureGroup. Idempotent.
+func (s *SQLiteStore) UnresolveFailureGroup(
+	ctx context.Context,
+	groupID, projectID string,
+) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE failure_groups
+		SET resolved_at = NULL, resolved_by = NULL
+		WHERE group_id = ? AND project_id = ?
+	`, groupID, projectID)
+	if err != nil {
+		return fmt.Errorf("unresolve failure_group: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("unresolve failure_group rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // GetFailureGroupByClassSignature returns a failure_group by its
@@ -4146,6 +4204,8 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		analyzedAt       sql.NullTime
 		analysisModel    sql.NullString
 		severityHint     sql.NullString
+		resolvedAt       sql.NullTime
+		resolvedBy       sql.NullString
 	)
 	if err := r.Scan(
 		&g.GroupID,
@@ -4162,6 +4222,8 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		&analyzedAt,
 		&analysisModel,
 		&severityHint,
+		&resolvedAt,
+		&resolvedBy,
 	); err != nil {
 		return nil, err
 	}
@@ -4193,6 +4255,14 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 	if severityHint.Valid && severityHint.String != "" {
 		v := severityHint.String
 		g.SeverityHint = &v
+	}
+	if resolvedAt.Valid {
+		t := resolvedAt.Time
+		g.ResolvedAt = &t
+	}
+	if resolvedBy.Valid && resolvedBy.String != "" {
+		v := resolvedBy.String
+		g.ResolvedBy = &v
 	}
 	return &g, nil
 }

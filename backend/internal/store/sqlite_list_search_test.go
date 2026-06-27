@@ -50,7 +50,9 @@ func openMinimalListStore(t *testing.T) *SQLiteStore {
 			analysis_markdown     TEXT,
 			analyzed_at           DATETIME,
 			analysis_model        TEXT,
-			severity_hint         TEXT
+			severity_hint         TEXT,
+			resolved_at           DATETIME,
+			resolved_by           TEXT
 		);
 		CREATE TABLE executions (
 			execution_id          TEXT PRIMARY KEY,
@@ -103,7 +105,7 @@ func TestListFailureGroups_EmptyQReturnsAll(t *testing.T) {
 	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
 	insertGroup(t, st, "g2", "token_waste", "near_dup:bar")
 
-	got, err := st.ListFailureGroups(context.Background(), "proj", "", 50, 0)
+	got, err := st.ListFailureGroups(context.Background(), "proj", ListFailureGroupsOpts{Limit: 50})
 	if err != nil {
 		t.Fatalf("ListFailureGroups: %v", err)
 	}
@@ -118,7 +120,7 @@ func TestListFailureGroups_QFiltersBySignature(t *testing.T) {
 	insertGroup(t, st, "g1", "crashes", "ValueError:nginx_timeout")
 	insertGroup(t, st, "g2", "crashes", "RuntimeError:other")
 
-	got, err := st.ListFailureGroups(context.Background(), "proj", "nginx", 50, 0)
+	got, err := st.ListFailureGroups(context.Background(), "proj", ListFailureGroupsOpts{Q: "nginx", Limit: 50})
 	if err != nil {
 		t.Fatalf("ListFailureGroups: %v", err)
 	}
@@ -133,7 +135,7 @@ func TestListFailureGroups_QFiltersByFailureClass(t *testing.T) {
 	insertGroup(t, st, "g1", "token_waste", "near_dup:foo")
 	insertGroup(t, st, "g2", "crashes", "ValueError:foo")
 
-	got, err := st.ListFailureGroups(context.Background(), "proj", "token", 50, 0)
+	got, err := st.ListFailureGroups(context.Background(), "proj", ListFailureGroupsOpts{Q: "token", Limit: 50})
 	if err != nil {
 		t.Fatalf("ListFailureGroups: %v", err)
 	}
@@ -147,7 +149,7 @@ func TestListFailureGroups_QIsCaseInsensitive(t *testing.T) {
 	st := openMinimalListStore(t)
 	insertGroup(t, st, "g1", "crashes", "ValueError:NginxTimeout")
 
-	got, err := st.ListFailureGroups(context.Background(), "proj", "nginxtimeout", 50, 0)
+	got, err := st.ListFailureGroups(context.Background(), "proj", ListFailureGroupsOpts{Q: "nginxtimeout", Limit: 50})
 	if err != nil {
 		t.Fatalf("ListFailureGroups: %v", err)
 	}
@@ -161,7 +163,7 @@ func TestListFailureGroups_QNoMatchReturnsEmpty(t *testing.T) {
 	st := openMinimalListStore(t)
 	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
 
-	got, err := st.ListFailureGroups(context.Background(), "proj", "zzzz", 50, 0)
+	got, err := st.ListFailureGroups(context.Background(), "proj", ListFailureGroupsOpts{Q: "zzzz", Limit: 50})
 	if err != nil {
 		t.Fatalf("ListFailureGroups: %v", err)
 	}
@@ -212,5 +214,135 @@ func TestListExecutions_EmptyQReturnsAll(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("want 2 rows, got %d", len(got))
+	}
+}
+
+// ─── failure-group-resolve wave: resolve/unresolve + list filter ───
+
+func TestListFailureGroups_HidesResolvedByDefault(t *testing.T) {
+	t.Parallel()
+	st := openMinimalListStore(t)
+	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
+	insertGroup(t, st, "g2", "crashes", "RuntimeError:bar")
+
+	if err := st.ResolveFailureGroup(context.Background(), "g1", "proj", "user_x"); err != nil {
+		t.Fatalf("ResolveFailureGroup: %v", err)
+	}
+
+	got, err := st.ListFailureGroups(context.Background(), "proj",
+		ListFailureGroupsOpts{Limit: 50})
+	if err != nil {
+		t.Fatalf("ListFailureGroups: %v", err)
+	}
+	if len(got) != 1 || got[0].GroupID != "g2" {
+		t.Fatalf("want only g2 (g1 resolved + hidden), got %+v", got)
+	}
+}
+
+func TestListFailureGroups_IncludeResolvedShowsAll(t *testing.T) {
+	t.Parallel()
+	st := openMinimalListStore(t)
+	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
+	insertGroup(t, st, "g2", "crashes", "RuntimeError:bar")
+	if err := st.ResolveFailureGroup(context.Background(), "g1", "proj", "user_x"); err != nil {
+		t.Fatalf("ResolveFailureGroup: %v", err)
+	}
+
+	got, err := st.ListFailureGroups(context.Background(), "proj",
+		ListFailureGroupsOpts{Limit: 50, IncludeResolved: true})
+	if err != nil {
+		t.Fatalf("ListFailureGroups: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want both rows when IncludeResolved=true, got %d", len(got))
+	}
+}
+
+func TestResolveFailureGroup_PopulatesFields(t *testing.T) {
+	t.Parallel()
+	st := openMinimalListStore(t)
+	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
+
+	if err := st.ResolveFailureGroup(context.Background(), "g1", "proj", "user_x"); err != nil {
+		t.Fatalf("ResolveFailureGroup: %v", err)
+	}
+
+	g, err := st.GetFailureGroup(context.Background(), "g1")
+	if err != nil {
+		t.Fatalf("GetFailureGroup: %v", err)
+	}
+	if g.ResolvedAt == nil {
+		t.Errorf("want ResolvedAt populated, got nil")
+	}
+	if g.ResolvedBy == nil || *g.ResolvedBy != "user_x" {
+		t.Errorf("want ResolvedBy=user_x, got %v", g.ResolvedBy)
+	}
+}
+
+func TestResolveFailureGroup_TenantScopedReturnsNotFound(t *testing.T) {
+	t.Parallel()
+	st := openMinimalListStore(t)
+	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
+
+	// Attempt to resolve from a different project — must return
+	// ErrNotFound, no cross-tenant leak.
+	err := st.ResolveFailureGroup(context.Background(), "g1", "other_proj", "user_y")
+	if err != ErrNotFound {
+		t.Errorf("want ErrNotFound for cross-tenant resolve, got %v", err)
+	}
+}
+
+func TestResolveFailureGroup_Idempotent(t *testing.T) {
+	t.Parallel()
+	st := openMinimalListStore(t)
+	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
+
+	if err := st.ResolveFailureGroup(context.Background(), "g1", "proj", "user_x"); err != nil {
+		t.Fatalf("first resolve: %v", err)
+	}
+	// Second resolve refreshes timestamp and should succeed.
+	if err := st.ResolveFailureGroup(context.Background(), "g1", "proj", "user_y"); err != nil {
+		t.Fatalf("second resolve: %v", err)
+	}
+	g, err := st.GetFailureGroup(context.Background(), "g1")
+	if err != nil {
+		t.Fatalf("GetFailureGroup: %v", err)
+	}
+	if g.ResolvedBy == nil || *g.ResolvedBy != "user_y" {
+		t.Errorf("want last writer user_y to win, got %v", g.ResolvedBy)
+	}
+}
+
+func TestUnresolveFailureGroup_ClearsFields(t *testing.T) {
+	t.Parallel()
+	st := openMinimalListStore(t)
+	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
+	if err := st.ResolveFailureGroup(context.Background(), "g1", "proj", "user_x"); err != nil {
+		t.Fatalf("ResolveFailureGroup: %v", err)
+	}
+
+	if err := st.UnresolveFailureGroup(context.Background(), "g1", "proj"); err != nil {
+		t.Fatalf("UnresolveFailureGroup: %v", err)
+	}
+
+	g, err := st.GetFailureGroup(context.Background(), "g1")
+	if err != nil {
+		t.Fatalf("GetFailureGroup: %v", err)
+	}
+	if g.ResolvedAt != nil {
+		t.Errorf("want ResolvedAt cleared, got %v", g.ResolvedAt)
+	}
+	if g.ResolvedBy != nil {
+		t.Errorf("want ResolvedBy cleared, got %v", g.ResolvedBy)
+	}
+}
+
+func TestUnresolveFailureGroup_TenantScopedReturnsNotFound(t *testing.T) {
+	t.Parallel()
+	st := openMinimalListStore(t)
+	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
+	err := st.UnresolveFailureGroup(context.Background(), "g1", "other_proj")
+	if err != ErrNotFound {
+		t.Errorf("want ErrNotFound for cross-tenant unresolve, got %v", err)
 	}
 }

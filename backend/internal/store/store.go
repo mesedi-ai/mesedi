@@ -654,6 +654,38 @@ type FailureGroup struct {
 	//   2. severity_hint (this field)
 	//   3. severity.Default(failureClass)
 	SeverityHint *string `json:"severity_hint,omitempty"`
+	// ResolvedAt + ResolvedBy populate when a customer marks the
+	// failure_group resolved via the Resolve action (migration 052,
+	// failure-group-resolve wave). Both NULL = unresolved (default).
+	// Resolved groups are hidden from the default list view; the
+	// dashboard exposes a "Show resolved" toggle that flips
+	// ListFailureGroupsOpts.IncludeResolved to surface them again.
+	// Sentry-style semantic: new events for a resolved group's
+	// signature still cluster into it and update last_seen but do
+	// NOT auto-reopen — only an explicit Unresolve action does that.
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+	ResolvedBy *string    `json:"resolved_by,omitempty"`
+}
+
+// ListFailureGroupsOpts is the options struct for
+// ListFailureGroups. Introduced in the failure-group-resolve wave
+// to replace the positional (q, limit, offset) signature that was
+// already growing parameter creep after the list-search-paginate
+// wave. New filter dimensions get added as fields here without
+// rippling every caller.
+type ListFailureGroupsOpts struct {
+	// Q is a case-insensitive substring filter on signature +
+	// failure_class. Empty means no filter.
+	Q string
+	// IncludeResolved=true returns resolved groups alongside open
+	// ones. Default false hides resolved groups so the dashboard
+	// stays clean.
+	IncludeResolved bool
+	// Limit caps the number of rows returned. Hard ceiling 200 at
+	// the handler layer.
+	Limit int
+	// Offset paginates. Cap 1_000_000 at the handler.
+	Offset int
 }
 
 // TopologyNode is one entry in a multi-agent execution topology
@@ -1981,13 +2013,23 @@ type Store interface {
 	// rows.
 	ListLLMUserMessagesForProjectSince(ctx context.Context, projectID string, cutoff time.Time, excludeExecutionID string, limit int) ([]string, error)
 	// ListFailureGroups returns the project's failure groups sorted by
-	// last_seen DESC (most recent first). For pagination, pass limit +
-	// offset; default to limit=50 in callers. When q is non-empty,
-	// results are filtered to rows where signature OR failure_class
-	// contains q (case-insensitive substring). Server-side search
-	// powers the dashboard's list-search-paginate wave; pass "" for
-	// the unfiltered list.
-	ListFailureGroups(ctx context.Context, projectID string, q string, limit, offset int) ([]*FailureGroup, error)
+	// last_seen DESC (most recent first). Opts struct carries pagination
+	// (Limit + Offset), search (Q — case-insensitive substring on
+	// signature + failure_class), and resolved-visibility
+	// (IncludeResolved — default false hides resolved groups from the
+	// dashboard's default view). Zero-value opts == legacy default
+	// behavior with no q + first page of 50 + resolved hidden.
+	ListFailureGroups(ctx context.Context, projectID string, opts ListFailureGroupsOpts) ([]*FailureGroup, error)
+	// ResolveFailureGroup marks a failure_group as resolved (sets
+	// resolved_at = now, resolved_by = actorUserID). Tenant-scoped via
+	// the projectID predicate — a resolve attempt against another
+	// project's group_id returns ErrNotFound, no leak. Idempotent: a
+	// second resolve refreshes the timestamp. Audit emission lives at
+	// the handler layer (audit_events.action = "failure_group.resolved").
+	ResolveFailureGroup(ctx context.Context, groupID, projectID, actorUserID string) error
+	// UnresolveFailureGroup clears resolved_at + resolved_by. Same
+	// tenant-scope contract as ResolveFailureGroup. Idempotent.
+	UnresolveFailureGroup(ctx context.Context, groupID, projectID string) error
 	// GetFailureGroup returns a single failure_group by id. Returns
 	// ErrNotFound if absent.
 	GetFailureGroup(ctx context.Context, groupID string) (*FailureGroup, error)
