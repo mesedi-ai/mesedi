@@ -250,6 +250,43 @@ def configured_sdk(backend: Backend):
     return mesedi
 
 
+@pytest.fixture(scope="function")
+def fresh_project(backend: Backend, configured_sdk):
+    """Mint a brand-new project + API key for a single test, and
+    swap the SDK's module-global client to point at it for the
+    duration of that test. Restores the session project on teardown.
+
+    Use this for tests of detectors that aggregate over the recent
+    project window (hitl_rejection_spike's 60-min lookback,
+    cost_velocity rate window, etc.) so cross-test pollution from
+    earlier tests in the session does not dilute the signal under
+    test. Without isolation, e.g. the rejected-variant test runs
+    first and adds 2 rejections + 3 approvals to the shared project;
+    the edited-variant test then sees 2 edits / 10 HITL execs = 20%,
+    below the 30% threshold, and falsely fails.
+
+    Yields a (Backend, sdk_module) tuple. The Backend has a fresh
+    base_url, api_key, and project_id; the sdk_module is the same
+    mesedi module pointer but reconfigured against the new key.
+    """
+    import mesedi
+
+    saved_api_key = backend.api_key
+    new_project_id, new_api_key = _signup_test_project(backend.base_url)
+    fresh = Backend(
+        base_url=backend.base_url,
+        api_key=new_api_key,
+        project_id=new_project_id,
+    )
+    mesedi.configure(api_key=new_api_key, base_url=backend.base_url)
+    try:
+        yield fresh, configured_sdk
+    finally:
+        # Restore the session project so subsequent tests using the
+        # session-scoped fixtures see the original key.
+        mesedi.configure(api_key=saved_api_key, base_url=backend.base_url)
+
+
 def await_failure_group(
     backend: Backend,
     *,

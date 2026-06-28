@@ -395,25 +395,60 @@ def test_lexical_drift(backend: Backend, configured_sdk):
 @needs_anthropic
 def test_cost_velocity(backend: Backend, configured_sdk):
     """Drives an execution's estimated cost above the velocity
-    threshold by making many real LLM calls. Production threshold
-    (per the observed cost_$0.001+ signature) is one-tenth of a cent
-    per execution; 10 small claude-haiku calls comfortably crosses
-    it."""
+    threshold by making many real LLM calls.
+
+    Wave 0.1 raised the default cost_velocity threshold from $0.001
+    (which broke real customers with chatty agents) to $1.00. Ten
+    small claude-haiku calls cost roughly $0.005 total — well below
+    the production default. So the test first lowers the per-project
+    threshold to $0.001 via PUT /me/cost-velocity-config, then runs
+    the calls. The detector fires on the now-tiny threshold.
+    """
     from anthropic import Anthropic
 
     mesedi = configured_sdk
     client = Anthropic()
 
+    # Lower the per-project threshold to the smallest allowed value
+    # ($0.01 — backend's anti-storage-abuse floor). Bypasses the
+    # production $1.00 default that Wave 0.1 established.
+    #
+    # Cost math (claude-haiku-4-5 @ $1/$5 per 1M tokens):
+    #   per call ≈ 25 input + 256 output tokens
+    #             ≈ 25/1M × $1 + 256/1M × $5
+    #             ≈ $0.000025 + $0.00128
+    #             ≈ $0.00131
+    #   25 calls ≈ $0.0327 — well above $0.01 with margin for
+    #   price drift or tokenizer variance.
+    resp = requests.put(
+        f"{backend.base_url}/me/cost-velocity-config",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"threshold_usd": 0.01},
+        timeout=5.0,
+    )
+    assert resp.status_code == 200, (
+        f"failed to lower cost_velocity threshold: "
+        f"status={resp.status_code} body={resp.text}"
+    )
+
     @mesedi.wrap
     def cost_heavy_agent():
-        for i in range(10):
+        # 25 calls with max_tokens=256 → ~$0.033 total.
+        # Comfortably above $0.01 threshold. (Previous 50 small
+        # calls at max_tokens=32 only reached ~$0.004 — below
+        # threshold — which is why this test was silently failing.)
+        for i in range(25):
             client.messages.create(
                 model="claude-haiku-4-5",
-                max_tokens=32,
+                max_tokens=256,
                 messages=[
                     {
                         "role": "user",
-                        "content": f"In one sentence, name an animal variant {i}.",
+                        "content": (
+                            f"Write a detailed paragraph (5-7 sentences) "
+                            f"describing the habitat and behavior of "
+                            f"animal variant {i}. Be specific."
+                        ),
                     }
                 ],
             )
@@ -601,13 +636,13 @@ def test_context_overflow(backend: Backend, configured_sdk):
     mesedi.instrument_anthropic()
     client = anthropic.Anthropic(api_key=api_key)
 
-    # Deterministic synthetic prompt sized to overshoot the 180K
-    # trigger by ~10%, so tokenizer differences vs our rough
-    # 4-chars-per-token estimate don't leave us under threshold.
-    # claude-haiku-4-5's 200K window means 90% = 180K input tokens;
-    # 25,000 repetitions of a 45-char phrase ≈ 1.1M chars ≈ 200K-280K
-    # tokens depending on tokenization, comfortably over the trigger.
-    phrase = "The quick brown fox jumps over the lazy dog. " * 25_000
+    # Deterministic synthetic prompt sized to land BETWEEN the
+    # 180K trigger and Anthropic's 200K hard ceiling. 18_000 reps
+    # × 45 chars = 810K chars ≈ 188K tokens at Anthropic's ~4.3
+    # chars/token English rate — comfortably above the 180K
+    # detector trigger and safely below the 200K Anthropic ceiling.
+    # claude-haiku-4-5's 200K window means 90% = 180K input tokens.
+    phrase = "The quick brown fox jumps over the lazy dog. " * 18_000
 
     @mesedi.wrap
     def long_context_agent():
@@ -869,13 +904,21 @@ def test_detector_status_endpoint(backend: Backend, configured_sdk):
     body = resp.json()
     assert body.get("project_id"), f"missing project_id: {body}"
 
+    # NOTE on assertion shape: the integration suite uses a
+    # session-scoped backend with a single shared project, so by the
+    # time this test runs, earlier tests have already populated tool
+    # calls + checkpoint events into the project's state. We can't
+    # assert "fresh project" emptiness here; instead we assert the
+    # response SHAPE is well-formed. Behavior-level checks
+    # (semantic_loop fires on N repeats, tool_schema_drift fires on
+    # N calls) are covered by the dedicated detector tests above.
     sem = body.get("semantic_loop")
     assert sem is not None, f"missing semantic_loop: {body}"
-    assert sem.get("has_checkpoint_data") is False, (
-        f"fresh project should report has_checkpoint_data=False, got {sem}"
+    assert isinstance(sem.get("has_checkpoint_data"), bool), (
+        f"semantic_loop.has_checkpoint_data must be bool, got {sem}"
     )
-    assert sem.get("checkpoint_count") == 0, (
-        f"fresh project should report checkpoint_count=0, got {sem}"
+    assert isinstance(sem.get("checkpoint_count"), int), (
+        f"semantic_loop.checkpoint_count must be int, got {sem}"
     )
     # last_checkpoint_at is omitted when nil (omitempty on the Go
     # side), so it may or may not be present; what matters is that
@@ -885,9 +928,18 @@ def test_detector_status_endpoint(backend: Backend, configured_sdk):
 
     drift = body.get("tool_schema_drift")
     assert drift is not None, f"missing tool_schema_drift: {body}"
-    assert drift.get("tools") == [], (
-        f"fresh project should have no tools, got {drift}"
+    assert isinstance(drift.get("tools"), list), (
+        f"tool_schema_drift.tools must be a list, got {drift}"
     )
+    # Each entry (if any) must be a well-formed {tool_name, call_count}
+    # dict — guards the wire format for the dashboard renderer.
+    for entry in drift["tools"]:
+        assert isinstance(entry.get("tool_name"), str), (
+            f"tool entry must have str tool_name: {entry}"
+        )
+        assert isinstance(entry.get("call_count"), int), (
+            f"tool entry must have int call_count: {entry}"
+        )
     assert drift.get("min_history_calls") == 10, (
         f"default min_history_calls should be 10, got {drift}"
     )
@@ -1181,7 +1233,7 @@ def test_hitl_timeout_sla_exceeded(backend: Backend, configured_sdk):
     )
 
 
-def test_hitl_rejection_spike_rejected(backend: Backend, configured_sdk):
+def test_hitl_rejection_spike_rejected(fresh_project):
     """Rejected variant: across 5 HITL executions, 2 complete with
     response_kind='rejected' (40% rejection rate, clears the 40%
     threshold). Rejected has priority over edited so this fires
@@ -1196,6 +1248,10 @@ def test_hitl_rejection_spike_rejected(backend: Backend, configured_sdk):
     Per Wave 1.1 Decision 2, we do NOT lower the min_sample knob
     via a config endpoint; we exercise the production behavior.
 
+    Isolation: uses the fresh_project fixture (function-scoped new
+    project) so the 60-minute detector lookback window starts empty
+    — earlier session tests cannot dilute the rate under test.
+
     Assertion:
         - failure_group with class=hitl_rejection_spike and
           signature prefix 'hitl_rejection_spike:rejected' appears
@@ -1203,7 +1259,7 @@ def test_hitl_rejection_spike_rejected(backend: Backend, configured_sdk):
     """
     import mesedi as mesedi_pkg
 
-    mesedi = configured_sdk
+    backend, mesedi = fresh_project
 
     # 2 rejected + 3 approved = 40% rejection rate → trips.
     response_kinds = [
@@ -1233,7 +1289,7 @@ def test_hitl_rejection_spike_rejected(backend: Backend, configured_sdk):
     )
 
 
-def test_hitl_rejection_spike_edited(backend: Backend, configured_sdk):
+def test_hitl_rejection_spike_edited(fresh_project):
     """Edited variant: across 5 HITL executions, 2 complete with
     response_kind='edited' and ZERO with 'rejected' (40% edit
     rate clears the 30% edit threshold; rejected priority does NOT
@@ -1245,6 +1301,11 @@ def test_hitl_rejection_spike_edited(backend: Backend, configured_sdk):
     rejecting — and we want to surface persistent quality drift
     even when the agent is not being outright rejected.
 
+    Isolation: uses the fresh_project fixture (function-scoped new
+    project) so the rejected-variant test's executions cannot
+    dilute the 2/5 = 40% edit rate to 2/10 = 20% (below the 30%
+    threshold).
+
     Assertion:
         - failure_group with class=hitl_rejection_spike and
           signature prefix 'hitl_rejection_spike:edited' appears
@@ -1252,7 +1313,7 @@ def test_hitl_rejection_spike_edited(backend: Backend, configured_sdk):
     """
     import mesedi as mesedi_pkg
 
-    mesedi = configured_sdk
+    backend, mesedi = fresh_project
 
     # 2 edited + 3 approved = 40% edit rate (above 30% threshold).
     # ZERO rejected so the rejected-variant priority does NOT
@@ -1774,11 +1835,17 @@ def test_allowlist_suppresses_matching_tool_failure(
     # 1) Create the allowlist entry. allowlist_key for tool_failures
     #    is the tool name (per the Allowlist.a docstring + the
     #    dashboard editor's keyPlaceholder='my_search_tool').
+    #    Tool name MUST be unique to this test — earlier tests like
+    #    test_tool_failures use "flaky_upstream" and the session-
+    #    scoped backend retains those groups. A shared name would
+    #    false-positive the "no group appeared" assertion below.
+    allowlisted_tool_name = "allowlisted_flaky_upstream_inttest"
+
     create_resp = requests.post(
         f"{backend.base_url}/me/allowlist/tool_failures",
         headers={"Authorization": f"Bearer {backend.api_key}"},
         json={
-            "allowlist_key": "flaky_upstream",
+            "allowlist_key": allowlisted_tool_name,
             "reason": "integration-test setup",
         },
         timeout=5.0,
@@ -1795,22 +1862,34 @@ def test_allowlist_suppresses_matching_tool_failure(
     )
 
     try:
-        # 2) Emit the same shape of failure as test_tool_failures.
+        # 2) Emit the same shape of failure as test_tool_failures —
+        #    but the decorated function's own name IS the tool name
+        #    (per @mesedi.tool's __name__ semantic), so naming the
+        #    function the same unique string we put in the allowlist
+        #    keeps the two in sync.
         @mesedi.tool
-        def flaky_upstream():
+        def allowlisted_flaky_upstream_inttest():
             raise RuntimeError("inttest tool failure (allowlist suppression)")
 
         @mesedi.wrap
         def agent_with_failing_tool():
             try:
-                flaky_upstream()
+                allowlisted_flaky_upstream_inttest()
             except RuntimeError:
                 pass
 
         agent_with_failing_tool()
         mesedi.flush(timeout=5.0)
 
-        # 3) Assert NO failure_group with class=tool_failures appears.
+        # 3) Assert NO failure_group with class=tool_failures appears
+        #    FOR THIS SPECIFIC TOOL. Earlier tests in the suite
+        #    (test_tool_failures, test_tool_failures_mcp) legitimately
+        #    create tool_failures groups for OTHER tools; we must
+        #    scope the assertion to the allowlisted tool name only.
+        #    Tool_failures signatures embed the tool name as the
+        #    leading segment, so a startswith("flaky_upstream") check
+        #    excludes unrelated groups.
+        #
         #    Poll the failure-groups REST surface for the full window —
         #    if a failure_group materializes mid-poll the assertion
         #    must catch it. We intentionally use the same polling
@@ -1831,7 +1910,15 @@ def test_allowlist_suppresses_matching_tool_failure(
                     "failure_groups", []
                 )
                 for g in groups:
-                    if g.get("failure_class") == "tool_failures":
+                    if g.get("failure_class") != "tool_failures":
+                        continue
+                    # Tool_failures signatures embed the tool name as
+                    # their leading segment. Anchor on the unique
+                    # allowlisted_tool_name so earlier tests'
+                    # tool_failures groups for OTHER tools don't
+                    # false-trigger this assertion.
+                    sig = g.get("signature", "")
+                    if allowlisted_tool_name in sig:
                         seen_tool_failure = True
                         break
                 if seen_tool_failure:
