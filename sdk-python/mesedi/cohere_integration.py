@@ -182,10 +182,17 @@ def instrument_cohere(
 
 
 def _patch_v1(cls: Type[Any]) -> None:
-    """Wrap cls.chat — v1 ``message=...``/``chat_history=...`` shape."""
+    """Wrap cls.chat — v1 ``message=...``/``chat_history=...`` shape.
+
+    Safely no-ops when the class does not expose .chat (test fakes,
+    customer subclasses that only do embeddings, etc.). Mirrors the
+    hasattr posture already used by the streaming patchers.
+    """
     if cls in _patched_classes:
         return
-    original_chat = cls.chat
+    original_chat = getattr(cls, "chat", None)
+    if original_chat is None:
+        return
 
     def patched_chat(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -264,10 +271,15 @@ def _patch_v1(cls: Type[Any]) -> None:
 
 
 def _patch_v2(cls: Type[Any]) -> None:
-    """Wrap cls.chat — v2 ``messages=[...]`` shape (OpenAI-style)."""
+    """Wrap cls.chat — v2 ``messages=[...]`` shape (OpenAI-style).
+
+    Same hasattr guard as _patch_v1.
+    """
     if cls in _patched_classes:
         return
-    original_chat = cls.chat
+    original_chat = getattr(cls, "chat", None)
+    if original_chat is None:
+        return
 
     def patched_chat(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -340,10 +352,15 @@ def _patch_v2(cls: Type[Any]) -> None:
 
 
 def _patch_async_v1(cls: Type[Any]) -> None:
-    """Async twin of _patch_v1 — wraps AsyncClient.chat (#271.h)."""
+    """Async twin of _patch_v1 — wraps AsyncClient.chat (#271.h).
+
+    Same hasattr guard as the sync twin.
+    """
     if cls in _patched_classes:
         return
-    original_chat = cls.chat
+    original_chat = getattr(cls, "chat", None)
+    if original_chat is None:
+        return
 
     async def patched_chat(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -416,10 +433,15 @@ def _patch_async_v1(cls: Type[Any]) -> None:
 
 
 def _patch_async_v2(cls: Type[Any]) -> None:
-    """Async twin of _patch_v2 — wraps AsyncClientV2.chat (#271.h)."""
+    """Async twin of _patch_v2 — wraps AsyncClientV2.chat (#271.h).
+
+    Same hasattr guard as the sync twin.
+    """
     if cls in _patched_classes:
         return
-    original_chat = cls.chat
+    original_chat = getattr(cls, "chat", None)
+    if original_chat is None:
+        return
 
     async def patched_chat(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -1116,10 +1138,19 @@ def _extract_embed_response_tokens(response: Any) -> int:
 
 
 def _patch_embed_sync(cls: Type[Any]) -> None:
-    """Wrap cls.embed to emit surface='embeddings' llm_call events."""
+    """Wrap cls.embed to emit surface='embeddings' llm_call events.
+
+    Safely no-ops on a Cohere client class that does not expose
+    .embed (older versions, customer subclasses that don't use
+    embeddings, test fakes). Mirrors the chat_stream patcher's
+    hasattr guard — instrument_cohere() must never crash because
+    the customer's client class lacks a surface they don't use.
+    """
     if cls in _embed_patched_classes:
         return
-    original_embed = cls.embed
+    original_embed = getattr(cls, "embed", None)
+    if original_embed is None:
+        return
 
     def patched_embed(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -1189,10 +1220,15 @@ def _patch_embed_sync(cls: Type[Any]) -> None:
 
 
 def _patch_embed_async(cls: Type[Any]) -> None:
-    """Async twin of _patch_embed_sync — AsyncClient[V2].embed."""
+    """Async twin of _patch_embed_sync — AsyncClient[V2].embed.
+
+    Same hasattr guard as the sync twin.
+    """
     if cls in _embed_patched_classes:
         return
-    original_embed = cls.embed
+    original_embed = getattr(cls, "embed", None)
+    if original_embed is None:
+        return
 
     async def patched_embed(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -1299,10 +1335,15 @@ def _extract_rerank_results_count(response: Any) -> int:
 
 
 def _patch_rerank_sync(cls: Type[Any]) -> None:
-    """Wrap cls.rerank to emit surface='rerank' llm_call events."""
+    """Wrap cls.rerank to emit surface='rerank' llm_call events.
+
+    Safely no-ops when the class does not expose .rerank.
+    """
     if cls in _rerank_patched_classes:
         return
-    original_rerank = cls.rerank
+    original_rerank = getattr(cls, "rerank", None)
+    if original_rerank is None:
+        return
 
     def patched_rerank(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -1368,10 +1409,15 @@ def _patch_rerank_sync(cls: Type[Any]) -> None:
 
 
 def _patch_rerank_async(cls: Type[Any]) -> None:
-    """Async twin of _patch_rerank_sync — AsyncClient[V2].rerank."""
+    """Async twin of _patch_rerank_sync — AsyncClient[V2].rerank.
+
+    Same hasattr guard as the sync twin.
+    """
     if cls in _rerank_patched_classes:
         return
-    original_rerank = cls.rerank
+    original_rerank = getattr(cls, "rerank", None)
+    if original_rerank is None:
+        return
 
     async def patched_rerank(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()

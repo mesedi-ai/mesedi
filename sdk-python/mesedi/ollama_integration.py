@@ -366,7 +366,12 @@ def _patch_chat(cls: Type[Any]) -> None:
     if cls in _patched_classes:
         return
 
-    original_chat = cls.chat
+    # hasattr guard (failure-group-resolve-context wave triage):
+    # safely no-op when the class does not expose .chat — uniform
+    # posture across all 4 provider integrations.
+    original_chat = getattr(cls, "chat", None)
+    if original_chat is None:
+        return
 
     def patched_chat(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -474,7 +479,12 @@ def _patch_async_chat(cls: Type[Any]) -> None:
     if cls in _patched_classes:
         return
 
-    original_chat = cls.chat
+    # hasattr guard (failure-group-resolve-context wave triage):
+    # safely no-op when the class does not expose .chat — uniform
+    # posture across all 4 provider integrations.
+    original_chat = getattr(cls, "chat", None)
+    if original_chat is None:
+        return
 
     async def patched_chat(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()

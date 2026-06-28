@@ -342,7 +342,14 @@ def _patch_chat_completions(cls: Type[Any]) -> None:
     if cls in _patched_classes:
         return
 
-    original_create = cls.create
+    # hasattr guard (failure-group-resolve-context wave triage):
+    # safely no-op when the class does not expose .create — test
+    # fakes / customer subclasses that don't use this surface
+    # shouldn't crash instrument_openai. Same posture as the Cohere
+    # stream patchers.
+    original_create = getattr(cls, "create", None)
+    if original_create is None:
+        return
 
     def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -455,7 +462,14 @@ def _patch_responses(cls: Type[Any]) -> None:
     if cls in _patched_classes:
         return
 
-    original_create = cls.create
+    # hasattr guard (failure-group-resolve-context wave triage):
+    # safely no-op when the class does not expose .create — test
+    # fakes / customer subclasses that don't use this surface
+    # shouldn't crash instrument_openai. Same posture as the Cohere
+    # stream patchers.
+    original_create = getattr(cls, "create", None)
+    if original_create is None:
+        return
 
     def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -564,7 +578,14 @@ def _patch_async_chat_completions(cls: Type[Any]) -> None:
     if cls in _patched_classes:
         return
 
-    original_create = cls.create
+    # hasattr guard (failure-group-resolve-context wave triage):
+    # safely no-op when the class does not expose .create — test
+    # fakes / customer subclasses that don't use this surface
+    # shouldn't crash instrument_openai. Same posture as the Cohere
+    # stream patchers.
+    original_create = getattr(cls, "create", None)
+    if original_create is None:
+        return
 
     async def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -663,7 +684,14 @@ def _patch_async_responses(cls: Type[Any]) -> None:
     if cls in _patched_classes:
         return
 
-    original_create = cls.create
+    # hasattr guard (failure-group-resolve-context wave triage):
+    # safely no-op when the class does not expose .create — test
+    # fakes / customer subclasses that don't use this surface
+    # shouldn't crash instrument_openai. Same posture as the Cohere
+    # stream patchers.
+    original_create = getattr(cls, "create", None)
+    if original_create is None:
+        return
 
     async def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -1255,7 +1283,14 @@ def _patch_embeddings(cls: Type[Any]) -> None:
     if cls in _patched_classes:
         return
 
-    original_create = cls.create
+    # hasattr guard (failure-group-resolve-context wave triage):
+    # safely no-op when the class does not expose .create — test
+    # fakes / customer subclasses that don't use this surface
+    # shouldn't crash instrument_openai. Same posture as the Cohere
+    # stream patchers.
+    original_create = getattr(cls, "create", None)
+    if original_create is None:
+        return
 
     def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -1334,7 +1369,14 @@ def _patch_async_embeddings(cls: Type[Any]) -> None:
     if cls in _patched_classes:
         return
 
-    original_create = cls.create
+    # hasattr guard (failure-group-resolve-context wave triage):
+    # safely no-op when the class does not expose .create — test
+    # fakes / customer subclasses that don't use this surface
+    # shouldn't crash instrument_openai. Same posture as the Cohere
+    # stream patchers.
+    original_create = getattr(cls, "create", None)
+    if original_create is None:
+        return
 
     async def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
         ctx = current_execution_context()
@@ -1429,7 +1471,10 @@ def _make_non_chat_sync_patcher(
     def _patcher(cls: Type[Any]) -> None:
         if cls in _patched_classes:
             return
-        original_create = cls.create
+        # hasattr guard — see module-level patchers for rationale.
+        original_create = getattr(cls, "create", None)
+        if original_create is None:
+            return
 
         def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
             ctx = current_execution_context()
@@ -1515,7 +1560,10 @@ def _make_non_chat_async_patcher(
     def _patcher(cls: Type[Any]) -> None:
         if cls in _patched_classes:
             return
-        original_create = cls.create
+        # hasattr guard — see module-level patchers for rationale.
+        original_create = getattr(cls, "create", None)
+        if original_create is None:
+            return
 
         async def patched_create(self: Any, *args: Any, **kwargs: Any) -> Any:
             ctx = current_execution_context()
