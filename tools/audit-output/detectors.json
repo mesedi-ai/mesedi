@@ -1,0 +1,1127 @@
+{
+  "generated_by": "tools/audit_detectors.py",
+  "detector_count": 20,
+  "blocking_failures": 0,
+  "reports": [
+    {
+      "detector": "crashes",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "Detector implemented inline in handlers.go; integration_test checkpoint covers verification."
+        },
+        {
+          "name": "project_config",
+          "status": "N/A",
+          "detail": "Detector is correctness-only; no tunable thresholds."
+        },
+        {
+          "name": "telemetry",
+          "status": "N/A",
+          "detail": "Detector has no configurable thresholds; no fallback telemetry needed."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'crashes' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'crashes'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/crashes/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "loops",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "Detector implemented inline in handlers.go; integration_test checkpoint covers verification."
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 4 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'loops' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'loops'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/loops/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "tool_failures",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "Detector implemented inline in handlers.go; integration_test checkpoint covers verification."
+        },
+        {
+          "name": "project_config",
+          "status": "N/A",
+          "detail": "Detector is correctness-only; no tunable thresholds."
+        },
+        {
+          "name": "telemetry",
+          "status": "N/A",
+          "detail": "Detector has no configurable thresholds; no fallback telemetry needed."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'tool_failures' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'tool_failures'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/tool_failures/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "validator_failures",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "PASS",
+          "detail": "Python: observe.py:104; TypeScript: observe.ts:102"
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "Detector implemented inline in handlers.go; integration_test checkpoint covers verification."
+        },
+        {
+          "name": "project_config",
+          "status": "N/A",
+          "detail": "Detector is correctness-only; no tunable thresholds."
+        },
+        {
+          "name": "telemetry",
+          "status": "N/A",
+          "detail": "Detector has no configurable thresholds; no fallback telemetry needed."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'validator_failures' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'validator_failures'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/validator_failures/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "drift",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "WARN",
+          "detail": "Source exists but missing unit-test file(s): drift_test.go"
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 3 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'drift' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'drift'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/drift/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "cost_velocity",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "Detector implemented inline in handlers.go; integration_test checkpoint covers verification."
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "Dedicated /me/cost-velocity-config endpoint(s) present."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Dedicated-endpoint fallback telemetry present in handlers.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'cost_velocity' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "PASS",
+          "detail": "Pricing-table drift test present."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'cost_velocity'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/cost-velocity/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "prompt_injection",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "WARN",
+          "detail": "Source exists but missing unit-test file(s): injection_test.go"
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "Custom-patterns endpoint family /me/pattern-config/{detector} present."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Patterns fallback telemetry present."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'prompt_injection' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'prompt_injection'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/security/prompt-injection/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "infrastructure_throttled",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "PASS",
+          "detail": "Python: observe.py:332; TypeScript: observe.ts:284"
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "Detector implemented inline in handlers.go; integration_test checkpoint covers verification."
+        },
+        {
+          "name": "project_config",
+          "status": "N/A",
+          "detail": "Detector is correctness-only; no tunable thresholds."
+        },
+        {
+          "name": "telemetry",
+          "status": "N/A",
+          "detail": "Detector has no configurable thresholds; no fallback telemetry needed."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'infrastructure_throttled' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'infrastructure_throttled'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/infrastructure_throttled/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "data_leakage",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "WARN",
+          "detail": "Source exists but missing unit-test file(s): data_leakage_test.go"
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 2 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'data_leakage' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'data_leakage'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/security/data_leakage/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "semantic_loop",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "All 1 source + test file(s) present."
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 4 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'semantic_loop' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'semantic_loop'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/semantic_loop/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "tool_schema_drift",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "All 1 source + test file(s) present."
+        },
+        {
+          "name": "project_config",
+          "status": "WARN",
+          "detail": "No /me/tool-schema-drift-config endpoint found; check if config lives under non-standard path."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Dedicated-endpoint fallback telemetry present in handlers.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'tool_schema_drift' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'tool_schema_drift'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/tool_schema_drift/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "context_overflow",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "All 1 source + test file(s) present."
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 1 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'context_overflow' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "WARN",
+          "detail": "No explicit model-windows drift test found."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'context_overflow'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/context_overflow/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "token_waste",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "All 1 source + test file(s) present."
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 1 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'token_waste' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'token_waste'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/token_waste/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "sandbox_escape",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "WARN",
+          "detail": "Source exists but missing unit-test file(s): sandbox_escape_test.go"
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "Custom-patterns endpoint family /me/pattern-config/{detector} present."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Patterns fallback telemetry present."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'sandbox_escape' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'sandbox_escape'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/security/sandbox_escape/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "grounding_failure",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "PASS",
+          "detail": "Python: observe.py:561; TypeScript: observe.ts:407"
+        },
+        {
+          "name": "backend_logic",
+          "status": "WARN",
+          "detail": "Source exists but missing unit-test file(s): grounding_failure_test.go"
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 1 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'grounding_failure' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'grounding_failure'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/grounding_failure/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "cascading_failure",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "PASS",
+          "detail": "Python: observe.py:710; TypeScript: observe.ts:557"
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "All 1 source + test file(s) present."
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 2 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'cascading_failure' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'cascading_failure'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/cascading_failure/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "coordination_deadlock",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "PASS",
+          "detail": "Python: observe.py:710; TypeScript: observe.ts:557"
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "All 1 source + test file(s) present."
+        },
+        {
+          "name": "project_config",
+          "status": "N/A",
+          "detail": "Detector is correctness-only; no tunable thresholds."
+        },
+        {
+          "name": "telemetry",
+          "status": "N/A",
+          "detail": "Detector has no configurable thresholds; no fallback telemetry needed."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'coordination_deadlock' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'coordination_deadlock'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/coordination_deadlock/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "provider_incident",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "WARN",
+          "detail": "Source exists but missing unit-test file(s): provider_incident_test.go, provider_error_classes_test.go"
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "Dedicated /me/provider-incident-config endpoint(s) present."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Dedicated-endpoint fallback telemetry present in handlers.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'provider_incident' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "PASS",
+          "detail": "Provider exception \u2192 canonical-class mapping staleness test present."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'provider_incident'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/provider_incident/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "hitl_timeout",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "PASS",
+          "detail": "Python: observe.py:1009; TypeScript: observe.ts:757"
+        },
+        {
+          "name": "backend_logic",
+          "status": "WARN",
+          "detail": "Source exists but missing unit-test file(s): hitl_timeout_test.go"
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 1 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'hitl_timeout' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'hitl_timeout'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/hitl_timeout/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "hitl_rejection_spike",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "PASS",
+          "detail": "Python: observe.py:1009; TypeScript: observe.ts:757"
+        },
+        {
+          "name": "backend_logic",
+          "status": "WARN",
+          "detail": "Source exists but missing unit-test file(s): hitl_rejection_spike_test.go"
+        },
+        {
+          "name": "project_config",
+          "status": "PASS",
+          "detail": "All 1 threshold key(s) registered."
+        },
+        {
+          "name": "telemetry",
+          "status": "PASS",
+          "detail": "Validator-registry fallback telemetry emitted centrally by detector_thresholds_loader.go."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'hitl_rejection_spike' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'hitl_rejection_spike'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/hitl_rejection_spike/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    }
+  ]
+}
