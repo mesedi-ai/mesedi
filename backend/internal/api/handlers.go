@@ -268,6 +268,11 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /me/cost-velocity-rate-config", h.HandleGetCostVelocityRateConfig)
 	mux.HandleFunc("PUT /me/cost-velocity-rate-config", h.HandleSetCostVelocityRateConfig)
 	mux.HandleFunc("GET /me/pricing-info", h.HandleGetPricingInfo)
+	// Wave ai-analysis-staleness-tracking: dashboard fetches the
+	// current playbook content signatures so it can compare against
+	// the stored signature on each cached AI analysis and surface a
+	// "re-analyze to refresh" badge when they differ.
+	mux.HandleFunc("GET /me/playbook-signatures", h.HandleGetPlaybookSignatures)
 	// Task #270.a, per-project tool_schema_drift return_value byte cap.
 	mux.HandleFunc("GET /me/tool-return-value-config", h.HandleGetToolReturnValueConfig)
 	mux.HandleFunc("PUT /me/tool-return-value-config", h.HandleSetToolReturnValueConfig)
@@ -4152,6 +4157,40 @@ func (h *Handlers) HandleGetPricingInfo(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"pricing_table_version": pricing.PricingTableVersion,
 		"supported_models":      pricing.SupportedModels(),
+	})
+}
+
+// HandleGetPlaybookSignatures returns the SHA-256 digest of every
+// in-binary playbook keyed by either "<failure_class>" (for catch-all
+// playbooks) or "<failure_class>:<signature_prefix>" (for detectors
+// with multiple signature variants like loops / drift /
+// prompt_injection). The dashboard compares the value for a failure
+// group against group.analysis_playbook_signature; mismatch surfaces
+// the "re-analyze to refresh" badge (Wave ai-analysis-staleness-
+// tracking).
+//
+// Tier-agnostic: the playbook content is identical across projects
+// + tiers (compiled into the binary). The /me/ scope is structural —
+// keeping all customer-facing reads under one auth chain — not a
+// per-project differentiator.
+//
+// Response:
+//
+//	{
+//	  "signatures": {
+//	    "data_leakage":           "abc...",
+//	    "loops:identical_call_":  "def...",
+//	    "drift:lexical_drift_":   "ghi...",
+//	    ...
+//	  }
+//	}
+func (h *Handlers) HandleGetPlaybookSignatures(w http.ResponseWriter, r *http.Request) {
+	if _, ok := ProjectIDFromContext(r.Context()); !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"signatures": playbooks.AllSignatures(),
 	})
 }
 

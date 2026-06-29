@@ -693,6 +693,11 @@ func main() {
 	// version + supported model list so customers can verify which
 	// models Mesedi prices server-side (Wave 0.3).
 	mux.Handle("GET /me/pricing-info", privateHandler)
+	// Playbook signatures. Returns the SHA-256 of each in-binary
+	// playbook so the dashboard can detect when a cached AI
+	// analysis was generated against a now-stale playbook (Wave
+	// ai-analysis-staleness-tracking).
+	mux.Handle("GET /me/playbook-signatures", privateHandler)
 	// Task #270.a, per-project tool_schema_drift return_value byte cap.
 	mux.Handle("GET /me/tool-return-value-config", privateHandler)
 	mux.Handle("PUT /me/tool-return-value-config", privateHandler)
