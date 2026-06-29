@@ -1,18 +1,23 @@
 # Sandbox escape
 
-A code-execution tool on this execution attempted behavior that matches one of Mesedi's nine sandbox-escape patterns. The detector scans both arguments and return values of every `tool_call` (regardless of whether the call itself succeeded) and fires when any of the patterns match.
+A code-execution tool on this execution attempted behavior that matches one of Mesedi's twelve sandbox-escape patterns. The detector scans both arguments and return values of every `tool_call` (regardless of whether the call itself succeeded) and fires when any of the patterns match.
 
-The signature is `sandbox_escape:<pattern_id>` so distinct attempt patterns cluster separately. The nine pattern ids are:
+The signature is `sandbox_escape:<pattern_id>` for built-in patterns and `sandbox_escape:custom:<pattern_id>` for per-project custom patterns. Distinct attempt patterns cluster separately. The production detector emits ALL matching signatures per execution (capped at 20), so an execution that hits multiple escape vectors produces multiple failure_groups — one per vector — rather than collapsing them into the first match.
 
-- `python_os_import` (import os; subprocess; pty)
-- `shell_invocation` (sh -c, bash -c, /bin/sh)
-- `dynamic_code_eval` (eval, exec, compile)
-- `raw_socket_open` (socket.socket, raw TCP/UDP)
-- `instance_metadata_access` (169.254.169.254, IMDS endpoints)
-- `proc_sys_access` (/proc/, /sys/ reads)
-- `privilege_escalation` (sudo, setuid, su -)
-- `host_secret_read` (/etc/shadow, /root/, ~/.ssh/id_*, .aws/credentials)
-- `python_dangerous_import` (ctypes, pickle, marshal, runpy)
+The twelve built-in pattern ids:
+
+- `python_os_import` — `import os` or `from os import` from the sandboxed Python runtime.
+- `python_subprocess_import` — `import subprocess` or `from subprocess import`.
+- `shell_invocation` — `os.system`, `os.popen`, `subprocess.run`/`call`/`Popen`/`check_output`, `child_process.exec`, `child_process.spawn`.
+- `dynamic_code_eval` — `eval(...)` or `exec(...)` called with an argument.
+- `js_vm_module` — Node `vm.runInNewContext`, `vm.runInContext`, `vm.createContext`.
+- `js_dynamic_require` — `require(...)` with a non-literal argument (variable, expression, function call). The safe form `require('fs')` with a string literal is NOT flagged.
+- `js_function_constructor` — `(new) Function('...')` constructing a runnable function from a string.
+- `raw_socket_open` — `import socket`, `socket.socket`, `socket.create_connection`, `socket.gethostbyname`.
+- `instance_metadata_access` — `169.254.169.254`, `metadata.google.internal`, `metadata.azure.com` (link-local IMDS endpoints).
+- `proc_sys_access` — `/proc/self`, `/proc/1`, `/sys/kernel`, `/sys/class`.
+- `privilege_escalation` — `chmod <numeric>`, `chown root`, `setuid(0)`. Does not match `sudo` or `su -` directly; those need a custom pattern.
+- `host_secret_read` — `.aws/credentials`, `.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/known_hosts`, `/etc/passwd`, `/etc/shadow`.
 
 ## What's usually happening
 
@@ -34,7 +39,7 @@ Three diagnostic questions:
 
 2. **Did the call succeed?** The detection fires on attempt, not success. Read the return value: was the file actually read? Did the network actually open? If the sandbox blocked the call, the detector flagged a near-miss; if the sandbox allowed it, you have a security incident, not just an alert.
 
-3. **Is the affected execution part of a broader pattern?** Cross-reference with other recent sandbox_escape failure_groups in the project. A single execution is investigation; many executions hitting the same pattern is a systematic issue (the agent's prompt allows this behavior unintentionally, or the sandbox config drifted).
+3. **Is the affected execution part of a broader pattern?** Cross-reference with other recent `sandbox_escape` failure_groups in the project. A single execution is investigation; many executions hitting the same pattern is a systematic issue (the agent's prompt allows this behavior unintentionally, or the sandbox config drifted).
 
 ## How to fix
 
@@ -49,6 +54,10 @@ The remediation depends on what the investigation found:
 ## How to test the fix
 
 After deploying the fix, the sandbox_escape failure_group should stop accumulating new affected_executions for the specific pattern. If you tightened the prompt, new attempts should be caught at the prompt layer and never reach the tool. If you hardened the sandbox, new attempts should fail at the runtime layer with a clear permission-denied error.
+
+## Custom patterns
+
+The detector accepts per-project custom regex patterns (Wave 2.1.b). Custom matches surface under `sandbox_escape:custom:<pattern_id>`. Built-in patterns run before custom patterns; both contribute to the per-execution match cap of 20. Use custom patterns for vectors the built-ins miss (e.g. `sudo`/`su -` for stacks where those need to be flagged, JavaScript dynamic `import()`, Ruby `Kernel.system`, obfuscated base64 payloads that decode to known dangerous shapes).
 
 ## A note on this being a security alert
 
