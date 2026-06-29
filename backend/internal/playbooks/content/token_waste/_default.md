@@ -1,6 +1,14 @@
 # Token waste
 
-The same leading prompt prefix (the first 2048 characters) was sent three or more times within a single execution. The agent is paying for the same tokens repeatedly. The signature is `token_waste:<prefix_hex8>` so distinct repeated prefixes cluster separately, and recurring patterns across executions surface clearly.
+A leading prompt prefix was sent to the model three or more times within a single execution. The agent is paying for the same tokens repeatedly. The signature is `token_waste:<prefix_hex8>` so distinct repeated prefixes cluster separately, and recurring patterns across executions surface clearly.
+
+The detector runs a three-layer pipeline on the `user_message` field of each `llm_call` event:
+
+1. **Variable-prefix strip.** Normalizes five known drifting prefix shapes that would otherwise fragment the cluster: ISO-8601 / RFC3339 timestamps, hex UUIDs (8-4-4-4-12 or naked 32-hex), `req_id` / `trace_id` / `correlation_id` key-value prefixes, leading numeric counters, and labeled counters like `Turn 12:` or `Step 3:`. Multi-layer prefixes (e.g. timestamp followed by request_id followed by turn counter) get stripped iteratively up to 8 rounds.
+2. **Exact 2048-char SHA-256 hash** on the normalized text. When three or more calls share the same hash, fires under `token_waste:<hex8>`.
+3. **Shingle-Jaccard near-duplicate fallback.** Runs ONLY when the exact-hash path found no match. Builds k=8 character shingles per normalized payload, computes pairwise Jaccard, and fires when three or more payloads share Jaccard ≥ 0.85 with each other. Catches the structurally-similar-but-lexically-distinct cases the strip can't reach (variable material mid-prefix, conversation-history drift inside the 2048-char window). Fires under a separate `token_waste:near_dup:<hex8>` signature so it doesn't pollute the exact-match clusters.
+
+The detector emits **one signature per execution** — either an exact match or a near_dup, never both. The near_dup suffix is deterministic across re-runs: same payloads produce the same hex8.
 
 ## What's usually happening
 
@@ -14,7 +22,9 @@ Three common causes, in rough order of frequency:
 
 ## How to investigate
 
-Open the execution and read the `llm_call` events. Compare the first 2048 characters of each `user_prompt` (or the combined system_prompt + user_prompt depending on your wire shape). If the prefix is byte-identical across three or more calls, the detector fired correctly. If the prefixes look different but the detector still fired, you may have whitespace, formatting, or invisible-character variance; tighten the prompt builder to ensure the prefix is canonical.
+Open the execution and read the `llm_call` events. Compare the `user_message` field across calls — that is the exact field the detector reads. (If you previously looked at `user_prompt`, that field name is not what the SDK emits; the SDK ships `user_message` and the detector reads `user_message`.) If the first 2048 characters look byte-identical across three or more calls, the exact-match path fired. If the calls look near-identical but differ in a UUID, timestamp, or customer ID mid-prefix, the near_dup path fired.
+
+If the signature is `token_waste:near_dup:<hex8>`, the calls are structurally similar at the shingle level (≥ 0.85 Jaccard on k=8 character shingles) but didn't pass the exact-hash test. This is normal for prompts whose variable material lives mid-prefix rather than at the leading edge.
 
 ## How to fix
 
@@ -29,6 +39,15 @@ The remediation depends on which of the three causes:
 ## How to test the fix
 
 After deploying, look at the next few executions in the same project. The `token_waste` failure_group's affected_executions count should plateau (no new entries). The cumulative `input_tokens` on each execution should drop noticeably as well, and so should your bill.
+
+## Per-project tunables
+
+Two thresholds are configurable per-project via the detector_thresholds primitive:
+
+- **`prefix_window_chars`** (default 2048; hard bounds [64, 65536]; tier-capped: Hobby 4 KB, Team 16 KB, Enterprise 64 KB). Bigger window means hashing more text per event AND a larger shingle set on the near-duplicate fallback — both real CPU vectors on the detector hot path, hence the tier discrimination.
+- **`min_repeats`** (default 3; bounds [2, 100]). Pure alerting sensitivity, no tier cap. Lower it to catch shorter loops; raise it to ignore agents that legitimately retry twice before succeeding.
+
+Both thresholds defend against bad config that escapes the validators registry: values below the lower bound revert to the historical default rather than erroring or no-op'ing.
 
 ## A note on cost vs latency
 
