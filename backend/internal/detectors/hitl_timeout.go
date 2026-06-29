@@ -15,11 +15,13 @@
 //     succeed, but the SLA was breached and a quality / response-
 //     time review is warranted.
 //
-// First-match priority: explicit timeout wins over sla_exceeded.
-// If an execution has multiple human_intervention events (e.g. an
-// agent that asked for human input several times during a single
-// run), the first event that meets either condition determines
-// the cluster.
+// Production path: DetectHITLTimeoutAllMatchesWithThresholds returns
+// BOTH signatures when both firing conditions are present in the
+// execution's human_intervention payloads. Result ordering is
+// deterministic: explicit before sla_exceeded when both fire. The
+// legacy DetectHITLTimeout variant uses first-match-wins (explicit
+// over sla_exceeded) and is kept for backward-compat with existing
+// non-handler call sites + tests.
 //
 // Signature shape: "hitl_timeout:<reason>" where reason is either
 // "explicit" or "sla_exceeded". Customers running both patterns
