@@ -69,10 +69,19 @@ NOT_APPLICABLE = "N/A"
 # backend logic / missing integration test / missing docs page are
 # release blockers; missing dashboard polish or telemetry chip is a
 # WARN that gets caught at human review.
+#
+# `logic_correctness` is blocking on FAIL specifically so a missing
+# ANTHROPIC_API_KEY (or missing anthropic package) cannot silently
+# turn the LLM-judge into a no-op. Default mode REQUIRES the
+# LLM-judge to actually run. To opt out deliberately, pass --no-llm
+# (which produces NEEDS_REVIEW, not FAIL — explicit skip with audit
+# trail in CURRENT_TASK.md). Transient API errors during a real call
+# still produce NEEDS_REVIEW (can't punish for infra issues).
 BLOCKING_CHECKPOINTS = {
     "backend_logic",
     "integration_test",
     "docs_page",
+    "logic_correctness",
 }
 
 
@@ -147,6 +156,13 @@ class DetectorMeta:
     # patterns_only       = only knob is a custom-patterns blob (no scalars)
     # none                = correctness-only detector, no tunable config
     config_mechanism: str = "none"
+    # Optional explicit endpoint name for `dedicated_endpoints` cases
+    # where the route is NOT /me/<detector-hyphenated>-config — e.g.
+    # tool_schema_drift's knob is `tool_return_value_max_bytes` so the
+    # endpoint is /me/tool-return-value-config (named after the knob,
+    # not the detector class). When set, check_project_config uses
+    # this exact path instead of deriving from the detector name.
+    explicit_config_endpoint: str = ""
     # URL slug under /docs/ relative to dashboard/app/docs/.
     # Includes category prefix (e.g. "observability/cost-velocity").
     docs_slug: str = ""
@@ -246,7 +262,10 @@ DETECTOR_REGISTRY: Dict[str, DetectorMeta] = {
     "tool_schema_drift": DetectorMeta(
         sdk_helpers=None,
         backend_files=["tool_schema_drift.go"],
-        config_mechanism="dedicated_endpoints",  # tool_return_value_max_bytes endpoint
+        config_mechanism="dedicated_endpoints",
+        # Endpoint is named after the knob (`tool_return_value_max_bytes`),
+        # not the detector class — see handlers.go:272-273.
+        explicit_config_endpoint="/me/tool-return-value-config",
         docs_slug="observability/tool_schema_drift",
         signature_prefix="",
     ),
@@ -501,7 +520,20 @@ def check_project_config(detector: str, meta: DetectorMeta, root: Path) -> Check
         if not handlers_path.exists():
             return Checkpoint("project_config", FAIL, "handlers.go missing")
         src = handlers_path.read_text(errors="ignore")
-        # Heuristic: a config endpoint for this detector is named
+        # If the registry declares an explicit endpoint path, use it
+        # verbatim (e.g. tool_schema_drift → /me/tool-return-value-config,
+        # named after the knob not the detector).
+        if meta.explicit_config_endpoint:
+            if meta.explicit_config_endpoint in src:
+                return Checkpoint(
+                    "project_config", PASS,
+                    f"Dedicated endpoint {meta.explicit_config_endpoint} present.",
+                )
+            return Checkpoint(
+                "project_config", FAIL,
+                f"explicit_config_endpoint declared as {meta.explicit_config_endpoint} but not found in handlers.go.",
+            )
+        # Default: a config endpoint for this detector is named
         # /me/<detector-hyphenated>-config or /me/<detector-hyphenated>-*-config.
         hyph = detector.replace("_", "-")
         if f"/me/{hyph}-config" in src or re.search(rf"/me/{re.escape(hyph)}-\w+-config", src):
@@ -509,14 +541,15 @@ def check_project_config(detector: str, meta: DetectorMeta, root: Path) -> Check
                 "project_config", PASS,
                 f"Dedicated /me/{hyph}-config endpoint(s) present.",
             )
-        # Some detectors have endpoints that don't follow the
-        # naming convention (e.g. provider_incident → min_tenants
-        # endpoint). Accept if there's at least one HandleFunc
-        # mentioning the detector class.
+        # Last-resort heuristic: accept if there's at least one
+        # HandleFunc mentioning the detector class (catches
+        # provider_incident → min_tenants and similar naming
+        # variants without forcing every detector to declare
+        # explicit_config_endpoint).
         if f'mux.HandleFunc("PUT /me/' in src and detector.split("_")[0] in src:
             return Checkpoint(
                 "project_config", WARN,
-                f"No /me/{hyph}-config endpoint found; check if config lives under non-standard path.",
+                f"No /me/{hyph}-config endpoint found; check if config lives under non-standard path or declare explicit_config_endpoint in DETECTOR_REGISTRY.",
             )
         return Checkpoint(
             "project_config", FAIL,
@@ -654,11 +687,25 @@ def check_drift_tests(detector: str, meta: DetectorMeta, root: Path) -> Checkpoi
     # Detectors with provider/library lookup tables that benefit
     # from drift tests:
     if detector == "context_overflow":
-        # Model-windows lookup map drift test.
-        test_path = root / "backend" / "internal" / "providers" / "providers_test.go"
-        if test_path.exists():
-            return Checkpoint("drift_tests", PASS, "Provider/model-window drift test present.")
-        return Checkpoint("drift_tests", WARN, "No explicit model-windows drift test found.")
+        # Model-windows lookup drift is guarded by Test_RegistryParity
+        # in models/registry_test.go, which asserts windowByModel and
+        # providerByModel share identical key sets (catching the "added
+        # a model to one map but forgot the other" class of silent
+        # break). Test_RegistryValuesSane catches obvious typos
+        # (non-positive windows, non-lowercase provider strings).
+        test_path = root / "backend" / "internal" / "models" / "registry_test.go"
+        if not test_path.exists():
+            return Checkpoint("drift_tests", FAIL, "models/registry_test.go missing")
+        src = test_path.read_text(errors="ignore")
+        if "Test_RegistryParity" in src:
+            return Checkpoint(
+                "drift_tests", PASS,
+                "Model-windows drift guarded by models/registry_test.go::Test_RegistryParity.",
+            )
+        return Checkpoint(
+            "drift_tests", FAIL,
+            "models/registry_test.go exists but Test_RegistryParity not found.",
+        )
     if detector == "cost_velocity":
         # Pricing-table drift test.
         test_path = root / "backend" / "internal" / "pricing" / "pricing_test.go"
@@ -796,12 +843,17 @@ def llm_judge_logic(detector: str, meta: DetectorMeta, root: Path) -> Checkpoint
     """Compares the detector's Go source against its playbook MD +
     docs page MD via Claude. Returns NEEDS_REVIEW with the model's
     structured reasoning attached (NOT a binary PASS/FAIL — humans
-    review the reasoning before treating it as authoritative)."""
+    review the reasoning before treating it as authoritative).
+
+    Default mode REQUIRES the LLM-judge to actually run; missing key
+    or missing anthropic package produce FAIL (blocking) rather than
+    a silent NEEDS_REVIEW skip. To opt out deliberately, pass --no-llm
+    at the call site (handled upstream in audit_detector())."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
         return Checkpoint(
-            "logic_correctness", NEEDS_REVIEW,
-            "ANTHROPIC_API_KEY not set; LLM-judge skipped. Set the key to enable semantic logic-vs-spec check.",
+            "logic_correctness", FAIL,
+            "ANTHROPIC_API_KEY not set; LLM-judge cannot run. Set the key OR pass --no-llm to deliberately skip (which produces NEEDS_REVIEW with an audit trail).",
         )
 
     # Gather inputs.
@@ -847,8 +899,8 @@ def llm_judge_logic(detector: str, meta: DetectorMeta, root: Path) -> Checkpoint
         import anthropic  # type: ignore
     except ImportError:
         return Checkpoint(
-            "logic_correctness", NEEDS_REVIEW,
-            "anthropic Python package not installed; LLM-judge skipped. `pip install anthropic` to enable.",
+            "logic_correctness", FAIL,
+            "anthropic Python package not installed; LLM-judge cannot run. `pip install anthropic` to enable, OR pass --no-llm to deliberately skip.",
         )
 
     try:
