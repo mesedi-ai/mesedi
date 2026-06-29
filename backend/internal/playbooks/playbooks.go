@@ -54,7 +54,9 @@
 package playbooks
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"strings"
@@ -215,4 +217,113 @@ func Load(failureClass, signature string) (string, error) {
 	// playbook opens with it. Centralized here so no individual
 	// playbook author can forget to include it.
 	return disclaimer + string(bytes), nil
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Playbook-signature staleness tracking (Wave ai-analysis-staleness-
+// tracking).
+//
+// AI analyses are produced by injecting the canonical playbook
+// content into Claude's prompt (Wave K). When the binary ships with
+// updated playbook content, every cached AI analysis that was
+// anchored on the previous content is "stale": customers reading
+// the cached analysis on the failure-group detail page are reading
+// text shaped by an interpretation framework that no longer matches
+// what Mesedi ships.
+//
+// The mechanism:
+//
+//   1. At process boot, hash every playbook's content (SHA-256).
+//      The map is keyed by content path so multiple signatures
+//      mapping to the same path (e.g. loops/identical_call.md
+//      covering all "identical_call_*" signatures) share one hash.
+//
+//   2. When AI analysis is generated, the handler reads the
+//      signature for the (failure_class, signature) pair and stores
+//      it on the cached row (failure_groups.analysis_playbook_signature
+//      + ai_analyses.playbook_signature).
+//
+//   3. The dashboard renders a "Re-analyze to refresh" badge when
+//      the stored signature differs from the current in-binary one.
+//
+// Why SHA-256 of raw bytes (NOT the disclaimer-prepended Load
+// output): the disclaimer is global and changes rarely (typically
+// legal copy edits). Triggering staleness across every cached
+// analysis on a disclaimer tweak would be aggressive in the wrong
+// direction. The disclaimer's purpose is customer-facing guidance,
+// not AI-analysis grounding — changing it doesn't materially affect
+// what the AI would produce.
+
+// signatureByPath caches the SHA-256 of each playbook file's content
+// (excluding the global disclaimer). Computed once at package init,
+// read O(1) thereafter. Files registered in patterns but absent from
+// the embedded filesystem (stub registrations) don't appear here;
+// Signature() returns ("", false) for those.
+var signatureByPath = func() map[string]string {
+	out := map[string]string{}
+	seen := map[string]bool{}
+	for _, p := range patterns {
+		if seen[p.contentPath] {
+			continue
+		}
+		seen[p.contentPath] = true
+		bytes, err := content.ReadFile("content/" + p.contentPath)
+		if err != nil {
+			// Stub registration without backing file — skip; the
+			// Load() caller surfaces ErrNotFound elsewhere.
+			continue
+		}
+		sum := sha256.Sum256(bytes)
+		out[p.contentPath] = hex.EncodeToString(sum[:])
+	}
+	return out
+}()
+
+// Signature returns the SHA-256 hex digest of the playbook content
+// that Load() would serve for the given (failure_class, signature)
+// pair, EXCLUDING the disclaimer prefix. The returned string is
+// 64 hex characters when found, "" when no pattern matches OR when
+// the matched pattern has no backing content file (stub registration).
+//
+// Used by the AI-analysis write path to stamp the cached analysis
+// row, and by the dashboard read path (via the API endpoint) to
+// compare against the current in-binary signature for staleness
+// detection.
+func Signature(failureClass, signature string) (string, bool) {
+	path, ok := Resolve(failureClass, signature)
+	if !ok {
+		return "", false
+	}
+	sig, ok := signatureByPath[path]
+	if !ok {
+		return "", false
+	}
+	return sig, true
+}
+
+// AllSignatures returns a copy of the in-memory signature map keyed
+// by failure_class. For failure classes with multiple signature
+// variants (loops, drift, prompt_injection), the returned map
+// contains one entry per variant prefix — keyed as
+// "<failure_class>:<sigPrefix>" or "<failure_class>" when the
+// pattern's sigPrefix is empty.
+//
+// The dashboard fetches this map once per page render to determine
+// which cached analyses are stale. Returning a flat per-(class,
+// signature-prefix) map lets the dashboard answer "is this exact
+// failure_group's cached analysis stale?" with one lookup.
+func AllSignatures() map[string]string {
+	out := make(map[string]string, len(patterns))
+	for _, p := range patterns {
+		sig, ok := signatureByPath[p.contentPath]
+		if !ok {
+			continue
+		}
+		key := p.failureClass
+		if p.sigPrefix != "" {
+			key = p.failureClass + ":" + p.sigPrefix
+		}
+		out[key] = sig
+	}
+	return out
 }
