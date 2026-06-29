@@ -47,12 +47,13 @@ func openMinimalListStore(t *testing.T) *SQLiteStore {
 			event_count           INTEGER NOT NULL DEFAULT 0,
 			affected_executions   INTEGER NOT NULL DEFAULT 0,
 			sample_execution_id   TEXT,
-			analysis_markdown     TEXT,
-			analyzed_at           DATETIME,
-			analysis_model        TEXT,
-			severity_hint         TEXT,
-			resolved_at           DATETIME,
-			resolved_by           TEXT
+			analysis_markdown            TEXT,
+			analyzed_at                  DATETIME,
+			analysis_model               TEXT,
+			analysis_playbook_signature  TEXT,
+			severity_hint                TEXT,
+			resolved_at                  DATETIME,
+			resolved_by                  TEXT
 		);
 		CREATE TABLE executions (
 			execution_id          TEXT PRIMARY KEY,

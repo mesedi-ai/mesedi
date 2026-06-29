@@ -2559,6 +2559,13 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 
 	prompt := buildFailureGroupAnalysisPrompt(group, sampleExecs, sampleEvents)
 
+	// Capture the playbook signature for staleness tracking
+	// (Wave ai-analysis-staleness-tracking). Empty string when
+	// the failure_class/signature pair has no registered playbook
+	// or its content file is absent — the dashboard treats NULL/
+	// empty stored signatures as "outdated, recommend re-analyze."
+	playbookSig, _ := playbooks.Signature(group.FailureClass, group.Signature)
+
 	model := "claude-haiku-4-5"
 	res, err := h.Anthropic.Call(r.Context(), anthropic.CallOptions{
 		Model:       model,
@@ -2576,7 +2583,7 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 
 	now := time.Now().UTC()
 	if err := h.Store.SaveFailureGroupAnalysis(
-		r.Context(), groupID, res.Text, model, now,
+		r.Context(), groupID, res.Text, model, now, playbookSig,
 	); err != nil {
 		h.Logger.Error("save failure_group analysis failed",
 			"group_id", groupID, "error", err.Error())
@@ -2597,16 +2604,17 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 	}
 	cost := anthropic.ComputeCostUSD(model, res.InputTokens, res.OutputTokens)
 	if err := h.Store.CreateAIAnalysis(r.Context(), &store.AIAnalysis{
-		AnalysisID:       newAIAnalysisID(),
-		FailureGroupID:   groupID,
-		ProjectID:        group.ProjectID,
-		TenantID:         tenantID,
-		ModelID:          model,
-		InputTokens:      res.InputTokens,
-		OutputTokens:     res.OutputTokens,
-		CostUSD:          cost,
-		GeneratedAt:      now,
-		AnalysisMarkdown: res.Text,
+		AnalysisID:        newAIAnalysisID(),
+		FailureGroupID:    groupID,
+		ProjectID:         group.ProjectID,
+		TenantID:          tenantID,
+		ModelID:           model,
+		InputTokens:       res.InputTokens,
+		OutputTokens:      res.OutputTokens,
+		CostUSD:           cost,
+		GeneratedAt:       now,
+		AnalysisMarkdown:  res.Text,
+		PlaybookSignature: playbookSig,
 	}); err != nil {
 		h.Logger.Warn("record ai_analyses row failed (accounting only)",
 			"group_id", groupID,

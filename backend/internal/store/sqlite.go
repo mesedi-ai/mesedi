@@ -4067,6 +4067,7 @@ func (s *SQLiteStore) ListFailureGroups(
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+			fg.analysis_playbook_signature,
 			fg.severity_hint,
 			fg.resolved_at, fg.resolved_by
 		FROM failure_groups fg
@@ -4106,6 +4107,7 @@ func (s *SQLiteStore) GetFailureGroup(
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+			fg.analysis_playbook_signature,
 			fg.severity_hint,
 			fg.resolved_at, fg.resolved_by
 		FROM failure_groups fg
@@ -4203,6 +4205,7 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		analysisMarkdown sql.NullString
 		analyzedAt       sql.NullTime
 		analysisModel    sql.NullString
+		playbookSig      sql.NullString
 		severityHint     sql.NullString
 		resolvedAt       sql.NullTime
 		resolvedBy       sql.NullString
@@ -4221,6 +4224,7 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		&analysisMarkdown,
 		&analyzedAt,
 		&analysisModel,
+		&playbookSig,
 		&severityHint,
 		&resolvedAt,
 		&resolvedBy,
@@ -4252,6 +4256,10 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		v := analysisModel.String
 		g.AnalysisModel = &v
 	}
+	if playbookSig.Valid && playbookSig.String != "" {
+		v := playbookSig.String
+		g.AnalysisPlaybookSignature = &v
+	}
 	if severityHint.Valid && severityHint.String != "" {
 		v := severityHint.String
 		g.SeverityHint = &v
@@ -4275,14 +4283,17 @@ func (s *SQLiteStore) SaveFailureGroupAnalysis(
 	ctx context.Context,
 	groupID, analysisMarkdown, analysisModel string,
 	analyzedAt time.Time,
+	playbookSignature string,
 ) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE failure_groups
-		SET analysis_markdown = ?,
-		    analyzed_at       = ?,
-		    analysis_model    = ?
+		SET analysis_markdown            = ?,
+		    analyzed_at                  = ?,
+		    analysis_model               = ?,
+		    analysis_playbook_signature  = ?
 		WHERE group_id = ?
-	`, analysisMarkdown, analyzedAt, analysisModel, groupID)
+	`, analysisMarkdown, analyzedAt, analysisModel,
+		nullString(playbookSignature), groupID)
 	if err != nil {
 		return fmt.Errorf("save failure_group analysis: %w", err)
 	}
@@ -4415,6 +4426,7 @@ func (s *SQLiteStore) ListAnalyzedFailureGroupsByProject(
 		       first_seen, last_seen, event_count, affected_executions,
 		       cost_wasted_usd, sample_execution_id,
 		       analysis_markdown, analyzed_at, analysis_model,
+		       analysis_playbook_signature,
 		       severity_hint
 		FROM failure_groups
 		WHERE project_id = ?

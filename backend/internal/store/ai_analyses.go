@@ -28,6 +28,12 @@ type AIAnalysis struct {
 	CostUSD          float64   `json:"cost_usd"`
 	GeneratedAt      time.Time `json:"generated_at"`
 	AnalysisMarkdown string    `json:"analysis_markdown,omitempty"`
+	// PlaybookSignature is the SHA-256 hex digest of the playbook
+	// content that was injected into the AI prompt at the time
+	// this analysis was generated (migration 053, ai-analysis-
+	// staleness-tracking wave). Empty when the playbook lookup
+	// failed at write time OR when the row predates the column.
+	PlaybookSignature string `json:"playbook_signature,omitempty"`
 	// Joined fields, populated by ListAIAnalyses for the founder UI.
 	// Empty when reading via single-row paths.
 	ProjectName string `json:"project_name,omitempty"`
@@ -73,13 +79,14 @@ func (s *SQLiteStore) CreateAIAnalysis(
 		INSERT INTO ai_analyses (
 			analysis_id, failure_group_id, project_id, tenant_id,
 			model_id, input_tokens, output_tokens, cost_usd,
-			generated_at, analysis_markdown
+			generated_at, analysis_markdown, playbook_signature
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		a.AnalysisID, a.FailureGroupID, a.ProjectID, nullString(a.TenantID),
 		a.ModelID, a.InputTokens, a.OutputTokens, a.CostUSD,
 		a.GeneratedAt.UTC(), nullString(a.AnalysisMarkdown),
+		nullString(a.PlaybookSignature),
 	)
 	if err != nil {
 		return fmt.Errorf("insert ai analysis: %w", err)
@@ -103,7 +110,7 @@ func (s *SQLiteStore) ListAIAnalyses(
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT a.analysis_id, a.failure_group_id, a.project_id, a.tenant_id,
 		       a.model_id, a.input_tokens, a.output_tokens, a.cost_usd,
-		       a.generated_at, a.analysis_markdown,
+		       a.generated_at, a.analysis_markdown, a.playbook_signature,
 		       p.name, p.owner_email, p.tier,
 		       fg.failure_class, fg.signature
 		FROM ai_analyses a
@@ -171,13 +178,14 @@ func (s *PostgresStore) CreateAIAnalysis(
 		INSERT INTO ai_analyses (
 			analysis_id, failure_group_id, project_id, tenant_id,
 			model_id, input_tokens, output_tokens, cost_usd,
-			generated_at, analysis_markdown
+			generated_at, analysis_markdown, playbook_signature
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`,
 		a.AnalysisID, a.FailureGroupID, a.ProjectID, nullString(a.TenantID),
 		a.ModelID, a.InputTokens, a.OutputTokens, a.CostUSD,
 		a.GeneratedAt.UTC(), nullString(a.AnalysisMarkdown),
+		nullString(a.PlaybookSignature),
 	)
 	if err != nil {
 		return fmt.Errorf("insert ai analysis (postgres): %w", err)
@@ -198,7 +206,7 @@ func (s *PostgresStore) ListAIAnalyses(
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT a.analysis_id, a.failure_group_id, a.project_id, a.tenant_id,
 		       a.model_id, a.input_tokens, a.output_tokens, a.cost_usd,
-		       a.generated_at, a.analysis_markdown,
+		       a.generated_at, a.analysis_markdown, a.playbook_signature,
 		       p.name, p.owner_email, p.tier,
 		       fg.failure_class, fg.signature
 		FROM ai_analyses a
@@ -254,11 +262,11 @@ func scanAIAnalysesRows(rows *sql.Rows) ([]*AIAnalysis, error) {
 	out := make([]*AIAnalysis, 0, 32)
 	for rows.Next() {
 		a := &AIAnalysis{}
-		var tenantID, markdown, name, email, tier, fc, sig sql.NullString
+		var tenantID, markdown, playbookSig, name, email, tier, fc, sig sql.NullString
 		if err := rows.Scan(
 			&a.AnalysisID, &a.FailureGroupID, &a.ProjectID, &tenantID,
 			&a.ModelID, &a.InputTokens, &a.OutputTokens, &a.CostUSD,
-			&a.GeneratedAt, &markdown,
+			&a.GeneratedAt, &markdown, &playbookSig,
 			&name, &email, &tier,
 			&fc, &sig,
 		); err != nil {
@@ -269,6 +277,9 @@ func scanAIAnalysesRows(rows *sql.Rows) ([]*AIAnalysis, error) {
 		}
 		if markdown.Valid {
 			a.AnalysisMarkdown = markdown.String
+		}
+		if playbookSig.Valid {
+			a.PlaybookSignature = playbookSig.String
 		}
 		if name.Valid {
 			a.ProjectName = name.String

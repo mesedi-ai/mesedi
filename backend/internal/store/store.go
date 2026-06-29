@@ -643,6 +643,16 @@ type FailureGroup struct {
 	// (e.g. "claude-haiku-4-5"). Lets the dashboard render
 	// provenance ("Analyzed by claude-haiku-4-5 14m ago").
 	AnalysisModel *string `json:"analysis_model,omitempty"`
+	// AnalysisPlaybookSignature is the SHA-256 hex digest of the
+	// playbook content used at the time AnalysisMarkdown was
+	// generated (migration 053, ai-analysis-staleness-tracking
+	// wave). The dashboard compares this to the in-binary
+	// playbooks.Signature() for this failure_class; when they
+	// differ, a "Re-analyze to refresh" badge surfaces because
+	// the cached analysis was anchored on an older playbook.
+	// NULL on rows generated before this column existed; the
+	// dashboard treats NULL as "outdated, recommend re-analyze."
+	AnalysisPlaybookSignature *string `json:"analysis_playbook_signature,omitempty"`
 	// SeverityHint is the SDK-supplied severity at the time the
 	// failure_group was created (migration 047). Today only
 	// validator_failures populates it (via the SDK
@@ -2040,13 +2050,21 @@ type Store interface {
 	GetFailureGroupByClassSignature(ctx context.Context, projectID, failureClass, signature string) (*FailureGroup, error)
 	// SaveFailureGroupAnalysis stores the LLM-generated root-cause
 	// analysis on a failure_group (Mesedi #27). Sets
-	// analysis_markdown, analyzed_at, and analysis_model on the
-	// row. Idempotent: a subsequent call overwrites with the new
-	// analysis. Returns ErrNotFound when the group does not exist.
+	// analysis_markdown, analyzed_at, analysis_model, and
+	// analysis_playbook_signature on the row. Idempotent:
+	// a subsequent call overwrites with the new analysis.
+	// Returns ErrNotFound when the group does not exist.
+	//
+	// playbookSignature is the SHA-256 hex digest of the playbook
+	// content used at analysis time (migration 053,
+	// ai-analysis-staleness-tracking wave). Empty string stores as
+	// NULL — used when the playbook lookup failed and no signature
+	// is available; the dashboard treats NULL as "outdated."
 	SaveFailureGroupAnalysis(
 		ctx context.Context,
 		groupID, analysisMarkdown, analysisModel string,
 		analyzedAt time.Time,
+		playbookSignature string,
 	) error
 	// CountAIAnalysesSincePeriodStart counts the number of distinct
 	// failure_groups for projectID whose analyzed_at >= since.

@@ -3097,6 +3097,7 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+			fg.analysis_playbook_signature,
 			fg.severity_hint,
 			fg.resolved_at, fg.resolved_by
 		FROM failure_groups fg
@@ -3106,6 +3107,7 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 		         fg.first_seen, fg.last_seen, fg.event_count,
 		         fg.affected_executions, fg.sample_execution_id,
 		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+		         fg.analysis_playbook_signature,
 		         fg.severity_hint, fg.resolved_at, fg.resolved_by
 		ORDER BY fg.last_seen DESC
 		LIMIT `+limitPlaceholder+` OFFSET `+offsetPlaceholder+`
@@ -3183,6 +3185,7 @@ func (s *PostgresStore) GetFailureGroup(ctx context.Context, groupID string) (*F
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+			fg.analysis_playbook_signature,
 			fg.severity_hint,
 			fg.resolved_at, fg.resolved_by
 		FROM failure_groups fg
@@ -3192,6 +3195,7 @@ func (s *PostgresStore) GetFailureGroup(ctx context.Context, groupID string) (*F
 		         fg.first_seen, fg.last_seen, fg.event_count,
 		         fg.affected_executions, fg.sample_execution_id,
 		         fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+		         fg.analysis_playbook_signature,
 		         fg.severity_hint, fg.resolved_at, fg.resolved_by
 	`, groupID)
 	g, err := scanFailureGroup(row)
@@ -3210,14 +3214,22 @@ func (s *PostgresStore) SaveFailureGroupAnalysis(
 	ctx context.Context,
 	groupID, analysisMarkdown, analysisModel string,
 	analyzedAt time.Time,
+	playbookSignature string,
 ) error {
+	var sig any
+	if playbookSignature == "" {
+		sig = nil
+	} else {
+		sig = playbookSignature
+	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE failure_groups
-		SET analysis_markdown = $1,
-		    analyzed_at       = $2,
-		    analysis_model    = $3
-		WHERE group_id = $4
-	`, analysisMarkdown, analyzedAt, analysisModel, groupID)
+		SET analysis_markdown           = $1,
+		    analyzed_at                 = $2,
+		    analysis_model              = $3,
+		    analysis_playbook_signature = $4
+		WHERE group_id = $5
+	`, analysisMarkdown, analyzedAt, analysisModel, sig, groupID)
 	if err != nil {
 		return fmt.Errorf("save failure_group analysis: %w", err)
 	}
@@ -3312,6 +3324,7 @@ func (s *PostgresStore) ListAnalyzedFailureGroupsByProject(
 		       first_seen, last_seen, event_count, affected_executions,
 		       cost_wasted_usd, sample_execution_id,
 		       analysis_markdown, analyzed_at, analysis_model,
+		       analysis_playbook_signature,
 		       severity_hint
 		FROM failure_groups
 		WHERE project_id = $1
