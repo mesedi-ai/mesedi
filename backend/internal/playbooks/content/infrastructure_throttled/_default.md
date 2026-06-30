@@ -2,15 +2,21 @@
 
 An LLM provider returned HTTP 429, or your application's circuit breaker tripped, or a hard quota was exhausted. This is an operations signal, not an agent-code bug: the agent did the right thing, the upstream said no.
 
-The signature is `infrastructure_throttled:<reason>` where reason is one of `rate_limited`, `circuit_breaker_open`, or `quota_exhausted`.
+The signature is `infrastructure_throttled:<reason>:<provider>` (and may include a third segment for the dimension or circuit state). The three canonical reasons are `rate_limit`, `circuit_breaker`, and `quota_exhausted`. Common shapes:
+
+- `infrastructure_throttled:rate_limit:<provider>` or `infrastructure_throttled:rate_limit:<provider>:<dimension>` (e.g. `tokens_per_minute`)
+- `infrastructure_throttled:circuit_breaker:<provider>:<state>` (state defaults to `open` when unspecified)
+- `infrastructure_throttled:quota_exhausted:<provider>`
+
+Mesedi auto-emits these signals from the `instrument_*` modules for Anthropic, OpenAI, Cohere, and Gemini (sync + async + streaming paths). Custom code paths can emit manually via the `emit_infrastructure_event` SDK helper.
 
 ## What's usually happening
 
 The reason in the signature usually tells the story:
 
-- **`rate_limited`** means the provider returned HTTP 429 (Anthropic) or 429 with a Retry-After header (OpenAI). You are above the per-minute, per-day, or per-key request limit configured on your provider account.
+- **`rate_limit`** means the provider returned an HTTP 429 (with or without a `Retry-After` header). You are above the per-minute, per-day, or per-key limit configured on your provider account. The optional `<dimension>` suffix (e.g. `tokens_per_minute`, `requests_per_minute`) names which axis you crossed.
 
-- **`circuit_breaker_open`** means your application code's circuit breaker tripped because a downstream dependency had too many consecutive failures. The breaker now refuses calls for a cool-down period to avoid hammering a broken upstream. The downstream was the cause; the breaker is the symptom.
+- **`circuit_breaker`** means your application code's circuit breaker tripped because a downstream dependency had too many consecutive failures. The breaker now refuses calls for a cool-down period to avoid hammering a broken upstream. The downstream was the cause; the breaker is the symptom. The signature carries the breaker state (`open`, `half_open`, etc.) so the "half_open re-test failed" pattern stays distinct from a fresh `open` trip.
 
 - **`quota_exhausted`** means you hit a hard provider limit such as a monthly spend cap, a Pro plan token allotment, or an organization-level budget. The provider will not accept calls until the limit resets or the cap is raised.
 
@@ -24,9 +30,9 @@ Look at the failure_group's affected-executions list to see how widespread the t
 
 The remediation depends on the reason:
 
-- **Rate limited.** Add exponential backoff with jitter at the SDK call site. If you are using the official Anthropic or OpenAI Python SDK, both have built-in retry logic but it may need to be configured. For high-volume workloads, consider splitting traffic across multiple API keys, requesting a rate-limit increase from the provider, or implementing a per-agent rate limiter that smooths spikes.
+- **`rate_limit`.** Add exponential backoff with jitter at the SDK call site. The `instrument_*` modules already capture the provider's `Retry-After` value into the `retry_after_ms` field on the event payload — honor it from your retry layer rather than rolling your own delay. For high-volume workloads, consider splitting traffic across multiple API keys, requesting a rate-limit increase from the provider, or implementing a per-agent rate limiter that smooths spikes.
 
-- **Circuit breaker open.** Find what the breaker is protecting. Whatever upstream the breaker is in front of is failing. Fix that upstream; the breaker will close itself once it sees healthy calls again. If the breaker is over-aggressive (tripping on transient errors that recover on their own), tune its thresholds.
+- **`circuit_breaker`.** Find what the breaker is protecting. Whatever upstream the breaker is in front of is failing. Fix that upstream; the breaker will close itself once it sees healthy calls again. If the breaker is over-aggressive (tripping on transient errors that recover on their own), tune its thresholds.
 
 - **Quota exhausted.** Raise the quota with the provider, or implement an application-side budget that caps spending below the provider quota so you fail fast and gracefully instead of mid-execution. Cross-reference with Mesedi's `cost_velocity` failure groups to identify which executions are driving the spend.
 
@@ -40,5 +46,5 @@ Throttling is not a code bug, and the right people to triage it are operations o
 
 ## Related detectors
 
-- **`provider_incident:rate_limited`** is the sibling cross-tenant signal. If multiple unrelated Mesedi projects all see rate-limited errors against the same provider in the same window, the cause is provider-side and the playbook is "wait for the provider to recover," not "tune your retry logic." `infrastructure_throttled` is YOUR project's per-tenant view; `provider_incident` is the cross-tenant view. Open both pages side-by-side when triaging — if the provider_incident group is active, your local backoff and quota changes will not help until the provider stabilizes.
+- **`provider_incident:<provider>:rate_limited`** is the sibling cross-tenant signal. (`provider_incident`'s error_class vocabulary uses `rate_limited` — the past-tense form — distinct from infrastructure_throttled's `rate_limit` reason. They're sourced from different events: infra_throttled from infrastructure_event.reason; provider_incident from the canonical error-class mapping of provider exceptions.) If multiple unrelated Mesedi projects all see rate_limited errors against the same provider in the same window, the cause is provider-side and the playbook is "wait for the provider to recover," not "tune your retry logic." `infrastructure_throttled` is YOUR project's per-tenant view; `provider_incident` is the cross-tenant view. Open both pages side-by-side when triaging — if the provider_incident group is active, your local backoff and quota changes will not help until the provider stabilizes.
 - **`cost_velocity`** is the financial sibling. Throttling and high spend often correlate (more calls per minute → both more throttled retries AND more dollars per minute). Cross-reference to identify whether the same code path is driving both.
