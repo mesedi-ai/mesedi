@@ -2,19 +2,25 @@
 
 Multiple distinct tenants in this project hit the same LLM provider error (Anthropic, OpenAI, Gemini, Bedrock, Mistral) within the last 15 minutes. This is a cross-tenant signal that the provider is almost certainly having an incident rather than per-tenant code being independently broken. The detector defaults to firing when at least two distinct tenants are affected.
 
-The signature is `provider_incident:<provider>:<error_class>` so each unique (provider, error_class) pair clusters separately. An Anthropic 529 incident and an OpenAI rate-limit incident at the same time would produce two distinct groups.
+The signature is `provider_incident:<provider>:<error_class>` (e.g. `provider_incident:anthropic:service_unavailable`, `provider_incident:openai:rate_limited`) so each unique (provider, error_class) pair clusters separately. An Anthropic 529 incident and an OpenAI rate-limit incident at the same time would produce two distinct groups.
 
 ## What's usually happening
 
-The signature names the provider and the error class. Common patterns:
+The error_class segment is drawn from Mesedi's canonical provider-error vocabulary (sourced from `spec/error_classes.yaml`). Only the **provider-side** subset can trigger this detector — customer-side classes (bad API keys, malformed requests) are explicitly excluded because they signal customer code defects, not provider outages.
 
-- **`provider_5xx`** means the provider's API returned 500, 502, 503, or 529. The provider is having infrastructure trouble. Check their status page.
+Provider-side error classes:
 
-- **`connection_refused` or `timeout`** means TCP-level connectivity issues. Could be the provider, could be your network. If only one provider is affected, the provider is the more likely cause; if multiple providers are affected simultaneously, look at your network.
+- **`service_unavailable`** is the canonical class for HTTP 500 / 502 / 503 / 529 — the provider's API is returning infrastructure-trouble status codes. Check their status page first.
 
-- **`auth_error`** means credentials are being rejected. Cross-tenant auth errors usually mean the project's shared credentials were rotated or revoked, not a provider incident. Verify the API key.
+- **`internal_error`** is the provider's "something went wrong on our side" response (typically a generic 500 with no further detail). Same investigation as `service_unavailable`.
 
-- **`rate_limited`** is broadly the same as `infrastructure_throttled` but cross-tenant: many tenants are hitting the same provider rate limit, which can mean an org-level quota was lowered or your traffic distribution shifted.
+- **`timeout`** means the provider's response exceeded the SDK's timeout window. Could be provider-side latency spikes or network-path issues. If only one provider is affected, lean provider-side; if multiple providers timeout simultaneously, look at your egress network.
+
+- **`rate_limited`** is broadly the same as `infrastructure_throttled:rate_limit:*` but cross-tenant: many tenants are hitting the same provider rate limit, which can mean an org-level quota was lowered or your traffic distribution shifted.
+
+- **`quota_exhausted`** is the same as `infrastructure_throttled:quota_exhausted:*` but cross-tenant: many tenants tripping the same hard cap simultaneously, e.g. a shared monthly-spend ceiling across the project.
+
+Customer-side error classes (`invalid_api_key`, `client_error`, `unknown`) are filtered out of provider_incident clustering by the `IsProviderSideErrorClass` guard. Cross-tenant credential failures are usually a project-wide rotation event, not a provider outage, and surface in different places.
 
 ## How to investigate
 
@@ -42,4 +48,4 @@ After the provider recovers or you cut over to a fallback, the provider_incident
 
 ## A note on cross-tenant detection
 
-This detector is specifically a cross-tenant signal. It looks at the `tenant_id` field on executions and counts distinct tenants with the same provider error in the recent window. If you do not populate `tenant_id` on your executions (single-tenant project, or you have not wired the field), this detector cannot fire. Cross-reference with the cost-by-tenant report to see whether you are passing the tenant_id correctly.
+This detector is specifically a cross-tenant signal. It looks at the `tenant_id` field on executions and counts distinct tenants with the same provider error in the recent window. If you do not populate `tenant_id` on your executions (single-tenant project, or you have not wired the field), **this detector silently does not fire** — there is no error, no warning, just no failure_group. Cross-reference with the cost-by-tenant report to see whether you are passing the tenant_id correctly; if that report shows everything under a single empty-string tenant bucket, provider_incident is non-functional for your project until you start populating tenant_id.
