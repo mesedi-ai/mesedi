@@ -34,6 +34,16 @@ The remediation depends on which of the three causes:
 
 After deploying, look at the next executions in the same project. The `input_tokens` cumulative on each execution should stay well below the window value. Mesedi will continue to issue `context_overflow:warn` for runs that approach 90 percent; you can use the warn signal as a leading indicator before you start truncating.
 
+## Per-project tunables
+
+Three configurable knobs:
+
+- **`high_pct`** (default 0.90; bounds [0.5, 1.0]; no tier cap). The soft alarm threshold — at or above this utilization, the detector emits `context_overflow:warn:<model>`. Note: the knob name uses `high`, but the signature level uses `warn` (historical naming retained for dashboard signature stability).
+- **`critical_pct`** (default 1.00; bounds [0.5, 1.0]; no tier cap). The hard alarm threshold — at or above this utilization, the detector emits `context_overflow:fail:<model>` instead. Must satisfy `high_pct < critical_pct`; violation reverts both to defaults.
+- **`custom_model_windows`** (default empty map; max 50 entries; per-model values bounded [1024, 10,000,000]). A JSON map of `model_id → window_in_tokens` for models not in the static registry (Ollama tag-style identifiers, fine-tuned models, proxied deployments) OR for known models where you want to enforce a tighter window (e.g. behind a proxy that caps inputs). Overrides win over the static registry even for known models.
+
+All three default to historical hardcoded values when the per-project read fails, with a `config_fallback` system_event recorded so persistent failures surface in the dashboard.
+
 ## A note on what truncation looks like
 
 Providers do not always announce truncation explicitly. The output may look coherent because the model is filling in plausible responses to a prompt missing its earlier sections. The customer-visible symptom is usually subtle quality drift rather than an outright error: the agent ignores instructions you thought you gave it, or forgets context from earlier in the session. If your agent's outputs degrade over a long conversation, context overflow is a likely culprit.
