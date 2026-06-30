@@ -149,7 +149,8 @@ func init() {
 		Detector:     "grounding_failure",
 		ThresholdKey: "mean_floor",
 		ValueType:    "float",
-		Description: "Below this rolling mean score, grounding_failure " +
+		Description: "Below this mean score across the execution's " +
+			"higher_is_better=true eval_score events, grounding_failure " +
 			"fires. Default 0.5 — half the evaluator's pass band.",
 		Default: 0.5,
 		Parse: func(valueJSON, _ string) (any, error) {

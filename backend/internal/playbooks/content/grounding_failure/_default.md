@@ -4,13 +4,17 @@ An external evaluator that you wired into your agent (Ragas, Promptfoo, Vectara 
 
 The signature is `grounding_failure:<evaluator_id>:<metric_type>` so each unique (evaluator, metric) pair clusters separately. A project running both Ragas faithfulness and HHEM hallucination produces two distinct groups, even if both fire on the same executions.
 
+The detector emits **all distinct (evaluator, metric) failures per execution**, capped at 20. A RAG pipeline whose Ragas faithfulness, Ragas answer-relevancy, and HHEM hallucination all flag the same output produces three failure_groups — not one.
+
 ## What's usually happening
 
-Two firing conditions:
+Two firing conditions, in priority order:
 
-1. **Any single `eval_score` event has `passed=false`.** The evaluator's own pass/fail verdict is authoritative; Mesedi does not second-guess it.
+1. **Any single `eval_score` event has `passed=false`.** The evaluator's own pass/fail verdict is authoritative; Mesedi does not second-guess it. This pass runs first; matching (evaluator, metric) pairs fire under this path.
 
-2. **Mean score across the execution's `higher_is_better` evaluators falls below 0.5.** A coin-flip floor for the heuristic interpretation when the evaluator does not declare an explicit verdict.
+2. **Mean score across the execution's `higher_is_better=true` evaluators falls below the floor.** The default floor is 0.5 (a coin-flip), tunable globally via `mean_floor` and per-evaluator via `per_evaluator_floors`. Only `higher_is_better=true` evaluators participate in the mean rollup — inverse metrics like `hallucination_rate` need their own threshold semantics (banked for a future wave).
+
+Same (evaluator, metric) pair triggering both passes fires once (the pass=false path wins, dedup ensures no double-emit).
 
 In both cases the agent's output diverged enough from the retrieved context (or whatever ground truth the evaluator is checking against) that the evaluator flagged it.
 
@@ -38,11 +42,20 @@ The remediation depends on the root cause:
 
 - **Retrieval is wrong.** Audit the embeddings, the retrieval scoring, and the re-ranker. Common fixes: switch to a domain-tuned embedding model, add a metadata filter that the question implies, lower the retrieval similarity threshold so more candidates are considered before re-ranking.
 
-- **Evaluator calibration.** Lower the threshold or switch evaluators. Validate the change against a hand-labeled golden set before deploying.
+- **Evaluator calibration.** Lower the threshold (use `per_evaluator_floors` to tune the specific evaluator that's misbehaving without disturbing the others) or switch evaluators. Validate the change against a hand-labeled golden set before deploying.
 
 ## How to test the fix
 
 After deploying, run the same workload and watch the `eval_score` events on new executions. The failure_group should plateau and eventually stop accumulating new entries. If your evaluator emits continuous scores, watch the rolling mean across executions; it should trend upward.
+
+## Per-project tunables
+
+Two configurable knobs:
+
+- **`mean_floor`** (default 0.5; bounds [0.0, 1.0]; no tier cap). The global default floor used for any `(evaluator_id, metric_type)` pair not present in `per_evaluator_floors`. Defensive: values outside [0.0, 1.0] revert to 0.5.
+- **`per_evaluator_floors`** (default empty map; max 50 entries; values bounded [0.0, 1.0]). Per-evaluator override keyed `"evaluator_id:metric_type"` → float. Lets one strict evaluator have a tighter floor without disturbing the rest. Lookups fall back to `mean_floor` when a key is absent.
+
+The 20-match-per-execution cap is hardcoded.
 
 ## A note on what eval_score events are not
 
