@@ -48,6 +48,18 @@ Lexical drift is unusual among Mesedi failure classes in that the "fix" is often
 
 - **Don't tune the threshold downward to chase signal.** The 0.45 floor was empirically calibrated against real traffic. Lowering it generates more false positives faster than it generates true positives. If you want more sensitivity, the right move is to add a complementary semantic-drift detector (embedding-based) once that capability ships, not to make the lexical one twitchier.
 
+## Per-project tunables
+
+The three bucket cutoffs are configurable via the detector_thresholds primitive:
+
+- **`lexical_threshold_low`** (default 0.45; bounds [0.0, 1.0]). The mild-shift cutoff.
+- **`lexical_threshold_medium`** (default 0.55; bounds [0.0, 1.0]). The moderate-shift cutoff.
+- **`lexical_threshold_high`** (default 0.70; bounds [0.0, 1.0]). The severe-shift cutoff.
+
+Cross-threshold ordering (`low < medium < high`) is enforced detector-side. If a customer writes values that violate the ordering OR any value falls outside [0.0, 1.0], the detector defensively reverts the WHOLE set to defaults rather than producing bucketing chaos. Customer-tuned values are embedded into the signature (`lexical_drift_0.60+` if the customer set low=0.60) so dashboard filters stay meaningful for tuned projects.
+
+No tier cap on any of the three — alerting sensitivity is the customer's call regardless of plan.
+
 ## Why this detector exists separately from new-model
 
 Both detectors are in the `drift` class because they share the same operational pattern, something upstream changed without coordination. But they're separated because the diagnostic and remediation are completely different:

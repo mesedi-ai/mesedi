@@ -1,33 +1,33 @@
-// Drift detection, v0.0.1 model-mix signal.
+// Drift detection. Two complementary detectors share this file, both
+// emitting under the same `drift` failure_class but with distinct
+// signature shapes so the dashboard separates the two causes:
 //
-// This file implements the cheapest useful drift signal: when an
-// execution uses a model the project hasn't seen in a recent window,
-// flag it as drift. Real customer scenarios this catches:
+//   - DetectModelDrift catches CATEGORICAL drift: an execution used a
+//     model the project hasn't seen in its recent history. Signature
+//     shape: "new_model:<model_name>". Real customer scenarios:
+//     uncoordinated model swap (claude-3-opus → claude-opus-4-6),
+//     a misconfiguration routing traffic to the wrong model, an
+//     A/B-test variant leaking into production.
 //
-//   - Developer swapped from claude-3-opus to claude-opus-4-6 without
-//     announcing it, and downstream metrics shifted.
-//   - A misconfiguration sent traffic to the wrong model (e.g. haiku
-//     instead of sonnet) for a portion of agents.
-//   - An A/B test starts shipping a new model to production traffic
-//     that wasn't supposed to leave the test cohort.
+//   - DetectLexicalDrift / DetectLexicalDriftWithThresholds catches
+//     DISTRIBUTIONAL drift: an execution's llm_call user_messages
+//     diverged from the project's historical 3-gram distribution
+//     beyond a configured cosine cutoff. Signature shapes:
+//     "lexical_drift_<cutoff>+" with the tripped bucket's value
+//     (defaults 0.45/0.55/0.70 — low/medium/high). Per-project
+//     tunable via DriftThresholds.
 //
-// What this detector explicitly is NOT:
+// What this file does NOT do: it does not consider WHICH agent or
+// code path used the new model (path-stable variant deferred until
+// per-execution agent identifiers land). It also does not perform
+// semantic-but-lexically-similar drift detection ("requirement" ↔
+// "what is required" with high cosine similarity); that needs
+// embedding-based detection and is not shipped here.
 //
-//   - It is not lexical / semantic drift detection. Those signals
-//     require embeddings infrastructure and are deliberately deferred
-//     to a later sub-slice. The honest framing is: v0.0.1 catches
-//     "categorical" drift (the model field changed); future versions
-//     catch "distributional" drift (the prompts evolved continuously).
-//
-//   - It does not consider WHICH agent or code path used the new model.
-//     For a single-purpose project this is fine; for projects running
-//     heterogeneous agents, false positives are possible if a new agent
-//     legitimately introduces a new model. The path-stable variant
-//     comes when we add per-execution agent identifiers.
-//
-// Design choice: pure function, no side effects. The handler
-// orchestrates: pulls inputs from the store, calls DetectModelDrift,
-// writes the result back via Store.GroupDriftSignal.
+// Design choice: both detectors are pure functions, no side effects.
+// The handler orchestrates: pulls inputs from the store, calls
+// DetectModelDrift + DetectLexicalDrift, writes the result back via
+// Store.GroupDriftSignal.
 package detectors
 
 import (

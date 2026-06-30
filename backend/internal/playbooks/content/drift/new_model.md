@@ -2,7 +2,7 @@
 
 An execution in this project used **a model name that hasn't appeared in the project's recent history**. Mesedi's drift detector compares the set of models used in the current execution against the set used in prior executions over the historical window and flags any that are new. The signature on this failure group encodes the alphabetically-first new model, e.g. `new_model:claude-opus-4-6`.
 
-This is categorical drift, the model identifier literally changed. It's the cheapest useful drift signal and v0.0.1 ships only this version. Future Mesedi versions catch distributional drift (continuous prompt evolution) via the lexical-drift detector, which is the sibling failure-group class on this dashboard.
+This is **categorical** drift — the model identifier literally changed. The sibling `lexical_drift_<cutoff>+` signature catches **distributional** drift (the prompt content shifted continuously over time). Both signatures share the `drift` failure_class but produce distinct failure_groups so the dashboard can separate "the model field changed" from "the prompt distribution shifted." Either or both can fire on the same project depending on what shipped.
 
 ## Why this matters
 
