@@ -3,7 +3,11 @@
 // persistence: each llm_call / tool_call payload is scanned against
 // the rule registry, matched secrets are replaced with stable
 // `[REDACTED:rule_id]` tokens, and a sibling dlp_scan_result event is
-// generated for each event that had at least one critical/high hit.
+// generated for each event that had ANY hit (critical, high, or
+// medium). The handler's downstream FindFirstDLPSignalForSeverities
+// query honors the per-project DataLeakageThresholds.AllowedSeverities
+// knob (data_leakage.G5 wave) to decide which sibling severities
+// promote to a failure_group; defaults are still ["critical", "high"].
 //
 // The sibling event lets the downstream detector aggregate by rule_id
 // without re-scanning, and gives the dashboard a per-event log of
@@ -212,17 +216,21 @@ func (h *Handlers) applyDLPToBatch(
 		}
 		out = append(out, evt)
 
-		// Generate the sibling dlp_scan_result event only when there
-		// are hits at critical or high severity. medium-only hits
-		// are recorded in the parent (the redaction stays) but do
-		// not page anyone.
+		// Generate the sibling dlp_scan_result event for ANY hit
+		// (critical, high, OR medium). Promotion to failure_group is
+		// gated downstream at the handler via
+		// FindFirstDLPSignalForSeverities, which honors the
+		// per-project DataLeakageThresholds.AllowedSeverities knob
+		// (data_leakage.G5 wave). Pre-filtering here would silently
+		// suppress the medium tier even for customers who explicitly
+		// opted into it via severity_policy=["critical","high","medium"].
+		// Default-config customers (["critical","high"]) see identical
+		// behavior — medium sibling events are stored but never
+		// queried for promotion.
 		if len(allHits) == 0 {
 			continue
 		}
 		highest := dlp.HighestSeverity(allHits)
-		if highest != dlp.SeverityCritical && highest != dlp.SeverityHigh {
-			continue
-		}
 		sibling, err := buildDLPScanResultEvent(evt, allHits, highest)
 		if err != nil {
 			h.Logger.Warn("dlp: build sibling event failed (parent redacted, no cluster signal)",
