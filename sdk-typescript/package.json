@@ -1,6 +1,6 @@
 {
   "name": "mesedi",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Mesedi SDK — guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence.",
   "license": "MIT",
   "homepage": "https://mesedi.ai",
@@ -32,13 +32,25 @@
     "./integrations/openai_agents": {
       "types": "./dist/integrations/openai_agents.d.ts",
       "import": "./dist/integrations/openai_agents.js"
+    },
+    "./integrations/mastra": {
+      "types": "./dist/integrations/mastra.d.ts",
+      "import": "./dist/integrations/mastra.js"
     }
   },
   "peerDependencies": {
-    "ai": ">=3.0.0"
+    "ai": ">=3.0.0",
+    "@mastra/core": ">=1.0.0",
+    "@mastra/observability": ">=1.0.0"
   },
   "peerDependenciesMeta": {
     "ai": {
+      "optional": true
+    },
+    "@mastra/core": {
+      "optional": true
+    },
+    "@mastra/observability": {
       "optional": true
     }
   },
@@ -75,6 +87,8 @@
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^20.11.0",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "@mastra/core": "^1.48.0",
+    "@mastra/observability": "^1.15.2"
   }
 }
