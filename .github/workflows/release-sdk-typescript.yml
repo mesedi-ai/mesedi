@@ -86,17 +86,28 @@ jobs:
         working-directory: sdk-typescript
         run: npm run build
 
-      - name: Publish to npm with provenance
+      - name: Publish to npm
         # Authentication is via npm Trusted Publishing (OIDC), no
         # NPM_TOKEN secret needed. The `id-token: write` permission at
         # the workflow level provides the Sigstore OIDC token; npm
         # validates the OIDC claims against the Trusted Publisher
         # config (org=mesedi-ai, repo=mesedi, workflow=release-sdk-
         # typescript.yml, environment=npm) before accepting the
-        # publish. The same OIDC token also signs the provenance
-        # artifact.
+        # publish.
+        #
+        # PROVENANCE TEMPORARILY DISABLED (Wave 4.B.C).
+        #
+        # Sigstore rejects `--provenance` when the source GitHub repo
+        # is private, returning a 422 "Unsupported GitHub Actions
+        # source repository visibility" error. mesedi-ai/mesedi is
+        # private until #157 flips it public.
+        #
+        # RESTORE THIS FLAG the moment #157 lands. One-line change:
+        # replace `npm publish --access public` below with
+        # `npm publish --provenance --access public`. Post-launch
+        # task tracked separately.
         working-directory: sdk-typescript
-        run: npm publish --provenance --access public
+        run: npm publish --access public
 
       - name: Create GitHub Release
         # Release notes come from sdk-typescript/RELEASE_NOTES.md
