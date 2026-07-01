@@ -99,6 +99,14 @@ jobs:
         run: npm publish --provenance --access public
 
       - name: Create GitHub Release
+        # Release notes come from sdk-typescript/RELEASE_NOTES.md
+        # (curated per-release copy). Auto-generation is deliberately
+        # OFF because commit messages between SDK releases include
+        # internal task numbers ("Mesedi #204", "Tier 3 batch",
+        # "PL7 audit", etc.) which the #282 no-forward-promises
+        # policy forbids on customer-facing surfaces. Whoever cuts
+        # a new SDK release updates RELEASE_NOTES.md first.
         uses: softprops/action-gh-release@v3
         with:
-          generate_release_notes: true
+          generate_release_notes: false
+          body_path: sdk-typescript/RELEASE_NOTES.md
