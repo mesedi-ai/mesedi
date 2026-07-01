@@ -1,8 +1,8 @@
 // Package playbooks serves canonical fix descriptions for Mesedi
-// failure-class signatures. This is Mesedi's Tier 1 repair surface
-// (per docs/REPAIR_TIER_ROADMAP.md): for each failure-class signature
-// the dashboard surfaces a markdown-formatted explanation of what the
-// pattern usually means and what the standard remediation looks like.
+// failure-class signatures. This is Mesedi's Tier 1 repair surface:
+// for each failure-class signature the dashboard surfaces a
+// markdown-formatted explanation of what the pattern usually means
+// and what the standard remediation looks like.
 // Zero Mesedi liability, text only, no actions taken. The customer's
 // engineer reads the playbook and decides.
 //

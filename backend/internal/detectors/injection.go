@@ -2,16 +2,9 @@
 // the storage layer (where SQL handles the predicate-pushable bits) or
 // the handler layer (which orchestrates but doesn't classify).
 //
-// Today's only detector is prompt-injection, regex pattern matching
-// against LLM user messages. Future detectors planned for this package:
-//
-//   - Identical-call loop detector (the 3rd Phase-4 sub-detector)
-//   - Similar-call loop detector (cosine similarity over embeddings)
-//   - Drift detector (semantic drift over time)
-//   - Cost-velocity detector (cost > baseline × N)
-//
-// All detectors should be PURE FUNCTIONS, given input text/events,
-// return a classification. Side effects (DB writes) live in handlers.
+// Detectors in this package are PURE FUNCTIONS: given input text or
+// events, they return a classification. Side effects (DB writes) live
+// in handlers.
 package detectors
 
 import "regexp"
