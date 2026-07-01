@@ -97,17 +97,23 @@ jobs:
         #
         # PROVENANCE TEMPORARILY DISABLED (Wave 4.B.C).
         #
-        # Sigstore rejects `--provenance` when the source GitHub repo
-        # is private, returning a 422 "Unsupported GitHub Actions
-        # source repository visibility" error. mesedi-ai/mesedi is
-        # private until #157 flips it public.
+        # Sigstore rejects provenance signatures when the source
+        # GitHub repo is private, returning a 422 "Unsupported
+        # GitHub Actions source repository visibility" error.
+        # mesedi-ai/mesedi is private until #157 flips it public.
         #
-        # RESTORE THIS FLAG the moment #157 lands. One-line change:
-        # replace `npm publish --access public` below with
-        # `npm publish --provenance --access public`. Post-launch
+        # We use `--no-provenance` because npm 11+ auto-adds
+        # provenance when it detects the `id-token: write`
+        # permission + a Trusted Publisher config, even without
+        # a `--provenance` flag on the command line. Removing the
+        # flag alone is NOT enough. `--no-provenance` is the
+        # explicit opt-out.
+        #
+        # RESTORE the moment #157 lands: replace `--no-provenance`
+        # with `--provenance` on the run line below. Post-launch
         # task tracked separately.
         working-directory: sdk-typescript
-        run: npm publish --access public
+        run: npm publish --no-provenance --access public
 
       - name: Create GitHub Release
         # Release notes come from sdk-typescript/RELEASE_NOTES.md
