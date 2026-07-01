@@ -32,7 +32,8 @@ import (
 
 // stubAuditStore embeds store.Store so it satisfies the interface
 // without listing every method; the tests below only reach the audit
-// methods plus GetProjectTenantID for the RBAC path.
+// methods plus GetProjectTenantID for the RBAC path and (Wave 3.F)
+// GetProject for the tier gate.
 type stubAuditStore struct {
 	store.Store
 
@@ -47,6 +48,12 @@ type stubAuditStore struct {
 	listedProjectID string
 	// Limit the lister was called with.
 	listedLimit int
+
+	// Tier returned by GetProject. Empty string normalizes to hobby
+	// (Wave 3.F tier gate default). Set to "team" or "enterprise"
+	// for the happy-path tests, leave empty to exercise the Hobby-
+	// refused path.
+	projectTier string
 }
 
 func (s *stubAuditStore) CreateAuditEvent(_ context.Context, e *store.AuditEvent) error {
@@ -71,6 +78,17 @@ func (s *stubAuditStore) ListAuditEventsByProject(
 // requireRole gate without us having to set up a full member row.
 func (s *stubAuditStore) GetProjectTenantID(_ context.Context, _ string) (*string, error) {
 	return nil, nil
+}
+
+// GetProject returns a project with the stub's configured tier so
+// the Wave 3.F tier gate in HandleListAuditEvents finds a value to
+// compare. Project ID is echoed to satisfy any handler that reads it
+// back; other fields are zero and unused by the audit tier check.
+func (s *stubAuditStore) GetProject(_ context.Context, projectID string) (*store.Project, error) {
+	return &store.Project{
+		ProjectID: projectID,
+		Tier:      s.projectTier,
+	}, nil
 }
 
 func Test_newAuditEventID_FormatAndUniqueness(t *testing.T) {
@@ -206,7 +224,11 @@ func Test_HandleListAuditEvents_HappyPath_ReturnsRows(t *testing.T) {
 			CreatedAt:  now.Add(-1 * time.Hour),
 		},
 	}
-	s := &stubAuditStore{listed: rows}
+	// Wave 3.F: tier must be Team-or-higher for the endpoint to
+	// return rows; Hobby now hits a 402 paywall before the store
+	// call. Set projectTier explicitly so this happy-path test
+	// exercises the Team-tier code path.
+	s := &stubAuditStore{listed: rows, projectTier: TierTeam}
 	h := &Handlers{Store: s, Logger: quietLogger()}
 
 	r := httptest.NewRequest(http.MethodGet, "/audit-log", nil)
@@ -237,6 +259,58 @@ func Test_HandleListAuditEvents_HappyPath_ReturnsRows(t *testing.T) {
 	if resp.Events[0].EventID != "audit_newest" {
 		t.Errorf("first event id = %q, want %q (store-order preserved)",
 			resp.Events[0].EventID, "audit_newest")
+	}
+}
+
+// Wave 3.F (closes #283 / #284): audit logs moved from Hobby-included
+// to Team-only. Hobby admins hitting /audit-log get 402 with an
+// upgrade nudge. The store's ListAuditEventsByProject must NOT be
+// called on the Hobby path — the tier gate short-circuits before it.
+func Test_HandleListAuditEvents_Hobby_Refused402(t *testing.T) {
+	s := &stubAuditStore{projectTier: TierHobby}
+	h := &Handlers{Store: s, Logger: quietLogger()}
+
+	r := httptest.NewRequest(http.MethodGet, "/audit-log", nil)
+	r = r.WithContext(withProjectID(r.Context(), "proj-hobby"))
+	w := httptest.NewRecorder()
+
+	h.HandleListAuditEvents(w, r)
+
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected 402 Payment Required for Hobby tier, got %d (body: %s)",
+			w.Code, w.Body.String())
+	}
+	// Store must not have been consulted for rows once the tier
+	// gate fires — otherwise a bug in the ordering would leak a
+	// paywalled feature to Hobby with an oversized response.
+	if s.listedProjectID != "" {
+		t.Errorf("Hobby request should short-circuit before ListAuditEventsByProject; "+
+			"got listedProjectID = %q", s.listedProjectID)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Cloud Team") {
+		t.Errorf("expected 402 body to mention Cloud Team upgrade; got %q", body)
+	}
+}
+
+// Wave 3.F: empty tier string normalizes to Hobby (strictest cap,
+// safest default) via normalizeTier, so an unlabeled project — which
+// can happen for pre-tier-labeling legacy rows — is treated exactly
+// like Hobby and refused. Belt-and-suspenders coverage for the same
+// tier check as above.
+func Test_HandleListAuditEvents_EmptyTier_TreatedAsHobby(t *testing.T) {
+	s := &stubAuditStore{projectTier: ""}
+	h := &Handlers{Store: s, Logger: quietLogger()}
+
+	r := httptest.NewRequest(http.MethodGet, "/audit-log", nil)
+	r = r.WithContext(withProjectID(r.Context(), "proj-unlabeled"))
+	w := httptest.NewRecorder()
+
+	h.HandleListAuditEvents(w, r)
+
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected 402 for empty-tier project (normalized to Hobby); "+
+			"got %d (body: %s)", w.Code, w.Body.String())
 	}
 }
 

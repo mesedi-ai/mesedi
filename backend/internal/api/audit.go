@@ -277,8 +277,17 @@ type ListAuditEventsResponse struct {
 }
 
 // HandleListAuditEvents returns the last 100 audit events for the
-// calling project. Admin-role only. Returned in created_at DESC
-// order so the UI can render newest first without re-sorting.
+// calling project. Admin-role AND Team-or-higher tier only. Returned
+// in created_at DESC order so the UI can render newest first without
+// re-sorting.
+//
+// Wave 3.F (closes #283 / #284): audit logs moved from Hobby-included
+// to Team-only. Rationale: audit logs on a single-admin Hobby project
+// are useless (all events are "you did it"); the real product value
+// is multi-admin "who did what," which requires the collaboration
+// story that only Team+ supports. Hobby customers hitting this
+// endpoint get 402 with an upgrade nudge, mirroring the Hobby AI-
+// analysis pay-per-use paywall.
 func (h *Handlers) HandleListAuditEvents(w http.ResponseWriter, r *http.Request) {
 	if !h.requireRole(w, r, "admin") {
 		return
@@ -286,6 +295,24 @@ func (h *Handlers) HandleListAuditEvents(w http.ResponseWriter, r *http.Request)
 	projectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+	// Tier gate — Team or Enterprise only (Wave 3.F). Allowlist
+	// pattern rather than denylist so an empty / unknown tier
+	// falls to the strictest cap (refuse), matching the doctrine
+	// applied in tier_caps.go. Empty tier is a legitimate legacy
+	// state (pre-tier-labeling projects) and MUST NOT accidentally
+	// bypass the paywall.
+	proj, err := h.Store.GetProject(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"load project for tier check: "+err.Error())
+		return
+	}
+	tier := normalizeTier(proj.Tier)
+	if tier != TierTeam && tier != TierEnterprise {
+		writeError(w, http.StatusPaymentRequired,
+			"Audit logs are a Cloud Team feature. On a single-admin Hobby project every event is 'you did it', so the log has no accountability value. Upgrade to Cloud Team at /app/billing to enable multi-admin audit trail.")
 		return
 	}
 	events, err := h.Store.ListAuditEventsByProject(r.Context(), projectID, 100)

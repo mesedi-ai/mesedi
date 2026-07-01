@@ -90,12 +90,24 @@ const (
 	// HobbyExecutionLimit is the included monthly quota on Hobby.
 	// Executions in [0, HobbyExecutionLimit] are free; executions
 	// above this number bill at HobbyOveragePriceUSD each.
-	HobbyExecutionLimit = 10000
+	//
+	// Wave 3.F (closes #283 / #284): cut from 10000 to 5000 to
+	// match the Sentry-free-tier benchmark (5K errors) and create
+	// a real volume differentiation vs Team's 100K. Compute cost
+	// per execution is cents so this is symbolic more than
+	// economic; the tightening is about Hobby↔Team conversion
+	// pressure, not COGS.
+	HobbyExecutionLimit = 5000
 	// HobbyDefaultRetentionDays is the retention window applied at
 	// signup AND enforced as the tier cap in tierRetentionCap. Drift
 	// guard tools/check-tier-constants.sh asserts this matches the
 	// TS lib/tier-constants.ts retentionDays for the hobby tier.
-	HobbyDefaultRetentionDays = 15
+	//
+	// Wave 3.F (closes #283 / #284): cut from 15 to 7 days to
+	// match PostHog free tier. Real storage cost vector — ~50%
+	// savings per Hobby project — and creates real conversion
+	// pressure for customers wanting longer history.
+	HobbyDefaultRetentionDays = 7
 	// TeamDefaultRetentionDays is the retention window applied at
 	// upgrade AND enforced as the tier cap in tierRetentionCap.
 	TeamDefaultRetentionDays = 90
@@ -152,14 +164,19 @@ const (
 	// the per-project scope (not per-org) because Hobby tier is
 	// single-project, single-admin by design.
 	//
-	// 50 / period is calibrated as the upper bound of "try the
+	// 25 / period is calibrated as the upper bound of "try the
 	// feature occasionally" use without crossing into "running the
-	// feature in production." At $0.75 per analysis, 50 caps the
-	// monthly add-on at $37.50. A Hobby customer running more than
-	// 50 analyses a month is operating Mesedi at production scale
-	// and should upgrade to Cloud Team ($99/mo includes 200 plus 10x
-	// executions, 6x retention, unlimited projects, audit logs).
-	HobbyAIAnalysisLimit = 50
+	// feature in production." At $0.75 per analysis, 25 caps the
+	// monthly add-on at $18.75. A Hobby customer running more than
+	// 25 analyses a month is operating Mesedi at production scale
+	// and should upgrade to Cloud Team ($99/mo includes 200 plus
+	// 20x executions, 13x retention, unlimited projects, audit
+	// logs).
+	//
+	// Wave 3.F (closes #283 / #284): cut from 50 to 25 to halve
+	// the Hobby Anthropic-cost ceiling and tighten the free-tier
+	// AI budget in line with the other volume cuts.
+	HobbyAIAnalysisLimit = 25
 
 	// HobbyAIAnalysisPriceUSD is the per-analysis charge on Hobby
 	// tier (pre-#30 product decision). Billed via the existing
