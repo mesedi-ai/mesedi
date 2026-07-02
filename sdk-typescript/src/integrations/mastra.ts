@@ -202,7 +202,7 @@ export class MesediExporter extends BaseExporter {
       status: Status.STARTED,
       started_at: utcNowRfc3339(),
       sdk_language: "typescript",
-      sdk_version: "0.6.0",
+      sdk_version: "0.7.0",
     };
     if (this.tenantId !== undefined) execution.tenant_id = this.tenantId;
     const client = getClient();
@@ -281,7 +281,7 @@ export class MesediExporter extends BaseExporter {
       status: mapStatus(span),
       started_at: utcNowRfc3339(),
       sdk_language: "typescript",
-      sdk_version: "0.6.0",
+      sdk_version: "0.7.0",
       ended_at: utcNowRfc3339(),
     };
     if (durationMs !== undefined) execution.duration_ms = durationMs;
