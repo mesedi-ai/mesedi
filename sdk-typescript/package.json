@@ -98,6 +98,6 @@
     "vitest": "^4.1.9",
     "@mastra/core": "^1.48.0",
     "@mastra/observability": "^1.15.2",
-    "@langchain/core": "^0.3.0"
+    "@langchain/core": "^1.2.1"
   }
 }
