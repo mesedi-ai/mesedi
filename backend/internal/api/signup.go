@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -79,7 +80,18 @@ const (
 // signupCheckIPLimit returns true if the given IP has too many recent
 // signups. It also prunes timestamps outside the window as a side
 // effect (no separate cleanup goroutine needed for v0.1 scale).
+//
+// Integration-test bypass: when MESEDI_DISABLE_SIGNUP_RATE_LIMIT=1,
+// the check always returns false. Mirrors MESEDI_DISABLE_EMAIL_VERIFY_GATE
+// so the SDK integration suites (backend/test/integration/ + the
+// TypeScript sdk-typescript/src/integrations/*.integration.test.ts
+// harness) can mint many fresh test projects in the same process
+// without tripping the 5/hour anti-abuse limit. Never set in
+// production.
 func signupCheckIPLimit(ip string) bool {
+	if os.Getenv("MESEDI_DISABLE_SIGNUP_RATE_LIMIT") == "1" {
+		return false
+	}
 	signupIPMu.Lock()
 	defer signupIPMu.Unlock()
 	cutoff := time.Now().Add(-signupRateLimitWindow)
