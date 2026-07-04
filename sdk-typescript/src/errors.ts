@@ -307,6 +307,72 @@ export function classifyOllamaException(err: unknown): ErrorClassValue {
   return OLLAMA_EXCEPTION_MAP[err.constructor.name] ?? ErrorClass.UNKNOWN;
 }
 
+/**
+ * Dispatch classification to the provider-specific error mapper. When
+ * the provider string is one of the known lowercase values, calls that
+ * provider's classifier. When the provider is unknown, tries each in
+ * turn and returns the first non-UNKNOWN bucket; falls through to
+ * UNKNOWN when nothing matches.
+ *
+ * Used by the framework adapters (LangChain, Mastra, Vercel AI SDK)
+ * where the exception object is available. Mastra adapter, which only
+ * has SpanErrorInfo.name as a string, uses `classifyByProviderName`
+ * below instead.
+ */
+export function classifyByProvider(
+  provider: string,
+  err: unknown,
+): ErrorClassValue {
+  switch (provider) {
+    case "anthropic":
+      return classifyAnthropicException(err);
+    case "openai":
+      return classifyOpenAIException(err);
+    case "cohere":
+      return classifyCohereException(err);
+    case "gemini":
+    case "vertexai":
+      return classifyGeminiException(err);
+    case "ollama":
+      return classifyOllamaException(err);
+    default: {
+      for (const fn of [
+        classifyAnthropicException,
+        classifyOpenAIException,
+        classifyCohereException,
+        classifyGeminiException,
+        classifyOllamaException,
+      ]) {
+        const cls = fn(err);
+        if (cls !== ErrorClass.UNKNOWN) return cls;
+      }
+      return ErrorClass.UNKNOWN;
+    }
+  }
+}
+
+/**
+ * Variant of `classifyByProvider` that dispatches on an exception
+ * class NAME (string) rather than an Error object. Mastra's
+ * SpanErrorInfo carries `.name` as a bare string — the underlying
+ * Error object is not preserved through the exporter chain. This
+ * shim wraps the name in a synthetic Error so the same class-name
+ * lookup path in the per-provider classifiers works unchanged.
+ *
+ * Returns UNKNOWN when `className` is falsy or unrecognized.
+ */
+export function classifyByProviderName(
+  provider: string,
+  className: string | undefined,
+): ErrorClassValue {
+  if (!className) return ErrorClass.UNKNOWN;
+  class ShimError extends Error {}
+  Object.defineProperty(ShimError, "name", { value: className });
+  const shim = new ShimError();
+  Object.defineProperty(shim.constructor, "name", { value: className });
+  return classifyByProvider(provider, shim);
+}
+
 /** Probe an OpenAI exception's body for the insufficient_quota
  * error code that distinguishes a billing-cap from a true rate
  * limit. Best-effort; any missing attr / unexpected shape returns

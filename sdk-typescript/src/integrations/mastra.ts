@@ -66,6 +66,10 @@
 import { getClient } from "../client.js";
 import { newEventId, newExecutionId } from "../context.js";
 import {
+  classifyByProviderName,
+  ErrorClass,
+} from "../errors.js";
+import {
   Event,
   EventType,
   Execution,
@@ -109,6 +113,7 @@ const SPAN_WORKFLOW_STEP = "workflow_step";
 const MAX_STATE_REPR = 1000;
 const MAX_TOOL_INPUT_REPR = 200;
 const MAX_TOOL_OUTPUT_REPR = 500;
+const MAX_EXC_MSG = 500;
 
 /**
  * Configuration accepted by `new MesediExporter(...)`. Kept tiny on
@@ -401,20 +406,84 @@ function modelPayload(span: AnyExportedSpan): Record<string, unknown> {
         outputTokens?: number;
       };
     };
+    errorInfo?: {
+      message?: string;
+      name?: string;
+      details?: Record<string, unknown>;
+    };
   };
   const model = s.attributes?.model ?? "unknown";
   const provider = s.attributes?.provider ?? "unknown";
-  const tokensIn = s.attributes?.internalUsage?.inputTokens;
-  const tokensOut = s.attributes?.internalUsage?.outputTokens;
+  const errorInfo = s.errorInfo;
+  const hasError = !!errorInfo && (!!errorInfo.name || !!errorInfo.message);
+
+  // Success path stays byte-identical with the pre-SW#280-3.f shape
+  // to avoid churning consumers that already handle Mastra llm_calls.
   const payload: Record<string, unknown> = {
     model,
     provider,
     user_message: summarize(inputRepr(span), MAX_STATE_REPR),
     response_text: summarize(outputRepr(span), MAX_STATE_REPR),
+    status: hasError ? "failed" : "ok",
   };
-  if (tokensIn !== undefined) payload["input_tokens"] = tokensIn;
-  if (tokensOut !== undefined) payload["output_tokens"] = tokensOut;
+  if (!hasError) {
+    const tokensIn = s.attributes?.internalUsage?.inputTokens;
+    const tokensOut = s.attributes?.internalUsage?.outputTokens;
+    if (tokensIn !== undefined) payload["input_tokens"] = tokensIn;
+    if (tokensOut !== undefined) payload["output_tokens"] = tokensOut;
+    return payload;
+  }
+
+  // SW#280-3.f: failed-path fields matching the LangChain adapter's
+  // SW#280-3.a contract so the provider_incident detector's canonical
+  // (provider, error_class) clustering works cross-adapter. Mastra
+  // gives us SpanErrorInfo.name (exception class name as a bare
+  // string, not an Error object) — classifyByProviderName wraps it in
+  // a shim so the per-provider classifiers score it correctly.
+  const excType = errorInfo?.name;
+  const excMessage = errorInfo?.message;
+  payload["error_class"] = classifyByProviderName(provider, excType) ?? ErrorClass.UNKNOWN;
+  if (excType) payload["exception_type"] = excType;
+  if (excMessage) {
+    payload["exception_message"] = summarize(excMessage, MAX_EXC_MSG);
+  }
+  const httpStatus = extractStatusCode(errorInfo?.details);
+  if (httpStatus !== undefined) payload["http_status"] = httpStatus;
+  const retryAfter = extractRetryAfterSeconds(errorInfo?.details);
+  if (retryAfter !== undefined) payload["retry_after"] = retryAfter;
   return payload;
+}
+
+/** Read an HTTP status code from SpanErrorInfo.details, tolerating
+ * the common variants (status, statusCode, http_status). Returns
+ * undefined when absent or not a finite integer. */
+function extractStatusCode(
+  details: Record<string, unknown> | undefined,
+): number | undefined {
+  if (!details) return undefined;
+  for (const key of ["status", "statusCode", "http_status"]) {
+    const v = details[key];
+    if (typeof v === "number" && Number.isFinite(v) && Number.isInteger(v)) {
+      return v;
+    }
+  }
+  return undefined;
+}
+
+/** Read a retry_after (seconds) from SpanErrorInfo.details, tolerating
+ * the common variants (retryAfter, retry_after). Returns undefined
+ * when absent or not a finite non-negative number. */
+function extractRetryAfterSeconds(
+  details: Record<string, unknown> | undefined,
+): number | undefined {
+  if (!details) return undefined;
+  for (const key of ["retryAfter", "retry_after"]) {
+    const v = details[key];
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+      return Math.floor(v);
+    }
+  }
+  return undefined;
 }
 
 function toolPayload(span: AnyExportedSpan): Record<string, unknown> {

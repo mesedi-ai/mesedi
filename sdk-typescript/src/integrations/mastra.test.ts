@@ -206,6 +206,156 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["provider"]).toBe("anthropic");
     expect(evt.payload["input_tokens"]).toBe(20);
     expect(evt.payload["output_tokens"]).toBe(5);
+    // SW#280-3.f: status field distinguishes ok from failed.
+    expect(evt.payload["status"]).toBe("ok");
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // SW#280-3.f: failed MODEL_GENERATION → llm_call with error_class
+  // ──────────────────────────────────────────────────────────────────
+  //
+  // Mastra 1.x populates SpanErrorInfo (name + message + details) on
+  // failed spans. The MesediExporter reads it and emits the canonical
+  // failure-path fields that feed the provider_incident detector's
+  // cross-tenant (provider, error_class) clustering, matching what
+  // SW#280-3.a shipped for LangChain.
+
+  test("SW#280-3.f: failed MODEL_GENERATION with Anthropic RateLimitError → error_class=rate_limited", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: {
+        model: "claude-haiku-4-5",
+        provider: "anthropic",
+        prompt: "hi",
+      },
+      errorInfo: {
+        name: "RateLimitError",
+        message: "429 Too Many Requests",
+        details: { status: 429, retryAfter: 30 },
+      },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.event_type).toBe("llm_call");
+    expect(evt.payload["status"]).toBe("failed");
+    expect(evt.payload["provider"]).toBe("anthropic");
+    expect(evt.payload["error_class"]).toBe("rate_limited");
+    expect(evt.payload["exception_type"]).toBe("RateLimitError");
+    expect(evt.payload["exception_message"]).toBe("429 Too Many Requests");
+    expect(evt.payload["http_status"]).toBe(429);
+    expect(evt.payload["retry_after"]).toBe(30);
+    // Failed-path drops token counts by design.
+    expect(evt.payload["input_tokens"]).toBeUndefined();
+    expect(evt.payload["output_tokens"]).toBeUndefined();
+  });
+
+  test("SW#280-3.f: OpenAI APITimeoutError → error_class=timeout", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "gpt-4o", provider: "openai" },
+      errorInfo: { name: "APITimeoutError", message: "request timed out" },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["error_class"]).toBe("timeout");
+    expect(evt.payload["provider"]).toBe("openai");
+  });
+
+  test("SW#280-3.f: unknown provider with known exception name still classifies", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "custom-model" },
+      errorInfo: { name: "RateLimitError", message: "throttled" },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["provider"]).toBe("unknown");
+    expect(evt.payload["error_class"]).toBe("rate_limited");
+  });
+
+  test("SW#280-3.f: unrecognized exception name → error_class=unknown", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "gpt-4o", provider: "openai" },
+      errorInfo: { name: "TotallyMadeUpError", message: "weird" },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["error_class"]).toBe("unknown");
+    expect(evt.payload["exception_type"]).toBe("TotallyMadeUpError");
+  });
+
+  test("SW#280-3.f: errorInfo with only message (no name) still marked failed", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "claude-haiku-4-5", provider: "anthropic" },
+      errorInfo: { message: "opaque error, no name field" },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["status"]).toBe("failed");
+    // Without a class name, we can't classify — falls to UNKNOWN.
+    expect(evt.payload["error_class"]).toBe("unknown");
+    expect(evt.payload["exception_type"]).toBeUndefined();
+    expect(evt.payload["exception_message"]).toBe("opaque error, no name field");
+  });
+
+  test("SW#280-3.f: http_status reads statusCode variant too", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "claude-haiku-4-5", provider: "anthropic" },
+      errorInfo: {
+        name: "InternalServerError",
+        message: "500",
+        details: { statusCode: 500 },
+      },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["http_status"]).toBe(500);
+    expect(evt.payload["error_class"]).toBe("internal_error");
   });
 
   test("TOOL_CALL emits tool_call event", async () => {

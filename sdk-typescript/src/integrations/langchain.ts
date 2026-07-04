@@ -58,13 +58,8 @@
 import { getClient } from "../client.js";
 import { currentExecutionContext, newEventId } from "../context.js";
 import {
-  ErrorClass,
   ErrorClassValue,
-  classifyAnthropicException,
-  classifyCohereException,
-  classifyGeminiException,
-  classifyOllamaException,
-  classifyOpenAIException,
+  classifyByProvider,
   extractHttpStatus,
   extractRetryAfter,
 } from "../errors.js";
@@ -657,43 +652,6 @@ function normalizeProvider(known: string): string {
   if (known === "googlegenai") return "gemini";
   if (known === "bedrock") return "bedrock";
   return known;
-}
-
-/**
- * Dispatch classification to the provider-specific error mapper.
- * When the provider is unknown, try each mapper in turn and return
- * the first non-UNKNOWN bucket; falls through to UNKNOWN when nothing
- * matches. This mirrors the same "closed vocabulary" contract used by
- * the direct instrumentation modules (see errors.ts).
- */
-function classifyByProvider(provider: string, err: unknown): ErrorClassValue {
-  switch (provider) {
-    case "anthropic":
-      return classifyAnthropicException(err);
-    case "openai":
-      return classifyOpenAIException(err);
-    case "cohere":
-      return classifyCohereException(err);
-    case "gemini":
-    case "vertexai":
-      return classifyGeminiException(err);
-    case "ollama":
-      return classifyOllamaException(err);
-    default: {
-      // Unknown provider — try each classifier, first non-UNKNOWN wins.
-      for (const fn of [
-        classifyAnthropicException,
-        classifyOpenAIException,
-        classifyCohereException,
-        classifyGeminiException,
-        classifyOllamaException,
-      ]) {
-        const cls = fn(err);
-        if (cls !== ErrorClass.UNKNOWN) return cls;
-      }
-      return ErrorClass.UNKNOWN;
-    }
-  }
 }
 
 /**
