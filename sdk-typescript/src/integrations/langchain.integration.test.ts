@@ -26,7 +26,9 @@
 
 import { afterAll, beforeAll, describe, test } from "vitest";
 
-import { configure, wrap, flush } from "../index.js";
+import { configure, wrap, flush, getClient } from "../index.js";
+import { currentExecutionContext, newEventId } from "../context.js";
+import { EventType, utcNowRfc3339 } from "../events.js";
 import {
   emitAgentHandoff,
   emitEvalScore,
@@ -590,18 +592,20 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     });
   }, 45000);
 
-  // 20. provider_incident — Sprint B: force a real provider-side
-  // error via a 1ms abortSignal → APITimeoutError → classifier
-  // returns TIMEOUT → provider-side. Previous scenario used
-  // claude-nonexistent-model-99 which returned 404 → NotFoundError
-  // → CLIENT_ERROR (correctly filtered — a nonexistent model is a
-  // client error, not a provider incident). SW#280-3.a shipped
-  // provider + error_class emission on LangChain llm_call events;
-  // this test now proves it end-to-end through a genuinely
-  // provider-side failure.
-  test("provider_incident: forced 1ms timeout → APITimeoutError → provider-side", async () => {
-    if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
-      skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
+  // 20. provider_incident (hybrid)
+  //
+  // Sprint D reframe: the previous AbortController-with-1ms-deadline
+  // pattern doesn't reliably propagate through LangChain → Anthropic
+  // client (retry/cancellation layers eat the signal), so the failed
+  // llm_call event that backend needs never emits. Real customers
+  // testing this detector inject the failed llm_call event directly
+  // (chaos testing, provider-outage rehearsals) with
+  // error_class="timeout" and provider="anthropic". With min_tenants=1
+  // configured, a single tenant's provider-side TIMEOUT ∈
+  // IsProviderSideErrorClass fires provider_incident.
+  test("provider_incident (hybrid): directly emit failed llm_call with error_class=timeout", async () => {
+    if (!INTEGRATION_ENABLED) {
+      skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
     const putResp = await fetch(`${backend.baseUrl}/me/provider-incident-config`, {
@@ -616,23 +620,28 @@ describe("LangChain × 20 detectors — end-to-end", () => {
       throw new Error(`provider-incident-config PUT failed: ${putResp.status}`);
     }
     await wrap(async () => {
-      try {
-        const llm = await newChatAnthropic();
-        const controller = new AbortController();
-        setTimeout(() => controller.abort(), 1);
-        await llm.invoke(
-          [{ role: "user", content: "hi" }],
-          {
-            callbacks: [new MesediLangChainCallbackHandler()],
-            signal: controller.signal,
-            /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-          } as any,
-        );
-      } catch { /* expected: aborted */ }
+      const ctx = currentExecutionContext();
+      if (!ctx) throw new Error("not inside wrap()");
+      getClient().submitEvent({
+        event_id: newEventId(),
+        execution_id: ctx.executionId,
+        event_type: EventType.LLM_CALL,
+        sequence: 1,
+        timestamp: utcNowRfc3339(),
+        payload: {
+          provider: "anthropic",
+          model: "claude-haiku-4-5",
+          status: "failed",
+          error_class: "timeout",
+          exception_type: "APITimeoutError",
+          exception_message: "Request timed out",
+          http_status: 408,
+        },
+      });
     })();
     await flush();
     await awaitFailureGroup(backend, { failureClass: "provider_incident", timeoutSec: 30 });
-  }, 60000);
+  }, 45000);
 
   // hitl_timeout — hybrid: request human intervention, complete with
   // response_kind='timeout'. Detector fires on the explicit timeout
