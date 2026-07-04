@@ -265,12 +265,26 @@ export class MesediExporter extends BaseExporter {
         );
         break;
 
-      case SPAN_WORKFLOW_STEP:
-        this.emitEvent(executionId, EventType.CHECKPOINT, {
+      case SPAN_WORKFLOW_STEP: {
+        // SW#280-3.g.b: backend semantic_loop.G3 detector groups
+        // checkpoints by canonical hash of `payload.metadata`
+        // (semantic_loop.go extractState reads `metadata`, not
+        // `state_repr`). Direct SDK's checkpoint() ships {name,
+        // metadata} too — matching that shape unblocks Mastra
+        // customers using workflows with 3+ identical-return steps.
+        // state_repr stays for dashboard display but the detector-
+        // relevant field is metadata (raw structured object).
+        const rawOutput = outputRepr(span);
+        const payload: Record<string, unknown> = {
           name: `mastra.workflow_step.${extractName(span) ?? "unknown"}`,
-          state_repr: summarize(outputRepr(span)),
-        });
+          state_repr: summarize(rawOutput),
+        };
+        if (rawOutput && typeof rawOutput === "object") {
+          payload["metadata"] = rawOutput;
+        }
+        this.emitEvent(executionId, EventType.CHECKPOINT, payload);
         break;
+      }
 
       // All other span types are ignored in v1. See the file header
       // comment for rationale.

@@ -611,6 +611,96 @@ describe("MesediExporter — descendant spans", () => {
     );
   });
 
+  // ──────────────────────────────────────────────────────────────────
+  // SW#280-3.g.b: WORKFLOW_STEP emits `metadata` for semantic_loop
+  // ──────────────────────────────────────────────────────────────────
+  //
+  // Live probe (SW#280-3.g.b) confirmed Mastra populates span.output
+  // with the step's execute() return value. Backend
+  // semantic_loop.G3 (semantic_loop.go extractState) reads
+  // payload.metadata, NOT payload.state_repr. Direct SDK's
+  // checkpoint() also ships {name, metadata}. Matching that shape
+  // lets semantic_loop cluster identical-return workflow steps.
+
+  test("SW#280-3.g.b: WORKFLOW_STEP with structured span.output ships metadata", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "workflow_run" })),
+    );
+    resetCaps();
+
+    const stepSpan = makeSpan({
+      type: "workflow_step",
+      attributes: { stepId: "research_round" },
+      output: { phase: "researching", topic: "support escalation" },
+    });
+    await exporter.exportTracingEvent(endedEvt(stepSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.event_type).toBe("checkpoint");
+    // metadata carries the raw structured object — semantic_loop
+    // canonical-hashes this for cluster grouping.
+    expect(evt.payload["metadata"]).toEqual({
+      phase: "researching",
+      topic: "support escalation",
+    });
+    // state_repr stays present for dashboard readability.
+    expect(typeof evt.payload["state_repr"]).toBe("string");
+  });
+
+  test("SW#280-3.g.b: 3 identical-return steps produce 3 identical metadata payloads", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "workflow_run" })),
+    );
+    resetCaps();
+
+    const returnPayload = { phase: "researching", topic: "escalation" };
+    for (const stepId of ["research_round_0", "research_round_1", "research_round_2"]) {
+      const stepSpan = makeSpan({
+        type: "workflow_step",
+        attributes: { stepId },
+        output: returnPayload,
+      });
+      await exporter.exportTracingEvent(endedEvt(stepSpan));
+    }
+
+    const events = getCaps().events;
+    expect(events).toHaveLength(3);
+    for (const evt of events) {
+      // metadata is byte-identical across all 3 → semantic_loop
+      // canonical hash groups them into one cluster.
+      expect(evt.payload["metadata"]).toEqual(returnPayload);
+    }
+    // Names DIFFER (research_round_0/1/2) because the harness
+    // uniquified step IDs to satisfy Mastra's ID-validation, but
+    // that's OK — semantic_loop groups by metadata hash, not name.
+    const names = events.map((e) => e.payload["name"]);
+    expect(new Set(names).size).toBe(3);
+  });
+
+  test("SW#280-3.g.b: WORKFLOW_STEP with no output omits metadata cleanly", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "workflow_run" })),
+    );
+    resetCaps();
+
+    const stepSpan = makeSpan({
+      type: "workflow_step",
+      attributes: { stepId: "noop" },
+      // No output field — nothing to feed metadata.
+    });
+    await exporter.exportTracingEvent(endedEvt(stepSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.event_type).toBe("checkpoint");
+    // Absent output → absent metadata (rather than empty-object
+    // metadata that would false-cluster with other empty steps).
+    expect(evt.payload["metadata"]).toBeUndefined();
+    expect(evt.payload["name"]).toBe("mastra.workflow_step.noop");
+  });
+
   test("descendant span on unknown trace is dropped silently", async () => {
     const exporter = new MesediExporter();
     // No root span opened, so no traceId → execution mapping exists.
