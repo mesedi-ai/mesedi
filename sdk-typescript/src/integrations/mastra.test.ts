@@ -759,6 +759,76 @@ describe("MesediExporter — status + tenant + fail-open", () => {
     expect(getCaps().ends[0]?.status).toBe("crashed");
   });
 
+  // Sprint C: mapStatus now reads span.errorInfo (top-level) first —
+  // real Mastra 1.x surfaces provider-level exceptions there, not in
+  // attributes.error. Same class of bug SW#280-3.f fixed for the
+  // llm_call / tool_call payload paths.
+  test("SW#280-3.j: execution end status is CRASHED when span.errorInfo is set", async () => {
+    const exporter = new MesediExporter();
+    const startSpan = makeSpan({ type: "agent_run" });
+    const endSpan = makeSpan({
+      type: "agent_run",
+      errorInfo: { name: "Error", message: "inttest crash" },
+    });
+    await exporter.exportTracingEvent(startedEvt(startSpan));
+    await exporter.exportTracingEvent(endedEvt(endSpan));
+
+    expect(getCaps().ends[0]?.status).toBe("crashed");
+  });
+
+  test("SW#280-3.j: errorInfo with only message (no name) still marks CRASHED", async () => {
+    const exporter = new MesediExporter();
+    const startSpan = makeSpan({ type: "agent_run" });
+    const endSpan = makeSpan({
+      type: "agent_run",
+      errorInfo: { message: "opaque, no name field" },
+    });
+    await exporter.exportTracingEvent(startedEvt(startSpan));
+    await exporter.exportTracingEvent(endedEvt(endSpan));
+
+    expect(getCaps().ends[0]?.status).toBe("crashed");
+  });
+
+  test("SW#280-3.j: nested agent_run (parent set) does NOT close outer execution", async () => {
+    const exporter = new MesediExporter();
+    // Outer root: workflow_run opens the execution.
+    const outerStart = makeSpan({ type: "workflow_run", traceId: "t-nest" });
+    await exporter.exportTracingEvent(startedEvt(outerStart));
+
+    // Inner agent_run has parentSpanId set → NOT root. Ends first.
+    const innerEnd = makeSpan({
+      type: "agent_run",
+      traceId: "t-nest",
+      spanId: "inner-1",
+      parentSpanId: "outer-1",
+    });
+    await exporter.exportTracingEvent(endedEvt(innerEnd));
+
+    // Outer workflow_run ends AFTER the inner agent_run.
+    const outerEnd = makeSpan({
+      type: "workflow_run",
+      traceId: "t-nest",
+      spanId: "outer-1",
+    });
+    await exporter.exportTracingEvent(endedEvt(outerEnd));
+
+    // Exactly ONE execution_end (from the outer close), not two.
+    expect(getCaps().ends).toHaveLength(1);
+  });
+
+  test("SW#280-3.j: empty errorInfo object stays COMPLETED (regression guard)", async () => {
+    const exporter = new MesediExporter();
+    const startSpan = makeSpan({ type: "agent_run" });
+    const endSpan = makeSpan({
+      type: "agent_run",
+      errorInfo: {},
+    });
+    await exporter.exportTracingEvent(startedEvt(startSpan));
+    await exporter.exportTracingEvent(endedEvt(endSpan));
+
+    expect(getCaps().ends[0]?.status).toBe("completed");
+  });
+
   test("execution end status is HALTED on tripwire abort", async () => {
     const exporter = new MesediExporter();
     const startSpan = makeSpan({ type: "agent_run" });

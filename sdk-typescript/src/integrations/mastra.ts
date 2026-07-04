@@ -247,15 +247,28 @@ export class MesediExporter extends BaseExporter {
 
     switch (span.type) {
       case SPAN_AGENT_RUN:
-      case SPAN_WORKFLOW_RUN:
+      case SPAN_WORKFLOW_RUN: {
+        // Sprint C: only the ROOT agent_run / workflow_run closes the
+        // Mesedi execution. Nested agent_runs (e.g. a workflow step
+        // that calls `agent.generate()`) are legitimate customer
+        // patterns for looping / cost-accumulating scenarios, and
+        // must NOT prematurely close the outer execution — the
+        // identical_call / cost_velocity detectors group per-execution,
+        // so an early close would split the signal across two
+        // executions and silence the detector. We still emit the
+        // exit checkpoint so semantic_loop and drift can see the
+        // inner-agent-run boundary.
         this.emitEvent(executionId, EventType.CHECKPOINT, {
           name: `mastra.${span.type}.exit`,
           agent: extractAgentName(span),
           agent_event: "exit",
           state_repr: summarize(outputRepr(span)),
         });
-        this.closeExecution(traceId, executionId, span);
+        if (isRootSpan(span)) {
+          this.closeExecution(traceId, executionId, span);
+        }
         break;
+      }
 
       case SPAN_MODEL_GENERATION:
         this.emitEvent(executionId, EventType.LLM_CALL, modelPayload(span));
@@ -651,10 +664,21 @@ function toolPayload(span: AnyExportedSpan): Record<string, unknown> {
 }
 
 function mapStatus(span: AnyExportedSpan): Status {
+  // Sprint C: Mastra 1.x surfaces provider-level exceptions as
+  // top-level `span.errorInfo` (name + message + details), NOT as
+  // `attributes.error`. Missing this mapping leaves crashed executions
+  // marked COMPLETED, silencing the `crashes` detector. Same class of
+  // bug SW#280-3.f fixed for toolPayload/modelPayload. We still read
+  // `attributes.error` as a compat fallback in case Mastra ever
+  // surfaces it there for a non-provider-side path.
   const s = span as unknown as {
     attributes?: { tripwireAbort?: unknown; error?: unknown };
+    errorInfo?: { name?: string; message?: string; details?: unknown };
   };
   if (s.attributes?.tripwireAbort) return Status.HALTED;
+  const ei = s.errorInfo;
+  const hasErrorInfo = !!ei && (!!ei.name || !!ei.message);
+  if (hasErrorInfo) return Status.CRASHED;
   if (s.attributes?.error) return Status.CRASHED;
   return Status.COMPLETED;
 }

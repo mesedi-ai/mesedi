@@ -255,14 +255,22 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 45000);
 
   // 2. loops — identical_call
-  test("loops (identical_call): 3 llm_calls with identical user_message via Mastra", async () => {
+  //
+  // Sprint C: identical_call fires PER-EXECUTION (backend
+  // scanForIdenticalCalls scans within one execution and hashes
+  // model + user_message). Each raw `agent.generate()` opens a new
+  // Mastra AGENT_RUN root span → new Mesedi execution. Wrapping the
+  // 3 identical calls inside ONE workflow so they share a trace
+  // → one execution → the backend sees 3 identical calls in the
+  // same execution and fires the detector. This is customer-realistic:
+  // an identical_call incident is a runaway loop repeating the same
+  // prompt inside one agent workflow, NOT 3 independent user sessions
+  // (which would legitimately be 3 separate executions).
+  test("loops (identical_call): 3 identical llm_calls nested in one workflow", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
     }
-    // Rely on Mastra's built-in provider to fire 3 identical llm_calls
-    // inside one workflow. The exporter's MODEL_GENERATION → llm_call
-    // pathway ships user_message + model + tokens.
     const { anthropic } = await import("@ai-sdk/anthropic");
     const mastra = await newMastraApp({
       agents: {
@@ -272,14 +280,31 @@ describe("Mastra × 20 detectors — end-to-end", () => {
           model: anthropic("claude-haiku-4-5"),
         } as any,
       },
+      workflows: {
+        identLoop: {
+          name: "identLoop",
+          steps: [
+            {
+              id: "loop_body",
+              /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+              run: async (ctx: any) => {
+                const agent = ctx.mastra.getAgent("looper");
+                for (let i = 0; i < 3; i++) {
+                  await agent.generate("Say hello in one word.");
+                  if (i < 2) await sleepMs(500);
+                }
+                return {};
+              },
+            },
+          ],
+        } as any,
+      },
     });
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    const agent = (mastra as any).getAgent?.("looper") ?? (mastra as any).agents?.looper;
+    const wf = (mastra as any).getWorkflow?.("identLoop") ?? (mastra as any).workflows?.identLoop;
+    const run = await wf.createRun();
+    await run.start({ inputData: {} });
     /* eslint-enable @typescript-eslint/no-explicit-any */
-    for (let i = 0; i < 3; i++) {
-      await agent.generate("Say hello in one word.");
-      if (i < 2) await sleepMs(500);
-    }
     await flush();
     await awaitFailureGroup(backend, {
       failureClass: "loops",
@@ -469,12 +494,21 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 180000);
 
   // 8. cost_velocity
-  test("cost_velocity: lower threshold then run enough LLM calls to exceed it", async () => {
+  //
+  // Sprint C: cost_velocity absolute detector fires PER-EXECUTION
+  // (backend checks `effectiveCost >= threshold_usd` on each ingested
+  // execution). Each raw `agent.generate()` opens a new AGENT_RUN
+  // root span → new execution at ~$0.001, always below the $0.01
+  // threshold. Wrapping 25 calls inside ONE workflow so they share a
+  // trace → one execution accumulates ~$0.023 → crosses $0.01 →
+  // detector fires. Customer-realistic: a cost_velocity incident is
+  // a workflow that burns through budget in one run, not 25
+  // independent trivial requests.
+  test("cost_velocity: 25 workflow-nested calls exceed lowered threshold", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
     }
-    // Mirrors Python test_cost_velocity: lower threshold to $0.01 first.
     const putResp = await fetch(`${backend.baseUrl}/me/cost-velocity-config`, {
       method: "PUT",
       headers: {
@@ -494,21 +528,36 @@ describe("Mastra × 20 detectors — end-to-end", () => {
           model: anthropic("claude-haiku-4-5"),
         } as any,
       },
+      workflows: {
+        spendLoop: {
+          name: "spendLoop",
+          steps: [
+            {
+              id: "spend_body",
+              /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+              run: async (ctx: any) => {
+                const agent = ctx.mastra.getAgent("spender");
+                // SW#280-3.d TPM pacing carried forward — 1.5s
+                // spacing keeps us under Anthropic's per-minute
+                // token window even at 25 sequential calls.
+                for (let i = 0; i < 25; i++) {
+                  await agent.generate(
+                    `Write a detailed 5-7 sentence paragraph about animal variant ${i}.`,
+                  );
+                  await sleepMs(1500);
+                }
+                return {};
+              },
+            },
+          ],
+        } as any,
+      },
     });
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    const agent = (mastra as any).getAgent?.("spender") ?? (mastra as any).agents?.spender;
+    const wf = (mastra as any).getWorkflow?.("spendLoop") ?? (mastra as any).workflows?.spendLoop;
+    const run = await wf.createRun();
+    await run.start({ inputData: {} });
     /* eslint-enable @typescript-eslint/no-explicit-any */
-    // SW#280-3.d: pace 25 sequential real-LLM calls so Anthropic's
-    // TPM window doesn't trip. 1.5s spacing → ~37s added wall time.
-    // cost_velocity is inherently a "fires when cumulative spend
-    // exceeds threshold" detector, so wall-time pacing doesn't
-    // change the detection outcome.
-    for (let i = 0; i < 25; i++) {
-      await agent.generate(
-        `Write a detailed 5-7 sentence paragraph about animal variant ${i}.`,
-      );
-      await sleepMs(1500);
-    }
     await flush();
     await awaitFailureGroup(backend, { failureClass: "cost_velocity" });
   }, 180000);
