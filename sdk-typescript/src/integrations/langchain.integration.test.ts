@@ -590,8 +590,16 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     });
   }, 45000);
 
-  // 20. provider_incident — HYPOTHESIS GAP: LangChain doesn't emit provider or error_class
-  test("provider_incident: HYPOTHESIS GAP — LangChain missing provider + error_class", async () => {
+  // 20. provider_incident — Sprint B: force a real provider-side
+  // error via a 1ms abortSignal → APITimeoutError → classifier
+  // returns TIMEOUT → provider-side. Previous scenario used
+  // claude-nonexistent-model-99 which returned 404 → NotFoundError
+  // → CLIENT_ERROR (correctly filtered — a nonexistent model is a
+  // client error, not a provider incident). SW#280-3.a shipped
+  // provider + error_class emission on LangChain llm_call events;
+  // this test now proves it end-to-end through a genuinely
+  // provider-side failure.
+  test("provider_incident: forced 1ms timeout → APITimeoutError → provider-side", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -609,9 +617,18 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     }
     await wrap(async () => {
       try {
-        const llm = await newChatAnthropic("claude-nonexistent-model-99");
-        await llm.invoke([{ role: "user", content: "hi" }]);
-      } catch { /* expected */ }
+        const llm = await newChatAnthropic();
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 1);
+        await llm.invoke(
+          [{ role: "user", content: "hi" }],
+          {
+            callbacks: [new MesediLangChainCallbackHandler()],
+            signal: controller.signal,
+            /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+          } as any,
+        );
+      } catch { /* expected: aborted */ }
     })();
     await flush();
     await awaitFailureGroup(backend, { failureClass: "provider_incident", timeoutSec: 30 });

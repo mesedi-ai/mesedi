@@ -120,6 +120,17 @@ export async function signupTestProject(
 export interface AwaitFailureGroupOptions {
   failureClass: string;
   signaturePrefix?: string;
+  /** Sprint B: accept any one of a list of alternative (failure_class,
+   * signaturePrefix?) pairs in addition to the primary match. Useful
+   * when a signal has multiple valid backend clustering shapes — e.g.
+   * near-duplicate LLM calls fire as EITHER `loops/similar_call_*` OR
+   * `drift/lexical_drift_*` depending on detector sensitivity. Both
+   * are correct product signals; the test succeeds if ANY of the
+   * (primary + alternatives) matches. */
+  alternatives?: Array<{
+    failureClass: string;
+    signaturePrefix?: string;
+  }>;
   /** Default: 30s. Some detectors need aggregation time. */
   timeoutSec?: number;
 }
@@ -159,13 +170,22 @@ export async function awaitFailureGroup(
         failure_groups?: FailureGroupRow[];
       };
       lastSeen = body.groups ?? body.failure_groups ?? [];
+      const matchers: Array<{
+        failureClass: string;
+        signaturePrefix?: string;
+      }> = [
+        { failureClass: opts.failureClass, signaturePrefix: opts.signaturePrefix },
+        ...(opts.alternatives ?? []),
+      ];
       for (const g of lastSeen) {
-        if (g.failure_class !== opts.failureClass) continue;
         const sig = g.signature ?? "";
-        if (opts.signaturePrefix && !sig.startsWith(opts.signaturePrefix)) {
-          continue;
+        for (const m of matchers) {
+          if (g.failure_class !== m.failureClass) continue;
+          if (m.signaturePrefix && !sig.startsWith(m.signaturePrefix)) {
+            continue;
+          }
+          return g;
         }
-        return g;
       }
     }
     await new Promise((r) => setTimeout(r, 250));
