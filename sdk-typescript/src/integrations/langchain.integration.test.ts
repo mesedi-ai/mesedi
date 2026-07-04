@@ -43,6 +43,7 @@ import {
   awaitFailureGroup,
   signupTestProject,
   skipReason,
+  sleepMs,
   type TestBackend,
 } from "./_integration_helpers.js";
 import { MesediLangChainCallbackHandler } from "./langchain.js";
@@ -154,6 +155,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
       const llm = await newChatAnthropic();
       for (let i = 0; i < 3; i++) {
         await llm.invoke([{ role: "user", content: "Say hello in one word." }]);
+        if (i < 2) await sleepMs(500);
       }
     });
     await run();
@@ -177,8 +179,9 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     ];
     const run = wrap(async () => {
       const llm = await newChatAnthropic();
-      for (const p of prompts) {
-        await llm.invoke([{ role: "user", content: p }]);
+      for (let i = 0; i < prompts.length; i++) {
+        await llm.invoke([{ role: "user", content: prompts[i]! }]);
+        if (i < prompts.length - 1) await sleepMs(500);
       }
     });
     await run();
@@ -264,11 +267,14 @@ describe("LangChain × 20 detectors — end-to-end", () => {
       "Draft a polite refund response for an upset enterprise customer.",
       "Summarize a support ticket about feature requests.",
     ];
+    // SW#280-3.d: pace 20 sequential real-LLM calls so Anthropic's
+    // TPM window doesn't trip. 1.5s spacing → ~30s added wall time.
     for (let i = 0; i < 5; i++) {
       await wrap(async () => {
         const llm = await newChatAnthropic();
-        for (const p of baseline) {
-          await llm.invoke([{ role: "user", content: p }]);
+        for (let j = 0; j < baseline.length; j++) {
+          await llm.invoke([{ role: "user", content: baseline[j]! }]);
+          await sleepMs(1500);
         }
       })();
     }
@@ -308,6 +314,10 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     if (putResp.status !== 200) {
       throw new Error(`cost-velocity-config PUT failed: ${putResp.status}`);
     }
+    // SW#280-3.d: pace 25 sequential real-LLM calls so Anthropic's
+    // TPM window doesn't trip. cost_velocity fires on cumulative
+    // spend crossing a threshold, so wall-time pacing doesn't
+    // change the detection outcome.
     await wrap(async () => {
       const llm = await newChatAnthropic();
       for (let i = 0; i < 25; i++) {
@@ -317,6 +327,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
             content: `Write a detailed 5-7 sentence paragraph about animal variant ${i}.`,
           },
         ]);
+        await sleepMs(1500);
       }
     })();
     await flush();
@@ -477,6 +488,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
       const llm = await newChatAnthropic();
       for (let i = 0; i < 3; i++) {
         await llm.invoke([{ role: "user", content: prefix + `\n\nQ${i}: name one thing.` }]);
+        if (i < 2) await sleepMs(500);
       }
     })();
     await flush();

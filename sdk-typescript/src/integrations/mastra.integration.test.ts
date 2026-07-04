@@ -41,6 +41,7 @@ import {
   awaitFailureGroup,
   signupTestProject,
   skipReason,
+  sleepMs,
   type TestBackend,
 } from "./_integration_helpers.js";
 import { MesediExporter } from "./mastra.js";
@@ -277,6 +278,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
     /* eslint-enable @typescript-eslint/no-explicit-any */
     for (let i = 0; i < 3; i++) {
       await agent.generate("Say hello in one word.");
+      if (i < 2) await sleepMs(500);
     }
     await flush();
     await awaitFailureGroup(backend, {
@@ -309,7 +311,10 @@ describe("Mastra × 20 detectors — end-to-end", () => {
       "Name a color that begins with the letter B.",
       "Could you name a color starting with the letter B?",
     ];
-    for (const p of prompts) await agent.generate(p);
+    for (let i = 0; i < prompts.length; i++) {
+      await agent.generate(prompts[i]!);
+      if (i < prompts.length - 1) await sleepMs(500);
+    }
     await flush();
     await awaitFailureGroup(backend, {
       failureClass: "loops",
@@ -432,7 +437,15 @@ describe("Mastra × 20 detectors — end-to-end", () => {
       "Draft a polite refund response for an upset enterprise customer.",
       "Summarize a support ticket about feature requests.",
     ];
-    for (let i = 0; i < 5; i++) for (const p of baseline) await agent.generate(p);
+    // SW#280-3.d: pace 20 sequential real-LLM calls so Anthropic's
+    // TPM window doesn't trip. 1.5s spacing → ~30s added wall time,
+    // but the OTHER detectors downstream see clean LLM responses.
+    for (let i = 0; i < 5; i++) {
+      for (let j = 0; j < baseline.length; j++) {
+        await agent.generate(baseline[j]!);
+        await sleepMs(1500);
+      }
+    }
     await flush();
     // Phase 2: single wildly-different execution
     await agent.generate(
@@ -476,10 +489,16 @@ describe("Mastra × 20 detectors — end-to-end", () => {
     /* eslint-disable @typescript-eslint/no-explicit-any */
     const agent = (mastra as any).getAgent?.("spender") ?? (mastra as any).agents?.spender;
     /* eslint-enable @typescript-eslint/no-explicit-any */
+    // SW#280-3.d: pace 25 sequential real-LLM calls so Anthropic's
+    // TPM window doesn't trip. 1.5s spacing → ~37s added wall time.
+    // cost_velocity is inherently a "fires when cumulative spend
+    // exceeds threshold" detector, so wall-time pacing doesn't
+    // change the detection outcome.
     for (let i = 0; i < 25; i++) {
       await agent.generate(
         `Write a detailed 5-7 sentence paragraph about animal variant ${i}.`,
       );
+      await sleepMs(1500);
     }
     await flush();
     await awaitFailureGroup(backend, { failureClass: "cost_velocity" });
@@ -680,6 +699,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
     ).repeat(35); // ~4500 chars
     for (let i = 0; i < 3; i++) {
       await agent.generate(prefix + `\n\nQ${i}: name one thing.`);
+      if (i < 2) await sleepMs(500);
     }
     await flush();
     await awaitFailureGroup(backend, {

@@ -50,6 +50,26 @@ export const EXPENSIVE_ENABLED =
 export const MESEDI_BASE_URL =
   process.env["MESEDI_BASE_URL"] || "https://api.mesedi.ai";
 
+// ── Anthropic-polite spacing ────────────────────────────────────────
+//
+// SW#280-3.d: sleepMs(ms) — insert small waits between real-LLM
+// calls in the tight-loop tests (drift, cost_velocity, near-dup
+// loops, token_waste). Without spacing the harness bursts >50
+// requests through Anthropic in a few seconds, trips its TPM cap,
+// and the SDK correctly emits `infrastructure_throttled` events —
+// which then pollute the failure_group list the OTHER tests poll for.
+//
+// The right product framing: real customers pace their LLM calls
+// naturally (users think between requests, downstream processing
+// runs). Modeling that pacing in the harness lets the DOWNSTREAM
+// detectors under test see the LLM responses they need. If Anthropic
+// still rate-limits us at this pace, infrastructure_throttled still
+// fires — we're being polite, not hiding the signal.
+export async function sleepMs(ms: number): Promise<void> {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ── Types + signup ───────────────────────────────────────────────────
 
 export interface TestBackend {
