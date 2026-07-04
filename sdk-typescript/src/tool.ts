@@ -182,7 +182,7 @@ function summarizeArgs(args: unknown[]): Record<string, unknown> {
  * so cross-SDK consumers (e.g. customer running Python tools that
  * call a TypeScript backend) see consistent fingerprints.
  */
-function structuredReturnValue(result: unknown): unknown {
+export function structuredReturnValue(result: unknown): unknown {
   let walked: unknown;
   try {
     walked = walkForShape(result, new WeakSet<object>());
