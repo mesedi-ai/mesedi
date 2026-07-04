@@ -110,6 +110,13 @@ afterAll(async () => {
 // bleed into cross-execution detectors (drift, cost_velocity rate,
 // hitl_rejection_spike). Per-test isolation matches the fresh_project
 // pattern shipped in Wave #278.
+//
+// SW#280-3.b: Mastra 1.x requires real `new Agent({...})` and
+// `createWorkflow({...})` instances so the internal `__setLogger` /
+// `__registerMastra` hooks fire cleanly. Plain-object configs blow
+// up inside `_Mastra.addAgent`. The factory now transparently wraps
+// each config value in the real constructor; callers keep passing
+// the same shape (name-keyed record of plain-object configs).
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 async function newMastraApp(config: {
@@ -117,15 +124,93 @@ async function newMastraApp(config: {
   workflows?: Record<string, any>;
 }) {
   const { Mastra } = await import("@mastra/core");
+  const { Agent } = await import("@mastra/core/agent");
+  const { createWorkflow, createStep } = await import("@mastra/core/workflows");
   const { Observability } = await import("@mastra/observability");
+  const wrappedAgents: Record<string, any> = {};
+  if (config.agents) {
+    for (const [key, cfg] of Object.entries(config.agents)) {
+      wrappedAgents[key] = cfg instanceof Agent ? cfg : new Agent(cfg);
+    }
+  }
+  // Workflows: Mastra 1.x also requires real `createWorkflow(...)`
+  // instances so `addWorkflow`'s `__registerMastra` hook fires. The
+  // plain-object shape from tests (`{name, steps: [{id, run}]}`) is
+  // shimmed into a real workflow by chaining `createStep(...)` calls
+  // into a `createWorkflow(...).then(...).commit()` pipeline.
+  const wrappedWorkflows: Record<string, any> = {};
+  if (config.workflows) {
+    const { z } = await import("zod");
+    const anySchema = z.any();
+    for (const [key, cfg] of Object.entries(config.workflows)) {
+      const c: any = cfg;
+      if (c && typeof c.then === "function" && typeof c.commit === "function") {
+        wrappedWorkflows[key] = c;
+        continue;
+      }
+      const steps = Array.isArray(c?.steps) ? c.steps : [];
+      const wf = createWorkflow({
+        id: c?.name ?? c?.id ?? key,
+        inputSchema: anySchema,
+        outputSchema: anySchema,
+      });
+      let acc: any = wf;
+      let idx = 0;
+      for (const s of steps) {
+        const step = createStep({
+          id: `${s?.id ?? "step"}_${idx++}`,
+          inputSchema: anySchema,
+          outputSchema: anySchema,
+          execute: async (ctx: any) => {
+            if (typeof s?.run === "function") return await s.run(ctx);
+            if (typeof s?.execute === "function") return await s.execute(ctx);
+            return {};
+          },
+        });
+        acc = acc.then(step);
+      }
+      wrappedWorkflows[key] = acc.commit();
+    }
+  }
   return new Mastra({
-    ...config,
+    agents: wrappedAgents,
+    workflows: wrappedWorkflows,
     observability: new Observability({
       exporters: {
         mesedi: new MesediExporter(),
       },
     }),
   } as any);
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+// ── Throwing LanguageModelV2 helper ─────────────────────────────────
+//
+// SW#280-3.b: some tests need to force a provider-level exception
+// through real Mastra machinery WITHOUT a live LLM call (crashes
+// detector). Building a minimal `LanguageModelV2`-shaped object that
+// always throws — Mastra never gets past `doGenerate` / `doStream`
+// before the exception fires, so the interface surface stays small.
+//
+// The ai-sdk contract is defined in @ai-sdk/provider's
+// `LanguageModelV2` type: {specificationVersion:'v2', provider,
+// modelId, supportedUrls, doGenerate(), doStream()}. Anything Mastra
+// or the ai-sdk try to introspect BEYOND those five never runs
+// because doGenerate / doStream throw synchronously on entry.
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function throwingModel(errMsg: string): any {
+  const boom = async () => {
+    throw new Error(errMsg);
+  };
+  return {
+    specificationVersion: "v2",
+    provider: "mesedi-inttest-throwing",
+    modelId: "inttest-throwing-model",
+    supportedUrls: {},
+    doGenerate: boom,
+    doStream: boom,
+  };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -138,13 +223,17 @@ describe("Mastra × 20 detectors — end-to-end", () => {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
+    // SW#280-3.b: real Mastra Agent requires an ai-sdk LanguageModelV2
+    // shape. `throwingModel` implements the minimal surface (5 fields)
+    // and throws on doGenerate/doStream so Mastra's real crash path
+    // runs end-to-end.
     const mastra = await newMastraApp({
       agents: {
         crasher: {
           name: "crasher",
           instructions: "n/a",
-          model: { id: "test", generate: async () => { throw new Error("inttest crash"); } },
-        } as any,
+          model: throwingModel("inttest crash"),
+        },
       },
     });
     /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -236,7 +325,9 @@ describe("Mastra × 20 detectors — end-to-end", () => {
     });
     /* eslint-disable @typescript-eslint/no-explicit-any */
     const workflow = (mastra as any).getWorkflow?.("stepHeavy") ?? (mastra as any).workflows?.stepHeavy;
-    await workflow.execute({});
+    // Mastra 1.x workflow API: createRun().start({inputData}).
+    const run = await workflow.createRun();
+    await run.start({ inputData: {} });
     /* eslint-enable @typescript-eslint/no-explicit-any */
     await flush();
     await awaitFailureGroup(backend, {
@@ -245,34 +336,49 @@ describe("Mastra × 20 detectors — end-to-end", () => {
     });
   }, 45000);
 
-  // 5. tool_failures
+  // 5. tool_failures — SW#280-3.b: uses real `createTool` from
+  // @mastra/core/tools + real anthropic so the LLM decides to call
+  // the throwing tool. Mastra tools don't fire via a direct
+  // `agent.callTool` API — they fire during `agent.generate()` when
+  // the model returns a tool_use content block. The system prompt
+  // makes the tool call inevitable so the throw path runs.
   test("tool_failures: Mastra tool that throws marks tool_call status=failed", async () => {
-    if (!INTEGRATION_ENABLED) {
-      skipReason("RUN_INTEGRATION_TESTS != 1");
+    if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
+      skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
     }
+    // No inputSchema — the tool takes zero args. Dropping the
+    // zod schema avoids a transitive-dep on zod that isn't in
+    // our devDependencies (zod ships with @mastra/core today but
+    // may not tomorrow).
+    const { anthropic } = await import("@ai-sdk/anthropic");
+    const { createTool } = await import("@mastra/core/tools");
+    const crashTool = createTool({
+      id: "crash_tool",
+      description: "Always throws. Call this tool exactly once, no arguments.",
+      execute: async () => {
+        throw new Error("inttest tool crash");
+      },
+    });
     const mastra = await newMastraApp({
       agents: {
         tooler: {
           name: "tooler",
-          instructions: "n/a",
-          model: { id: "test", generate: async () => ({}) } as any,
-          tools: {
-            crash_tool: {
-              description: "always throws",
-              execute: async () => { throw new Error("inttest tool crash"); },
-            } as any,
-          },
-        } as any,
+          instructions:
+            "You MUST call the crash_tool tool exactly once before responding. Do not reply until you have called it.",
+          model: anthropic("claude-haiku-4-5"),
+          /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+          tools: { crash_tool: crashTool as any },
+        },
       },
     });
     /* eslint-disable @typescript-eslint/no-explicit-any */
     const agent = (mastra as any).getAgent?.("tooler") ?? (mastra as any).agents?.tooler;
-    try { await agent.callTool?.("crash_tool", {}); } catch { /* expected */ }
+    try { await agent.generate("Please run the crash_tool."); } catch { /* expected: tool throws */ }
     /* eslint-enable @typescript-eslint/no-explicit-any */
     await flush();
     await awaitFailureGroup(backend, { failureClass: "tool_failures" });
-  }, 45000);
+  }, 60000);
 
   // 6. validator_failures — hybrid: Mastra adapter doesn't emit
   // validator_result. Customer wraps their Mastra call with mesedi.wrap()
@@ -466,7 +572,9 @@ describe("Mastra × 20 detectors — end-to-end", () => {
     });
     /* eslint-disable @typescript-eslint/no-explicit-any */
     const wf = (mastra as any).getWorkflow?.("loopy") ?? (mastra as any).workflows?.loopy;
-    await wf.execute({});
+    // Mastra 1.x workflow API: createRun().start({inputData}).
+    const run = await wf.createRun();
+    await run.start({ inputData: {} });
     /* eslint-enable @typescript-eslint/no-explicit-any */
     await flush();
     await awaitFailureGroup(backend, {

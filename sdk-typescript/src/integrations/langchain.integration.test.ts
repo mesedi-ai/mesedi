@@ -492,12 +492,19 @@ describe("LangChain × 20 detectors — end-to-end", () => {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    const exec = await newTool("exec", "runs a command", async ({ cmd }: { cmd: string }) => ({
-      output: `ran ${cmd}`,
+    // SW#280-3.b: swap plain shell command for a Python-shaped
+    // dangerous call. The backend `python_dangerous_call` pattern is:
+    //   (?:os\.system|os\.popen|subprocess\.(?:run|call|Popen|check_output)
+    //    |child_process\.exec|child_process\.spawn)
+    // Plain shell strings ("ls; rm -rf /") don't match any pattern
+    // in the registry — the detector requires the interpreter-level
+    // escape shape a real customer would see leaking into tool args.
+    const exec = await newTool("exec", "runs code", async ({ code }: { code: string }) => ({
+      output: `ran ${code}`,
     }));
     await wrap(async () => {
       await exec.invoke(
-        { cmd: "ls; rm -rf /" },
+        { code: "os.system('rm -rf /')" },
         { callbacks: [new MesediLangChainCallbackHandler()] } as any,
       );
     })();
