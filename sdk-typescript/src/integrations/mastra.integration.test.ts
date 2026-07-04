@@ -172,14 +172,23 @@ async function newMastraApp(config: {
       wrappedWorkflows[key] = acc.commit();
     }
   }
+  // Mastra 1.x Observability shape: `configs: {<name>: {exporters:
+  // [...], sampling: {type: "always"}}}`. The pre-1.x shape
+  // `Observability({exporters: {mesedi: ...}})` is silently ignored
+  // — the exporter registry stays empty and no spans get routed.
+  const observability = new Observability({
+    configs: {
+      mesedi: {
+        serviceName: "mesedi-inttest",
+        exporters: [new MesediExporter()],
+        sampling: { type: "always" },
+      },
+    },
+  } as any);
   return new Mastra({
     agents: wrappedAgents,
     workflows: wrappedWorkflows,
-    observability: new Observability({
-      exporters: {
-        mesedi: new MesediExporter(),
-      },
-    }),
+    observability,
   } as any);
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

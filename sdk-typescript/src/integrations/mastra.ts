@@ -15,11 +15,17 @@
  *     // Once, on Mesedi setup.
  *     configure({ apiKey: process.env.MESEDI_API_KEY });
  *
- *     // Then wire the exporter into Mastra.
+ *     // Then wire the exporter into Mastra. Mastra 1.x requires the
+ *     // `configs` shape below — the `exporters: {...}` root shape from
+ *     // pre-1.x is silently ignored and no spans reach the exporter.
  *     const mastra = new Mastra({
  *       observability: new Observability({
- *         exporters: {
- *           mesedi: new MesediExporter(),
+ *         configs: {
+ *           mesedi: {
+ *             serviceName: "my-app",
+ *             exporters: [new MesediExporter()],
+ *             sampling: { type: "always" },
+ *           },
  *         },
  *       }),
  *       // ...your agents / workflows
