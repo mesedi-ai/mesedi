@@ -396,11 +396,100 @@ function outputRepr(span: AnyExportedSpan): unknown {
   return s.attributes?.output ?? s.attributes?.result ?? s.output ?? "";
 }
 
+/**
+ * SW#280-3.g: extract the last user-role message's text from a
+ * Mastra MODEL_GENERATION span's `input`, unwrapping the ai-sdk
+ * message-array + content-parts + providerOptions timestamp
+ * envelope. Falls back to the raw input for non-Mastra shapes so
+ * existing tests keep working.
+ *
+ * Mastra shape observed live (SW#280-3.g probe):
+ *   input = {
+ *     messages: [
+ *       {role: "system", content: "..."},
+ *       {role: "user", content: [
+ *         {type: "text", text: "actual prompt",
+ *          providerOptions: {mastra: {createdAt: 1783...}}}
+ *       ]}
+ *     ]
+ *   }
+ *
+ * The `providerOptions.mastra.createdAt` differs per call and, when
+ * we ship the whole envelope as user_message, defeats
+ * identical_call / drift lexical / token_waste signature equality.
+ * Extracting just the human-visible text is what those detectors
+ * need.
+ */
+function extractUserMessage(span: AnyExportedSpan): unknown {
+  const s = span as unknown as {
+    input?: unknown;
+    attributes?: { prompt?: unknown; input?: unknown };
+  };
+  const raw =
+    s.attributes?.prompt ?? s.attributes?.input ?? s.input ?? "";
+  if (typeof raw === "string") return raw;
+  const messages = (raw as { messages?: unknown[] })?.messages;
+  if (!Array.isArray(messages)) return raw;
+  // Walk backwards; use the last user-role message.
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i] as { role?: string; content?: unknown };
+    if (m?.role !== "user") continue;
+    if (typeof m.content === "string") return m.content;
+    if (Array.isArray(m.content)) {
+      const parts: string[] = [];
+      for (const p of m.content) {
+        if (typeof p === "string") {
+          parts.push(p);
+        } else if (p && typeof p === "object") {
+          const pt = p as { type?: string; text?: string };
+          if (pt.type === "text" && typeof pt.text === "string") {
+            parts.push(pt.text);
+          }
+        }
+      }
+      return parts.join(" ");
+    }
+    return m.content ?? "";
+  }
+  return raw;
+}
+
+/**
+ * SW#280-3.g: extract the response text from a Mastra
+ * MODEL_GENERATION span's `output`, unwrapping the
+ * `{files, reasoning, sources, text, warnings}` envelope. Falls
+ * back to the raw output for non-Mastra shapes so existing tests
+ * keep working.
+ */
+function extractResponseText(span: AnyExportedSpan): unknown {
+  const s = span as unknown as {
+    output?: unknown;
+    attributes?: { output?: unknown; result?: unknown };
+  };
+  const raw =
+    s.attributes?.output ?? s.attributes?.result ?? s.output ?? "";
+  if (typeof raw === "string") return raw;
+  const text = (raw as { text?: unknown })?.text;
+  if (typeof text === "string") return text;
+  return raw;
+}
+
 function modelPayload(span: AnyExportedSpan): Record<string, unknown> {
   const s = span as unknown as {
     attributes?: {
       model?: string;
       provider?: string;
+      // SW#280-3.g: Mastra 1.x MODEL_GENERATION spans carry per-call
+      // token counts in `attributes.usage`. `attributes.internalUsage`
+      // is only for INTERNAL descendant spans rolled up to their
+      // exported ancestor (e.g. AGENT_RUN with hidden MODEL_GENERATION
+      // children) — it stays empty on the customer-facing
+      // model_generation span. Read `usage` first, fall back to
+      // `internalUsage` for the ancestor-rollup case.
+      usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+      };
       internalUsage?: {
         inputTokens?: number;
         outputTokens?: number;
@@ -419,16 +508,31 @@ function modelPayload(span: AnyExportedSpan): Record<string, unknown> {
 
   // Success path stays byte-identical with the pre-SW#280-3.f shape
   // to avoid churning consumers that already handle Mastra llm_calls.
+  // SW#280-3.g: Mastra 1.x model_generation spans populate
+  // `span.input` with the full ai-sdk messages array (system + user
+  // messages, with `providerOptions.mastra.createdAt` timestamps
+  // baked in) and `span.output` with `{files, reasoning, sources,
+  // text, warnings}` where `text` is the response. Extracting the
+  // last user message's text (not JSON-stringifying the whole
+  // envelope) is what identical_call / drift lexical / token_waste
+  // need — the raw envelope's per-call timestamp noise defeats
+  // signature equality.
   const payload: Record<string, unknown> = {
     model,
     provider,
-    user_message: summarize(inputRepr(span), MAX_STATE_REPR),
-    response_text: summarize(outputRepr(span), MAX_STATE_REPR),
+    user_message: summarize(extractUserMessage(span), MAX_STATE_REPR),
+    response_text: summarize(extractResponseText(span), MAX_STATE_REPR),
     status: hasError ? "failed" : "ok",
   };
   if (!hasError) {
-    const tokensIn = s.attributes?.internalUsage?.inputTokens;
-    const tokensOut = s.attributes?.internalUsage?.outputTokens;
+    // SW#280-3.g: prefer per-call `usage` over ancestor-rollup
+    // `internalUsage` — see attribute-shape comment above.
+    const tokensIn =
+      s.attributes?.usage?.inputTokens ??
+      s.attributes?.internalUsage?.inputTokens;
+    const tokensOut =
+      s.attributes?.usage?.outputTokens ??
+      s.attributes?.internalUsage?.outputTokens;
     if (tokensIn !== undefined) payload["input_tokens"] = tokensIn;
     if (tokensOut !== undefined) payload["output_tokens"] = tokensOut;
     return payload;

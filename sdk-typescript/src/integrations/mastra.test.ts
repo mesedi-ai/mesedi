@@ -211,6 +211,195 @@ describe("MesediExporter — descendant spans", () => {
   });
 
   // ──────────────────────────────────────────────────────────────────
+  // SW#280-3.g: Mastra 1.x MODEL_GENERATION shape extraction
+  // ──────────────────────────────────────────────────────────────────
+  //
+  // Live probe evidence (SW#280-3.g investigation):
+  //   input = { messages: [
+  //     {role:"system", content:"..."},
+  //     {role:"user", content:[{type:"text", text:"actual prompt",
+  //                             providerOptions:{mastra:{createdAt:...}}}]}
+  //   ]}
+  //   output = { files, reasoning, sources, text:"response", warnings }
+  //   attributes.usage = {inputTokens, outputTokens, ...}
+  //   attributes.internalUsage = undefined
+  //
+  // Extractors must unwrap these so identical_call / drift lexical /
+  // token_waste can score user_message + response_text on the
+  // human-visible content, not the per-call timestamp-poisoned
+  // envelope. The `usage` (not `internalUsage`) field carries
+  // per-call tokens for cost_velocity.
+
+  test("SW#280-3.g: Mastra input.messages array → user_message extracts last user's text", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: {
+        model: "claude-haiku-4-5",
+        provider: "anthropic",
+        usage: { inputTokens: 42, outputTokens: 7 },
+      },
+      input: {
+        messages: [
+          { role: "system", content: "Reply in one word." },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Say hello in one word.",
+                providerOptions: { mastra: { createdAt: 1783184625090 } },
+              },
+            ],
+          },
+        ],
+      },
+      output: {
+        files: [],
+        reasoning: [],
+        sources: [],
+        text: "Hello.",
+        warnings: [],
+      },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["user_message"]).toBe("Say hello in one word.");
+    expect(evt.payload["response_text"]).toBe("Hello.");
+    // usage (not internalUsage) is the correct per-call token source.
+    expect(evt.payload["input_tokens"]).toBe(42);
+    expect(evt.payload["output_tokens"]).toBe(7);
+  });
+
+  test("SW#280-3.g: string-content user message extracts as-is (no wrapping)", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "gpt-4o", provider: "openai", usage: {} },
+      input: {
+        messages: [
+          { role: "system", content: "You are helpful." },
+          { role: "user", content: "What is 2+2?" },
+        ],
+      },
+      output: { text: "4" },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["user_message"]).toBe("What is 2+2?");
+    expect(evt.payload["response_text"]).toBe("4");
+  });
+
+  test("SW#280-3.g: multiple user turns → picks the LAST user message", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "gpt-4o", provider: "openai" },
+      input: {
+        messages: [
+          { role: "user", content: "First question" },
+          { role: "assistant", content: "First answer" },
+          { role: "user", content: "Second question" },
+        ],
+      },
+      output: { text: "Second answer" },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["user_message"]).toBe("Second question");
+  });
+
+  test("SW#280-3.g: multi-part text content joined with spaces", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "gpt-4o", provider: "openai" },
+      input: {
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Describe" },
+              { type: "image_url", image_url: "..." },
+              { type: "text", text: "this image" },
+            ],
+          },
+        ],
+      },
+      output: { text: "cat" },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["user_message"]).toBe("Describe this image");
+  });
+
+  test("SW#280-3.g: non-Mastra shape (raw string input) still works", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "gpt-4o", provider: "openai", prompt: "hi", output: "hey" },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    // Pre-Mastra-1.x shape still recognized via attributes.prompt +
+    // attributes.output — the extractor falls back cleanly.
+    expect(evt.payload["user_message"]).toBe("hi");
+    expect(evt.payload["response_text"]).toBe("hey");
+  });
+
+  test("SW#280-3.g: internalUsage still consulted when usage absent (ancestor-rollup case)", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: {
+        model: "claude-haiku-4-5",
+        provider: "anthropic",
+        internalUsage: { inputTokens: 100, outputTokens: 20 },
+      },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["input_tokens"]).toBe(100);
+    expect(evt.payload["output_tokens"]).toBe(20);
+  });
+
+  // ──────────────────────────────────────────────────────────────────
   // SW#280-3.f: failed MODEL_GENERATION → llm_call with error_class
   // ──────────────────────────────────────────────────────────────────
   //
