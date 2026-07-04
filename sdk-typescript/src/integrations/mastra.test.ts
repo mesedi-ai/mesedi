@@ -792,3 +792,82 @@ describe("MesediExporter — status + tenant + fail-open", () => {
     expect(getCaps().starts).toHaveLength(0);
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Sprint A: tool_failures + user_message cap
+// ──────────────────────────────────────────────────────────────────────
+
+describe("MesediExporter — Sprint A: tool_failures errorInfo", () => {
+  test("TOOL_CALL with errorInfo emits status=failed + exception fields", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const toolSpan = makeSpan({
+      type: "tool_call",
+      attributes: { name: "crash_tool", input: {}, output: {} },
+      errorInfo: {
+        name: "ToolExecutionError",
+        message: "inttest tool crash",
+        details: {},
+      },
+    });
+    await exporter.exportTracingEvent(endedEvt(toolSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.event_type).toBe("tool_call");
+    // Sprint A: pre-fix, this always shipped status="ok" because
+    // attributes.error was never populated by real Mastra.
+    expect(evt.payload["status"]).toBe("failed");
+    expect(evt.payload["exception_type"]).toBe("ToolExecutionError");
+    expect(evt.payload["exception_message"]).toBe("inttest tool crash");
+    expect(evt.payload["tool_name"]).toBe("crash_tool");
+  });
+
+  test("TOOL_CALL with no errorInfo stays status=ok (regression guard)", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    const toolSpan = makeSpan({
+      type: "tool_call",
+      attributes: { name: "search", input: { q: "cats" }, output: "found" },
+    });
+    await exporter.exportTracingEvent(endedEvt(toolSpan));
+
+    const evt = getCaps().events[0]!;
+    expect(evt.payload["status"]).toBe("ok");
+    expect(evt.payload["exception_type"]).toBeUndefined();
+    expect(evt.payload["exception_message"]).toBeUndefined();
+  });
+
+  test("MODEL_GENERATION user_message uses higher cap so token_waste sees full prefix", async () => {
+    const exporter = new MesediExporter();
+    await exporter.exportTracingEvent(
+      startedEvt(makeSpan({ type: "agent_run" })),
+    );
+    resetCaps();
+
+    // 5000-char message > pre-Sprint-A cap of 1000; must NOT truncate
+    // to 1000 or backend token_waste (needs 2048+ shared prefix)
+    // can't score the content.
+    const longMessage = "a".repeat(5000);
+    const modelSpan = makeSpan({
+      type: "model_generation",
+      attributes: { model: "claude-haiku-4-5", provider: "anthropic" },
+      input: { messages: [{ role: "user", content: longMessage }] },
+      output: { text: "short response" },
+    });
+    await exporter.exportTracingEvent(endedEvt(modelSpan));
+
+    const evt = getCaps().events[0]!;
+    const userMsg = evt.payload["user_message"] as string;
+    expect(userMsg.length).toBe(5000);
+    // response_text still uses the smaller MAX_STATE_REPR cap.
+    expect(evt.payload["response_text"]).toBe("short response");
+  });
+});

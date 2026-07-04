@@ -82,7 +82,14 @@ import type { BaseMessage } from "@langchain/core/messages";
 // the Python `emit_llm_call` so wire-format payloads from this
 // adapter and from hand-written code are byte-indistinguishable.
 const MAX_SYSTEM = 1000;
-const MAX_USER_MSG = 1000;
+// Sprint A: user_message cap raised from 1000 to 8192 so backend
+// detectors that score on the raw user_message content
+// (token_waste requires a 2048+ char shared prefix, drift lexical
+// uses the full text for similarity scoring) actually see the
+// customer's prompt instead of a defensive truncation that defeated
+// them. Wire payload size is bounded elsewhere via #243 payload
+// truncation on the outer envelope.
+const MAX_USER_MSG = 8192;
 const MAX_RESPONSE = 1000;
 const MAX_TOOL_INPUT_REPR = 200;
 const MAX_TOOL_OUTPUT_REPR = 500;

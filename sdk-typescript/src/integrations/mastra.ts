@@ -114,6 +114,14 @@ const MAX_STATE_REPR = 1000;
 const MAX_TOOL_INPUT_REPR = 200;
 const MAX_TOOL_OUTPUT_REPR = 500;
 const MAX_EXC_MSG = 500;
+// Sprint A: user_message needs a taller cap than other state
+// fields because backend detectors (token_waste requires 2048+ char
+// shared prefix, drift lexical uses the full text for similarity
+// scoring) score on the raw user_message content. Wire payload size
+// is bounded elsewhere (#243 payload truncation applies on the
+// outer envelope). 8 KB comfortably clears the 2 KB token_waste
+// threshold while staying well under the wire cap.
+const MAX_USER_MSG = 8192;
 
 /**
  * Configuration accepted by `new MesediExporter(...)`. Kept tiny on
@@ -534,7 +542,7 @@ function modelPayload(span: AnyExportedSpan): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     model,
     provider,
-    user_message: summarize(extractUserMessage(span), MAX_STATE_REPR),
+    user_message: summarize(extractUserMessage(span), MAX_USER_MSG),
     response_text: summarize(extractResponseText(span), MAX_STATE_REPR),
     status: hasError ? "failed" : "ok",
   };
@@ -608,14 +616,38 @@ function toolPayload(span: AnyExportedSpan): Record<string, unknown> {
   const name = extractName(span) ?? "unknown";
   const s = span as unknown as {
     attributes?: { input?: unknown; output?: unknown; error?: unknown };
+    errorInfo?: {
+      message?: string;
+      name?: string;
+      details?: Record<string, unknown>;
+    };
   };
-  const status = s.attributes?.error ? "error" : "ok";
-  return {
+  // Sprint A: read span.errorInfo (Mastra 1.x's canonical error info
+  // container on failed spans) — same class of bug modelPayload had
+  // pre-SW#280-3.f. Backend tool_failures detector groups on
+  // `status: "failed"`; the pre-Sprint-A `status: "error"` on
+  // attributes.error was never populated by real Mastra (only by
+  // hand-rolled test mocks) so every real Mastra tool crash was
+  // silently classified as `status: "ok"`.
+  const errorInfo = s.errorInfo;
+  const hasError =
+    !!errorInfo && (!!errorInfo.name || !!errorInfo.message);
+  const payload: Record<string, unknown> = {
     tool_name: name,
     arguments: summarize(s.attributes?.input, MAX_TOOL_INPUT_REPR),
     return_value: summarize(s.attributes?.output, MAX_TOOL_OUTPUT_REPR),
-    status,
+    status: hasError ? "failed" : "ok",
   };
+  if (hasError) {
+    if (errorInfo?.name) payload["exception_type"] = errorInfo.name;
+    if (errorInfo?.message) {
+      payload["exception_message"] = summarize(
+        errorInfo.message,
+        MAX_EXC_MSG,
+      );
+    }
+  }
+  return payload;
 }
 
 function mapStatus(span: AnyExportedSpan): Status {

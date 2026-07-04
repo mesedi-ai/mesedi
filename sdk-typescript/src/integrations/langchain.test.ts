@@ -305,6 +305,9 @@ describe("MesediLangChainCallbackHandler — context + fail-open", () => {
   test("truncates oversized fields to matching wire budgets", async () => {
     await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
+      // Sprint A: user_message cap raised to 8192. A 1500-char prompt
+      // now passes through uncut (previously truncated to 1000).
+      // response_text stays at MAX_RESPONSE=1000.
       const bigPrompt = "a".repeat(1500);
       const bigResponse = "b".repeat(1500);
       h.handleLLMStart(
@@ -321,8 +324,32 @@ describe("MesediLangChainCallbackHandler — context + fail-open", () => {
       );
 
       const p = getCaps().events[0]!.payload;
-      expect((p["user_message"] as string).length).toBe(1000);
+      // 1500 < 8192 → user_message passes through uncut.
+      expect((p["user_message"] as string).length).toBe(1500);
+      expect((p["user_message"] as string).endsWith("...")).toBe(false);
+      // response_text still truncates at MAX_RESPONSE=1000.
       expect((p["response_text"] as string).length).toBe(1000);
+      expect((p["response_text"] as string).endsWith("...")).toBe(true);
+    });
+  });
+
+  test("Sprint A: user_message truncates at MAX_USER_MSG=8192 for oversized prompts", async () => {
+    await inCtx(async () => {
+      const h = new MesediLangChainCallbackHandler();
+      // 10000-char prompt exceeds the 8192 cap — must truncate.
+      const oversizedPrompt = "z".repeat(10000);
+      h.handleLLMStart(
+        { kwargs: { model: "gpt-4o" } },
+        [oversizedPrompt],
+        "over",
+      );
+      h.handleLLMEnd(
+        { generations: [[{ text: "ok" }]] },
+        "over",
+      );
+
+      const p = getCaps().events[0]!.payload;
+      expect((p["user_message"] as string).length).toBe(8192);
       expect((p["user_message"] as string).endsWith("...")).toBe(true);
     });
   });
