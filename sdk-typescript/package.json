@@ -98,7 +98,7 @@
     "@langchain/core": "^1.2.1",
     "@mastra/core": "^1.48.0",
     "@mastra/observability": "^1.15.2",
-    "@types/node": "^20.11.0",
+    "@types/node": "^26.1.0",
     "typescript": "^5.4.0",
     "vitest": "^4.1.9"
   }
