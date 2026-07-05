@@ -1,0 +1,11 @@
+# Integration-test runtime deps.
+#
+# We install the mesedi SDK from the local source tree so the suite
+# exercises the same code path real customers do — and so a broken
+# SDK change fails the suite at dev time, not in production.
+
+-e ../../../sdk-python
+
+pytest>=8.0
+requests>=2.31
+anthropic>=0.40,<1.0

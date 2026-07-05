@@ -1,0 +1,8 @@
+{
+  "context_overflow": {
+    "reason": "Real-LLM integration test costs ~$0.18 per run (180K input tokens against Claude Haiku). Test exists at backend/test/integration/test_detectors.py::test_context_overflow but is RUN_EXPENSIVE_TESTS=1 gated by design — pre-launch QA opts in; default CI skips. Synthetic-customer coverage from seed_context_overflow exercises a cheaper threshold-lowered trigger path; the expensive integration test is the canonical end-to-end coverage.",
+    "approved_by": "robert@mesedi.ai",
+    "approved_date": "2026-06-23",
+    "ticket": "#277"
+  }
+}

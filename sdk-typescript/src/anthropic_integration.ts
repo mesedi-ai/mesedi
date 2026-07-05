@@ -1,0 +1,331 @@
+/**
+ * Anthropic SDK monkey-patch, auto-emit llm_call events for every
+ * messages.create() call inside a wrap()'d execution.
+ *
+ * Activation is opt-in (call instrumentAnthropic() once at startup),
+ * matching the Python SDK and the Datadog/Sentry/OpenTelemetry
+ * pattern for observability instrumentation.
+ *
+ * What gets captured per call:
+ *   - model (e.g. "claude-opus-4-6")
+ *   - system_prompt, truncated to 1000 chars
+ *   - user_message, the LAST user-role message, truncated to 1000
+ *   - response_text, concatenated text-block content, truncated
+ *   - input_tokens / output_tokens, from response.usage
+ *   - duration_ms, wall-clock of the API call
+ *   - status, "ok" / "failed"
+ *   - exception_type + exception_message on failure
+ *
+ * Dependency injection: instrumentAnthropic accepts an optional
+ * `messagesClass` argument so this code path is testable without
+ * installing the actual `@anthropic-ai/sdk` package. Production
+ * callers pass the real Messages class; tests pass a hand-rolled
+ * fake.
+ */
+
+import { getClient } from "./client.js";
+import { currentExecutionContext, newEventId } from "./context.js";
+import {
+  classifyAnthropicException,
+  extractHttpStatus,
+  extractRetryAfter,
+} from "./errors.js";
+import { Event, EventType, utcNowRfc3339 } from "./events.js";
+import { _maybeEmitThrottlingEvent } from "./observe.js";
+
+const MAX_SYSTEM = 1000;
+const MAX_USER_MSG = 1000;
+const MAX_RESPONSE = 1000;
+const MAX_EXC_MSG = 500;
+
+/** Stable lowercase provider identifier shipped on every llm_call
+ * event from this integration. Backend detectors cluster cross-
+ * tenant signals on (provider, error_class), so this string must
+ * NOT change between SDK versions without a coordinated backend
+ * change. */
+const PROVIDER = "anthropic";
+
+/** Already-patched classes, keyed by class identity to make
+ * instrumentAnthropic() idempotent and to allow distinct fake classes
+ * to be patched in tests without falsely tripping the check. */
+const _patched = new WeakSet<object>();
+
+/**
+ * Minimal duck-typed interfaces for the parts of the Anthropic SDK
+ * shape we depend on. Defined here so the SDK has zero direct
+ * dependency on @anthropic-ai/sdk, at runtime we just call .create()
+ * on whatever class was passed.
+ *
+ * `create` typed as `(...args: any[]) => Promise<any>` rather than a
+ * tighter signature because we monkey-patch external code whose
+ * shape varies across SDK versions and test doubles. This is the
+ * standard pattern for instrumentation libraries (cf. OpenTelemetry's
+ * patcher types). The runtime check is duck-typing on the args we
+ * actually read (model, system, messages).
+ */
+export interface MessagesClassLike {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  prototype: { create: (...args: any[]) => Promise<any> };
+}
+
+type AnthropicCreateFn = (
+  this: unknown,
+  ...args: unknown[]
+) => Promise<AnthropicResponseLike>;
+
+interface AnthropicResponseLike {
+  content?: Array<{ text?: string }>;
+  usage?: { input_tokens?: number; output_tokens?: number };
+}
+
+interface AnthropicCreateArgs {
+  model?: string;
+  system?: string | unknown;
+  messages?: Array<{ role: string; content: string | unknown }>;
+}
+
+/**
+ * Patch the given Messages class's `create()` method to emit
+ * llm_call events. Returns true on success or no-op (already
+ * patched). Returns false if no class was supplied and the
+ * @anthropic-ai/sdk package isn't installed (best-effort dynamic
+ * import, kept optional so the SDK stays dependency-free at install
+ * time).
+ */
+export async function instrumentAnthropic(
+  messagesClass?: MessagesClassLike,
+): Promise<boolean> {
+  let cls = messagesClass;
+  if (!cls) {
+    try {
+      // Dynamic import so the SDK doesn't take a hard runtime
+      // dependency on @anthropic-ai/sdk. If the user has it
+      // installed, we auto-locate Messages; otherwise instrumentation
+      // is a no-op.
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore, the package may not be installed; this is by design
+      const mod = (await import("@anthropic-ai/sdk")) as unknown as {
+        Anthropic?: { Messages?: MessagesClassLike };
+      };
+      cls = mod?.Anthropic?.Messages;
+    } catch {
+      console.warn(
+        "mesedi: @anthropic-ai/sdk not installed; instrumentAnthropic() is a no-op. " +
+          "Install with `npm install @anthropic-ai/sdk` to enable, or pass the Messages class explicitly.",
+      );
+      return false;
+    }
+    if (!cls) {
+      console.warn(
+        "mesedi: located @anthropic-ai/sdk but couldn't find Anthropic.Messages, SDK version mismatch?",
+      );
+      return false;
+    }
+  }
+
+  if (_patched.has(cls)) return true;
+
+  const originalCreate = cls.prototype.create;
+
+  cls.prototype.create = async function patchedCreate(
+    this: unknown,
+    ...args: unknown[]
+  ): Promise<AnthropicResponseLike> {
+    const ctx = currentExecutionContext();
+    if (!ctx) {
+      // Outside wrap(), pass through unobserved.
+      return originalCreate.apply(this, args);
+    }
+
+    // Halt-safe boundary: check the budget BEFORE the actual LLM
+    // call. If a budget exists and is exceeded, this throws
+    // MesediHalt which propagates up to wrap()'s catch block. We
+    // count this as a step now (after the check passes) so the
+    // counter advances even though the LLM call hasn't run yet , 
+    // matches the Python SDK's pattern (check, then count, then act).
+    ctx.checkBudget();
+    if (ctx.budgetTracker) {
+      ctx.budgetTracker.incrementSteps();
+    }
+
+    const client = getClient();
+    const sequence = ctx.nextSequence();
+    const eventId = newEventId();
+
+    const firstArg = (args[0] ?? {}) as AnthropicCreateArgs;
+    const model = firstArg.model ?? "unknown";
+    const system = firstArg.system ?? "";
+    const messages = Array.isArray(firstArg.messages) ? firstArg.messages : [];
+
+    const systemText = typeof system === "string" ? system : safeStringify(system);
+    const userMessage = extractLastUserMessage(messages);
+
+    const start = performance.now();
+    try {
+      const response = await originalCreate.apply(this, args);
+      const durationMs = Math.round(performance.now() - start);
+      const { responseText, inputTokens, outputTokens } =
+        extractResponseFields(response);
+      // Token-budget accounting: feeds into BudgetTracker so future
+      // halt-safe boundary checks know how many tokens this execution
+      // has consumed. Tokens from FAILED LLM calls don't get
+      // accounted (we don't reach this code path on the error
+      // branch), that matches the Python SDK behavior.
+      if (ctx.budgetTracker) {
+        ctx.budgetTracker.addTokens(inputTokens, outputTokens);
+      }
+      const event: Event = {
+        event_id: eventId,
+        execution_id: ctx.executionId,
+        event_type: EventType.LLM_CALL,
+        sequence,
+        timestamp: utcNowRfc3339(),
+        duration_ms: durationMs,
+        payload: {
+          provider: PROVIDER,
+          surface: "chat",
+          model,
+          system_prompt: truncate(systemText, MAX_SYSTEM),
+          user_message: truncate(userMessage, MAX_USER_MSG),
+          response_text: truncate(responseText, MAX_RESPONSE),
+          status: "ok",
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+        },
+      };
+      client.submitEvent(event);
+      return response;
+    } catch (err) {
+      const durationMs = Math.round(performance.now() - start);
+      // Build the failure payload with the canonical cross-
+      // provider vocabulary from ./errors. provider lets the
+      // backend group multi-provider signals; error_class maps
+      // the native exception to one of eight canonical buckets;
+      // http_status is included when the exception exposes it.
+      const failurePayload: Record<string, unknown> = {
+        provider: PROVIDER,
+        surface: "chat",
+        model,
+        system_prompt: truncate(systemText, MAX_SYSTEM),
+        user_message: truncate(userMessage, MAX_USER_MSG),
+        status: "failed",
+        error_class: classifyAnthropicException(err),
+        exception_type:
+          err instanceof Error && err.constructor.name
+            ? err.constructor.name
+            : typeof err,
+        exception_message: truncate(
+          err instanceof Error ? err.message : String(err),
+          MAX_EXC_MSG,
+        ),
+      };
+      const httpStatus = extractHttpStatus(err);
+      if (httpStatus !== undefined) {
+        failurePayload.http_status = httpStatus;
+      }
+      // Provider-recommended back-off window. When present, the
+      // backend surfaces it on the provider_incident failure group
+      // so the customer's dashboard shows "back off N seconds"
+      // alongside the incident itself.
+      const retryAfter = extractRetryAfter(err);
+      if (retryAfter !== undefined) {
+        failurePayload.retry_after_seconds = retryAfter;
+      }
+      const event: Event = {
+        event_id: eventId,
+        execution_id: ctx.executionId,
+        event_type: EventType.LLM_CALL,
+        sequence,
+        timestamp: utcNowRfc3339(),
+        duration_ms: durationMs,
+        payload: failurePayload,
+      };
+      client.submitEvent(event);
+      //  auto-emit infrastructure_event on throttling-class
+      // exceptions so the infrastructure_throttled detector isn't
+      // silently inactive for the default customer.
+      _maybeEmitThrottlingEvent({
+        provider: PROVIDER,
+        errorClass: failurePayload.error_class as string,
+        httpStatus,
+        retryAfterSeconds: retryAfter,
+        endpoint: "/v1/messages",
+      });
+      throw err;
+    }
+  } as AnthropicCreateFn;
+
+  _patched.add(cls);
+  return true;
+}
+
+function extractLastUserMessage(
+  messages: AnthropicCreateArgs["messages"],
+): string {
+  if (!messages || messages.length === 0) return "";
+  // Walk backwards to find the most recent user-role message.
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || m.role !== "user") continue;
+    const content = m.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      const parts: string[] = [];
+      for (const block of content as Array<{ type?: string; text?: string }>) {
+        if (block?.type === "text" && typeof block.text === "string") {
+          parts.push(block.text);
+        }
+      }
+      return parts.join("\n");
+    }
+    return safeStringify(content);
+  }
+  return "";
+}
+
+function extractResponseFields(response: AnthropicResponseLike): {
+  responseText: string;
+  inputTokens: number;
+  outputTokens: number;
+} {
+  let responseText = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  try {
+    if (Array.isArray(response.content)) {
+      const parts: string[] = [];
+      for (const block of response.content) {
+        if (block && typeof block.text === "string") parts.push(block.text);
+      }
+      responseText = parts.join("\n");
+    }
+  } catch {
+    // best effort, leave responseText empty
+  }
+  try {
+    if (response.usage) {
+      inputTokens = Number(response.usage.input_tokens ?? 0) || 0;
+      outputTokens = Number(response.usage.output_tokens ?? 0) || 0;
+    }
+  } catch {
+    // best effort, leave token counts at 0
+  }
+  return { responseText, inputTokens, outputTokens };
+}
+
+function safeStringify(v: unknown): string {
+  if (v === undefined) return "";
+  if (v === null) return "";
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max - 3) + "...";
+}

@@ -1,0 +1,75 @@
+# Dependabot config for the Mesedi backend.
+#
+# Two ecosystems:
+#   - gomod (the Go module under backend/) for runtime + tooling deps
+#   - github-actions for the workflow files in .github/workflows
+#
+# Weekly cadence; we set open-pull-requests-limit per ecosystem so
+# a flood of low-priority bumps doesn't drown the queue. Security
+# alerts ignore this limit and always open a PR regardless.
+#
+# Dependabot is free on every repo, public or private. This file
+# survives the public flip; no toggle needed.
+
+version: 2
+updates:
+  # Backend Go module.
+  - package-ecosystem: "gomod"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "deps"
+      - "go"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  # GitHub Actions used by the workflows above (CodeQL, Fly deploy,
+  # release workflows). Action versions drift fast; weekly check
+  # surfaces deprecations early.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "deps"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # Python SDK lives at sdk-python/. Its dependencies are slim but
+  # we track them so a CVE in a runtime dep gets surfaced as a PR.
+  - package-ecosystem: "pip"
+    directory: "/sdk-python"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "deps"
+      - "python-sdk"
+
+  # TypeScript SDK lives at sdk-typescript/. Mirror cadence.
+  - package-ecosystem: "npm"
+    directory: "/sdk-typescript"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "deps"
+      - "typescript-sdk"

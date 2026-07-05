@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mesedi-curl"
+version = "0.1.0"
+description = "Transparent curl wrapper that records direct LLM API calls to Mesedi"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Mesedi", email = "hello@mesedi.ai" }]
+keywords = ["mesedi", "ai", "agents", "observability", "curl", "llm", "anthropic", "openai", "gemini"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Monitoring",
+]
+
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "responses>=0.24",
+]
+
+[project.urls]
+Homepage = "https://mesedi.ai"
+Documentation = "https://docs.mesedi.ai"
+Source = "https://github.com/mesedi-ai/mesedi"
+Issues = "https://github.com/mesedi-ai/mesedi/issues"
+
+[project.scripts]
+mesedi-curl = "mesedi_curl.cli:main_console"
+
+[tool.setuptools.packages.find]
+include = ["mesedi_curl*"]
+exclude = ["tests*"]

@@ -1,0 +1,9 @@
+# Don't ship local dev artifacts into the image build context.
+mesedi-dev.db
+mesedi-dev.db-*
+*.test
+coverage.out
+.env
+.env.local
+.env.example
+README.md
