@@ -1,0 +1,89 @@
+# Mesedi backend — Fly.io app configuration.
+#
+# v0.1 production posture (matches current local-only architecture):
+#   - SQLite on a 1GB persistent volume at /data.
+#     Single-writer; sufficient for early-stage traffic. Postgres
+#     migration is a v0.2 concern — the store interface already
+#     abstracts the underlying engine.
+#   - Plaintext webhook secrets in DB. The volume is only readable
+#     by the app's own container, so this is acceptable for v0.1.
+#     KMS encryption deferred to a later slice (see slice 2 deferral
+#     note in backend/internal/store/migrations/003_project_webhooks.sql).
+#   - Dashboard UI ships from the same binary via go:embed (one
+#     service, one deploy, no separate static-asset hosting).
+#
+# When mesedi.ai domain is acquired + Cloudflare-zoned, [http_service]
+# stays unchanged and a CNAME at api.mesedi.ai points at this Fly
+# app. Fly handles TLS termination either way.
+
+app = "mesedi-api"
+primary_region = "iad"
+
+[build]
+
+[env]
+  MESEDI_PORT = "8080"
+  MESEDI_LOG_LEVEL = "info"
+  # SQLite WAL journal mode for concurrent readers while a writer
+  # holds the lock; foreign_keys=on enforces ON DELETE CASCADE.
+  MESEDI_DB_URL = "file:/data/mesedi.db?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)"
+  # Public origin of the React dashboard. Used to build deep-link
+  # URLs in webhook payloads and Discord/Slack embeds.
+  MESEDI_DASHBOARD_URL = "https://app.mesedi.ai"
+
+# Persistent volume for SQLite database + WAL/SHM files. 1GB is
+# generous for v0.1 telemetry volume — at ~1KB per event, that's
+# room for ~1M events before we need to grow the volume.
+[[mounts]]
+  source = "mesedi_data"
+  destination = "/data"
+
+# HTTP service config. Force HTTPS, auto-start machines on inbound
+# traffic.
+#
+# PRE-LAUNCH NEON COST FIX (2026-06-14): auto_stop_machines is set
+# to "stop" and min_machines_running is 0 to let the backend fully
+# shut down during idle periods. Reason: the Go database/sql pool
+# keeps Neon connections open 24/7 while the machine is running,
+# preventing Neon's serverless compute from scaling to zero, which
+# was burning 6.1 CU-hrs/day against the 100 CU-hr Free-tier
+# monthly cap (projection: ~180 CU-hrs/month). With these two
+# settings the machine stops when idle, Neon's connections drop,
+# Neon's compute scales to zero, and CU-hr burn essentially stops
+# during quiet hours. Cold-start cost: 10-30 seconds for the first
+# request after idle.
+#
+# REVERT BEFORE PUBLIC LAUNCH:
+#   auto_stop_machines = false
+#   min_machines_running = 1
+# Real customers cannot tolerate 10-30s cold starts. The Neon plan
+# at launch time will be Launch ($19/mo) or Scale ($69/mo), which
+# accommodate always-on compute.
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+# VM size. shared-cpu-1x + 256MB is the smallest tier; should be
+# fine for v0.1 backend traffic (telemetry ingest is cheap; the
+# detector chain runs per-PATCH on a small event list).
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+# /health is unauthenticated (see cmd/api/main.go); Fly's health-
+# check hits it directly without bearer-token gymnastics.
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  protocol = "http"
+  timeout = "5s"

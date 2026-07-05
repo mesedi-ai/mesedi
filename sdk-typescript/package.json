@@ -1,0 +1,105 @@
+{
+  "name": "mesedi",
+  "version": "0.7.0",
+  "description": "Mesedi SDK — guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence.",
+  "license": "MIT",
+  "homepage": "https://mesedi.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mesedi-ai/mesedi.git",
+    "directory": "sdk-typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/mesedi-ai/mesedi/issues"
+  },
+  "author": "Robert J. Canario <hello@mesedi.ai>",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./integrations/vercel_ai": {
+      "types": "./dist/integrations/vercel_ai.d.ts",
+      "import": "./dist/integrations/vercel_ai.js"
+    },
+    "./integrations/langgraph": {
+      "types": "./dist/integrations/langgraph.d.ts",
+      "import": "./dist/integrations/langgraph.js"
+    },
+    "./integrations/openai_agents": {
+      "types": "./dist/integrations/openai_agents.d.ts",
+      "import": "./dist/integrations/openai_agents.js"
+    },
+    "./integrations/mastra": {
+      "types": "./dist/integrations/mastra.d.ts",
+      "import": "./dist/integrations/mastra.js"
+    },
+    "./integrations/langchain": {
+      "types": "./dist/integrations/langchain.d.ts",
+      "import": "./dist/integrations/langchain.js"
+    }
+  },
+  "peerDependencies": {
+    "@langchain/core": ">=0.3.0 <2.0.0",
+    "@mastra/core": ">=1.0.0",
+    "@mastra/observability": ">=1.0.0",
+    "ai": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    },
+    "@mastra/core": {
+      "optional": true
+    },
+    "@mastra/observability": {
+      "optional": true
+    },
+    "@langchain/core": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build:sandbox": "tsc -p tsconfig.sandbox.json",
+    "clean": "rm -rf dist dist-sandbox",
+    "test": "vitest run",
+    "test:sandbox": "npm run build:sandbox && node dist-sandbox/sandbox/real_agent.js",
+    "test:parity": "npm run build:sandbox && node dist-sandbox/sandbox/parity_test.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "observability",
+    "agent-monitoring",
+    "llm",
+    "vercel-ai-sdk",
+    "anthropic",
+    "openai",
+    "mesedi"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@ai-sdk/anthropic": "^4.0.8",
+    "@langchain/anthropic": "^1.5.1",
+    "@langchain/core": "^1.2.1",
+    "@mastra/core": "^1.48.0",
+    "@mastra/observability": "^1.15.2",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.9"
+  }
+}

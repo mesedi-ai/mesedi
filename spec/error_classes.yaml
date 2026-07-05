@@ -1,0 +1,96 @@
+# Single source of truth for the Mesedi canonical provider-error
+# vocabulary (/ closeout).
+#
+# Three language targets consume this spec via scripts/codegen.py:
+#
+#   - sdk-python/mesedi/_error_classes_generated.py
+#   - sdk-typescript/src/_errorClassesGenerated.ts
+#   - backend/internal/detectors/provider_error_classes_generated.go
+#
+# The generated files re-export the canonical constants + the
+# provider-side filter set; hand-written errors.py / errors.ts /
+# provider_error_classes.go import from the generated files so the
+# class names + filter membership cannot drift across the three
+# implementations.
+#
+# When adding a new class:
+#   1. Add an entry under `classes` with name, value, description.
+#   2. If the class should count as "provider-side" for the
+#      provider_incident detector, add its name to
+#      `provider_side_classes`.
+#   3. Run `python scripts/codegen.py` to regenerate the three
+#      target files.
+#   4. Update each provider's mapping in spec/provider_mappings.yaml
+#      to route at least one real exception to the new class (or
+#      explicitly document why no current provider produces it).
+
+# The eight canonical buckets. Names are UPPER_SNAKE for the
+# language-level constant; values are the lowercase wire-format
+# strings the backend persists. The split lets us rename a constant
+# without rewriting persisted data.
+classes:
+  - name: RATE_LIMITED
+    value: rate_limited
+    description: |
+      Provider says you're going too fast. Maps to HTTP 429 in
+      most provider APIs.
+
+  - name: QUOTA_EXHAUSTED
+    value: quota_exhausted
+    description: |
+      Billing / quota cap hit on the provider side. Distinct from
+      RATE_LIMITED because remediation differs (raise quota vs.
+      back off).
+
+  - name: INTERNAL_ERROR
+    value: internal_error
+    description: |
+      Provider had an internal 5xx failure or returned a malformed
+      response that fails the SDK's own response validation.
+
+  - name: SERVICE_UNAVAILABLE
+    value: service_unavailable
+    description: |
+      Provider unreachable, overloaded, or circuit-open. Connection
+      failures and explicit "service unavailable" responses both
+      map here.
+
+  - name: TIMEOUT
+    value: timeout
+    description: |
+      Provider took longer than its configured timeout. Includes
+      deadline-exceeded variants.
+
+  - name: INVALID_API_KEY
+    value: invalid_api_key
+    description: |
+      Auth rejection — bad / expired / revoked API key, or
+      insufficient permissions. Customer-side issue but reported
+      consistently so the dashboard can surface it.
+
+  - name: CLIENT_ERROR
+    value: client_error
+    description: |
+      4xx request validation failure (bad request, not-found,
+      conflict, payload-too-large, unprocessable entity). Customer
+      bug — the backend's provider_incident detector filters this
+      class out.
+
+  - name: UNKNOWN
+    value: unknown
+    description: |
+      Couldn't classify. Falls through to UNKNOWN rather than
+      mislabeling. The backend treats UNKNOWN as non-clusterable
+      for provider_incident purposes.
+
+# Subset of `classes` that count as "provider-side" for the
+# provider_incident detector. Customer-side issues (auth, bad
+# request, unknown) are explicitly EXCLUDED so a customer
+# accidentally rotating an API key doesn't fire provider_incident
+# alerts.
+provider_side_classes:
+  - RATE_LIMITED
+  - QUOTA_EXHAUSTED
+  - INTERNAL_ERROR
+  - SERVICE_UNAVAILABLE
+  - TIMEOUT

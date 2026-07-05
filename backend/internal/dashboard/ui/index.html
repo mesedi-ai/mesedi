@@ -1,0 +1,2349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mesedi — Local Dev</title>
+  <style>
+    :root {
+      --bg:           #0f172a;
+      --surface:      #1e293b;
+      --surface-2:    #334155;
+      --surface-3:    #475569;
+      --border:       #334155;
+      --border-2:     #475569;
+      --text:         #f1f5f9;
+      --text-muted:   #94a3b8;
+      --text-dim:     #64748b;
+      --accent:       #c9a646;
+      --danger:       #ef4444;
+      --danger-bg:    rgba(239, 68, 68, 0.15);
+      --danger-border:rgba(239, 68, 68, 0.35);
+      --warning:      #f59e0b;
+      --warning-bg:   rgba(245, 158, 11, 0.15);
+      --warning-border:rgba(245, 158, 11, 0.35);
+      --success:      #10b981;
+      --success-bg:   rgba(16, 185, 129, 0.15);
+      --success-border:rgba(16, 185, 129, 0.35);
+      --info:         #60a5fa;
+      --info-bg:      rgba(96, 165, 250, 0.15);
+      --info-border:  rgba(96, 165, 250, 0.35);
+      --purple:       #a78bfa;
+      --purple-bg:    rgba(167, 139, 250, 0.15);
+      --purple-border:rgba(167, 139, 250, 0.35);
+      --teal:         #14b8a6;
+      --teal-bg:      rgba(20, 184, 166, 0.15);
+      --teal-border:  rgba(20, 184, 166, 0.35);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px; border-bottom: 0.5px solid var(--border);
+      background: var(--surface);
+    }
+    .brand { display: flex; align-items: center; gap: 24px; }
+    .brand-name { font-size: 17px; font-weight: 500; letter-spacing: -0.2px; }
+    .project-chip {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 10px;
+      border: 0.5px solid var(--border-2);
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .dev-badge {
+      font-size: 10px; padding: 3px 7px;
+      background: var(--warning-bg); color: var(--warning);
+      border: 0.5px solid var(--warning-border);
+      border-radius: 4px; font-weight: 500; letter-spacing: 0.5px;
+    }
+    .nav-link {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 5px;
+    }
+    .nav-link:hover { color: var(--text); background: var(--surface-2); }
+    .nav-link.admin {
+      color: var(--accent);
+      border: 0.5px solid var(--border-2);
+    }
+    .nav-link.admin:hover {
+      background: rgba(201, 166, 70, 0.12);
+      color: var(--accent);
+    }
+
+    /* /app/admin landing — tiles */
+    .admin-tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .admin-tile {
+      padding: 20px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 80ms ease, border-color 120ms ease;
+    }
+    .admin-tile:hover {
+      transform: translateY(-1px);
+      border-color: var(--accent);
+    }
+    .admin-tile .tile-eyebrow {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+    .admin-tile .tile-title {
+      font-size: 18px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .admin-tile .tile-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .admin-tile .tile-meta {
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    /* /app/admin/api-keys — scope picker + DANGER ZONE for admin revoke */
+    .scope-picker {
+      display: flex;
+      gap: 18px;
+      margin: 12px 0;
+      font-size: 13px;
+    }
+    .scope-picker label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .scope-picker input[type="radio"] { cursor: pointer; }
+    .admin-confirm {
+      margin: 8px 0 12px;
+      padding: 10px 12px;
+      background: var(--danger-bg);
+      border: 0.5px solid var(--danger-border);
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--danger);
+      display: none;
+    }
+    .admin-confirm.active { display: block; }
+    .admin-confirm label {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .scope-badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .scope-badge.customer {
+      background: var(--info-bg);
+      color: var(--info);
+      border: 0.5px solid var(--info-border);
+    }
+    .scope-badge.admin {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 0.5px solid var(--danger-border);
+    }
+    .danger-zone {
+      margin-top: 12px;
+      padding: 14px;
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      border-radius: 8px;
+    }
+    .danger-zone-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--danger);
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    /* Active-key indicator on /app/admin */
+    .active-key-card {
+      margin-top: 20px;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 0.5px solid var(--border-2);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .active-key-card .ak-label {
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .active-key-card .ak-value {
+      font-family: monospace;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    /* Settings page-specific bits */
+    .key-revealed {
+      padding: 14px 16px;
+      background: var(--success-bg);
+      border: 0.5px solid var(--success-border);
+      border-radius: 8px;
+      margin-bottom: 18px;
+    }
+    .key-revealed .label {
+      font-size: 11px;
+      color: var(--success);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .key-revealed .value {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      padding: 8px 10px;
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: 4px;
+      word-break: break-all;
+      user-select: all;
+    }
+    .key-revealed .warn {
+      font-size: 11px;
+      color: var(--warning);
+      margin-top: 8px;
+    }
+    .mint-form {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .mint-form input {
+      flex: 1;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 0.5px solid var(--border-2);
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    .mint-form input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .mint-form button {
+      padding: 8px 14px;
+      background: var(--accent);
+      border: 0.5px solid var(--accent);
+      color: var(--bg);
+      border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .mint-form button:hover { opacity: 0.9; }
+    .mint-form button:active { transform: translateY(1px); }
+    .revoke-btn {
+      padding: 4px 10px;
+      background: transparent;
+      border: 0.5px solid var(--danger-border);
+      color: var(--danger);
+      border-radius: 5px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .revoke-btn:hover { background: var(--danger-bg); }
+
+    /* Secret-reveal action row — copy + dismiss buttons. Used by both
+     * the webhook register-reveal and (eventually) the API-key mint
+     * reveal. */
+    .reveal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .reveal-actions button {
+      padding: 5px 11px;
+      background: var(--bg);
+      border: 0.5px solid var(--border-2);
+      color: var(--text);
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .reveal-actions button:hover { background: var(--surface-2); }
+    .reveal-actions button.dismiss {
+      color: var(--text-muted);
+    }
+    .reveal-actions button.copied {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success);
+    }
+
+    /* Webhook settings page. */
+    .webhook-form {
+      display: grid;
+      grid-template-columns: 1fr 2fr auto;
+      gap: 10px;
+      align-items: start;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 18px;
+    }
+    .webhook-form input[type="text"], .webhook-form input[type="url"] {
+      padding: 8px 12px;
+      background: var(--bg);
+      border: 0.5px solid var(--border-2);
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    .webhook-form input:focus {
+      outline: none; border-color: var(--accent);
+    }
+    .webhook-form-classes {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 4px 0 0 0;
+    }
+    .webhook-form-classes label {
+      display: flex; align-items: center; gap: 5px; cursor: pointer;
+    }
+    .webhook-form-classes input { cursor: pointer; }
+    .webhook-form-hint {
+      grid-column: 1 / -1;
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 2px 0 0 0;
+    }
+    .webhook-form button {
+      padding: 8px 14px;
+      background: var(--accent);
+      border: 0.5px solid var(--accent);
+      color: var(--bg);
+      border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .webhook-form button:hover { opacity: 0.9; }
+    .webhook-row-actions {
+      display: flex; gap: 6px;
+    }
+    .small-btn {
+      padding: 3px 9px;
+      background: transparent;
+      border: 0.5px solid var(--border-2);
+      color: var(--text-muted);
+      border-radius: 5px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .small-btn:hover { background: var(--surface-2); color: var(--text); }
+    .deliveries-panel {
+      margin: 6px 0 18px 0;
+      padding: 12px 14px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 8px;
+    }
+    .deliveries-panel h3 {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .deliveries-panel table { font-size: 12px; }
+    .status-badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .status-delivered {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 0.5px solid var(--success-border);
+    }
+    .status-failed {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 0.5px solid var(--danger-border);
+    }
+    .status-pending {
+      background: var(--surface-2);
+      color: var(--text-muted);
+      border: 0.5px solid var(--border-2);
+    }
+
+    main { padding: 28px; max-width: 1280px; margin: 0 auto; }
+
+    .page-head {
+      display: flex; justify-content: space-between; align-items: flex-end;
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 24px; font-weight: 500; margin-bottom: 4px; }
+    .subtitle { font-size: 13px; color: var(--text-muted); }
+    .back-link {
+      display: inline-block;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+    .back-link:hover { color: var(--text); }
+    .reload-btn {
+      padding: 7px 14px;
+      background: var(--surface);
+      border: 0.5px solid var(--border-2);
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 13px; font-family: inherit;
+      cursor: pointer;
+    }
+    .reload-btn:hover { background: var(--surface-2); border-color: var(--surface-3); }
+    .reload-btn:active { transform: translateY(1px); }
+
+    /* Operator-action row above an execution's metadata. Only rendered
+     * when the execution is still running (status === "started"); the
+     * Halt button POSTs /executions/{id}/halt to push a halt event via
+     * the SSE channel the SDK is subscribed to. */
+    .exec-actions {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .halt-btn {
+      padding: 8px 18px;
+      background: var(--danger-bg);
+      border: 0.5px solid var(--danger-border);
+      color: var(--danger);
+      border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .halt-btn:hover { background: var(--danger); color: var(--bg); }
+    .halt-btn:active { transform: translateY(1px); }
+    .halt-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 32px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    .stat-label {
+      font-size: 12px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .stat-value {
+      font-size: 28px; font-weight: 500;
+      font-variant-numeric: tabular-nums;
+      margin-top: 4px;
+    }
+    .stat-sub { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .stat-sub.bad { color: var(--danger); }
+    .stat-sub.good { color: var(--success); }
+
+    .section { margin-bottom: 36px; }
+    .section-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .section-title { font-size: 16px; font-weight: 500; }
+    .section-title .count {
+      font-weight: 400; color: var(--text-muted);
+      font-size: 14px; margin-left: 8px;
+    }
+    .section-desc {
+      font-size: 12px; color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    thead tr { background: var(--surface-2); }
+    th {
+      text-align: left; padding: 10px 14px;
+      font-size: 11px; font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    td {
+      padding: 11px 14px;
+      font-size: 13px;
+      border-top: 0.5px solid var(--border);
+    }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: var(--surface-2); }
+    td.mono {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .num { font-variant-numeric: tabular-nums; text-align: right; }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 9px;
+      font-size: 11px; font-weight: 500;
+      border-radius: 4px;
+      border: 0.5px solid transparent;
+      text-transform: capitalize;
+    }
+    .badge-crash      { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+    .badge-loop       { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .badge-tool       { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .badge-validator  { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
+    .badge-injection  { background: var(--purple-bg);  color: var(--purple);  border-color: var(--purple-border); }
+    .badge-drift      { background: var(--teal-bg);    color: var(--teal);    border-color: var(--teal-border); }
+    .badge-cost       { background: rgba(201, 166, 70, 0.15); color: var(--accent); border-color: rgba(201, 166, 70, 0.35); }
+    .badge-default    { background: var(--surface-2);  color: var(--text-muted); }
+    .status-started   { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
+    .status-completed { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
+    .status-crashed   { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+    .status-halted    { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .status-timeout   { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .status-validation_failed { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-border); }
+
+    .evt-llm_call         { background: var(--purple-bg);  color: var(--purple);  border-color: var(--purple-border); }
+    .evt-tool_call        { background: var(--info-bg);    color: var(--info);    border-color: var(--info-border); }
+    .evt-checkpoint       { background: var(--surface-2);  color: var(--text-muted); }
+    .evt-validator_result { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
+    .evt-exception        { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+    .evt-drift_signal     { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+    .evt-injection_alert  { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger-border); }
+
+    .empty {
+      padding: 60px 24px;
+      text-align: center; color: var(--text-muted); font-size: 14px;
+    }
+    .empty strong { color: var(--text); font-weight: 500; }
+    .empty code {
+      display: inline-block; margin-top: 8px;
+      font-size: 12px; color: var(--accent);
+      background: var(--surface); padding: 4px 8px;
+      border-radius: 4px;
+      border: 0.5px solid var(--border);
+    }
+    .error {
+      padding: 18px 22px;
+      background: var(--danger-bg);
+      color: var(--text);
+      border: 0.5px solid var(--danger-border);
+      border-radius: 8px;
+      font-family: "SF Mono", monospace;
+      font-size: 12px;
+      margin-bottom: 24px;
+    }
+
+    /* Detail-view styles */
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 28px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+    }
+    .meta-cell .meta-label {
+      font-size: 11px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .meta-cell .meta-value {
+      font-size: 15px; margin-top: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .meta-cell .meta-value.mono {
+      font-family: "SF Mono", Menlo, monospace; font-size: 13px;
+      color: var(--text-muted);
+    }
+    details.payload {
+      margin-top: 4px;
+    }
+    details.payload summary {
+      cursor: pointer; font-size: 11px; color: var(--text-muted);
+      list-style: none;
+    }
+    details.payload summary::-webkit-details-marker { display: none; }
+    details.payload summary:before {
+      content: "▸"; display: inline-block;
+      width: 12px; transition: transform 0.1s;
+      color: var(--text-dim);
+    }
+    details.payload[open] summary:before { transform: rotate(90deg); }
+    details.payload pre {
+      margin-top: 6px;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: 6px;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+
+    footer {
+      margin-top: 60px;
+      padding: 24px 28px;
+      border-top: 0.5px solid var(--border);
+      text-align: center;
+      font-size: 11px; color: var(--text-dim);
+    }
+
+    /* ── Filter bar (failure-groups list controls) ───────────────────── */
+    .filter-bar {
+      display: flex; gap: 16px; align-items: center;
+      margin-bottom: 14px; flex-wrap: wrap;
+    }
+    .filter-group {
+      display: flex; gap: 4px; align-items: center;
+    }
+    .filter-label {
+      font-size: 10px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin-right: 6px;
+    }
+    .filter-chip {
+      padding: 5px 11px;
+      font-size: 12px;
+      background: transparent;
+      border: 0.5px solid var(--border-2);
+      color: var(--text-muted);
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .filter-chip:hover { background: var(--surface-2); color: var(--text); }
+    .filter-chip.active {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--surface-3);
+    }
+    .filter-bar-spacer { flex: 1; }
+
+    /* ── Tier 1 Playbook card on failure-group detail ────────────────── */
+    .playbook-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin-bottom: 28px;
+      line-height: 1.55;
+    }
+    .playbook-card .playbook-eyebrow {
+      font-size: 10px;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .playbook-card h1 {
+      font-size: 18px;
+      font-weight: 500;
+      margin: 0 0 12px 0;
+    }
+    .playbook-card h2 {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      margin: 18px 0 8px 0;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .playbook-card p {
+      color: var(--text-muted);
+      margin: 0 0 10px 0;
+    }
+    .playbook-card p strong { color: var(--text); font-weight: 500; }
+    .playbook-card ul, .playbook-card ol {
+      margin: 6px 0 12px 0;
+      padding-left: 22px;
+      color: var(--text-muted);
+    }
+    .playbook-card li { margin-bottom: 6px; }
+    .playbook-card li strong { color: var(--text); font-weight: 500; }
+    .playbook-card code {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      padding: 1px 5px;
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+    }
+    .playbook-card a {
+      color: var(--info);
+      text-decoration: none;
+      border-bottom: 0.5px dotted var(--info);
+    }
+    .playbook-card a:hover { color: var(--text); border-bottom-color: var(--text); }
+
+    /* ── Collapsible class-group cards ───────────────────────────────── */
+    .class-group {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .class-group-head {
+      display: flex; align-items: center; gap: 14px;
+      padding: 14px 18px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .class-group-head:hover { background: var(--surface-2); }
+    .class-group-caret {
+      font-size: 11px; color: var(--text-dim);
+      transition: transform 0.1s;
+      display: inline-block; width: 12px;
+    }
+    .class-group.open .class-group-caret { transform: rotate(90deg); }
+    .class-group-title {
+      flex: 1;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .class-group-title .badge { font-size: 11px; }
+    .class-group-stats {
+      display: flex; gap: 22px; align-items: center;
+      font-size: 12px; color: var(--text-muted);
+    }
+    .class-group-stat {
+      display: flex; gap: 5px; align-items: baseline;
+    }
+    .class-group-stat-value {
+      font-weight: 500; color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .class-group-stat-value.cost { color: var(--accent); }
+    .class-group-body {
+      display: none;
+      border-top: 0.5px solid var(--border);
+    }
+    .class-group.open .class-group-body { display: block; }
+    .class-group-body table {
+      border: none;
+      border-radius: 0;
+      background: transparent;
+    }
+    .class-group-body thead tr { background: transparent; }
+    .class-group-body td:first-child,
+    .class-group-body th:first-child { padding-left: 18px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="brand-name">Mesedi</span>
+      <span class="project-chip">
+        <span>Local Dev</span>
+        <span style="color: var(--text-dim);">·</span>
+        <span style="font-family: monospace; font-size: 12px;">proj-dev</span>
+      </span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <a class="nav-link" onclick="showOverview()">Overview</a>
+      <a class="nav-link" onclick="showWebhooks()">Webhooks</a>
+      <a class="nav-link" onclick="showSettings()">Settings</a>
+      <a class="nav-link admin" id="admin-nav" onclick="showAdmin()" style="display: none;">Admin</a>
+      <a class="nav-link" id="admin-signin" onclick="promptAdminKey()">Sign in as admin</a>
+      <span class="dev-badge">DEV ONLY · LOCALHOST</span>
+    </div>
+  </header>
+  <main id="main"></main>
+  <footer>
+    Mesedi local-dev dashboard prototype · Phase 3b sub-slice 8 · served from the backend binary at /ui/
+  </footer>
+
+  <script>
+    const DEV_KEY = "mesedi_sk_dev_local_only";
+    const ADMIN_KEY_STORAGE = "mesedi_admin_key";
+
+    // currentKey returns the bearer the dashboard sends on every request.
+    // Resolution order: localStorage(mesedi_admin_key), else the
+    // hardcoded DEV_KEY for local dev. The admin-key entry from
+    // promptAdminKey() persists across reloads so an operator who
+    // signs in once stays in the admin view.
+    function currentKey() {
+      try {
+        const k = localStorage.getItem(ADMIN_KEY_STORAGE);
+        if (k && k.trim()) return k.trim();
+      } catch (_) { /* localStorage unavailable -> fall through */ }
+      return DEV_KEY;
+    }
+    function headers(extra) {
+      return Object.assign({
+        "Authorization": "Bearer " + currentKey(),
+        "X-Mesedi-Schema-Version": "1",
+      }, extra || {});
+    }
+    // HEADERS kept as a live getter so legacy call sites that read it
+    // synchronously still see the active key.
+    const HEADERS = new Proxy({}, {
+      get(_, prop) {
+        if (prop === "Authorization") return "Bearer " + currentKey();
+        if (prop === "X-Mesedi-Schema-Version") return "1";
+        return undefined;
+      },
+      ownKeys() { return ["Authorization", "X-Mesedi-Schema-Version"]; },
+      getOwnPropertyDescriptor() {
+        return { enumerable: true, configurable: true };
+      },
+    });
+
+    // ── helpers ────────────────────────────────────────────────────────
+    function fmtNum(n) { return new Intl.NumberFormat("en-US").format(n); }
+    function fmtDate(s) {
+      if (!s) return "—";
+      const d = new Date(s);
+      const diffMs = new Date() - d;
+      const diffMin = Math.round(diffMs / 60000);
+      if (diffMin < 1) return "just now";
+      if (diffMin < 60) return diffMin + "m ago";
+      const diffHr = Math.round(diffMin / 60);
+      if (diffHr < 24) return diffHr + "h ago";
+      const diffDays = Math.round(diffHr / 24);
+      return diffDays + "d ago";
+    }
+    function fmtDateExact(s) {
+      if (!s) return "—";
+      return new Date(s).toLocaleString();
+    }
+    function fmtDuration(ms) {
+      if (ms === null || ms === undefined || ms === 0) return "—";
+      if (ms < 1000) return ms + "ms";
+      return (ms / 1000).toFixed(1) + "s";
+    }
+    function badgeForClass(cls) {
+      switch (cls) {
+        case "crashes":            return "badge-crash";
+        case "loops":              return "badge-loop";
+        case "tool_failures":      return "badge-tool";
+        case "validator_failures": return "badge-validator";
+        case "prompt_injection":   return "badge-injection";
+        case "drift":              return "badge-drift";
+        case "cost_velocity":      return "badge-cost";
+        default:                   return "badge-default";
+      }
+    }
+    function badgeForStatus(status) { return "status-" + (status || "default"); }
+    function escapeHtml(s) {
+      if (s === null || s === undefined) return "";
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    async function fetchJSON(path) {
+      const r = await fetch(path, { headers: HEADERS });
+      if (!r.ok) throw new Error("HTTP " + r.status + " from " + path);
+      return r.json();
+    }
+
+    // ── OVERVIEW VIEW ──────────────────────────────────────────────────
+
+    async function showOverview() {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <div class="page-head">
+          <div>
+            <h1>Overview</h1>
+            <div class="subtitle" id="last-refresh">Loading…</div>
+          </div>
+          <button class="reload-btn" onclick="showOverview()">↻ Reload</button>
+        </div>
+        <div class="stats-row">
+          <div class="stat-card"><div class="stat-label">Total executions</div><div class="stat-value" id="stat-total">—</div><div class="stat-sub">all time</div></div>
+          <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value" id="stat-completed">—</div><div class="stat-sub">all time</div></div>
+          <div class="stat-card"><div class="stat-label">Crashed · 24h</div><div class="stat-value" id="stat-crashed">—</div><div class="stat-sub" id="stat-crashed-sub">last 24 hours</div></div>
+          <div class="stat-card"><div class="stat-label">Open failure groups</div><div class="stat-value" id="stat-groups">—</div><div class="stat-sub">grouped signatures</div></div>
+        </div>
+        <div class="section">
+          <div class="section-head"><div class="section-title">Failure groups<span class="count" id="groups-count"></span></div></div>
+          <div class="section-desc">Failure signatures clustered by class. Click a class to expand the signatures inside. Within each class, ranking sorts by <em>cost wasted × affected executions</em> by default.</div>
+          <div id="groups-content"></div>
+        </div>
+        <div class="section">
+          <div class="section-head"><div class="section-title">Recent executions<span class="count" id="execs-count"></span></div></div>
+          <div class="section-desc">Most recent agent executions, newest first. Click a row to see its event timeline.</div>
+          <div id="execs-content"></div>
+        </div>
+      `;
+
+      try {
+        const [stats, groupsResp, execsResp] = await Promise.all([
+          fetchJSON("/stats"),
+          fetchJSON("/failure-groups"),
+          fetchJSON("/executions?limit=50"),
+        ]);
+        renderStats(stats);
+        renderGroups(groupsResp.failure_groups || []);
+        renderExecsTable(execsResp.executions || []);
+        document.getElementById("last-refresh").textContent =
+          "Last refresh: " + new Date().toLocaleTimeString();
+      } catch (e) {
+        main.insertAdjacentHTML("afterbegin",
+          '<div class="error">Fetch failed: ' + e.message + '<br>Is the backend running?</div>');
+      }
+    }
+
+    function renderStats(s) {
+      document.getElementById("stat-total").textContent = fmtNum(s.total_executions || 0);
+      document.getElementById("stat-completed").textContent = fmtNum(s.completed_executions || 0);
+      const crashed = s.crashed_24h || 0;
+      document.getElementById("stat-crashed").textContent = fmtNum(crashed);
+      document.getElementById("stat-crashed-sub").classList.toggle("bad", crashed > 0);
+      document.getElementById("stat-groups").textContent = fmtNum(s.open_failure_groups || 0);
+    }
+
+    // ── Failure-groups view: filter + sort + collapse-by-class ──────────
+    //
+    // Severity rank: lower number = surface higher in the list.
+    // Crashes first (always actionable), then security (injection), then
+    // money (cost_velocity), then operational classes.
+    const FAILURE_CLASS_RANK = {
+      "crashes":            1,
+      "prompt_injection":   2,
+      "drift":              3,
+      "cost_velocity":      4,
+      "loops":              5,
+      "tool_failures":      6,
+      "validator_failures": 7,
+    };
+
+    const TIME_WINDOWS = {
+      "all": { label: "All time",     ms: Infinity },
+      "7d":  { label: "Last 7 days",  ms: 7 * 24 * 3600 * 1000 },
+      "24h": { label: "Last 24h",     ms: 24 * 3600 * 1000 },
+    };
+
+    const SORT_MODES = {
+      "severity": { label: "Severity" },
+      "recent":   { label: "Most recent" },
+      "frequent": { label: "Most frequent" },
+    };
+
+    const DEFAULT_PREFS = {
+      window:   "all",
+      sort:     "severity",
+      expanded: {},
+    };
+
+    function loadPrefs() {
+      try {
+        const raw = localStorage.getItem("mesedi.dashboard.prefs");
+        if (!raw) return JSON.parse(JSON.stringify(DEFAULT_PREFS));
+        const parsed = JSON.parse(raw);
+        return Object.assign({}, DEFAULT_PREFS, parsed,
+          { expanded: Object.assign({}, parsed.expanded || {}) });
+      } catch (e) {
+        return JSON.parse(JSON.stringify(DEFAULT_PREFS));
+      }
+    }
+
+    function savePrefs(prefs) {
+      try { localStorage.setItem("mesedi.dashboard.prefs", JSON.stringify(prefs)); }
+      catch (e) { /* private browsing or quota — silently degrade */ }
+    }
+
+    let _prefs = loadPrefs();
+    let _lastGroups = null;  // cached so filter toggles can re-render without re-fetch
+
+    function setPref(key, value) {
+      _prefs[key] = value;
+      savePrefs(_prefs);
+      if (_lastGroups) renderGroups(_lastGroups);
+    }
+
+    function toggleClassExpand(cls) {
+      _prefs.expanded = _prefs.expanded || {};
+      _prefs.expanded[cls] = !_prefs.expanded[cls];
+      savePrefs(_prefs);
+      if (_lastGroups) renderGroups(_lastGroups);
+    }
+
+    function toggleAllExpand() {
+      const groups = _lastGroups || [];
+      const classes = Array.from(new Set(groups.map(g => g.failure_class)));
+      const anyOpen = classes.some(c => _prefs.expanded && _prefs.expanded[c]);
+      _prefs.expanded = {};
+      if (!anyOpen) classes.forEach(c => { _prefs.expanded[c] = true; });
+      savePrefs(_prefs);
+      renderGroups(groups);
+    }
+
+    function filterGroupsByWindow(groups) {
+      const w = TIME_WINDOWS[_prefs.window] || TIME_WINDOWS.all;
+      if (!isFinite(w.ms)) return groups;
+      const cutoff = Date.now() - w.ms;
+      return groups.filter(g => {
+        if (!g.last_seen) return false;
+        const ts = new Date(g.last_seen).getTime();
+        return ts >= cutoff;
+      });
+    }
+
+    function severityScore(g) {
+      // cost × affected. groups with $0 cost still rank by affected count.
+      return (g.cost_wasted_usd || 0) * (g.affected_executions || 0)
+        + (g.affected_executions || 0) * 0.0000001;
+    }
+
+    function sortGroupsWithin(groups) {
+      const mode = _prefs.sort || "severity";
+      const sortFns = {
+        severity: (a, b) => severityScore(b) - severityScore(a),
+        recent:   (a, b) => new Date(b.last_seen || 0).getTime()
+                          - new Date(a.last_seen || 0).getTime(),
+        frequent: (a, b) => (b.affected_executions || 0) - (a.affected_executions || 0),
+      };
+      return groups.slice().sort(sortFns[mode] || sortFns.severity);
+    }
+
+    function renderFilterBar(visibleCount, totalCount) {
+      const windowChips = Object.keys(TIME_WINDOWS).map(k => {
+        const active = _prefs.window === k ? ' active' : '';
+        return '<button class="filter-chip' + active + '" onclick="setPref(\'window\', \''
+          + k + '\')">' + escapeHtml(TIME_WINDOWS[k].label) + '</button>';
+      }).join('');
+
+      const sortChips = Object.keys(SORT_MODES).map(k => {
+        const active = _prefs.sort === k ? ' active' : '';
+        return '<button class="filter-chip' + active + '" onclick="setPref(\'sort\', \''
+          + k + '\')">' + escapeHtml(SORT_MODES[k].label) + '</button>';
+      }).join('');
+
+      return '<div class="filter-bar">' +
+        '<div class="filter-group"><span class="filter-label">Window</span>' + windowChips + '</div>' +
+        '<div class="filter-group"><span class="filter-label">Sort</span>' + sortChips + '</div>' +
+        '<div class="filter-bar-spacer"></div>' +
+        '<button class="filter-chip" onclick="toggleAllExpand()">Expand / collapse all</button>' +
+      '</div>';
+    }
+
+    function renderGroups(groups) {
+      _lastGroups = groups;
+      const c = document.getElementById("groups-content");
+      const countEl = document.getElementById("groups-count");
+      const totalCount = groups.length;
+      const filtered = filterGroupsByWindow(groups);
+
+      if (countEl) {
+        countEl.textContent = totalCount === filtered.length
+          ? " (" + totalCount + ")"
+          : " (" + filtered.length + " of " + totalCount + " · " + (TIME_WINDOWS[_prefs.window] || TIME_WINDOWS.all).label + ")";
+      }
+
+      if (totalCount === 0) {
+        c.innerHTML = renderFilterBar(0, 0) +
+          '<div class="empty"><strong>No failure groups yet.</strong><br>Run some agents against the backend to populate this view.</div>';
+        return;
+      }
+      if (filtered.length === 0) {
+        c.innerHTML = renderFilterBar(0, totalCount) +
+          '<div class="empty"><strong>No failure groups in this window.</strong><br>Try the "All time" filter to see older groups.</div>';
+        return;
+      }
+
+      // Bucket by class.
+      const byClass = {};
+      filtered.forEach(g => {
+        const cls = g.failure_class || "unknown";
+        (byClass[cls] = byClass[cls] || []).push(g);
+      });
+
+      // Order classes by rank (unknown classes go last).
+      const classNames = Object.keys(byClass).sort((a, b) => {
+        const ra = FAILURE_CLASS_RANK[a] || 99;
+        const rb = FAILURE_CLASS_RANK[b] || 99;
+        if (ra !== rb) return ra - rb;
+        return a.localeCompare(b);
+      });
+
+      const cards = classNames.map(cls => {
+        const groupsInCls = sortGroupsWithin(byClass[cls]);
+        const totalAffected = groupsInCls.reduce((s, g) => s + (g.affected_executions || 0), 0);
+        const totalCost     = groupsInCls.reduce((s, g) => s + (g.cost_wasted_usd || 0), 0);
+        const groupCount    = groupsInCls.length;
+        const expanded      = !!(_prefs.expanded && _prefs.expanded[cls]);
+
+        const rows = groupsInCls.map(g =>
+          '<tr class="clickable" onclick="showFailureGroupDetail(\'' + escapeHtml(g.group_id) + '\')">' +
+            '<td class="mono">' + escapeHtml(g.signature) + '</td>' +
+            '<td class="num">' + fmtNum(g.event_count) + '</td>' +
+            '<td class="num">' + fmtNum(g.affected_executions) + '</td>' +
+            '<td class="num">' + (g.cost_wasted_usd ? '$' + g.cost_wasted_usd.toFixed(4) : '—') + '</td>' +
+            '<td>' + fmtDate(g.first_seen) + '</td>' +
+            '<td>' + fmtDate(g.last_seen) + '</td>' +
+          '</tr>').join('');
+
+        return '<div class="class-group' + (expanded ? ' open' : '') + '">' +
+          '<div class="class-group-head" onclick="toggleClassExpand(\'' + escapeHtml(cls) + '\')">' +
+            '<span class="class-group-caret">▸</span>' +
+            '<div class="class-group-title">' +
+              '<span class="badge ' + badgeForClass(cls) + '">' + escapeHtml(cls) + '</span>' +
+            '</div>' +
+            '<div class="class-group-stats">' +
+              '<span class="class-group-stat"><span class="class-group-stat-value">' + fmtNum(groupCount) + '</span> ' +
+                (groupCount === 1 ? 'group' : 'groups') + '</span>' +
+              '<span class="class-group-stat"><span class="class-group-stat-value">' + fmtNum(totalAffected) + '</span> affected</span>' +
+              '<span class="class-group-stat"><span class="class-group-stat-value cost">$' + totalCost.toFixed(4) + '</span> wasted</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="class-group-body">' +
+            '<table><thead><tr>' +
+              '<th>Signature</th>' +
+              '<th class="num">Events</th>' +
+              '<th class="num">Affected</th>' +
+              '<th class="num">Cost wasted</th>' +
+              '<th>First seen</th>' +
+              '<th>Last seen</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      c.innerHTML = renderFilterBar(filtered.length, totalCount) + cards;
+    }
+
+    function renderExecsTable(execs) {
+      const c = document.getElementById("execs-content");
+      document.getElementById("execs-count").textContent = " (" + execs.length + ")";
+      if (execs.length === 0) {
+        c.innerHTML = '<div class="empty"><strong>No executions yet.</strong></div>';
+        return;
+      }
+      const rows = execs.map(e =>
+        '<tr class="clickable" onclick="showExecutionDetail(\'' + escapeHtml(e.execution_id) + '\')">' +
+          '<td class="mono">' + escapeHtml(e.execution_id) + '</td>' +
+          '<td><span class="badge ' + badgeForStatus(e.status) + '">' + escapeHtml(e.status) + '</span></td>' +
+          '<td class="num">' + fmtDuration(e.duration_ms) + '</td>' +
+          '<td>' + escapeHtml(e.sdk_language || "—") + '</td>' +
+          '<td class="mono">' + escapeHtml(e.crash_signature || "—") + '</td>' +
+          '<td>' + fmtDate(e.started_at) + '</td>' +
+        '</tr>').join("");
+      c.innerHTML = '<table><thead><tr>' +
+        '<th>Execution</th><th>Status</th>' +
+        '<th class="num">Duration</th>' +
+        '<th>SDK</th><th>Crash signature</th><th>Started</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    // ── EXECUTION DETAIL VIEW ──────────────────────────────────────────
+
+    async function showExecutionDetail(executionID) {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <a class="back-link" onclick="showOverview()">← Overview</a>
+        <div class="page-head">
+          <div>
+            <h1>Execution detail</h1>
+            <div class="subtitle mono" id="exec-id">${escapeHtml(executionID)}</div>
+          </div>
+          <button class="reload-btn" onclick="showExecutionDetail('${escapeHtml(executionID)}')">↻ Reload</button>
+        </div>
+        <div id="detail-content"><div class="empty">Loading…</div></div>
+      `;
+      try {
+        const data = await fetchJSON("/executions/" + encodeURIComponent(executionID));
+        renderExecutionDetail(data.execution, data.events || []);
+      } catch (e) {
+        document.getElementById("detail-content").innerHTML =
+          '<div class="error">Fetch failed: ' + e.message + '</div>';
+      }
+    }
+
+    function renderExecutionDetail(exec, events) {
+      const c = document.getElementById("detail-content");
+
+      // Operator Halt action — only visible while the execution is
+      // still running. POSTs to /executions/{id}/halt which pushes a
+      // halt event over the SSE channel the SDK is subscribed to.
+      // The agent halts at the next safe boundary (tool entry, LLM
+      // call entry, checkpoint), runs its try/finally cleanup, and
+      // PATCHes the execution to status=halted.
+      const haltAction = exec.status === "started"
+        ? '<div class="exec-actions">' +
+            '<button class="halt-btn" ' +
+              'onclick="haltExecution(\'' + escapeHtml(exec.execution_id) + '\', this)">' +
+              '⛔ Halt this execution' +
+            '</button>' +
+          '</div>'
+        : "";
+
+      const meta = `
+        ${haltAction}
+        <div class="meta-grid">
+          <div class="meta-cell">
+            <div class="meta-label">Status</div>
+            <div class="meta-value"><span class="badge ${badgeForStatus(exec.status)}">${escapeHtml(exec.status)}</span></div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Duration</div>
+            <div class="meta-value">${fmtDuration(exec.duration_ms)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">SDK</div>
+            <div class="meta-value">${escapeHtml(exec.sdk_language || "—")} ${escapeHtml(exec.sdk_version || "")}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Crash signature</div>
+            <div class="meta-value mono">${escapeHtml(exec.crash_signature || "—")}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Started</div>
+            <div class="meta-value">${fmtDateExact(exec.started_at)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Ended</div>
+            <div class="meta-value">${fmtDateExact(exec.ended_at)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Tokens in / out</div>
+            <div class="meta-value">${fmtNum(exec.total_tokens_in || 0)} / ${fmtNum(exec.total_tokens_out || 0)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Estimated cost</div>
+            <div class="meta-value">${exec.estimated_cost_usd ? '$' + exec.estimated_cost_usd.toFixed(4) : "—"}</div>
+          </div>
+        </div>
+      `;
+
+      const eventsSection = `
+        <div class="section">
+          <div class="section-head"><div class="section-title">Event timeline<span class="count"> (${events.length})</span></div></div>
+          <div class="section-desc">Events recorded against this execution, in sequence order. Click ▸ to expand each event's payload.</div>
+          ${events.length === 0
+            ? '<div class="empty"><strong>No events recorded.</strong><br>This execution started + ended without emitting any tool/LLM/checkpoint events.</div>'
+            : renderEventsTimeline(events)
+          }
+        </div>
+      `;
+
+      c.innerHTML = meta + eventsSection;
+    }
+
+    function renderEventsTimeline(events) {
+      const rows = events.map(e => {
+        const summary = eventSummary(e);
+        const payloadJSON = e.payload
+          ? JSON.stringify(e.payload, null, 2)
+          : "(no payload)";
+        return `
+          <tr>
+            <td class="num">${e.sequence}</td>
+            <td><span class="badge evt-${e.event_type}">${escapeHtml(e.event_type)}</span></td>
+            <td>${escapeHtml(summary)}
+              <details class="payload">
+                <summary>payload</summary>
+                <pre>${escapeHtml(payloadJSON)}</pre>
+              </details>
+            </td>
+            <td class="num">${fmtDuration(e.duration_ms)}</td>
+            <td>${fmtDateExact(e.timestamp)}</td>
+          </tr>
+        `;
+      }).join("");
+      return `<table><thead><tr>
+        <th class="num">#</th><th>Event</th><th>Summary</th>
+        <th class="num">Duration</th><th>Time</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    // Operator-triggered halt — POST /executions/{id}/halt to the
+    // backend, which fans the halt event out over SSE to whatever
+    // SDK process is subscribed for this execution. The agent stops
+    // at the next safe boundary; the dashboard reloads the execution
+    // detail shortly after so the operator sees the new status=halted
+    // state.
+    //
+    // Three response paths to handle:
+    //   200 + {notified: N}   — N>=1 SDK subscriber received the halt.
+    //                           Tell the operator, reload the detail.
+    //   404 + {error: "no active halt-stream subscribers..."}
+    //                         — execution has no live SDK listener
+    //                           (probably already terminal, or the
+    //                           agent wasn't budgeted so it never
+    //                           subscribed). Tell the operator —
+    //                           still a useful failure mode to know
+    //                           about, not a bug.
+    //   other                 — surface raw HTTP status + body for
+    //                           debugging.
+    async function haltExecution(executionID, btn) {
+      if (!confirm(
+        "Halt this execution?\n\n" +
+        "The SDK will be signaled to stop at the next safe boundary " +
+        "(next tool call, LLM call, or checkpoint). The agent's normal " +
+        "try/finally cleanup will run; the execution will be recorded " +
+        "as status=halted with crash_signature=halt:remote_signal."
+      )) return;
+
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Halting…";
+      }
+
+      try {
+        const r = await fetch("/executions/" + encodeURIComponent(executionID) + "/halt", {
+          method: "POST",
+          headers: Object.assign({}, HEADERS, { "Content-Type": "application/json" }),
+          body: JSON.stringify({ reason: "halted by operator from dashboard" }),
+        });
+        const text = await r.text();
+        let body = null;
+        try { body = JSON.parse(text); } catch { /* not JSON */ }
+
+        if (r.ok && body && body.notified) {
+          alert(
+            "Halt delivered to " + body.notified + " SDK subscriber(s).\n\n" +
+            "The execution will stop at its next safe boundary. " +
+            "Reloading the detail page shortly to show the new status."
+          );
+          setTimeout(() => showExecutionDetail(executionID), 1500);
+          return;
+        }
+        if (r.status === 404 && body && body.error) {
+          alert(
+            "Halt could not be delivered:\n\n" + body.error + "\n\n" +
+            "This usually means the execution has no live SDK listener " +
+            "(either it's already terminal, or the wrapped agent didn't " +
+            "set a Budget so no halt-stream subscription was opened)."
+          );
+        } else {
+          alert("Halt failed: HTTP " + r.status + "\n" + text);
+        }
+      } catch (err) {
+        alert("Halt request failed: " + (err.message || String(err)));
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "⛔ Halt this execution";
+        }
+      }
+    }
+
+    // Extract a short human-readable summary from event payload.
+    // Different event types have different "identifying" fields.
+    function eventSummary(e) {
+      const p = e.payload || {};
+      switch (e.event_type) {
+        case "llm_call":
+          return (p.model || "?") +
+            (p.status === "failed" ? " (failed: " + (p.exception_type || "") + ")" : "") +
+            (p.input_tokens !== undefined ? " · " + p.input_tokens + " in / " + p.output_tokens + " out" : "");
+        case "tool_call":
+          return (p.tool_name || "?") +
+            (p.status === "failed" ? " (failed: " + (p.exception_type || "") + ")" : "");
+        case "checkpoint":
+          return p.name || "?";
+        case "validator_result":
+          return (p.name || "?") +
+            (p.passed === false ? " (failed: " + (p.message || "") + ")" : " (passed)");
+        case "exception":
+          return p.exception_type || "?";
+        default:
+          return p.name || "—";
+      }
+    }
+
+    // ── FAILURE GROUP DETAIL VIEW ──────────────────────────────────────
+
+    async function showFailureGroupDetail(groupID) {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <a class="back-link" onclick="showOverview()">← Overview</a>
+        <div class="page-head">
+          <div>
+            <h1>Failure group</h1>
+            <div class="subtitle mono">${escapeHtml(groupID)}</div>
+          </div>
+          <button class="reload-btn" onclick="showFailureGroupDetail('${escapeHtml(groupID)}')">↻ Reload</button>
+        </div>
+        <div id="group-detail-content"><div class="empty">Loading…</div></div>
+      `;
+      try {
+        const [group, execsResp] = await Promise.all([
+          fetchJSON("/failure-groups/" + encodeURIComponent(groupID)),
+          fetchJSON("/failure-groups/" + encodeURIComponent(groupID) + "/executions?limit=200"),
+        ]);
+        renderFailureGroupDetail(group, execsResp.executions || []);
+      } catch (e) {
+        document.getElementById("group-detail-content").innerHTML =
+          '<div class="error">Fetch failed: ' + e.message + '</div>';
+      }
+    }
+
+    function renderFailureGroupDetail(g, execs) {
+      const c = document.getElementById("group-detail-content");
+
+      // Playbook is fetched lazily AFTER the page renders, so a slow
+      // playbook lookup doesn't block the rest of the detail view.
+      // The placeholder div gets populated by loadPlaybook() below
+      // once we know the failure_class + signature.
+      const playbookPlaceholder = '<div id="playbook-slot"></div>';
+
+      const meta = `
+        <div class="meta-grid">
+          <div class="meta-cell">
+            <div class="meta-label">Failure class</div>
+            <div class="meta-value"><span class="badge ${badgeForClass(g.failure_class)}">${escapeHtml(g.failure_class)}</span></div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Signature</div>
+            <div class="meta-value mono">${escapeHtml(g.signature)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Event count</div>
+            <div class="meta-value">${fmtNum(g.event_count)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Affected executions</div>
+            <div class="meta-value">${fmtNum(g.affected_executions)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">First seen</div>
+            <div class="meta-value">${fmtDateExact(g.first_seen)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Last seen</div>
+            <div class="meta-value">${fmtDateExact(g.last_seen)}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Sample execution</div>
+            <div class="meta-value mono">${escapeHtml(g.sample_execution_id || "—")}</div>
+          </div>
+          <div class="meta-cell">
+            <div class="meta-label">Cost wasted</div>
+            <div class="meta-value">${g.cost_wasted_usd ? '$' + g.cost_wasted_usd.toFixed(4) : "—"}</div>
+          </div>
+        </div>
+      `;
+
+      const execsSection = `
+        <div class="section">
+          <div class="section-head"><div class="section-title">Affected executions<span class="count"> (${execs.length})</span></div></div>
+          <div class="section-desc">Every execution linked to this failure group. Click any row to drill into its event timeline.</div>
+          ${execs.length === 0
+            ? '<div class="empty"><strong>No executions linked.</strong><br>Group exists but no execution has been associated yet.</div>'
+            : renderAffectedExecsTable(execs)
+          }
+        </div>
+      `;
+
+      c.innerHTML = meta + playbookPlaceholder + execsSection;
+
+      // Tier 1 Playbook — fire-and-forget fetch. If a playbook exists
+      // for this (failure_class, signature) pair, it renders into the
+      // #playbook-slot placeholder. If not, the placeholder stays
+      // empty (no error UI — a missing playbook is normal for many
+      // signatures, especially crash hashes).
+      loadPlaybook(g.failure_class, g.signature);
+    }
+
+    // Fetches the playbook for the given (failure_class, signature)
+    // and renders the markdown into the #playbook-slot div. Silent
+    // failure for 404 (no playbook for this signature is the
+    // expected case for the majority of failure-group views right
+    // now — only a handful of signatures have content authored).
+    async function loadPlaybook(failureClass, signature) {
+      const slot = document.getElementById("playbook-slot");
+      if (!slot) return;
+      try {
+        const url = "/playbooks?failure_class=" +
+          encodeURIComponent(failureClass) +
+          "&signature=" + encodeURIComponent(signature);
+        const r = await fetch(url, { headers: HEADERS });
+        if (r.status === 404) return;       // expected — no content authored yet
+        if (!r.ok) {
+          console.warn("playbook fetch failed", r.status);
+          return;
+        }
+        const markdown = await r.text();
+        slot.innerHTML =
+          '<div class="playbook-card">' +
+            '<div class="playbook-eyebrow">Playbook · canonical fix description</div>' +
+            renderMarkdown(markdown) +
+          '</div>';
+      } catch (err) {
+        console.warn("playbook load failed", err);
+      }
+    }
+
+    // Tiny markdown-to-HTML renderer. Supports only the subset
+    // playbook content actually uses: H1/H2 headers, paragraphs,
+    // bulleted + numbered lists, inline code, bold via **, simple
+    // links. Intentionally minimal so the dashboard doesn't pull a
+    // 50 KB markdown library to render a few hundred lines of text.
+    //
+    // Escapes HTML first so playbook content can't inject scripts
+    // even if a future author writes raw HTML by mistake.
+    function renderMarkdown(md) {
+      // 1. Escape all HTML special chars.
+      let s = md
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      // 2. Headers (H1, H2). Match start-of-line.
+      s = s.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+      s = s.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+
+      // 3. Inline: bold (**x**), code (`x`), links ([text](url)).
+      // Order matters — process code BEFORE bold so backtick
+      // contents don't get re-interpreted.
+      s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+      s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+      // 4. Lists — handled by splitting into blocks and detecting
+      // groups of lines that start with `- ` or `1. `. Bulleted
+      // and numbered are both rendered as <ul> for visual
+      // consistency in this dashboard; numbered semantics aren't
+      // critical for playbook readability.
+      const lines = s.split("\n");
+      const out = [];
+      let inList = false;
+      let inParagraph = false;
+      const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+      const closeParagraph = () => { if (inParagraph) { out.push("</p>"); inParagraph = false; } };
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed === "") {
+          closeList();
+          closeParagraph();
+          continue;
+        }
+        if (/^[-*] /.test(trimmed) || /^\d+\. /.test(trimmed)) {
+          closeParagraph();
+          if (!inList) { out.push("<ul>"); inList = true; }
+          const item = trimmed.replace(/^[-*] /, "").replace(/^\d+\. /, "");
+          out.push("<li>" + item + "</li>");
+          continue;
+        }
+        if (/^<h[12]>/.test(trimmed)) {
+          closeList();
+          closeParagraph();
+          out.push(trimmed);
+          continue;
+        }
+        closeList();
+        if (!inParagraph) { out.push("<p>"); inParagraph = true; }
+        out.push(trimmed);
+      }
+      closeList();
+      closeParagraph();
+      return out.join("\n");
+    }
+
+    function renderAffectedExecsTable(execs) {
+      const rows = execs.map(e =>
+        '<tr class="clickable" onclick="showExecutionDetail(\'' + escapeHtml(e.execution_id) + '\')">' +
+          '<td class="mono">' + escapeHtml(e.execution_id) + '</td>' +
+          '<td><span class="badge ' + badgeForStatus(e.status) + '">' + escapeHtml(e.status) + '</span></td>' +
+          '<td class="num">' + fmtDuration(e.duration_ms) + '</td>' +
+          '<td>' + escapeHtml(e.sdk_language || "—") + '</td>' +
+          '<td>' + fmtDate(e.started_at) + '</td>' +
+        '</tr>').join("");
+      return '<table><thead><tr>' +
+        '<th>Execution</th><th>Status</th>' +
+        '<th class="num">Duration</th>' +
+        '<th>SDK</th><th>Started</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    // ── SETTINGS VIEW (API key management) ─────────────────────────────
+
+    async function showSettings() {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <a class="back-link" onclick="showOverview()">← Overview</a>
+        <div class="page-head">
+          <div>
+            <h1>Settings · API keys</h1>
+            <div class="subtitle">Mint and revoke keys for this project. Raw key values are shown ONCE at mint time.</div>
+          </div>
+          <button class="reload-btn" onclick="showSettings()">↻ Reload</button>
+        </div>
+        <div id="mint-revealed"></div>
+        <div class="mint-form">
+          <input type="text" id="mint-name" placeholder="Label (optional) — e.g. 'production', 'staging', 'ci'" />
+          <button onclick="mintApiKey()">+ Mint new key</button>
+        </div>
+        <div id="keys-content"><div class="empty">Loading…</div></div>
+      `;
+      await refreshKeys();
+    }
+
+    async function refreshKeys() {
+      const c = document.getElementById("keys-content");
+      try {
+        const data = await fetchJSON("/api-keys");
+        const keys = data.api_keys || [];
+        if (keys.length === 0) {
+          c.innerHTML = '<div class="empty"><strong>No API keys yet.</strong><br>Mint one above.</div>';
+          return;
+        }
+        const rows = keys.map(k =>
+          '<tr>' +
+            '<td class="mono">' + escapeHtml(k.key_prefix) + '…</td>' +
+            '<td>' + escapeHtml(k.name || "—") + '</td>' +
+            '<td>' + fmtDate(k.created_at) + '</td>' +
+            '<td>' + (k.last_used_at ? fmtDate(k.last_used_at) : "never") + '</td>' +
+            '<td><button class="revoke-btn" onclick="revokeKey(\'' + escapeHtml(k.key_id) + '\', \'' + escapeHtml(k.key_prefix) + '\')">Revoke</button></td>' +
+          '</tr>'
+        ).join("");
+        c.innerHTML = '<table><thead><tr>' +
+          '<th>Prefix</th><th>Label</th><th>Created</th><th>Last used</th><th></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      } catch (e) {
+        c.innerHTML = '<div class="error">Fetch failed: ' + e.message + '</div>';
+      }
+    }
+
+    async function mintApiKey() {
+      const nameEl = document.getElementById("mint-name");
+      const name = nameEl.value.trim();
+      try {
+        const r = await fetch("/api-keys", {
+          method: "POST",
+          headers: {
+            ...HEADERS,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ name }),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        const data = await r.json();
+        document.getElementById("mint-revealed").innerHTML = `
+          <div class="key-revealed">
+            <div class="label">New key minted — copy this NOW</div>
+            <div class="value">${escapeHtml(data.raw_key)}</div>
+            <div class="warn">⚠ ${escapeHtml(data.warning || "Store this raw_key now — it will never be shown again.")}</div>
+          </div>
+        `;
+        nameEl.value = "";
+        await refreshKeys();
+      } catch (e) {
+        document.getElementById("mint-revealed").innerHTML =
+          '<div class="error">Mint failed: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function revokeKey(keyID, prefix) {
+      if (!confirm(`Revoke key ${prefix}…? Any clients still using it will start getting 401.`)) {
+        return;
+      }
+      try {
+        const r = await fetch("/api-keys/" + encodeURIComponent(keyID), {
+          method: "DELETE",
+          headers: HEADERS,
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        await refreshKeys();
+      } catch (e) {
+        alert("Revoke failed: " + e.message);
+      }
+    }
+
+    // ── Webhooks page ──────────────────────────────────────────────────
+    // Lists registered webhooks, lets the operator create new ones with a
+    // class filter, run an on-demand test delivery, view recent deliveries
+    // inline, and delete. Reveals each newly-created webhook's secret ONCE
+    // — same pattern as the API-key mint page.
+
+    const FAILURE_CLASSES_FOR_FILTER = [
+      "crashes", "loops", "tool_failures", "validator_failures",
+      "drift", "cost_velocity", "prompt_injection",
+    ];
+
+    async function showWebhooks() {
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <div class="page-head">
+          <div>
+            <h1>Webhooks · failure-class escalation</h1>
+            <div class="subtitle">When Mesedi detects a brand-new failure pattern in this project, it POSTs a signed JSON payload to each registered URL. Secret is shown ONCE at creation.</div>
+          </div>
+          <button class="reload-btn" onclick="showWebhooks()">↻ Reload</button>
+        </div>
+        <div id="webhook-revealed"></div>
+        <div class="webhook-form">
+          <input type="text" id="wh-name" placeholder="Label (optional) — e.g. 'slack-oncall'" />
+          <input type="url" id="wh-url" placeholder="https://hooks.slack.com/services/..." />
+          <button onclick="createWebhook()">+ Register</button>
+          <div class="webhook-form-classes" id="wh-classes">
+            ${FAILURE_CLASSES_FOR_FILTER.map(c =>
+              `<label><input type="checkbox" value="${escapeHtml(c)}" /> ${escapeHtml(c)}</label>`
+            ).join("")}
+          </div>
+          <div class="webhook-form-hint">Leave all classes unchecked to receive every failure class.</div>
+        </div>
+        <div id="webhooks-content"><div class="empty">Loading…</div></div>
+      `;
+      await refreshWebhooks();
+    }
+
+    async function refreshWebhooks() {
+      const c = document.getElementById("webhooks-content");
+      try {
+        const data = await fetchJSON("/webhooks");
+        const hooks = data.webhooks || [];
+        if (hooks.length === 0) {
+          c.innerHTML = '<div class="empty"><strong>No webhooks yet.</strong><br>Register one above and Mesedi will POST to it on every new failure class.</div>';
+          return;
+        }
+        const rows = hooks.map(h => {
+          const classes = (h.enabled_classes && h.enabled_classes.length)
+            ? h.enabled_classes.join(", ")
+            : "<em>all classes</em>";
+          const enabledChip = h.enabled
+            ? '<span class="status-badge status-delivered">enabled</span>'
+            : '<span class="status-badge status-pending">disabled</span>';
+          return `<tr>
+            <td>${escapeHtml(h.name || "—")}</td>
+            <td class="mono" style="word-break: break-all;">${escapeHtml(h.url)}</td>
+            <td>${classes}</td>
+            <td>${enabledChip}</td>
+            <td>${fmtDate(h.created_at)}</td>
+            <td>
+              <div class="webhook-row-actions">
+                <button class="small-btn" onclick="testWebhook('${escapeHtml(h.webhook_id)}')">Test</button>
+                <button class="small-btn" onclick="toggleDeliveries('${escapeHtml(h.webhook_id)}')">Deliveries</button>
+                <button class="revoke-btn" onclick="deleteWebhook('${escapeHtml(h.webhook_id)}', '${escapeHtml(h.name || h.webhook_id)}')">Delete</button>
+              </div>
+            </td>
+          </tr>
+          <tr id="del-row-${escapeHtml(h.webhook_id)}" style="display: none;">
+            <td colspan="6"><div id="del-panel-${escapeHtml(h.webhook_id)}" class="deliveries-panel"></div></td>
+          </tr>`;
+        }).join("");
+        c.innerHTML = `<table>
+          <thead><tr>
+            <th>Label</th><th>URL</th><th>Classes</th><th>Status</th><th>Created</th><th></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+      } catch (e) {
+        c.innerHTML = '<div class="error">Fetch failed: ' + e.message + '</div>';
+      }
+    }
+
+    async function createWebhook() {
+      const name = document.getElementById("wh-name").value.trim();
+      const url = document.getElementById("wh-url").value.trim();
+      const classes = Array.from(
+        document.querySelectorAll('#wh-classes input[type="checkbox"]:checked')
+      ).map(el => el.value);
+
+      if (!url) {
+        document.getElementById("webhook-revealed").innerHTML =
+          '<div class="error">URL is required.</div>';
+        return;
+      }
+
+      try {
+        const r = await fetch("/webhooks", {
+          method: "POST",
+          headers: { ...HEADERS, "Content-Type": "application/json" },
+          body: JSON.stringify({ name, url, enabled_classes: classes }),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        const data = await r.json();
+        document.getElementById("webhook-revealed").innerHTML = `
+          <div class="key-revealed">
+            <div class="label">Webhook registered · secret shown ONCE</div>
+            <div class="value" id="webhook-secret-value">${escapeHtml(data.secret)}</div>
+            <div class="warn">⚠ ${escapeHtml(data.warning || "Store this secret now. Use it to verify the X-Mesedi-Signature header on inbound deliveries (HMAC-SHA256 of the raw body).")}</div>
+            <div class="reveal-actions">
+              <button id="webhook-secret-copy" onclick="copyWebhookSecret('${escapeHtml(data.secret)}')">Copy secret</button>
+              <button class="dismiss" onclick="dismissWebhookSecret()">Dismiss</button>
+            </div>
+          </div>
+        `;
+        document.getElementById("wh-name").value = "";
+        document.getElementById("wh-url").value = "";
+        document.querySelectorAll('#wh-classes input[type="checkbox"]').forEach(el => el.checked = false);
+        await refreshWebhooks();
+      } catch (e) {
+        document.getElementById("webhook-revealed").innerHTML =
+          '<div class="error">Register failed: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function copyWebhookSecret(secret) {
+      const btn = document.getElementById("webhook-secret-copy");
+      try {
+        await navigator.clipboard.writeText(secret);
+        if (btn) {
+          const original = btn.textContent;
+          btn.textContent = "✓ Copied";
+          btn.classList.add("copied");
+          setTimeout(() => {
+            btn.textContent = original;
+            btn.classList.remove("copied");
+          }, 1500);
+        }
+      } catch (e) {
+        // Fallback for browsers without clipboard API: select the
+        // secret element so the user can ⌘C themselves.
+        const valueEl = document.getElementById("webhook-secret-value");
+        if (valueEl) {
+          const range = document.createRange();
+          range.selectNodeContents(valueEl);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        if (btn) btn.textContent = "Select-copy (clipboard unavailable)";
+      }
+    }
+
+    function dismissWebhookSecret() {
+      const el = document.getElementById("webhook-revealed");
+      if (el) el.innerHTML = "";
+    }
+
+    async function deleteWebhook(webhookID, label) {
+      if (!confirm(`Delete webhook "${label}"? Future failure groups will no longer notify it.`)) {
+        return;
+      }
+      try {
+        const r = await fetch("/webhooks/" + encodeURIComponent(webhookID), {
+          method: "DELETE",
+          headers: HEADERS,
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        await refreshWebhooks();
+      } catch (e) {
+        alert("Delete failed: " + e.message);
+      }
+    }
+
+    async function testWebhook(webhookID) {
+      try {
+        const r = await fetch("/webhooks/" + encodeURIComponent(webhookID) + "/test", {
+          method: "POST",
+          headers: HEADERS,
+        });
+        const data = await r.json();
+        if (data.ok) {
+          alert(`Test delivered ✓\nattempts: ${data.attempts}\nhttp: ${data.http_status}\ntook ${data.duration_ms}ms`);
+        } else {
+          alert(`Test FAILED\nattempts: ${data.attempts}\nerror: ${data.error || "—"}\nhttp: ${data.http_status || "—"}`);
+        }
+        // Refresh deliveries panel if currently open for this webhook.
+        const row = document.getElementById("del-row-" + webhookID);
+        if (row && row.style.display !== "none") {
+          await loadDeliveries(webhookID);
+        }
+      } catch (e) {
+        alert("Test request failed: " + e.message);
+      }
+    }
+
+    async function toggleDeliveries(webhookID) {
+      const row = document.getElementById("del-row-" + webhookID);
+      if (!row) return;
+      if (row.style.display === "none") {
+        row.style.display = "";
+        await loadDeliveries(webhookID);
+      } else {
+        row.style.display = "none";
+      }
+    }
+
+    async function loadDeliveries(webhookID) {
+      const panel = document.getElementById("del-panel-" + webhookID);
+      if (!panel) return;
+      panel.innerHTML = '<div class="empty">Loading deliveries…</div>';
+      try {
+        const data = await fetchJSON("/webhooks/" + encodeURIComponent(webhookID) + "/deliveries");
+        const deliveries = data.deliveries || [];
+        if (deliveries.length === 0) {
+          panel.innerHTML = '<h3>Recent deliveries</h3><div class="empty">No deliveries yet.</div>';
+          return;
+        }
+        const rows = deliveries.map(d => {
+          let statusCls = "status-pending";
+          if (d.status === "delivered") statusCls = "status-delivered";
+          else if (d.status === "failed") statusCls = "status-failed";
+          return `<tr>
+            <td>${fmtDate(d.created_at)}</td>
+            <td>${escapeHtml(d.failure_class || "—")}</td>
+            <td class="mono">${escapeHtml(d.signature || "—")}</td>
+            <td class="num">${d.attempt}</td>
+            <td><span class="status-badge ${statusCls}">${escapeHtml(d.status)}</span></td>
+            <td class="num">${d.http_status ?? "—"}</td>
+            <td class="num">${d.duration_ms}ms</td>
+            <td>${escapeHtml(d.error || "")}</td>
+          </tr>`;
+        }).join("");
+        panel.innerHTML = `<h3>Recent deliveries · ${deliveries.length}</h3>
+          <table>
+            <thead><tr>
+              <th>When</th><th>Class</th><th>Signature</th><th>Try</th>
+              <th>Status</th><th>HTTP</th><th>Took</th><th>Error</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      } catch (e) {
+        panel.innerHTML = '<div class="error">Fetch failed: ' + e.message + '</div>';
+      }
+    }
+
+    // ── BOOT ───────────────────────────────────────────────────────────
+    showOverview();
+
+    // ── ADMIN: sign-in flow ────────────────────────────────────────────
+    // The dashboard sends whichever key currentKey() resolves. On page
+    // load we hit /admin/whoami; if it succeeds (admin path), the
+    // Admin nav link appears. The "Sign in as admin" link prompts for
+    // a key and re-checks.
+
+    function promptAdminKey() {
+      const cur = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
+      const v = prompt(
+        "Paste your admin API key (mesedi_sk_...).\n\n" +
+        "Stored in localStorage and sent as Authorization: Bearer <key>.\n" +
+        "Leave blank to clear the saved key and use the local dev key.",
+        cur
+      );
+      if (v === null) return;
+      const trimmed = v.trim();
+      try {
+        if (trimmed === "") {
+          localStorage.removeItem(ADMIN_KEY_STORAGE);
+        } else {
+          localStorage.setItem(ADMIN_KEY_STORAGE, trimmed);
+        }
+      } catch (_) { /* ignore storage failures */ }
+      detectAdminScope();
+    }
+
+    function signOutAdmin() {
+      try { localStorage.removeItem(ADMIN_KEY_STORAGE); } catch (_) {}
+      detectAdminScope();
+      showOverview();
+    }
+
+    // detectAdminScope calls /admin/whoami with the active key. On 2xx
+    // we surface the Admin nav link and hide the sign-in link; on
+    // anything else we hide Admin and surface sign-in.
+    async function detectAdminScope() {
+      const adminNav = document.getElementById("admin-nav");
+      const signinNav = document.getElementById("admin-signin");
+      try {
+        const r = await fetch("/admin/whoami", { headers: headers() });
+        if (r.ok) {
+          const who = await r.json();
+          window.__mesediAdminWhoami = who;
+          if (adminNav) adminNav.style.display = "";
+          if (signinNav) signinNav.style.display = "none";
+          return who;
+        }
+      } catch (_) { /* network error → treat as not-admin */ }
+      window.__mesediAdminWhoami = null;
+      if (adminNav) adminNav.style.display = "none";
+      if (signinNav) signinNav.style.display = "";
+      return null;
+    }
+
+    // ── /app/admin LANDING (tiles) ─────────────────────────────────────
+
+    async function showAdmin() {
+      const who = await detectAdminScope();
+      if (!who) {
+        const main = document.getElementById("main");
+        main.innerHTML = `
+          <div class="page-head">
+            <div>
+              <h1>Admin</h1>
+              <div class="subtitle">Admin sign-in required.</div>
+            </div>
+          </div>
+          <div class="empty" style="margin-top: 20px;">
+            <strong>The active key does not have admin scope.</strong><br>
+            <a class="nav-link" onclick="promptAdminKey()" style="display: inline-block; margin-top: 10px;">
+              Sign in as admin
+            </a>
+          </div>
+        `;
+        return;
+      }
+      const main = document.getElementById("main");
+      const method = who.auth_method === "legacy_token"
+        ? "Legacy MESEDI_ADMIN_TOKEN (static Fly secret)"
+        : "Admin-scope API key";
+      const keyDisplay = who.key_id
+        ? escapeHtml(who.name || "(unnamed)") + ' · <span class="ak-value">' + escapeHtml(who.key_id) + '</span>'
+        : "—";
+      const signOutLink = who.auth_method === "api_key"
+        ? '<a class="nav-link" onclick="signOutAdmin()" style="margin-left: 10px;">Sign out</a>'
+        : '';
+      main.innerHTML = `
+        <div class="page-head">
+          <div>
+            <h1>Admin</h1>
+            <div class="subtitle">Founder-side dashboard for managing projects, abuse signals, and credentials.</div>
+          </div>
+          <button class="reload-btn" onclick="showAdmin()">↻ Reload</button>
+        </div>
+        <div class="admin-tiles">
+          <div class="admin-tile" onclick="showAdminAPIKeys()">
+            <div class="tile-eyebrow">Credentials</div>
+            <div class="tile-title">API Keys</div>
+            <div class="tile-desc">
+              Mint, list, and revoke admin-scope and customer-scope keys across every project.
+              Includes optional expiration dates and DANGER ZONE confirmation on admin-key revoke.
+            </div>
+            <div class="tile-meta">GET /admin/api-keys</div>
+          </div>
+          <div class="admin-tile" onclick="alert('Projects view: GET /admin/projects (existing endpoint, dashboard view TBD)')">
+            <div class="tile-eyebrow">Tenants</div>
+            <div class="tile-title">Projects</div>
+            <div class="tile-desc">
+              Every project's activity aggregates, tier, granted executions, and per-project failure-group resets.
+            </div>
+            <div class="tile-meta">GET /admin/projects</div>
+          </div>
+          <div class="admin-tile" onclick="alert('Abuse signals view: GET /admin/abuse (existing endpoint, dashboard view TBD)')">
+            <div class="tile-eyebrow">Safety</div>
+            <div class="tile-title">Abuse signals</div>
+            <div class="tile-desc">
+              Key-leak detector and suspension queue. Resolve open signals after manual review.
+            </div>
+            <div class="tile-meta">GET /admin/abuse</div>
+          </div>
+          <div class="admin-tile" onclick="alert('Storage view: GET /admin/storage (existing endpoint, dashboard view TBD)')">
+            <div class="tile-eyebrow">Capacity</div>
+            <div class="tile-title">Storage</div>
+            <div class="tile-desc">
+              Per-table byte counts, row counts, and retention configuration across every project.
+            </div>
+            <div class="tile-meta">GET /admin/storage</div>
+          </div>
+        </div>
+        <div class="active-key-card">
+          <div class="ak-label">Authenticated as</div>
+          <div>${escapeHtml(method)}</div>
+          <div style="margin-top: 6px;">${keyDisplay}${signOutLink}</div>
+        </div>
+      `;
+    }
+
+    // ── /app/admin/api-keys ────────────────────────────────────────────
+
+    async function showAdminAPIKeys() {
+      const who = await detectAdminScope();
+      if (!who) {
+        showAdmin();
+        return;
+      }
+      const main = document.getElementById("main");
+      main.innerHTML = `
+        <a class="back-link" onclick="showAdmin()">← Admin</a>
+        <div class="page-head">
+          <div>
+            <h1>Admin · API keys</h1>
+            <div class="subtitle">
+              Mint admin-scope and customer-scope keys across every project.
+              The raw secret is shown ONCE on mint.
+            </div>
+          </div>
+          <button class="reload-btn" onclick="showAdminAPIKeys()">↻ Reload</button>
+        </div>
+        <div id="admin-mint-revealed"></div>
+        <div class="mint-form" style="display: block;">
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <input type="text" id="admin-mint-name" placeholder="Name (e.g. 'founder-laptop', 'cs-support-jane')" style="flex: 2; min-width: 240px;" />
+            <input type="text" id="admin-mint-project" placeholder="project_id (customer scope only)" style="flex: 1; min-width: 220px;" />
+            <input type="date" id="admin-mint-expires" title="Optional expiry (UTC end-of-day)" />
+          </div>
+          <div class="scope-picker">
+            <label><input type="radio" name="admin-scope" value="customer" checked onchange="onAdminScopeChange()"> Customer scope (project key)</label>
+            <label><input type="radio" name="admin-scope" value="admin" onchange="onAdminScopeChange()"> Admin scope (privileged)</label>
+          </div>
+          <div class="admin-confirm" id="admin-confirm-block">
+            <label>
+              <input type="checkbox" id="admin-confirm-check">
+              <span>
+                <strong>I understand this mints an admin-scope key.</strong>
+                Holder of this key can read every project's data, revoke any other key, and reach every /admin/* endpoint.
+              </span>
+            </label>
+          </div>
+          <button onclick="mintAdminApiKey()" style="margin-top: 6px;">+ Mint key</button>
+        </div>
+        <div id="admin-keys-content"><div class="empty">Loading…</div></div>
+      `;
+      await refreshAdminKeys();
+    }
+
+    // Clear the green "key minted" reveal panel once the operator has
+    // copied the secret. Triggered by the × in the top-right corner of
+    // the .key-revealed box.
+    function dismissAdminMintRevealed() {
+      const el = document.getElementById("admin-mint-revealed");
+      if (el) el.innerHTML = "";
+    }
+
+    function onAdminScopeChange() {
+      const adminSelected = document.querySelector('input[name="admin-scope"]:checked').value === "admin";
+      const confirmBlock = document.getElementById("admin-confirm-block");
+      const projInput = document.getElementById("admin-mint-project");
+      if (confirmBlock) confirmBlock.classList.toggle("active", adminSelected);
+      if (projInput) {
+        projInput.disabled = adminSelected;
+        projInput.placeholder = adminSelected
+          ? "(ignored; admin keys go to _admin)"
+          : "project_id (customer scope only)";
+      }
+    }
+
+    async function refreshAdminKeys() {
+      const c = document.getElementById("admin-keys-content");
+      try {
+        const data = await fetch("/admin/api-keys", { headers: headers() });
+        if (!data.ok) {
+          const t = await data.text();
+          throw new Error("HTTP " + data.status + ": " + t);
+        }
+        const j = await data.json();
+        const keys = j.api_keys || [];
+        if (keys.length === 0) {
+          c.innerHTML = '<div class="empty"><strong>No API keys in the system.</strong><br>Mint one above.</div>';
+          return;
+        }
+        const whoKeyID = (window.__mesediAdminWhoami || {}).key_id || "";
+        const rows = keys.map(k => {
+          const scope = k.scope || "customer";
+          const scopeBadge = '<span class="scope-badge ' + scope + '">' + escapeHtml(scope) + '</span>';
+          const isSelf = whoKeyID && k.key_id === whoKeyID;
+          const selfTag = isSelf ? ' <span style="color: var(--accent); font-size: 11px;">(this key)</span>' : '';
+          const expires = k.expires_at && k.expires_at !== ''
+            ? fmtDateExact(k.expires_at)
+            : 'never';
+          const revokeBtn = isSelf
+            ? '<button class="revoke-btn" disabled title="Cannot revoke the key authenticating this session">Self</button>'
+            : '<button class="revoke-btn" onclick="revokeAdminKey(\'' + escapeHtml(k.key_id) + '\', \'' + escapeHtml(k.key_prefix) + '\', \'' + escapeHtml(scope) + '\')">Revoke</button>';
+          return '<tr>' +
+            '<td>' + scopeBadge + selfTag + '</td>' +
+            '<td class="mono">' + escapeHtml(k.key_prefix) + '…</td>' +
+            '<td>' + escapeHtml(k.name || "—") + '</td>' +
+            '<td class="mono">' + escapeHtml(k.project_id) + '</td>' +
+            '<td>' + fmtDate(k.created_at) + '</td>' +
+            '<td>' + (k.last_used_at ? fmtDate(k.last_used_at) : "never") + '</td>' +
+            '<td>' + escapeHtml(expires) + '</td>' +
+            '<td>' + revokeBtn + '</td>' +
+            '</tr>';
+        }).join("");
+        c.innerHTML = '<table><thead><tr>' +
+          '<th>Scope</th><th>Prefix</th><th>Name</th><th>Project</th><th>Created</th><th>Last used</th><th>Expires</th><th></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      } catch (e) {
+        c.innerHTML = '<div class="error">Fetch failed: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function mintAdminApiKey() {
+      const name = document.getElementById("admin-mint-name").value.trim();
+      const scope = document.querySelector('input[name="admin-scope"]:checked').value;
+      const projectID = document.getElementById("admin-mint-project").value.trim();
+      const expiresAt = document.getElementById("admin-mint-expires").value.trim();
+      const confirmAdmin = document.getElementById("admin-confirm-check").checked;
+
+      if (!name) {
+        alert("Name required.");
+        return;
+      }
+      if (scope === "admin" && !confirmAdmin) {
+        alert("Tick the confirmation checkbox to mint an admin-scope key.");
+        return;
+      }
+      if (scope === "customer" && !projectID) {
+        alert("project_id required for customer-scope keys.");
+        return;
+      }
+
+      const body = { name, scope };
+      if (scope === "admin") body.confirm_admin_scope = true;
+      if (scope === "customer") body.project_id = projectID;
+      if (expiresAt) body.expires_at = expiresAt;
+
+      try {
+        const r = await fetch("/admin/api-keys", {
+          method: "POST",
+          headers: headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        const data = await r.json();
+        document.getElementById("admin-mint-revealed").innerHTML = `
+          <div class="key-revealed" style="position: relative;">
+            <button
+              onclick="dismissAdminMintRevealed()"
+              title="Dismiss"
+              style="
+                position: absolute; top: 8px; right: 10px;
+                background: transparent; border: 0.5px solid var(--success-border);
+                color: var(--success); border-radius: 4px;
+                width: 24px; height: 24px; line-height: 18px;
+                font-size: 16px; cursor: pointer; padding: 0;
+              ">×</button>
+            <div class="label">${escapeHtml(scope.toUpperCase())} key minted — copy this NOW</div>
+            <div class="value">${escapeHtml(data.secret)}</div>
+            <div class="warn">⚠ ${escapeHtml(data.warning || "Store this secret now. It will never be shown again.")}</div>
+          </div>
+        `;
+        document.getElementById("admin-mint-name").value = "";
+        document.getElementById("admin-mint-project").value = "";
+        document.getElementById("admin-mint-expires").value = "";
+        document.getElementById("admin-confirm-check").checked = false;
+        document.querySelector('input[name="admin-scope"][value="customer"]').checked = true;
+        onAdminScopeChange();
+        await refreshAdminKeys();
+      } catch (e) {
+        document.getElementById("admin-mint-revealed").innerHTML =
+          '<div class="error">Mint failed: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function revokeAdminKey(keyID, prefix, scope) {
+      // Customer-scope: a plain confirm() is enough; same posture as the
+      // project-side /api-keys page.
+      if (scope === "customer") {
+        if (!confirm('Revoke customer key ' + prefix + '…? Any clients still using it will start getting 401.')) {
+          return;
+        }
+      } else {
+        // Admin-scope: DANGER ZONE confirmation. Require the operator
+        // to paste the FULL key_id of the row they're revoking.
+        // "type/paste the key id" guards
+        // against muscle-memory revocation of the wrong row.
+        const typed = prompt(
+          'DANGER ZONE: revoking an ADMIN-scope key.\n\n' +
+          'Holder of this key has full /admin/* access.\n\n' +
+          'To confirm, paste the full key_id below:\n' +
+          '  ' + keyID,
+          ''
+        );
+        if (typed === null) return;
+        if (typed.trim() !== keyID) {
+          alert('key_id mismatch. Revoke cancelled.');
+          return;
+        }
+      }
+      try {
+        const r = await fetch("/admin/api-keys/" + encodeURIComponent(keyID), {
+          method: "DELETE",
+          headers: headers(),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error("HTTP " + r.status + ": " + text);
+        }
+        await refreshAdminKeys();
+      } catch (e) {
+        alert("Revoke failed: " + e.message);
+      }
+    }
+
+    // ── page-load init ─────────────────────────────────────────────────
+    // Probe /admin/whoami on first paint so the Admin nav link surfaces
+    // automatically when the loaded key has scope='admin'. Failures are
+    // silent — Overview rendering is independent of admin detection.
+    document.addEventListener("DOMContentLoaded", () => {
+      detectAdminScope();
+    });
+  </script>
+</body>
+</html>

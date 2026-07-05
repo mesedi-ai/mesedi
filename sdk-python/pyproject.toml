@@ -1,0 +1,85 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mesedi"
+version = "0.5.0"
+description = "Mesedi SDK — guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+    { name = "Robert J. Canario", email = "hello@mesedi.ai" },
+]
+keywords = [
+    "ai",
+    "agents",
+    "observability",
+    "agent-monitoring",
+    "llm",
+    "langchain",
+    "crewai",
+    "anthropic",
+    "openai",
+    "mesedi",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "httpx>=0.24",
+    "zstandard>=0.22",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "mypy>=1.0",
+]
+# Framework adapter extras. The adapter modules under
+# mesedi.integrations.* import the third-party framework only when
+# instantiated, so importing `mesedi` never requires any of these.
+# Install the extra you need — e.g. `pip install mesedi[langchain]`.
+#
+# LangChain's `langchain-core` is the minimum needed; many users will
+# also have `langchain` itself (full chain library) installed, and our
+# adapter detects either. We pin to >=0.1 because the BaseCallbackHandler
+# interface stabilized at that version.
+langchain = [
+    "langchain-core>=0.1",
+]
+# CrewAI builds on LangChain, so `langchain-core` comes in transitively.
+# CrewAI's step_callback / task_callback API stabilized at ~0.30.
+crewai = [
+    "crewai>=0.30",
+]
+
+[project.urls]
+Homepage = "https://mesedi.ai"
+Repository = "https://github.com/mesedi-ai/mesedi"
+Issues = "https://github.com/mesedi-ai/mesedi/issues"
+Documentation = "https://github.com/mesedi-ai/mesedi/tree/main/sdk-python#readme"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mesedi"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/mesedi",
+    "/README.md",
+    "/pyproject.toml",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.9"

@@ -1,0 +1,76 @@
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+backend/mesedi-dev.db
+backend/mesedi-dev.db-*
+backend/*.test
+backend/coverage.out
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Env
+.env
+.env.local
+backend/.env
+
+# Future subdirs
+sdk-python/__pycache__/
+sdk-python/.venv/
+sdk-python/dist/
+sdk-python/*.egg-info/
+sdk-typescript/node_modules/
+sdk-typescript/dist/
+sdk-typescript/dist-sandbox/
+dashboard/node_modules/
+dashboard/.next/
+
+# Nested __pycache__ caches (any package directory)
+**/__pycache__/
+
+# In-place sed backup files
+*.bak
+
+# Synthetic-org local runtime state
+synthetic-org/.venv/
+synthetic-org/session-*.json
+synthetic-org/continuous_traffic.log
+synthetic-org/continuous_traffic.log.*
+
+# Internal-only docs — pricing strategy, roadmap timelines,
+# competitive notes. Never commit these to a public repo.
+ROADMAP.md
+NOTES.md
+PRICING.md
+INTERNAL_*.md
+
+# Scratch commit-message drafts (legacy pattern: .c-msg-<topic>.txt).
+# Local-only working files; delete after the commit ships.
+# Critical to ignore here because this repo is going public.
+.c-msg-*.txt
+
+# Sibling Mesedi-org repos nested for local workspace organization.
+# Each has its own .git and own GitHub remote, not tracked by this repo.
+/web-extract/
+/internal-extract/
+/status/
+mesedi-dev.db
+backend/api
+
+
+# Root-level pre-flight audit docs belong in internal-extract, never here.
+PREFLIGHT_*.md
+
+# Stale Next.js scaffold — real dashboard lives in mesedi-web
+dashboard/
+# Local scratch (marketing drafts, personal assets, etc.) belongs in internal-extract
+local/
+# Root-level gap / capability audit docs belong in internal-extract
+docs/GAPS_*.md
