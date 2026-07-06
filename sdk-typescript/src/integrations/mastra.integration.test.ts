@@ -95,13 +95,13 @@ async function createPreCrashedChild(
 
 let backend: TestBackend;
 
-beforeAll(async => {
+beforeAll(async () => {
   if (!INTEGRATION_ENABLED) return;
   backend = await signupTestProject(MESEDI_BASE_URL);
   configure({ apiKey: backend.apiKey, baseUrl: backend.baseUrl });
 }, 15000);
 
-afterAll(async => {
+afterAll(async () => {
   if (!INTEGRATION_ENABLED) return;
   await flush();
 });
@@ -211,12 +211,12 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // ships. Customers wrapping their entry point in mesedi.wrap()
   // catch this via the SDK regardless of adapter — same coverage
   // semantics as LangChain's crashes.
-  test("crashes: thrown error inside wrap marks execution CRASHED", async => {
+  test("crashes: thrown error inside wrap marks execution CRASHED", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    const run = wrap(async => {
+    const run = wrap(async () => {
       throw new Error("inttest mastra crash");
     });
     try {
@@ -240,7 +240,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // an identical_call incident is a runaway loop repeating the same
   // prompt inside one agent workflow, NOT 3 independent user sessions
   // (which would legitimately be 3 separate executions).
-  test("loops (identical_call): 3 identical llm_calls nested in one workflow", async => {
+  test("loops (identical_call): 3 identical llm_calls nested in one workflow", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -287,7 +287,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 60000);
 
   // 3. loops — similar_call_loop (near-duplicate user_messages)
-  test("loops (similar_call): 3 near-duplicate prompts via Mastra", async => {
+  test("loops (similar_call): 3 near-duplicate prompts via Mastra", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -331,7 +331,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 60000);
 
   // 4. loops — step_count
-  test("loops (step_count): 11+ events in a single Mastra workflow", async => {
+  test("loops (step_count): 11+ events in a single Mastra workflow", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -341,7 +341,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
       workflows: {
         stepHeavy: {
           name: "stepHeavy",
-          steps: Array.from({ length: 11 }, (_, i) => ({ id: `step_${i}`, run: async => ({}) })),
+          steps: Array.from({ length: 11 }, (_, i) => ({ id: `step_${i}`, run: async () => ({}) })),
         } as any,
       },
     });
@@ -364,7 +364,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // `agent.callTool` API — they fire during `agent.generate()` when
   // the model returns a tool_use content block. The system prompt
   // makes the tool call inevitable so the throw path runs.
-  test("tool_failures: Mastra tool that throws marks tool_call status=failed", async => {
+  test("tool_failures: Mastra tool that throws marks tool_call status=failed", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -378,7 +378,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
     const crashTool = createTool({
       id: "crash_tool",
       description: "Always throws. Call this tool exactly once, no arguments.",
-      execute: async => {
+      execute: async () => {
         throw new Error("inttest tool crash");
       },
     });
@@ -405,12 +405,12 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // 6. validator_failures — hybrid: Mastra adapter doesn't emit
   // validator_result. Customer wraps their Mastra call with mesedi.wrap()
   // and calls mesedi.validatorResult() inside; detector fires end-to-end.
-  test("validator_failures (hybrid): wrap + mesedi.validatorResult() fires the detector", async => {
+  test("validator_failures (hybrid): wrap + mesedi.validatorResult() fires the detector", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       validatorResult("output_schema_check", false, {
         severity: "error",
         message: "expected JSON object, got string",
@@ -421,7 +421,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 45000);
 
   // 7. drift (lexical) — needs 20+ baseline messages + one divergent
-  test("drift (lexical): baseline history + divergent prompt", async => {
+  test("drift (lexical): baseline history + divergent prompt", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -478,7 +478,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // detector fires. Customer-realistic: a cost_velocity incident is
   // a workflow that burns through budget in one run, not 25
   // independent trivial requests.
-  test("cost_velocity: 25 workflow-nested calls exceed lowered threshold", async => {
+  test("cost_velocity: 25 workflow-nested calls exceed lowered threshold", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -537,7 +537,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 180000);
 
   // 9. prompt_injection
-  test("prompt_injection: known payload in Mastra generate() input", async => {
+  test("prompt_injection: known payload in Mastra generate() input", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -566,12 +566,12 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // 10. infrastructure_throttled — hybrid: customer emits directly
   // when observing a 429 (or uses instrument_* modules to auto-emit).
   // Detector fires end-to-end via the SDK helper.
-  test("infrastructure_throttled (hybrid): wrap + emitInfrastructureEvent fires the detector", async => {
+  test("infrastructure_throttled (hybrid): wrap + emitInfrastructureEvent fires the detector", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       emitInfrastructureEvent("rate_limit", {
         provider: "anthropic",
         endpoint: "/v1/messages",
@@ -585,7 +585,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 45000);
 
   // 11. data_leakage
-  test("data_leakage: user_message contains AWS-key canary", async => {
+  test("data_leakage: user_message contains AWS-key canary", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -610,7 +610,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 60000);
 
   // 12. semantic_loop
-  test("semantic_loop: workflow that revisits the same step 3+ times", async => {
+  test("semantic_loop: workflow that revisits the same step 3+ times", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -625,7 +625,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
           name: "loopy",
           steps: Array.from({ length: 3 }, () => ({
             id: "research_round",
-            run: async => ({ phase: "researching", topic: "support escalation" }),
+            run: async () => ({ phase: "researching", topic: "support escalation" }),
           })),
         } as any,
       },
@@ -654,7 +654,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // wire-format tool_call event includes structured return_value that
   // backend fingerprints for schema drift. 10 shape-A + 1 shape-B calls
   // land in 2 executions (matches LangChain's passing pattern).
-  test("tool_schema_drift (hybrid): 10 shape A + 1 shape B via mesedi tool() wrapper", async => {
+  test("tool_schema_drift (hybrid): 10 shape A + 1 shape B via mesedi tool() wrapper", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -674,14 +674,14 @@ describe("Mastra × 20 detectors — end-to-end", () => {
         };
       },
     );
-    await wrap(async => {
+    await wrap(async () => {
       for (let i = 0; i < 10; i++) {
         await fetchItem({ item_id: `baseline-${i}` });
       }
     })();
     await flush();
     currentShape = "B";
-    await wrap(async => {
+    await wrap(async () => {
       await fetchItem({ item_id: "drift-1" });
     })();
     await flush();
@@ -689,7 +689,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 60000);
 
   // 14. context_overflow
-  test("context_overflow: ~180K token prompt (opt-in, ~$0.18 per run)", async => {
+  test("context_overflow: ~180K token prompt (opt-in, ~$0.18 per run)", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC || !EXPENSIVE_ENABLED) {
       skipReason(
         "needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY + RUN_EXPENSIVE_TESTS=1 (~$0.18)",
@@ -717,7 +717,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   }, 300000);
 
   // 15. token_waste
-  test("token_waste: 3 llm_calls with identical 2048+ char prefix", async => {
+  test("token_waste: 3 llm_calls with identical 2048+ char prefix", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -763,7 +763,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // exact `os.system(...)` string matching backend's
   // `python_dangerous_call` regex in
   // backend/internal/detectors/sandbox_escape.go.
-  test("sandbox_escape (hybrid): direct tool call with dangerous payload via mesedi tool()", async => {
+  test("sandbox_escape (hybrid): direct tool call with dangerous payload via mesedi tool()", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -772,7 +772,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
       { name: "exec" },
       async ({ code }: { code: string }) => ({ output: `ran ${code}` }),
     );
-    await wrap(async => {
+    await wrap(async () => {
       await execTool({ code: "os.system('rm -rf /')" });
     })();
     await flush();
@@ -782,12 +782,12 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // 17. grounding_failure — hybrid: customer emits eval_score. Detector
   // needs several low scores below threshold to fire the grounding_failure
   // cluster. Emit 3 below-threshold eval scores in one execution.
-  test("grounding_failure (hybrid): wrap + emitEvalScore fires the detector", async => {
+  test("grounding_failure (hybrid): wrap + emitEvalScore fires the detector", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       for (let i = 0; i < 3; i++) {
         emitEvalScore("ragas-test", "faithfulness", 0.2, false, {
           threshold: 0.7,
@@ -803,13 +803,13 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // 18. cascading_failure — hybrid: parent emits agent_handoff to a
   // pre-crashed child. Detector fires when handoff resolves to a child
   // in a failure terminal state.
-  test("cascading_failure (hybrid): wrap + emitAgentHandoff to pre-crashed child", async => {
+  test("cascading_failure (hybrid): wrap + emitAgentHandoff to pre-crashed child", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
     const childId = await createPreCrashedChild(backend);
-    await wrap({ agentName: "parent" }, async => {
+    await wrap({ agentName: "parent" }, async () => {
       emitAgentHandoff({
         toAgent: "child",
         handoffKind: "delegate",
@@ -826,12 +826,12 @@ describe("Mastra × 20 detectors — end-to-end", () => {
 
   // 19. coordination_deadlock — hybrid: single execution emits two
   // handoffs forming a 2-cycle (planner→reviewer, reviewer→planner).
-  test("coordination_deadlock (hybrid): wrap + 2-cycle emitAgentHandoff fires the detector", async => {
+  test("coordination_deadlock (hybrid): wrap + 2-cycle emitAgentHandoff fires the detector", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       emitAgentHandoff("planner", "reviewer", { handoffKind: "consult" });
       emitAgentHandoff("reviewer", "planner", { handoffKind: "consult" });
     })();
@@ -853,7 +853,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // rehearsals) with error_class="timeout" and provider="anthropic".
   // With min_tenants=1 configured, a single tenant's provider-side
   // TIMEOUT ∈ IsProviderSideErrorClass fires provider_incident.
-  test("provider_incident (hybrid): directly emit failed llm_call with error_class=timeout", async => {
+  test("provider_incident (hybrid): directly emit failed llm_call with error_class=timeout", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -867,7 +867,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
       body: JSON.stringify({ min_tenants: 1 }),
     });
     expect(putResp.status).toBe(200);
-    await wrap(async => {
+    await wrap(async () => {
       const ctx = currentExecutionContext();
       if (!ctx) throw new Error("not inside wrap()");
       getClient().submitEvent({
@@ -894,12 +894,12 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // hitl_timeout — hybrid: request human intervention, complete with
   // response_kind='timeout'. Detector fires on the explicit timeout
   // signature regardless of wait duration.
-  test("hitl_timeout (hybrid): wrap + requestHumanIntervention + complete(timeout)", async => {
+  test("hitl_timeout (hybrid): wrap + requestHumanIntervention + complete(timeout)", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       const handle = await requestHumanIntervention("Approve seeded action?", {
         slaSeconds: 3600,
       });
@@ -919,7 +919,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
   // hitl_rejection_spike — hybrid: 5 sequential HITL executions,
   // 2 rejected + 3 approved = 40% rejection rate → detector fires.
   // Uses a fresh project to avoid dilution from other tests in the session.
-  test("hitl_rejection_spike (hybrid): 5 executions with 40% rejection rate", async => {
+  test("hitl_rejection_spike (hybrid): 5 executions with 40% rejection rate", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -935,7 +935,7 @@ describe("Mastra × 20 detectors — end-to-end", () => {
         "approved",
       ];
       for (const kind of kinds) {
-        await wrap(async => {
+        await wrap(async () => {
           const handle = await requestHumanIntervention("Approve seeded action?", {
             slaSeconds: 3600,
           });

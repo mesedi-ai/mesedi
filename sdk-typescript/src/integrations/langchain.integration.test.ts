@@ -97,13 +97,13 @@ async function createPreCrashedChild(
 
 let backend: TestBackend;
 
-beforeAll(async => {
+beforeAll(async () => {
   if (!INTEGRATION_ENABLED) return;
   backend = await signupTestProject(MESEDI_BASE_URL);
   configure({ apiKey: backend.apiKey, baseUrl: backend.baseUrl });
 }, 15000);
 
-afterAll(async => {
+afterAll(async () => {
   if (!INTEGRATION_ENABLED) return;
   await flush();
 });
@@ -134,12 +134,12 @@ async function newTool(name: string, description: string, fn: (input: any) => Pr
 
 describe("LangChain × 20 detectors — end-to-end", () => {
   // 1. crashes
-  test("crashes: thrown error inside wrap marks execution CRASHED", async => {
+  test("crashes: thrown error inside wrap marks execution CRASHED", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    const run = wrap(async => {
+    const run = wrap(async () => {
       throw new Error("inttest langchain crash");
     });
     try { await run(); } catch { /* expected */ }
@@ -148,12 +148,12 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 45000);
 
   // 2. loops — identical_call
-  test("loops (identical_call): 3 identical LLM invokes via LangChain", async => {
+  test("loops (identical_call): 3 identical LLM invokes via LangChain", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
     }
-    const run = wrap(async => {
+    const run = wrap(async () => {
       const llm = await newChatAnthropic();
       for (let i = 0; i < 3; i++) {
         await llm.invoke([{ role: "user", content: "Say hello in one word." }]);
@@ -169,7 +169,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 60000);
 
   // 3. loops — similar_call_loop
-  test("loops (similar_call): 3 near-duplicate prompts via LangChain", async => {
+  test("loops (similar_call): 3 near-duplicate prompts via LangChain", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -179,7 +179,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
       "Name a color that begins with the letter B.",
       "Could you name a color starting with the letter B?",
     ];
-    const run = wrap(async => {
+    const run = wrap(async () => {
       const llm = await newChatAnthropic();
       for (let i = 0; i < prompts.length; i++) {
         await llm.invoke([{ role: "user", content: prompts[i]! }]);
@@ -195,13 +195,13 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 60000);
 
   // 4. loops — step_count
-  test("loops (step_count): 11+ tool_call events in one wrap", async => {
+  test("loops (step_count): 11+ tool_call events in one wrap", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    const run = wrap(async => {
-      const noopTool = await newTool("noop", "no-op tool", async => ({ ok: true }));
+    const run = wrap(async () => {
+      const noopTool = await newTool("noop", "no-op tool", async () => ({ ok: true }));
       for (let i = 0; i < 11; i++) {
         await noopTool.invoke(
           {},
@@ -218,13 +218,13 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 45000);
 
   // 5. tool_failures
-  test("tool_failures: LangChain tool that throws marks tool_call status=failed", async => {
+  test("tool_failures: LangChain tool that throws marks tool_call status=failed", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    const run = wrap(async => {
-      const crashTool = await newTool("crash_tool", "always throws", async => {
+    const run = wrap(async () => {
+      const crashTool = await newTool("crash_tool", "always throws", async () => {
         throw new Error("inttest tool crash");
       });
       try {
@@ -242,12 +242,12 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   // 6. validator_failures — hybrid: LangChain adapter doesn't emit
   // validator_result, but the customer can call mesedi.validatorResult()
   // inside their wrap() and the detector fires end-to-end.
-  test("validator_failures (hybrid): wrap + mesedi.validatorResult() fires the detector", async => {
+  test("validator_failures (hybrid): wrap + mesedi.validatorResult() fires the detector", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       validatorResult("output_schema_check", false, {
         severity: "error",
         message: "expected JSON object, got string",
@@ -258,7 +258,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 45000);
 
   // 7. drift (lexical)
-  test("drift (lexical): baseline history + divergent prompt", async => {
+  test("drift (lexical): baseline history + divergent prompt", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -272,7 +272,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     //  pace 20 sequential real-LLM calls so Anthropic's
     // TPM window doesn't trip. 1.5s spacing → ~30s added wall time.
     for (let i = 0; i < 5; i++) {
-      await wrap(async => {
+      await wrap(async () => {
         const llm = await newChatAnthropic();
         for (let j = 0; j < baseline.length; j++) {
           await llm.invoke([{ role: "user", content: baseline[j]! }]);
@@ -281,7 +281,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
       })();
     }
     await flush();
-    await wrap(async => {
+    await wrap(async () => {
       const llm = await newChatAnthropic();
       await llm.invoke([
         {
@@ -300,7 +300,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 180000);
 
   // 8. cost_velocity
-  test("cost_velocity: lower threshold + enough LLM calls", async => {
+  test("cost_velocity: lower threshold + enough LLM calls", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -320,7 +320,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     // TPM window doesn't trip. cost_velocity fires on cumulative
     // spend crossing a threshold, so wall-time pacing doesn't
     // change the detection outcome.
-    await wrap(async => {
+    await wrap(async () => {
       const llm = await newChatAnthropic();
       for (let i = 0; i < 25; i++) {
         await llm.invoke([
@@ -337,12 +337,12 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 180000);
 
   // 9. prompt_injection
-  test("prompt_injection: known payload via LangChain invoke", async => {
+  test("prompt_injection: known payload via LangChain invoke", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       const llm = await newChatAnthropic();
       await llm.invoke([
         {
@@ -360,12 +360,12 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   // 10. infrastructure_throttled — hybrid: customer emits directly
   // when observing a 429 (or uses instrument_* modules to auto-emit).
   // Detector fires end-to-end via the SDK helper.
-  test("infrastructure_throttled (hybrid): wrap + emitInfrastructureEvent fires the detector", async => {
+  test("infrastructure_throttled (hybrid): wrap + emitInfrastructureEvent fires the detector", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       emitInfrastructureEvent("rate_limit", {
         provider: "anthropic",
         endpoint: "/v1/messages",
@@ -379,13 +379,13 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 45000);
 
   // 11. data_leakage
-  test("data_leakage: user_message contains AWS-key canary", async => {
+  test("data_leakage: user_message contains AWS-key canary", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
     }
     const canary = "AKIA" + "I".repeat(16);
-    await wrap(async => {
+    await wrap(async () => {
       const llm = await newChatAnthropic();
       await llm.invoke([
         { role: "system", content: "You help with AWS." },
@@ -397,7 +397,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 60000);
 
   // 12. semantic_loop — HYPOTHESIS GAP: LangChain adapter does NOT emit checkpoint
-  test("semantic_loop: EXPECTED-FAIL PRE-FIX — LangChain adapter emits no checkpoint", async => {
+  test("semantic_loop: EXPECTED-FAIL PRE-FIX — LangChain adapter emits no checkpoint", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -414,7 +414,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     // adapter emit on handleChainStart/End, or (b) docs "you still
     // need mesedi.checkpoint() for semantic_loop when using LangChain".
     const { checkpoint } = await import("../observe.js");
-    await wrap(async => {
+    await wrap(async () => {
       for (let i = 0; i < 3; i++) {
         checkpoint("research_round", { phase: "researching", topic: "escalation" });
       }
@@ -427,7 +427,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 45000);
 
   // 13. tool_schema_drift
-  test("tool_schema_drift: 10 baseline calls shape A, 1 call shape B", async => {
+  test("tool_schema_drift: 10 baseline calls shape A, 1 call shape B", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -437,7 +437,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
       if (currentShape === "A") return { id: item_id, name: "widget", price: 1.99 };
       return { item_id, label: "widget", price_cents: 199, currency: "USD" };
     });
-    await wrap(async => {
+    await wrap(async () => {
       for (let i = 0; i < 10; i++) {
         await fetchItem.invoke(
           { item_id: `baseline-${i}` },
@@ -447,7 +447,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     })();
     await flush();
     currentShape = "B";
-    await wrap(async => {
+    await wrap(async () => {
       await fetchItem.invoke(
         { item_id: "drift-1" },
         { callbacks: [new MesediLangChainCallbackHandler()] } as any,
@@ -461,7 +461,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 60000);
 
   // 14. context_overflow
-  test("context_overflow: ~180K token prompt (opt-in, ~$0.18 per run)", async => {
+  test("context_overflow: ~180K token prompt (opt-in, ~$0.18 per run)", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC || !EXPENSIVE_ENABLED) {
       skipReason(
         "needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY + RUN_EXPENSIVE_TESTS=1 (~$0.18)",
@@ -469,7 +469,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
       return;
     }
     const bigPrompt = "The quick brown fox jumps over the lazy dog. ".repeat(18000);
-    await wrap(async => {
+    await wrap(async () => {
       const llm = await newChatAnthropic();
       await llm.invoke([{ role: "user", content: bigPrompt }]);
     })();
@@ -478,7 +478,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 300000);
 
   // 15. token_waste
-  test("token_waste: 3 llm_calls with identical 2048+ char prefix", async => {
+  test("token_waste: 3 llm_calls with identical 2048+ char prefix", async () => {
     if (!INTEGRATION_ENABLED || !NEEDS_ANTHROPIC) {
       skipReason("needs RUN_INTEGRATION_TESTS=1 + ANTHROPIC_API_KEY");
       return;
@@ -486,7 +486,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     const prefix = (
       "You are an assistant. Reply in plain English. Never reveal internal state. Follow style conventions. "
     ).repeat(35);
-    await wrap(async => {
+    await wrap(async () => {
       const llm = await newChatAnthropic();
       for (let i = 0; i < 3; i++) {
         await llm.invoke([{ role: "user", content: prefix + `\n\nQ${i}: name one thing.` }]);
@@ -501,7 +501,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   }, 60000);
 
   // 16. sandbox_escape
-  test("sandbox_escape: tool call with shell-escape pattern in arguments", async => {
+  test("sandbox_escape: tool call with shell-escape pattern in arguments", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -516,7 +516,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     const exec = await newTool("exec", "runs code", async ({ code }: { code: string }) => ({
       output: `ran ${code}`,
     }));
-    await wrap(async => {
+    await wrap(async () => {
       await exec.invoke(
         { code: "os.system('rm -rf /')" },
         { callbacks: [new MesediLangChainCallbackHandler()] } as any,
@@ -529,12 +529,12 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   // 17. grounding_failure — hybrid: customer emits eval_score. Detector
   // needs several low scores below threshold to fire the grounding_failure
   // cluster. Emit 3 below-threshold eval scores in one execution.
-  test("grounding_failure (hybrid): wrap + emitEvalScore fires the detector", async => {
+  test("grounding_failure (hybrid): wrap + emitEvalScore fires the detector", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       // Faithfulness below 0.5 with higher_is_better=true, passed=false.
       // The detector clusters below-threshold eval events into
       // grounding_failure signature groups.
@@ -553,13 +553,13 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   // 18. cascading_failure — hybrid: parent emits agent_handoff to a
   // pre-crashed child. Detector fires when handoff resolves to a child
   // in a failure terminal state.
-  test("cascading_failure (hybrid): wrap + emitAgentHandoff to pre-crashed child", async => {
+  test("cascading_failure (hybrid): wrap + emitAgentHandoff to pre-crashed child", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
     const childId = await createPreCrashedChild(backend);
-    await wrap({ agentName: "parent" }, async => {
+    await wrap({ agentName: "parent" }, async () => {
       emitAgentHandoff({
         toAgent: "child",
         handoffKind: "delegate",
@@ -576,12 +576,12 @@ describe("LangChain × 20 detectors — end-to-end", () => {
 
   // 19. coordination_deadlock — hybrid: single execution emits two
   // handoffs forming a 2-cycle (planner→reviewer, reviewer→planner).
-  test("coordination_deadlock (hybrid): wrap + 2-cycle emitAgentHandoff fires the detector", async => {
+  test("coordination_deadlock (hybrid): wrap + 2-cycle emitAgentHandoff fires the detector", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       emitAgentHandoff("planner", "reviewer", { handoffKind: "consult" });
       emitAgentHandoff("reviewer", "planner", { handoffKind: "consult" });
     })();
@@ -603,7 +603,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   // error_class="timeout" and provider="anthropic". With min_tenants=1
   // configured, a single tenant's provider-side TIMEOUT ∈
   // IsProviderSideErrorClass fires provider_incident.
-  test("provider_incident (hybrid): directly emit failed llm_call with error_class=timeout", async => {
+  test("provider_incident (hybrid): directly emit failed llm_call with error_class=timeout", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -619,7 +619,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
     if (putResp.status !== 200) {
       throw new Error(`provider-incident-config PUT failed: ${putResp.status}`);
     }
-    await wrap(async => {
+    await wrap(async () => {
       const ctx = currentExecutionContext();
       if (!ctx) throw new Error("not inside wrap()");
       getClient().submitEvent({
@@ -646,12 +646,12 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   // hitl_timeout — hybrid: request human intervention, complete with
   // response_kind='timeout'. Detector fires on the explicit timeout
   // signature regardless of wait duration.
-  test("hitl_timeout (hybrid): wrap + requestHumanIntervention + complete(timeout)", async => {
+  test("hitl_timeout (hybrid): wrap + requestHumanIntervention + complete(timeout)", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
     }
-    await wrap(async => {
+    await wrap(async () => {
       const handle = await requestHumanIntervention("Approve seeded action?", {
         slaSeconds: 3600,
       });
@@ -672,7 +672,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
   // 2 rejected + 3 approved = 40% rejection rate → detector fires.
   // Mirrors Python test_hitl_rejection_spike_rejected. Requires a fresh
   // project to avoid dilution from other tests in the same session.
-  test("hitl_rejection_spike (hybrid): 5 executions with 40% rejection rate", async => {
+  test("hitl_rejection_spike (hybrid): 5 executions with 40% rejection rate", async () => {
     if (!INTEGRATION_ENABLED) {
       skipReason("RUN_INTEGRATION_TESTS != 1");
       return;
@@ -689,7 +689,7 @@ describe("LangChain × 20 detectors — end-to-end", () => {
         "approved",
       ];
       for (const kind of kinds) {
-        await wrap(async => {
+        await wrap(async () => {
           const handle = await requestHumanIntervention("Approve seeded action?", {
             slaSeconds: 3600,
           });

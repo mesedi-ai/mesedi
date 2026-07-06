@@ -628,6 +628,21 @@ type FailureGroup struct {
 	EventCount         int       `json:"event_count"`
 	AffectedExecutions int       `json:"affected_executions"`
 	CostWastedUSD      *float64  `json:"cost_wasted_usd,omitempty"`
+	// TotalTokensIn / TotalTokensOut / TotalTokens are computed live
+	// as SUM(executions.total_tokens_in / total_tokens_out) across all
+	// executions linked to the group (same rollup pattern as
+	// CostWastedUSD). TotalTokens is the sum of the two. Populated
+	// only when the summed value is positive — nil means "no LLM
+	// call in this group's executions had recorded token usage."
+	// The dashboard's per-failure-class metric policy decides which
+	// failure_class surfaces these fields prominently (Tier 1 — token
+	// classes), as secondary context (Tier 2 — most classes), or hides
+	// them on the group header entirely (Tier 3 — HITL / tool /
+	// coordination classes where tokens are non-diagnostic). See
+	// mesedi-web/dashboard/lib/failureClass.ts for the policy.
+	TotalTokensIn      *int64    `json:"total_tokens_in,omitempty"`
+	TotalTokensOut     *int64    `json:"total_tokens_out,omitempty"`
+	TotalTokens        *int64    `json:"total_tokens,omitempty"`
 	SampleExecutionID  string    `json:"sample_execution_id,omitempty"`
 	// AnalysisMarkdown is the LLM-generated root-cause analysis
 	// (). Nil when no analysis has been generated for

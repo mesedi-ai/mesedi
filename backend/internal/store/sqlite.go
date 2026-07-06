@@ -4065,6 +4065,8 @@ func (s *SQLiteStore) ListFailureGroups(
 			fg.first_seen, fg.last_seen,
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
+			COALESCE(SUM(e.total_tokens_in), 0) AS computed_tokens_in,
+			COALESCE(SUM(e.total_tokens_out), 0) AS computed_tokens_out,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
 			fg.analysis_playbook_signature,
@@ -4105,6 +4107,8 @@ func (s *SQLiteStore) GetFailureGroup(
 			fg.first_seen, fg.last_seen,
 			fg.event_count, fg.affected_executions,
 			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
+			COALESCE(SUM(e.total_tokens_in), 0) AS computed_tokens_in,
+			COALESCE(SUM(e.total_tokens_out), 0) AS computed_tokens_out,
 			fg.sample_execution_id,
 			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
 			fg.analysis_playbook_signature,
@@ -4201,6 +4205,8 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		firstSeen        string
 		lastSeen         string
 		costWasted       sql.NullFloat64
+		tokensIn         sql.NullInt64
+		tokensOut        sql.NullInt64
 		sampleID         sql.NullString
 		analysisMarkdown sql.NullString
 		analyzedAt       sql.NullTime
@@ -4220,6 +4226,8 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		&g.EventCount,
 		&g.AffectedExecutions,
 		&costWasted,
+		&tokensIn,
+		&tokensOut,
 		&sampleID,
 		&analysisMarkdown,
 		&analyzedAt,
@@ -4240,6 +4248,25 @@ func scanFailureGroup(r rowScanner) (*FailureGroup, error) {
 		// when there's no actual cost to show.
 		v := costWasted.Float64
 		g.CostWastedUSD = &v
+	}
+	// Same "only-if-positive" pattern for the token rollups. COALESCE
+	// on the SQL side makes Valid always true; the >0 guard prevents
+	// zero-token rows (e.g. groups whose executions never made an LLM
+	// call, like sandbox_escape or coordination_deadlock) from
+	// leaking as "total_tokens_in: 0" in the JSON. Dashboard's
+	// failureClassMetricPolicy() then decides whether to render the
+	// field even when present, based on the failure_class tier.
+	if tokensIn.Valid && tokensIn.Int64 > 0 {
+		v := tokensIn.Int64
+		g.TotalTokensIn = &v
+	}
+	if tokensOut.Valid && tokensOut.Int64 > 0 {
+		v := tokensOut.Int64
+		g.TotalTokensOut = &v
+	}
+	if (tokensIn.Valid && tokensIn.Int64 > 0) || (tokensOut.Valid && tokensOut.Int64 > 0) {
+		v := tokensIn.Int64 + tokensOut.Int64
+		g.TotalTokens = &v
 	}
 	if sampleID.Valid {
 		g.SampleExecutionID = sampleID.String
