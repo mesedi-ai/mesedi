@@ -60,7 +60,7 @@ function resetCaps(): void {
 
 // Wrap a test body in a synthetic execution context so emitters land.
 async function inCtx<T>(fn: () => Promise<T> | T): Promise<T> {
-  return runInExecutionContext("exec-test000000", async => await fn());
+  return runInExecutionContext("exec-test000000", async () => await fn());
 }
 
 beforeEach(() => {
@@ -72,8 +72,8 @@ beforeEach(() => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe("MesediLangChainCallbackHandler — LLM (plain)", () => {
-  test("handleLLMStart → handleLLMEnd emits ok llm_call with tokens", async => {
-    await inCtx(async => {
+  test("handleLLMStart → handleLLMEnd emits ok llm_call with tokens", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMStart(
         { name: "OpenAI", kwargs: { model: "gpt-4o" } },
@@ -102,8 +102,8 @@ describe("MesediLangChainCallbackHandler — LLM (plain)", () => {
     });
   });
 
-  test("handleLLMStart → handleLLMError emits failed llm_call", async => {
-    await inCtx(async => {
+  test("handleLLMStart → handleLLMError emits failed llm_call", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMStart(
         { name: "OpenAI", kwargs: { model: "gpt-4o" } },
@@ -124,8 +124,8 @@ describe("MesediLangChainCallbackHandler — LLM (plain)", () => {
     });
   });
 
-  test("handleLLMEnd without matching start is a no-op", async => {
-    await inCtx(async => {
+  test("handleLLMEnd without matching start is a no-op", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMEnd({ generations: [[{ text: "x" }]] }, "run-nomatch");
       expect(getCaps().events).toHaveLength(0);
@@ -138,8 +138,8 @@ describe("MesediLangChainCallbackHandler — LLM (plain)", () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe("MesediLangChainCallbackHandler — chat model", () => {
-  test("handleChatModelStart extracts user + system messages", async => {
-    await inCtx(async => {
+  test("handleChatModelStart extracts user + system messages", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       const messages = [
         [
@@ -170,8 +170,8 @@ describe("MesediLangChainCallbackHandler — chat model", () => {
     });
   });
 
-  test("chat model handles multi-modal content list (text blocks only)", async => {
-    await inCtx(async => {
+  test("chat model handles multi-modal content list (text blocks only)", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       const messages = [
         [
@@ -195,8 +195,8 @@ describe("MesediLangChainCallbackHandler — chat model", () => {
     });
   });
 
-  test("token usage from usage_metadata on the generation", async => {
-    await inCtx(async => {
+  test("token usage from usage_metadata on the generation", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleChatModelStart(
         { kwargs: { model: "claude-haiku-4-5" } },
@@ -231,8 +231,8 @@ describe("MesediLangChainCallbackHandler — chat model", () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe("MesediLangChainCallbackHandler — tools", () => {
-  test("handleToolStart → handleToolEnd emits ok tool_call", async => {
-    await inCtx(async => {
+  test("handleToolStart → handleToolEnd emits ok tool_call", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleToolStart({ name: "search" }, "cats", "tool-1");
       h.handleToolEnd("42 results", "tool-1");
@@ -253,8 +253,8 @@ describe("MesediLangChainCallbackHandler — tools", () => {
     });
   });
 
-  test("handleToolError emits failed tool_call with exception fields", async => {
-    await inCtx(async => {
+  test("handleToolError emits failed tool_call with exception fields", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleToolStart({ name: "risky" }, "input", "tool-e");
       class CustomError extends Error {}
@@ -269,8 +269,8 @@ describe("MesediLangChainCallbackHandler — tools", () => {
     });
   });
 
-  test("tool name falls back to id chain then unknown_tool", async => {
-    await inCtx(async => {
+  test("tool name falls back to id chain then unknown_tool", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleToolStart(
         { id: ["langchain", "tools", "MyTool"] },
@@ -302,8 +302,8 @@ describe("MesediLangChainCallbackHandler — context + fail-open", () => {
     expect(getCaps().events).toHaveLength(0);
   });
 
-  test("truncates oversized fields to matching wire budgets", async => {
-    await inCtx(async => {
+  test("truncates oversized fields to matching wire budgets", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       //  user_message cap raised to 8192. A 1500-char prompt
       // now passes through uncut (previously truncated to 1000).
@@ -333,8 +333,8 @@ describe("MesediLangChainCallbackHandler — context + fail-open", () => {
     });
   });
 
-  test(" user_message truncates at MAX_USER_MSG=8192 for oversized prompts", async => {
-    await inCtx(async => {
+  test(" user_message truncates at MAX_USER_MSG=8192 for oversized prompts", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       // 10000-char prompt exceeds the 8192 cap — must truncate.
       const oversizedPrompt = "z".repeat(10000);
@@ -354,8 +354,8 @@ describe("MesediLangChainCallbackHandler — context + fail-open", () => {
     });
   });
 
-  test("truncates oversized tool input + output", async => {
-    await inCtx(async => {
+  test("truncates oversized tool input + output", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       const bigInput = "x".repeat(500);
       const bigOutput = "y".repeat(2000);
@@ -369,8 +369,8 @@ describe("MesediLangChainCallbackHandler — context + fail-open", () => {
     });
   });
 
-  test("sequence numbers are monotonic per execution context", async => {
-    await inCtx(async => {
+  test("sequence numbers are monotonic per execution context", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMStart({ kwargs: { model: "m" } }, ["a"], "r1");
       h.handleLLMEnd({ generations: [[{ text: "b" }]] }, "r1");
@@ -382,8 +382,8 @@ describe("MesediLangChainCallbackHandler — context + fail-open", () => {
     });
   });
 
-  test("concurrent runs stay paired by runId", async => {
-    await inCtx(async => {
+  test("concurrent runs stay paired by runId", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMStart({ kwargs: { model: "A" } }, ["prompt-A"], "run-A");
       h.handleLLMStart({ kwargs: { model: "B" } }, ["prompt-B"], "run-B");
@@ -401,8 +401,8 @@ describe("MesediLangChainCallbackHandler — context + fail-open", () => {
     });
   });
 
-  test("model fallback: kwargs.model → id chain → name → unknown", async => {
-    await inCtx(async => {
+  test("model fallback: kwargs.model → id chain → name → unknown", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMStart(
         { id: ["langchain", "chat_models", "ChatOpenAI"] },
@@ -435,8 +435,8 @@ describe("MesediLangChainCallbackHandler — context + fail-open", () => {
 // These tests lock in each field's presence and content shape.
 
 describe("MesediLangChainCallbackHandler — provider extraction", () => {
-  test("Anthropic serialized.id → provider=anthropic on ok llm_call", async => {
-    await inCtx(async => {
+  test("Anthropic serialized.id → provider=anthropic on ok llm_call", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleChatModelStart(
         {
@@ -453,8 +453,8 @@ describe("MesediLangChainCallbackHandler — provider extraction", () => {
     });
   });
 
-  test("OpenAI serialized.id → provider=openai", async => {
-    await inCtx(async => {
+  test("OpenAI serialized.id → provider=openai", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMStart(
         {
@@ -471,8 +471,8 @@ describe("MesediLangChainCallbackHandler — provider extraction", () => {
     });
   });
 
-  test("scoped package id (@langchain/anthropic) → provider=anthropic", async => {
-    await inCtx(async => {
+  test("scoped package id (@langchain/anthropic) → provider=anthropic", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleChatModelStart(
         {
@@ -489,8 +489,8 @@ describe("MesediLangChainCallbackHandler — provider extraction", () => {
     });
   });
 
-  test("class-name-only fallback (ChatCohere) → provider=cohere", async => {
-    await inCtx(async => {
+  test("class-name-only fallback (ChatCohere) → provider=cohere", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleChatModelStart(
         {
@@ -507,8 +507,8 @@ describe("MesediLangChainCallbackHandler — provider extraction", () => {
     });
   });
 
-  test("unrecognized serialized → provider=unknown", async => {
-    await inCtx(async => {
+  test("unrecognized serialized → provider=unknown", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMStart(
         {
@@ -527,8 +527,8 @@ describe("MesediLangChainCallbackHandler — provider extraction", () => {
 });
 
 describe("MesediLangChainCallbackHandler — error_class classification", () => {
-  test("Anthropic RateLimitError → error_class=rate_limited", async => {
-    await inCtx(async => {
+  test("Anthropic RateLimitError → error_class=rate_limited", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleChatModelStart(
         {
@@ -549,8 +549,8 @@ describe("MesediLangChainCallbackHandler — error_class classification", () => 
     });
   });
 
-  test("APITimeoutError on Anthropic → error_class=timeout", async => {
-    await inCtx(async => {
+  test("APITimeoutError on Anthropic → error_class=timeout", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleChatModelStart(
         {
@@ -568,8 +568,8 @@ describe("MesediLangChainCallbackHandler — error_class classification", () => 
     });
   });
 
-  test("cross-provider fallback: unknown provider still classifies known exception name", async => {
-    await inCtx(async => {
+  test("cross-provider fallback: unknown provider still classifies known exception name", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMStart(
         { kwargs: { model: "mystery-1" } },
@@ -585,8 +585,8 @@ describe("MesediLangChainCallbackHandler — error_class classification", () => 
     });
   });
 
-  test("truly unknown exception → error_class=unknown", async => {
-    await inCtx(async => {
+  test("truly unknown exception → error_class=unknown", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleLLMStart(
         { kwargs: { model: "x" } },
@@ -601,8 +601,8 @@ describe("MesediLangChainCallbackHandler — error_class classification", () => 
     });
   });
 
-  test("wrapped exception via err.cause is unwrapped for classification", async => {
-    await inCtx(async => {
+  test("wrapped exception via err.cause is unwrapped for classification", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleChatModelStart(
         {
@@ -624,8 +624,8 @@ describe("MesediLangChainCallbackHandler — error_class classification", () => 
     });
   });
 
-  test("failed llm_call carries http_status when exception exposes .status", async => {
-    await inCtx(async => {
+  test("failed llm_call carries http_status when exception exposes .status", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleChatModelStart(
         {
@@ -646,8 +646,8 @@ describe("MesediLangChainCallbackHandler — error_class classification", () => 
     });
   });
 
-  test("failed llm_call surfaces retry_after when exception exposes it", async => {
-    await inCtx(async => {
+  test("failed llm_call surfaces retry_after when exception exposes it", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleChatModelStart(
         {
@@ -669,8 +669,8 @@ describe("MesediLangChainCallbackHandler — error_class classification", () => 
 });
 
 describe("MesediLangChainCallbackHandler — structured tool_call return_value", () => {
-  test("object return emits structured return_value alongside result_summary", async => {
-    await inCtx(async => {
+  test("object return emits structured return_value alongside result_summary", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleToolStart({ name: "get_user" }, "42", "tool-obj");
       h.handleToolEnd({ id: 42, email: "a@b.com", active: true }, "tool-obj");
@@ -688,8 +688,8 @@ describe("MesediLangChainCallbackHandler — structured tool_call return_value",
     });
   });
 
-  test("JSON-string return is parsed into structured return_value", async => {
-    await inCtx(async => {
+  test("JSON-string return is parsed into structured return_value", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleToolStart({ name: "search" }, "cats", "tool-js");
       h.handleToolEnd(
@@ -705,8 +705,8 @@ describe("MesediLangChainCallbackHandler — structured tool_call return_value",
     });
   });
 
-  test("plain-text return has no return_value coercion (string preserved as-is)", async => {
-    await inCtx(async => {
+  test("plain-text return has no return_value coercion (string preserved as-is)", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleToolStart({ name: "echo" }, "hello", "tool-plain");
       h.handleToolEnd("just plain text, not json", "tool-plain");
@@ -720,8 +720,8 @@ describe("MesediLangChainCallbackHandler — structured tool_call return_value",
     });
   });
 
-  test("failed tool_call omits return_value entirely", async => {
-    await inCtx(async => {
+  test("failed tool_call omits return_value entirely", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleToolStart({ name: "risky" }, "input", "tool-f");
       h.handleToolError(new Error("boom"), "tool-f");
@@ -732,8 +732,8 @@ describe("MesediLangChainCallbackHandler — structured tool_call return_value",
     });
   });
 
-  test("JSON-string tool input is parsed into structured arguments", async => {
-    await inCtx(async => {
+  test("JSON-string tool input is parsed into structured arguments", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleToolStart(
         { name: "query" },
@@ -750,8 +750,8 @@ describe("MesediLangChainCallbackHandler — structured tool_call return_value",
     });
   });
 
-  test("plain-string tool input keeps the truncated string branch", async => {
-    await inCtx(async => {
+  test("plain-string tool input keeps the truncated string branch", async () => {
+    await inCtx(async () => {
       const h = new MesediLangChainCallbackHandler();
       h.handleToolStart({ name: "search" }, "cats", "tool-plainargs");
       h.handleToolEnd("done", "tool-plainargs");

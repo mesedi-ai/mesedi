@@ -93,7 +93,7 @@ beforeEach(() => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe("MesediExporter — root span lifecycle", () => {
-  test("AGENT_RUN start opens execution + emits enter checkpoint", async => {
+  test("AGENT_RUN start opens execution + emits enter checkpoint", async () => {
     const exporter = new MesediExporter();
     const span = makeSpan({
       type: "agent_run",
@@ -114,7 +114,7 @@ describe("MesediExporter — root span lifecycle", () => {
     expect(caps.events[0]?.sequence).toBe(1);
   });
 
-  test("AGENT_RUN end closes execution + emits exit checkpoint", async => {
+  test("AGENT_RUN end closes execution + emits exit checkpoint", async () => {
     const exporter = new MesediExporter();
     const span = makeSpan({
       type: "agent_run",
@@ -135,7 +135,7 @@ describe("MesediExporter — root span lifecycle", () => {
     expect(caps.ends[0]?.duration_ms).toBeGreaterThanOrEqual(0);
   });
 
-  test("WORKFLOW_RUN behaves like AGENT_RUN as a root span", async => {
+  test("WORKFLOW_RUN behaves like AGENT_RUN as a root span", async () => {
     const exporter = new MesediExporter();
     const span = makeSpan({
       type: "workflow_run",
@@ -151,7 +151,7 @@ describe("MesediExporter — root span lifecycle", () => {
     expect(caps.ends).toHaveLength(1);
   });
 
-  test("non-root child span does NOT open a new execution", async => {
+  test("non-root child span does NOT open a new execution", async () => {
     const exporter = new MesediExporter();
     const child = makeSpan({
       type: "agent_run",
@@ -163,7 +163,7 @@ describe("MesediExporter — root span lifecycle", () => {
     expect(getCaps().starts).toHaveLength(0);
   });
 
-  test("duplicate SPAN_STARTED on the same trace is idempotent", async => {
+  test("duplicate SPAN_STARTED on the same trace is idempotent", async () => {
     const exporter = new MesediExporter();
     const span = makeSpan({ type: "agent_run" });
 
@@ -179,7 +179,7 @@ describe("MesediExporter — root span lifecycle", () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe("MesediExporter — descendant spans", () => {
-  test("MODEL_GENERATION emits llm_call with tokens", async => {
+  test("MODEL_GENERATION emits llm_call with tokens", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -230,7 +230,7 @@ describe("MesediExporter — descendant spans", () => {
   // envelope. The `usage` (not `internalUsage`) field carries
   // per-call tokens for cost_velocity.
 
-  test(" Mastra input.messages array → user_message extracts last user's text", async => {
+  test(" Mastra input.messages array → user_message extracts last user's text", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -277,7 +277,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["output_tokens"]).toBe(7);
   });
 
-  test(" string-content user message extracts as-is (no wrapping)", async => {
+  test(" string-content user message extracts as-is (no wrapping)", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -302,7 +302,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["response_text"]).toBe("4");
   });
 
-  test(" multiple user turns → picks the LAST user message", async => {
+  test(" multiple user turns → picks the LAST user message", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -327,7 +327,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["user_message"]).toBe("Second question");
   });
 
-  test(" multi-part text content joined with spaces", async => {
+  test(" multi-part text content joined with spaces", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -357,7 +357,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["user_message"]).toBe("Describe this image");
   });
 
-  test(" non-Mastra shape (raw string input) still works", async => {
+  test(" non-Mastra shape (raw string input) still works", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -377,7 +377,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["response_text"]).toBe("hey");
   });
 
-  test(" internalUsage still consulted when usage absent (ancestor-rollup case)", async => {
+  test(" internalUsage still consulted when usage absent (ancestor-rollup case)", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -409,7 +409,7 @@ describe("MesediExporter — descendant spans", () => {
   // cross-tenant (provider, error_class) clustering, matching what
   // shipped for LangChain.
 
-  test(" failed MODEL_GENERATION with Anthropic RateLimitError → error_class=rate_limited", async => {
+  test(" failed MODEL_GENERATION with Anthropic RateLimitError → error_class=rate_limited", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -445,7 +445,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["output_tokens"]).toBeUndefined();
   });
 
-  test(" OpenAI APITimeoutError → error_class=timeout", async => {
+  test(" OpenAI APITimeoutError → error_class=timeout", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -464,7 +464,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["provider"]).toBe("openai");
   });
 
-  test(" unknown provider with known exception name still classifies", async => {
+  test(" unknown provider with known exception name still classifies", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -483,7 +483,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["error_class"]).toBe("rate_limited");
   });
 
-  test(" unrecognized exception name → error_class=unknown", async => {
+  test(" unrecognized exception name → error_class=unknown", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -502,7 +502,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["exception_type"]).toBe("TotallyMadeUpError");
   });
 
-  test(" errorInfo with only message (no name) still marked failed", async => {
+  test(" errorInfo with only message (no name) still marked failed", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -524,7 +524,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["exception_message"]).toBe("opaque error, no name field");
   });
 
-  test(" http_status reads statusCode variant too", async => {
+  test(" http_status reads statusCode variant too", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -547,7 +547,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["error_class"]).toBe("internal_error");
   });
 
-  test("TOOL_CALL emits tool_call event", async => {
+  test("TOOL_CALL emits tool_call event", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -572,7 +572,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["status"]).toBe("ok");
   });
 
-  test("MCP_TOOL_CALL emits mcp_call event type", async => {
+  test("MCP_TOOL_CALL emits mcp_call event type", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -590,7 +590,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(caps.events[0]?.event_type).toBe("mcp_call");
   });
 
-  test("WORKFLOW_STEP emits checkpoint event", async => {
+  test("WORKFLOW_STEP emits checkpoint event", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "workflow_run" })),
@@ -622,7 +622,7 @@ describe("MesediExporter — descendant spans", () => {
   // checkpoint() also ships {name, metadata}. Matching that shape
   // lets semantic_loop cluster identical-return workflow steps.
 
-  test(" WORKFLOW_STEP with structured span.output ships metadata", async => {
+  test(" WORKFLOW_STEP with structured span.output ships metadata", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "workflow_run" })),
@@ -648,7 +648,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(typeof evt.payload["state_repr"]).toBe("string");
   });
 
-  test(" 3 identical-return steps produce 3 identical metadata payloads", async => {
+  test(" 3 identical-return steps produce 3 identical metadata payloads", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "workflow_run" })),
@@ -679,7 +679,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(new Set(names).size).toBe(3);
   });
 
-  test(" WORKFLOW_STEP with no output omits metadata cleanly", async => {
+  test(" WORKFLOW_STEP with no output omits metadata cleanly", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "workflow_run" })),
@@ -701,7 +701,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(evt.payload["name"]).toBe("mastra.workflow_step.noop");
   });
 
-  test("descendant span on unknown trace is dropped silently", async => {
+  test("descendant span on unknown trace is dropped silently", async () => {
     const exporter = new MesediExporter();
     // No root span opened, so no traceId → execution mapping exists.
     const orphan = makeSpan({
@@ -715,7 +715,7 @@ describe("MesediExporter — descendant spans", () => {
     expect(getCaps().starts).toHaveLength(0);
   });
 
-  test("sequence numbers are monotonic per execution", async => {
+  test("sequence numbers are monotonic per execution", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -737,7 +737,7 @@ describe("MesediExporter — descendant spans", () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe("MesediExporter — status + tenant + fail-open", () => {
-  test("execution end status is COMPLETED when span has no error", async => {
+  test("execution end status is COMPLETED when span has no error", async () => {
     const exporter = new MesediExporter();
     const span = makeSpan({ type: "agent_run" });
     await exporter.exportTracingEvent(startedEvt(span));
@@ -746,7 +746,7 @@ describe("MesediExporter — status + tenant + fail-open", () => {
     expect(getCaps().ends[0]?.status).toBe("completed");
   });
 
-  test("execution end status is CRASHED when span has error attr", async => {
+  test("execution end status is CRASHED when span has error attr", async () => {
     const exporter = new MesediExporter();
     const startSpan = makeSpan({ type: "agent_run" });
     const endSpan = makeSpan({
@@ -763,7 +763,7 @@ describe("MesediExporter — status + tenant + fail-open", () => {
   // real Mastra 1.x surfaces provider-level exceptions there, not in
   // attributes.error. Same class of bug fixed for the
   // llm_call / tool_call payload paths.
-  test(" execution end status is CRASHED when span.errorInfo is set", async => {
+  test(" execution end status is CRASHED when span.errorInfo is set", async () => {
     const exporter = new MesediExporter();
     const startSpan = makeSpan({ type: "agent_run" });
     const endSpan = makeSpan({
@@ -776,7 +776,7 @@ describe("MesediExporter — status + tenant + fail-open", () => {
     expect(getCaps().ends[0]?.status).toBe("crashed");
   });
 
-  test(" errorInfo with only message (no name) still marks CRASHED", async => {
+  test(" errorInfo with only message (no name) still marks CRASHED", async () => {
     const exporter = new MesediExporter();
     const startSpan = makeSpan({ type: "agent_run" });
     const endSpan = makeSpan({
@@ -789,7 +789,7 @@ describe("MesediExporter — status + tenant + fail-open", () => {
     expect(getCaps().ends[0]?.status).toBe("crashed");
   });
 
-  test(" nested agent_run (parent set) does NOT close outer execution", async => {
+  test(" nested agent_run (parent set) does NOT close outer execution", async () => {
     const exporter = new MesediExporter();
     // Outer root: workflow_run opens the execution.
     const outerStart = makeSpan({ type: "workflow_run", traceId: "t-nest" });
@@ -816,7 +816,7 @@ describe("MesediExporter — status + tenant + fail-open", () => {
     expect(getCaps().ends).toHaveLength(1);
   });
 
-  test(" empty errorInfo object stays COMPLETED (regression guard)", async => {
+  test(" empty errorInfo object stays COMPLETED (regression guard)", async () => {
     const exporter = new MesediExporter();
     const startSpan = makeSpan({ type: "agent_run" });
     const endSpan = makeSpan({
@@ -829,7 +829,7 @@ describe("MesediExporter — status + tenant + fail-open", () => {
     expect(getCaps().ends[0]?.status).toBe("completed");
   });
 
-  test("execution end status is HALTED on tripwire abort", async => {
+  test("execution end status is HALTED on tripwire abort", async () => {
     const exporter = new MesediExporter();
     const startSpan = makeSpan({ type: "agent_run" });
     const endSpan = makeSpan({
@@ -844,7 +844,7 @@ describe("MesediExporter — status + tenant + fail-open", () => {
     expect(getCaps().ends[0]?.status).toBe("halted");
   });
 
-  test("tenant_id from constructor flows onto execution", async => {
+  test("tenant_id from constructor flows onto execution", async () => {
     const exporter = new MesediExporter({ tenantId: "acme-corp" });
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -853,7 +853,7 @@ describe("MesediExporter — status + tenant + fail-open", () => {
     expect(getCaps().starts[0]?.tenant_id).toBe("acme-corp");
   });
 
-  test("swallowed error inside handler doesn't propagate", async => {
+  test("swallowed error inside handler doesn't propagate", async () => {
     const exporter = new MesediExporter();
     // A malformed event (missing exportedSpan) should not throw.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -868,7 +868,7 @@ describe("MesediExporter — status + tenant + fail-open", () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe("MesediExporter —  tool_failures errorInfo", () => {
-  test("TOOL_CALL with errorInfo emits status=failed + exception fields", async => {
+  test("TOOL_CALL with errorInfo emits status=failed + exception fields", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -896,7 +896,7 @@ describe("MesediExporter —  tool_failures errorInfo", () => {
     expect(evt.payload["tool_name"]).toBe("crash_tool");
   });
 
-  test("TOOL_CALL with no errorInfo stays status=ok (regression guard)", async => {
+  test("TOOL_CALL with no errorInfo stays status=ok (regression guard)", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),
@@ -915,7 +915,7 @@ describe("MesediExporter —  tool_failures errorInfo", () => {
     expect(evt.payload["exception_message"]).toBeUndefined();
   });
 
-  test("MODEL_GENERATION user_message uses higher cap so token_waste sees full prefix", async => {
+  test("MODEL_GENERATION user_message uses higher cap so token_waste sees full prefix", async () => {
     const exporter = new MesediExporter();
     await exporter.exportTracingEvent(
       startedEvt(makeSpan({ type: "agent_run" })),

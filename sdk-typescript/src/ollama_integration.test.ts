@@ -180,7 +180,7 @@ describe("truncate", () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe("instrumentOllama", () => {
-  test("patches the chat method when a class is provided", async => {
+  test("patches the chat method when a class is provided", async () => {
     class FakeOllama {
       async chat(_args: unknown): Promise<unknown> {
         return { message: { content: "from real" } };
@@ -192,7 +192,7 @@ describe("instrumentOllama", () => {
     expect(FakeOllama.prototype.chat).not.toBe(originalChat);
   });
 
-  test("is idempotent per class — second call is a no-op", async => {
+  test("is idempotent per class — second call is a no-op", async () => {
     class FakeOllama {
       async chat(_args: unknown): Promise<unknown> {
         return null;

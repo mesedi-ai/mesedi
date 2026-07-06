@@ -172,7 +172,7 @@ describe("Ollama no-throttling guard", () => {
     expect(stripped).not.toContain("_maybeEmitThrottlingEvent");
   });
 
-  test("ollama_integration exposes instrumentOllama", async => {
+  test("ollama_integration exposes instrumentOllama", async () => {
     // The positive half: even though throttling auto-emit is omitted,
     // the integration's primary export must still ship.
     const ollamaIntegration = await import("./ollama_integration.js");

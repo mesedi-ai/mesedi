@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 describe("Vertex AI Gemini", () => {
-  it("emits provider=gemini surface=chat on success", async => {
+  it("emits provider=gemini surface=chat on success", async () => {
     class FakeVertexModel {
       modelName = "gemini-2.5-pro";
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,7 +66,7 @@ describe("Vertex AI Gemini", () => {
       }
     }
     await instrumentVertexGemini(FakeVertexModel);
-    const agent = wrap(async => {
+    const agent = wrap(async () => {
       return await new FakeVertexModel().generateContent("hello vertex");
     });
     await agent();
@@ -82,7 +82,7 @@ describe("Vertex AI Gemini", () => {
     expect(chats[0].output_tokens).toBe(34);
   });
 
-  it("emits failure event with error_class when generateContent throws", async => {
+  it("emits failure event with error_class when generateContent throws", async () => {
     class _Err extends Error {
       constructor(msg: string) {
         super(msg);
@@ -97,7 +97,7 @@ describe("Vertex AI Gemini", () => {
       }
     }
     await instrumentVertexGemini(FakeVertexModel);
-    const agent = wrap(async => {
+    const agent = wrap(async () => {
       return await new FakeVertexModel().generateContent("x");
     });
     await expect(agent()).rejects.toThrow("boom");
@@ -114,7 +114,7 @@ describe("Vertex AI Gemini", () => {
     expect(failures[0].error_class).toBeDefined();
   });
 
-  it("is idempotent on re-patch of same class", async => {
+  it("is idempotent on re-patch of same class", async () => {
     class FakeVertexModel {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async generateContent(_arg: any): Promise<any> {

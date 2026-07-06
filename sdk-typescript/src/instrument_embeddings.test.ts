@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 describe("OpenAI embeddings", () => {
-  it("emits surface=embeddings on success", async => {
+  it("emits surface=embeddings on success", async () => {
     class FakeEmbeddings {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async create(_args: any): Promise<any> {
@@ -63,7 +63,7 @@ describe("OpenAI embeddings", () => {
       }
     }
     openaiMod.patchEmbeddings(FakeEmbeddings);
-    const agent = wrap(async => {
+    const agent = wrap(async () => {
       return await new FakeEmbeddings().create({
         model: "text-embedding-3-small",
         input: "hello world",
@@ -82,7 +82,7 @@ describe("OpenAI embeddings", () => {
 });
 
 describe("OpenAI image + audio", () => {
-  it("emits surface=image", async => {
+  it("emits surface=image", async () => {
     class FakeImages {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async create(_args: any): Promise<any> {
@@ -90,7 +90,7 @@ describe("OpenAI image + audio", () => {
       }
     }
     openaiMod.patchImages(FakeImages);
-    const agent = wrap(async => {
+    const agent = wrap(async () => {
       return await new FakeImages().create({
         model: "gpt-image-1",
         prompt: "a red apple",
@@ -103,7 +103,7 @@ describe("OpenAI image + audio", () => {
     expect(imgs[0].response_text).toBe("<image output>");
   });
 
-  it("emits surface=audio_stt for transcriptions", async => {
+  it("emits surface=audio_stt for transcriptions", async () => {
     class FakeT {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async create(_args: any): Promise<any> {
@@ -111,7 +111,7 @@ describe("OpenAI image + audio", () => {
       }
     }
     openaiMod.patchAudioTranscriptions(FakeT);
-    const agent = wrap(async => {
+    const agent = wrap(async () => {
       return await new FakeT().create({ model: "whisper-1", file: "a.mp3" });
     });
     await agent();
@@ -120,7 +120,7 @@ describe("OpenAI image + audio", () => {
     expect(stts[0].user_message).toContain("a.mp3");
   });
 
-  it("emits surface=audio_tts for speech", async => {
+  it("emits surface=audio_tts for speech", async () => {
     class FakeS {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async create(_args: any): Promise<any> {
@@ -128,7 +128,7 @@ describe("OpenAI image + audio", () => {
       }
     }
     openaiMod.patchAudioSpeech(FakeS);
-    const agent = wrap(async => {
+    const agent = wrap(async () => {
       return await new FakeS().create({
         model: "gpt-4o-mini-tts",
         voice: "alloy",
@@ -144,7 +144,7 @@ describe("OpenAI image + audio", () => {
 });
 
 describe("Cohere embed + rerank", () => {
-  it("emits surface=embeddings on embed", async => {
+  it("emits surface=embeddings on embed", async () => {
     class FakeC {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async embed(_args: any): Promise<any> {
@@ -152,7 +152,7 @@ describe("Cohere embed + rerank", () => {
       }
     }
     cohereMod.patchEmbedV1(FakeC);
-    const agent = wrap(async => {
+    const agent = wrap(async () => {
       return await new FakeC().embed({
         texts: ["doc1", "doc2"],
         model: "embed-english-v3.0",
@@ -167,7 +167,7 @@ describe("Cohere embed + rerank", () => {
     expect(embeds[0].input_tokens).toBe(99);
   });
 
-  it("emits surface=rerank with result count", async => {
+  it("emits surface=rerank with result count", async () => {
     class FakeR {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async rerank(_args: any): Promise<any> {
@@ -175,7 +175,7 @@ describe("Cohere embed + rerank", () => {
       }
     }
     cohereMod.patchRerankV1(FakeR);
-    const agent = wrap(async => {
+    const agent = wrap(async () => {
       return await new FakeR().rerank({
         query: "best apples",
         documents: ["red", "green", "blue"],
@@ -191,7 +191,7 @@ describe("Cohere embed + rerank", () => {
 });
 
 describe("Gemini embedContent", () => {
-  it("emits surface=embeddings", async => {
+  it("emits surface=embeddings", async () => {
     class FakeGemini {
       modelName = "text-embedding-004";
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -200,7 +200,7 @@ describe("Gemini embedContent", () => {
       }
     }
     geminiMod.patchGeminiEmbedContent(FakeGemini);
-    const agent = wrap(async => {
+    const agent = wrap(async () => {
       return await new FakeGemini().embedContent({ content: "hello world" });
     });
     await agent();
