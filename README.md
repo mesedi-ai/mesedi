@@ -91,7 +91,7 @@ Each subdirectory has its own README:
 
 - [`backend/README.md`](backend/README.md): backend runbook, configuration, schema versioning, rate limiting
 - [`sdk-python/README.md`](sdk-python/README.md): Python SDK API, framework adapters, hard-halt
-- [`sdk-typescript/README.md`](sdk-typescript/README.md): TypeScript SDK API, Vercel AI SDK adapter
+- [`sdk-typescript/README.md`](sdk-typescript/README.md): TypeScript SDK API, framework adapters (LangChain.js / LangGraph / OpenAI Agents / Vercel AI SDK / Mastra), hard-halt
 
 ## License
 

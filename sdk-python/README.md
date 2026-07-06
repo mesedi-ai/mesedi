@@ -53,6 +53,38 @@ Network failures during observation NEVER block the wrapped function. The
 SDK is fail-open: a Mesedi outage degrades to invisibility, not to broken
 production code.
 
+## Optional: hard-halt with local budgets
+
+Cap a single execution across four axes — input tokens, output tokens,
+wall-clock seconds, and step count. Pass any subset; unset fields impose
+no limit on that axis. When any budget is exceeded, the SDK raises
+`MesediHalt` at the next safe boundary (between LLM calls, tool calls,
+or explicit `checkpoint()`s), never mid-call, so `try`/`finally` cleanup
+runs and open resources release.
+
+```python
+from mesedi import wrap, Budget
+
+@wrap(budget=Budget(
+    max_wall_clock_seconds=600,   # 10 min real time
+    max_steps=30,                  # 30 tool/LLM/checkpoint boundaries
+    max_tokens_in=200_000,
+    max_tokens_out=50_000,
+))
+def my_agent(query: str):
+    ...
+```
+
+When a budget is supplied, the SDK also opens an SSE subscription to
+`GET /executions/{id}/halt-stream`. Operators can halt a running
+execution from the dashboard. If the SSE connection fails (backend
+unreachable, 4xx/5xx, network partition), the reader logs and returns
+— the wrapped agent keeps running with local budgets still enforced
+client-side. Mesedi never decides to halt on its own; operator intent
+or your own budget rules are the only triggers. `MesediHalt` inherits
+from `BaseException` (not `Exception`), so broad `except Exception`
+handlers do not swallow it.
+
 ## Framework integrations
 
 If your agent is built on LangChain, LangGraph, the OpenAI Agents SDK, or

@@ -65,14 +65,50 @@ drainer. Network failures during observation NEVER throw back into the
 wrapped agent. The SDK is fail-open: a Mesedi outage degrades to
 invisibility, not to broken production code.
 
+## Optional: hard-halt with local budgets
+
+Cap a single execution across four axes — input tokens, output tokens,
+wall-clock seconds, and step count. Pass any subset; unset fields impose
+no limit on that axis. When any budget is exceeded, the SDK throws
+`MesediHalt` at the next safe boundary (between LLM calls, tool calls,
+or explicit `checkpoint()`s), never mid-call, so `try`/`finally` cleanup
+runs and open resources release.
+
+```typescript
+import { wrap } from "mesedi";
+
+export const myAgent = wrap(
+  {
+    budget: {
+      maxWallClockSeconds: 600,   // 10 min real time
+      maxSteps: 30,                // 30 tool/LLM/checkpoint boundaries
+      maxTokensIn: 200_000,
+      maxTokensOut: 50_000,
+    },
+  },
+  async (query: string) => { /* ... */ },
+);
+```
+
+When a budget is supplied, the SDK also opens an SSE subscription to
+`GET /executions/{id}/halt-stream`. Operators can halt a running
+execution from the dashboard. If the SSE connection fails (backend
+unreachable, 4xx/5xx, network partition), the reader logs and returns
+— the wrapped agent keeps running with local budgets still enforced
+client-side. Mesedi never decides to halt on its own; operator intent
+or your own budget rules are the only triggers. `MesediHalt` carries an
+internal Symbol marker so `wrap()` detects it even if user code
+accidentally re-wraps it via `throw new Error(...)`.
+
 ## Framework integrations
 
 Adapter modules under `mesedi/integrations/*` translate each framework's
 native callback or hook surface into Mesedi telemetry. They're optional;
 importing `mesedi` itself never requires any framework to be installed.
 
-Currently shipping: **LangGraph**, **OpenAI Agents SDK**, and **Vercel AI
-SDK**. Each peer dependency is opt-in.
+Currently shipping: **LangChain.js**, **LangGraph**, **OpenAI Agents
+SDK**, **Vercel AI SDK**, and **Mastra**. Each peer dependency is
+opt-in.
 
 ### LangGraph
 
