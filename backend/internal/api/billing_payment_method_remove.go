@@ -46,6 +46,44 @@ import (
 	"mesedi/backend/internal/store"
 )
 
+// removalSettlement enumerates how a card-removal request settles
+// its pending balance before the card is detached. Used both by the
+// handler (to branch on flow) and by the audit log (as the
+// `settlement` field) so finance can reconcile write-offs.
+type removalSettlement string
+
+const (
+	// settleCharge: pending >= Stripe minimum. Handler creates an
+	// off-session PaymentIntent for `cents` and detaches on success.
+	settleCharge removalSettlement = "charge"
+	// settleRoundedToZero: pending * 100 rounds to <=0 cents. No
+	// charge attempted; card detaches immediately.
+	settleRoundedToZero removalSettlement = "rounded_to_zero"
+	// settleWaivedBelowMin: 0 < cents < stripeMinChargePaymentIntentCents.
+	// Stripe would reject the PaymentIntent with amount_too_small, so
+	// mesedi eats the sub-$0.50 balance rather than trap the customer
+	// with an unremovable card. Recorded as a write-off in the audit
+	// log. Max per-cycle exposure: $0.49.
+	settleWaivedBelowMin removalSettlement = "waived_below_stripe_min"
+)
+
+// classifyRemovalSettlement decides how to settle the pending USD
+// balance on a customer-initiated card removal. `pending` should
+// already be cap-clamped by the caller. Returns the cents amount the
+// caller should pass to Stripe (only meaningful for settleCharge)
+// plus the settlement kind for both the switch and the audit log.
+func classifyRemovalSettlement(pending float64) (int64, removalSettlement) {
+	cents := int64(math.Round(pending * 100))
+	switch {
+	case cents <= 0:
+		return 0, settleRoundedToZero
+	case cents < stripeMinChargePaymentIntentCents:
+		return cents, settleWaivedBelowMin
+	default:
+		return cents, settleCharge
+	}
+}
+
 // PaymentMethodRemoveRequest is the body of
 // POST /billing/payment-method/remove.
 type PaymentMethodRemoveRequest struct {
@@ -224,21 +262,31 @@ func (h *Handlers) HandleRemovePaymentMethod(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Confirmed. Charge then detach.
-	cents := int64(math.Round(pending * 100))
-	if cents <= 0 {
-		// Round-to-zero (less than half a cent of overage).
-		// Treat as no-charge case.
+	// Confirmed. Classify settlement, then act. See
+	// classifyRemovalSettlement + the removalSettlement docstrings
+	// for the three branches (charge, rounded-to-zero, waived-below-min).
+	cents, settlement := classifyRemovalSettlement(pending)
+	if settlement != settleCharge {
 		if err := h.detachCardWithReset(r.Context(), p); err != nil {
 			writeError(w, http.StatusInternalServerError, "detach: "+err.Error())
 			return
 		}
-		// audit log: round-to-zero settlement, still a card-removal.
-		h.recordAuditEvent(r, AuditBillingPaymentMethodRm, "payment_method", p.StripeCustomerID, map[string]any{
-			"tier":        tier,
-			"charged_usd": 0,
-			"settlement":  "rounded_to_zero",
-		})
+		auditFields := map[string]any{
+			"tier":                      tier,
+			"charged_usd":               0,
+			"settlement":                string(settlement),
+			"execution_overage_units":   overUnits,
+			"ai_analysis_overage_units": aiCount,
+		}
+		if settlement == settleWaivedBelowMin {
+			auditFields["waived_usd"] = pending
+			h.Logger.Info("card removal: waived sub-minimum overage",
+				"project_id", p.ProjectID, "tier", tier,
+				"waived_usd", pending,
+				"execution_overage_units", overUnits,
+				"ai_analysis_overage_units", aiCount)
+		}
+		h.recordAuditEvent(r, AuditBillingPaymentMethodRm, "payment_method", p.StripeCustomerID, auditFields)
 		writeJSON(w, http.StatusOK, PaymentMethodRemoveResponse{
 			OK:                     true,
 			Tier:                   tier,

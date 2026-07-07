@@ -237,6 +237,16 @@ const (
 	// projects that were attempted within the last 48h are
 	// skipped to enforce the every-other-day cadence.
 	HobbyBillingRetryCadence = 48 * time.Hour
+
+	// stripeMinChargePaymentIntentCents is Stripe's documented
+	// minimum PaymentIntent amount for USD-denominated card charges
+	// (https://stripe.com/docs/currencies#minimum-and-maximum-charge-amounts).
+	// PaymentIntents below this threshold are rejected by Stripe with
+	// error code `amount_too_small`. Card-removal settlement waives
+	// pending charges below this floor rather than trapping the
+	// customer with an unremovable card. Max per-cycle waiver
+	// exposure: $0.49.
+	stripeMinChargePaymentIntentCents = int64(50)
 )
 
 // normalizeTier maps any legacy tier string to its canonical form.
