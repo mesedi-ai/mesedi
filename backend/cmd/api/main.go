@@ -532,6 +532,9 @@ func main() {
 		Logger:       logger,
 	}
 	hobbyBillingScheduler.Start(context.Background())
+	// #366 admin trigger endpoint reaches back to the scheduler
+	// via handlers.HobbyBillingScheduler.
+	handlers.HobbyBillingScheduler = hobbyBillingScheduler
 
 	// Public POST /signup bypasses the bearer-token auth chain (visitors
 	// have no key yet) but still needs CORS so the marketing site at

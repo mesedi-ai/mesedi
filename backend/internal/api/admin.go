@@ -169,6 +169,12 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/projects/{id}", h.HandleAdminGetProjectDetail)
 	mux.HandleFunc("POST /admin/projects/{id}/tier", h.HandleAdminSetTier)
 	mux.HandleFunc("POST /admin/projects/{id}/grant", h.HandleAdminGrantExecutions)
+	// #366 admin trigger endpoints for the billing schedulers.
+	// See admin_billing_triggers.go for scope. Test-mode overrides
+	// (billing_test_overrides.go) make these safe to call against
+	// tiny synthetic quotas on staging.
+	mux.HandleFunc("POST /admin/projects/{id}/trigger-hobby-billing-run", h.HandleAdminTriggerHobbyBillingRun)
+	mux.HandleFunc("POST /admin/projects/{id}/trigger-team-billing-run", h.HandleAdminTriggerTeamBillingRun)
 	mux.HandleFunc("GET /admin/projects/{id}/export", h.HandleAdminExportProject)
 	mux.HandleFunc("DELETE /admin/projects/{id}", h.HandleAdminDeleteProject)
 	mux.HandleFunc("DELETE /admin/projects/{id}/failure-groups", h.HandleAdminResetFailureGroups)

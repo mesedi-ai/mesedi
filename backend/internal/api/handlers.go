@@ -58,6 +58,13 @@ type Handlers struct {
 	// be empty in local dev; the billing endpoints respond 503 when
 	// any of them is missing.
 	Stripe StripeConfig
+	// HobbyBillingScheduler is the same instance started at process
+	// boot; a pointer is stashed on Handlers so the #366 admin
+	// trigger endpoint (POST /admin/projects/{id}/trigger-hobby-
+	// billing-run) can invoke the scheduler's processProject step
+	// on demand. Nil in unit tests + local dev that don't spin up
+	// the scheduler; the admin handler 503s on nil.
+	HobbyBillingScheduler *HobbyBillingScheduler
 	// Mailer ships transactional email (welcome on signup today;
 	// day-1 / day-3 nudges later). Local-dev runs without
 	// RESEND_API_KEY use a NoopMailer that silently swallows sends.
