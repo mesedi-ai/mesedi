@@ -797,6 +797,11 @@ func main() {
 	mux.Handle("OPTIONS /admin/projects/{id}/tier", adminHandler)
 	mux.Handle("POST /admin/projects/{id}/grant", adminHandler)
 	mux.Handle("OPTIONS /admin/projects/{id}/grant", adminHandler)
+	// #366 admin trigger endpoints for the billing schedulers.
+	mux.Handle("POST /admin/projects/{id}/trigger-hobby-billing-run", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}/trigger-hobby-billing-run", adminHandler)
+	mux.Handle("POST /admin/projects/{id}/trigger-team-billing-run", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}/trigger-team-billing-run", adminHandler)
 	mux.Handle("GET /admin/projects/{id}/export", adminHandler)
 	mux.Handle("OPTIONS /admin/projects/{id}/export", adminHandler)
 	mux.Handle("DELETE /admin/projects/{id}", adminHandler)
