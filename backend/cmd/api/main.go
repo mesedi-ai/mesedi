@@ -349,6 +349,18 @@ func main() {
 	}
 
 	handlers := api.New(logger, st, cfg.DashboardURL, stripeCfg, mailer)
+
+	// #366 test-mode tier-quota overrides. Never set on prod; staging
+	// sets these so the payment-smoke harness can exercise overage
+	// math with 10-20 executions instead of 5000. See
+	// backend/internal/api/billing_test_overrides.go for safety
+	// posture.
+	api.InitTestOverrides(api.TestOverrides{
+		HobbyExecutionLimit:   int64(envInt("MESEDI_HOBBY_EXECUTION_LIMIT_OVERRIDE", 0)),
+		TeamExecutionIncluded: int64(envInt("MESEDI_TEAM_EXECUTION_LIMIT_OVERRIDE", 0)),
+		HobbyAIAnalysisLimit:  envInt("MESEDI_HOBBY_AI_ANALYSIS_LIMIT_OVERRIDE", 0),
+		TeamAIAnalysisLimit:   envInt("MESEDI_TEAM_AI_ANALYSIS_LIMIT_OVERRIDE", 0),
+	}, logger)
 	// — SSO + magic-link sign-in. The dashboard server calls
 	// POST /signin from its OAuth callback / magic-link verify
 	// routes; empty secret leaves /signin returning 503 so a

@@ -377,16 +377,21 @@ func (c StripeConfig) applyKeyForLivemode(livemode bool) {
 // tierExecutionLimit returns the included monthly execution quota
 // for a tier. Enterprise returns 0 meaning "no fixed limit"; the
 // dashboard renders that as the unicode infinity sign.
+//
+// Reads through the Effective* helpers so staging test overrides
+// (MESEDI_HOBBY_EXECUTION_LIMIT_OVERRIDE et al.) transparently
+// propagate to every quota-check callsite. Production never sets
+// the overrides, so the behavior is identical to the raw constants.
 func tierExecutionLimit(tier string) int64 {
 	switch normalizeTier(tier) {
 	case TierHobby:
-		return HobbyExecutionLimit
+		return EffectiveHobbyExecutionLimit()
 	case TierTeam:
-		return TeamExecutionIncluded
+		return EffectiveTeamExecutionIncluded()
 	case TierEnterprise:
 		return 0
 	default:
-		return HobbyExecutionLimit
+		return EffectiveHobbyExecutionLimit()
 	}
 }
 
@@ -881,11 +886,12 @@ func (h *Handlers) HandleGetAIAnalysesUsage(w http.ResponseWriter, r *http.Reque
 		// cap. Surface the overage rate so the dashboard chip can
 		// render the running pay-as-you-go spend once count
 		// crosses included.
-		resp.Limit = TeamAIAnalysisLimit
+		teamLimit := EffectiveTeamAIAnalysisLimit()
+		resp.Limit = teamLimit
 		overagePrice := TeamAIAnalysisOveragePriceUSD
 		var overageSpend float64
-		if count > TeamAIAnalysisLimit {
-			overageSpend = float64(count-TeamAIAnalysisLimit) * TeamAIAnalysisOveragePriceUSD
+		if count > teamLimit {
+			overageSpend = float64(count-teamLimit) * TeamAIAnalysisOveragePriceUSD
 		}
 		resp.PricePerAnalysisUSD = &overagePrice
 		resp.EstimatedSpendUSD = &overageSpend
@@ -893,7 +899,7 @@ func (h *Handlers) HandleGetAIAnalysesUsage(w http.ResponseWriter, r *http.Reque
 		// Hobby: limit IS the hard cap (50). Every analysis bills
 		// at the per-use price from analysis because Hobby
 		// doesn't include any.
-		resp.Limit = HobbyAIAnalysisLimit
+		resp.Limit = EffectiveHobbyAIAnalysisLimit()
 		price := HobbyAIAnalysisPriceUSD
 		spend := float64(count) * HobbyAIAnalysisPriceUSD
 		resp.PricePerAnalysisUSD = &price
@@ -1716,10 +1722,11 @@ func (h *Handlers) computeTeamAIAnalysisOverageCostUSD(
 			"project_id", p.ProjectID, "error", cErr.Error())
 		return 0, 0
 	}
-	if count <= TeamAIAnalysisLimit {
+	teamLimit := EffectiveTeamAIAnalysisLimit()
+	if count <= teamLimit {
 		return 0, 0
 	}
-	overage := count - TeamAIAnalysisLimit
+	overage := count - teamLimit
 	return float64(overage) * TeamAIAnalysisOveragePriceUSD, overage
 }
 

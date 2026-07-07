@@ -2426,7 +2426,7 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 		if !proj.CardOnFile {
 			writeError(w, http.StatusPaymentRequired,
 				fmt.Sprintf("AI root-cause analysis on Cloud Hobby is pay-per-use at $%.2f per analysis. Add a payment method on /app/billing to enable it, or upgrade to Cloud Team for %d analyses included.",
-					HobbyAIAnalysisPriceUSD, TeamAIAnalysisLimit))
+					HobbyAIAnalysisPriceUSD, EffectiveTeamAIAnalysisLimit()))
 			return
 		}
 		// Hobby is single-project tier; per-project count is the
@@ -2438,19 +2438,20 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 		count, cErr := h.Store.CountAIAnalysesSincePeriodStart(
 			r.Context(), authProjectID, since,
 		)
+		hobbyLimit := EffectiveHobbyAIAnalysisLimit()
 		if cErr != nil {
 			h.Logger.Warn("analyze: hobby count check failed",
 				"project_id", authProjectID, "error", cErr.Error())
 			// Fail open on the rate-limit query itself. A DB blip
 			// should not block a legitimate analysis request.
-		} else if count >= HobbyAIAnalysisLimit {
+		} else if count >= hobbyLimit {
 			h.Logger.Info("analyze: hobby rate limit reached",
 				"project_id", authProjectID,
-				"count", count, "limit", HobbyAIAnalysisLimit)
+				"count", count, "limit", hobbyLimit)
 			writeError(w, http.StatusTooManyRequests,
 				fmt.Sprintf("You have used %d of %d AI root-cause analyses this period on Cloud Hobby ($%.2f each, capped at %d to prevent surprise bills). Upgrade to Cloud Team at /app/billing for %d included per period plus unlimited projects + 90-day retention. Failure detection still works; AI explanations resume next billing period.",
-					count, HobbyAIAnalysisLimit, HobbyAIAnalysisPriceUSD,
-					HobbyAIAnalysisLimit, TeamAIAnalysisLimit))
+					count, hobbyLimit, HobbyAIAnalysisPriceUSD,
+					hobbyLimit, EffectiveTeamAIAnalysisLimit()))
 			return
 		}
 	}
@@ -2496,7 +2497,7 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 				"project_id", authProjectID, "error", cErr.Error())
 			// Fail open on the rate-limit query itself. A DB blip
 			// should not block a legitimate analysis request.
-		} else if count >= TeamAIAnalysisLimit {
+		} else if teamLimit := EffectiveTeamAIAnalysisLimit(); count >= teamLimit {
 			// : Team that removed their card mid-cycle is
 			// hard-capped at the included 200 because there's no
 			// way to bill the $0.50 overage. The 402 message
@@ -2505,10 +2506,10 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 			if !proj.CardOnFile {
 				h.Logger.Info("analyze: team no-card hard cap at included",
 					"project_id", authProjectID,
-					"count", count, "included", TeamAIAnalysisLimit)
+					"count", count, "included", teamLimit)
 				writeError(w, http.StatusPaymentRequired,
 					fmt.Sprintf("You have used your included %d AI root-cause analyses for this period on Cloud Team and your card has been removed. Add a payment method on /app/billing to continue at $%.2f each, or wait for your next billing period.",
-						TeamAIAnalysisLimit, TeamAIAnalysisOveragePriceUSD))
+						teamLimit, TeamAIAnalysisOveragePriceUSD))
 				return
 			}
 			// : Team with card past 200 → overage at
@@ -2521,8 +2522,8 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 				"project_id", authProjectID,
 				"tenant_id", tenantID,
 				"count", count,
-				"included", TeamAIAnalysisLimit,
-				"overage_units", count-TeamAIAnalysisLimit+1,
+				"included", teamLimit,
+				"overage_units", count-teamLimit+1,
 				"overage_rate_usd", TeamAIAnalysisOveragePriceUSD)
 		}
 	}

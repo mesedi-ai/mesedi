@@ -178,7 +178,7 @@ func (h *Handlers) HandleRemovePaymentMethod(w http.ResponseWriter, r *http.Requ
 		}
 		teamWarning = fmt.Sprintf(
 			"You will keep Cloud Team access through %s (hard-capped at the included 100K executions and %d AI analyses since there is no card on file for overage). At that point, if you have not added a new payment method, your subscription will auto-downgrade to Cloud Hobby — no failed-charge emails, no dunning. To stay on Team, add a card on /app/billing before then.",
-			periodEndCopy, TeamAIAnalysisLimit,
+			periodEndCopy, EffectiveTeamAIAnalysisLimit(),
 		)
 	}
 
@@ -485,10 +485,11 @@ func computeAIAnalysisPendingForTier(
 		// Only overage above the 200 included is billable. Return
 		// the OVERAGE count (the unit we'd put on the receipt), not
 		// the full count.
-		if count <= TeamAIAnalysisLimit {
+		teamLimit := EffectiveTeamAIAnalysisLimit()
+		if count <= teamLimit {
 			return 0, 0
 		}
-		overage := count - TeamAIAnalysisLimit
+		overage := count - teamLimit
 		return overage, float64(overage) * TeamAIAnalysisOveragePriceUSD
 	}
 	return 0, 0

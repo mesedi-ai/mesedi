@@ -364,7 +364,7 @@ func (s *HobbyBillingScheduler) sendCardDetachedEmail(p *store.Project) {
 			ProjectName:        p.Name,
 			DashboardURL:       s.dashboardURL(),
 			FailureCeiling:     HobbyBillingFailureCeiling,
-			IncludedExecutions: HobbyExecutionLimit,
+			IncludedExecutions: int(EffectiveHobbyExecutionLimit()),
 		},
 	); err != nil {
 		s.Logger.Warn("hobby card-detached email failed",
