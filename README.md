@@ -95,4 +95,23 @@ Each subdirectory has its own README:
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE). Mesedi is operated by Verdifax, LLC d/b/a Mesedi, a Delaware limited liability company.
+Mesedi is licensed as **MIT-core + Enterprise Edition** (the same shape used by
+PostHog).
+
+- Everything outside the [`ee/`](ee/) directory is **MIT-licensed**. See
+  [`LICENSE`](LICENSE). You can self-host, modify, and use the core of
+  Mesedi in production at no cost, with no artificial usage caps.
+- The [`ee/`](ee/) directory contains enterprise-only features under a
+  separate proprietary license. See [`ee/LICENSE.md`](ee/LICENSE.md) and
+  [`ee/README.md`](ee/README.md) for the scope, policy, and what production
+  use of EE features requires.
+
+The MIT-licensed core is the full product: every failure-class detector,
+the full SDK surface, the full dashboard, no seat caps, no retention caps,
+no artificial usage limits. The `ee/` directory is where features aimed at
+enterprise procurement (SAML SSO, advanced RBAC, seat management, SLA
+reporting, compliance packs) will live as they ship. At the time of the
+initial `ee/` scaffold commit this directory is intentionally empty.
+
+Mesedi is operated by Verdifax, LLC d/b/a Mesedi, a Delaware limited
+liability company.
