@@ -175,6 +175,9 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	// tiny synthetic quotas on staging.
 	mux.HandleFunc("POST /admin/projects/{id}/trigger-hobby-billing-run", h.HandleAdminTriggerHobbyBillingRun)
 	mux.HandleFunc("POST /admin/projects/{id}/trigger-team-billing-run", h.HandleAdminTriggerTeamBillingRun)
+	// Reset the period counter for a project (harness state hygiene
+	// between smoke runs). See admin_billing_triggers.go for scope.
+	mux.HandleFunc("POST /admin/projects/{id}/reset-period-counter", h.HandleAdminResetPeriodCounter)
 	mux.HandleFunc("GET /admin/projects/{id}/export", h.HandleAdminExportProject)
 	mux.HandleFunc("DELETE /admin/projects/{id}", h.HandleAdminDeleteProject)
 	mux.HandleFunc("DELETE /admin/projects/{id}/failure-groups", h.HandleAdminResetFailureGroups)

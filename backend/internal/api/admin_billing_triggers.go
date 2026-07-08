@@ -160,6 +160,72 @@ func (h *Handlers) HandleAdminTriggerTeamBillingRun(w http.ResponseWriter, r *ht
 	})
 }
 
+// HandleAdminResetPeriodCounter zeros a project's
+// executions_this_period counter and advances the current billing
+// period to a fresh 30-day window starting at now.
+//
+// Motivation: the payment-smoke harness runs multiple destructive
+// scenarios back-to-back and needs the mesedi-side execution counter
+// reset between runs so state doesn't leak across sessions.
+// Otherwise the previous run's overage bleeds into the next run's
+// "under quota" checks. Founder-side this is also useful as a debug
+// tool for wiping a project's counter without waiting for a billing
+// period to naturally roll over.
+//
+// Idempotent: safe to call from any tier and any pending state. Does
+// NOT touch Stripe or the subscription — that lives on the trigger
+// endpoints above. Does NOT clear granted_executions since those are
+// a distinct product concern (bonus credits).
+//
+// Response: {"ok": true, "project_id": "...",
+// "previous_executions_this_period": N,
+// "new_period_start": "...", "new_period_end": "..."}.
+func (h *Handlers) HandleAdminResetPeriodCounter(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "missing project id")
+		return
+	}
+	p, err := h.Store.GetProject(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load project: "+err.Error())
+		return
+	}
+
+	previousExecutions := p.ExecutionsThisPeriod
+	now := time.Now().UTC()
+	// 30-day window matches the Hobby-tier natural period. On Team
+	// the actual billing period is Stripe-driven and reasserted on
+	// the next invoice.paid webhook, so this window is a placeholder
+	// that any real webhook will overwrite.
+	newEnd := now.AddDate(0, 0, 30)
+
+	if err := h.Store.ResetExecutionsThisPeriod(r.Context(), projectID, now, newEnd); err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"reset period counter: "+err.Error())
+		return
+	}
+
+	h.Logger.Info("admin reset period counter",
+		"project_id", projectID,
+		"previous_executions_this_period", previousExecutions,
+		"new_period_start", now.Format(time.RFC3339),
+		"new_period_end", newEnd.Format(time.RFC3339))
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                              true,
+		"project_id":                      projectID,
+		"previous_executions_this_period": previousExecutions,
+		"new_period_start":                now.Format(time.RFC3339),
+		"new_period_end":                  newEnd.Format(time.RFC3339),
+		"note":                            "counter reset; period window advanced to a fresh 30-day span. Stripe not touched.",
+	})
+}
+
 // ── register ────────────────────────────────────────────────
 
 // Registered from admin.go's RegisterAdminRoutes.

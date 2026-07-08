@@ -802,6 +802,10 @@ func main() {
 	mux.Handle("OPTIONS /admin/projects/{id}/trigger-hobby-billing-run", adminHandler)
 	mux.Handle("POST /admin/projects/{id}/trigger-team-billing-run", adminHandler)
 	mux.Handle("OPTIONS /admin/projects/{id}/trigger-team-billing-run", adminHandler)
+	// Reset the mesedi-side execution counter for a project so the
+	// payment-smoke harness starts each run with a clean period.
+	mux.Handle("POST /admin/projects/{id}/reset-period-counter", adminHandler)
+	mux.Handle("OPTIONS /admin/projects/{id}/reset-period-counter", adminHandler)
 	mux.Handle("GET /admin/projects/{id}/export", adminHandler)
 	mux.Handle("OPTIONS /admin/projects/{id}/export", adminHandler)
 	mux.Handle("DELETE /admin/projects/{id}", adminHandler)
