@@ -61,7 +61,11 @@ func TestNormalizeResolveReason(t *testing.T) {
 		{"preserve tabs", "col1\tcol2", "col1\tcol2"},
 		{"strip null byte", "ab\x00cd", "abcd"},
 		{"strip control chars", "a\x01b\x1fc\x7fd", "abcd"},
-		{"keep printable unicode", "résolu — voir ", "résolu — voir "},
+		// TrimSpace is applied at the top of normalizeResolveReason, so
+		// the assertion here should not include leading/trailing spaces
+		// in either input or want — the point of this case is to verify
+		// non-ASCII printable characters (é, em-dash) survive the filter.
+		{"keep printable unicode", "résolu — voir", "résolu — voir"},
 		{"cap at 512 bytes", strings.Repeat("a", 600), strings.Repeat("a", 512)},
 	}
 	for _, tc := range cases {
