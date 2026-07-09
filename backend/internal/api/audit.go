@@ -34,8 +34,8 @@ const (
 	AuditBillingPaymentMethodAdd = "billing.payment_method_added"
 	AuditBillingPaymentMethodRm  = "billing.payment_method_removed"
 	// step C — additional v1.5 capture points.
-	AuditProjectRename     = "project.rename"
-	AuditRetentionUpdate   = "project.retention_update"
+	AuditProjectRename   = "project.rename"
+	AuditRetentionUpdate = "project.retention_update"
 	// Team-management actions. Recorded against the calling admin's
 	// project (the project they were looking at when they made the
 	// change); a multi-project org sees the row only on that one
@@ -326,4 +326,3 @@ func (h *Handlers) HandleListAuditEvents(w http.ResponseWriter, r *http.Request)
 		Events: events,
 	})
 }
-

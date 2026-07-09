@@ -1622,6 +1622,12 @@ func (s *PostgresStore) ListExecutions(ctx context.Context, projectID string, q 
 	limitPlaceholder := fmt.Sprintf("$%d", len(args)-1)
 	offsetPlaceholder := fmt.Sprintf("$%d", len(args))
 
+	// G202: whereClause is built above from allowlisted fragments
+	// (project_id / status / crash_signature ILIKE with parameter
+	// placeholders). limitPlaceholder / offsetPlaceholder are
+	// server-controlled $N tokens, never user input. All user-supplied
+	// values flow through args... as parameterized placeholders.
+	//nolint:gosec // G202: false positive — see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			execution_id, project_id, status,

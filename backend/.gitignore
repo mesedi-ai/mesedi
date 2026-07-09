@@ -39,3 +39,11 @@ Thumbs.db
 config.local.*
 secrets.local.*
 mesedi-dev.db
+
+# Fly deploy configs are machine-local. Only fly.toml (prod) is public.
+# fly.staging.toml, fly.dev.toml, and any other per-environment overrides
+# stay out of the public tree — they name internal hosts + secret refs.
+fly.staging.toml
+fly.dev.toml
+fly.*.toml
+!fly.toml

@@ -217,6 +217,11 @@ func (s *SQLiteStore) SearchClosedProjectAuditEvents(
 		args = append(args, filter.ProjectID)
 	}
 	args = append(args, filter.Limit)
+	// G202: joinSQLClauses concatenates only allowlisted clause literals
+	// ("project_id = ?", "action = ?", etc.). All user-supplied values
+	// flow through args... as parameterized placeholders, never into the
+	// concatenated SQL fragment.
+	//nolint:gosec // G202: false positive — see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT event_id, project_id,
 		       actor_key_id, actor_key_name, actor_email,
@@ -410,6 +415,11 @@ func (s *PostgresStore) SearchClosedProjectAuditEvents(
 	}
 	args = append(args, filter.Limit)
 	limitPlaceholder := fmt.Sprintf("$%d", len(args))
+	// G202: joinSQLClauses concatenates only allowlisted clause literals
+	// built from fmt.Sprintf format strings under this function's control.
+	// All user-supplied values flow through args... as parameterized
+	// placeholders, never into the concatenated SQL fragment.
+	//nolint:gosec // G202: false positive — see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT event_id, project_id,
 		       actor_key_id, actor_key_name, actor_email,
