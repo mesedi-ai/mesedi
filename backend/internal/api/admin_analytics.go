@@ -263,7 +263,7 @@ func (h *Handlers) HandleAdminListCharges(w http.ResponseWriter, r *http.Request
 	params.Limit = stripe.Int64(int64(limit))
 
 	out := AdminListChargesResponse{
-		OK:      true,
+		OK: true,
 		// Cap allocation at the package-level constant; `limit` is
 		// guaranteed <= adminListLimitMax by the clamp above. Using
 		// the constant here makes the upper bound visible to static
@@ -347,7 +347,7 @@ func (h *Handlers) HandleAdminListRefunds(w http.ResponseWriter, r *http.Request
 	params.Limit = stripe.Int64(int64(limit))
 
 	out := AdminListRefundsResponse{
-		OK:      true,
+		OK: true,
 		// See Charges allocation above for the rationale on using
 		// the constant rather than `limit` here (alert ).
 		Refunds: make([]AdminRefundRow, 0, adminListLimitMax),
@@ -430,7 +430,7 @@ func (h *Handlers) HandleAdminListCanceledSubscriptions(w http.ResponseWriter, r
 	params.Limit = stripe.Int64(int64(limit))
 
 	out := AdminListCanceledSubsResponse{
-		OK:            true,
+		OK: true,
 		// See Charges allocation above for the rationale on using
 		// the constant rather than `limit` here (alert ).
 		Subscriptions: make([]AdminCanceledSubRow, 0, adminListLimitMax),
@@ -470,4 +470,3 @@ func (h *Handlers) HandleAdminListCanceledSubscriptions(w http.ResponseWriter, r
 	}
 	writeJSON(w, http.StatusOK, out)
 }
-

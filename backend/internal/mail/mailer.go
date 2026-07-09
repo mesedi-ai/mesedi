@@ -98,7 +98,7 @@ type HobbyBillingNotificationInput struct {
 }
 
 // OrgInviteInput is everything the team-invite email template needs
-//. Sent when an admin clicks 'Invite' on /app/team. AcceptURL
+// . Sent when an admin clicks 'Invite' on /app/team. AcceptURL
 // carries the invite token and lands the invitee on the public
 // accept page.
 type OrgInviteInput struct {
@@ -773,7 +773,7 @@ func (m *ResendMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeS
 }
 
 // SendAccountClosed confirms the close-account cascade succeeded
-//. Sent immediately AFTER DeleteProjectCascade, before the
+// . Sent immediately AFTER DeleteProjectCascade, before the
 // dashboard's force-logout fires, so the customer has a paper trail.
 //
 // History:

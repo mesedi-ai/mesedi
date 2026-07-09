@@ -71,6 +71,11 @@ func (s *SQLiteStore) ListExecutionsByAPIKey(
 		args = append(args, t2.UTC())
 	}
 	args = append(args, limit)
+	// G202: joinSQLClauses concatenates only allowlisted clause literals
+	// ("project_id = ?", "started_at >= ?", etc.). All user-supplied
+	// values flow through args... as parameterized placeholders, never
+	// into the concatenated SQL fragment.
+	//nolint:gosec // G202: false positive — see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT execution_id, project_id, parent_execution_id, status,
 		       started_at, ended_at, duration_ms,
@@ -136,6 +141,12 @@ func (s *PostgresStore) ListExecutionsByAPIKey(
 	}
 	args = append(args, limit)
 	limitPlaceholder := fmt.Sprintf("$%d", len(args))
+	// G202: joinSQLClauses concatenates only allowlisted clause literals
+	// built from fmt.Sprintf format strings under this function's
+	// control. All user-supplied values flow through args... as
+	// parameterized placeholders, never into the concatenated SQL
+	// fragment.
+	//nolint:gosec // G202: false positive — see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT execution_id, project_id, parent_execution_id, status,
 		       started_at, ended_at, duration_ms,

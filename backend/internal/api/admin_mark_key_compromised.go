@@ -65,19 +65,19 @@ type adminMarkKeyCompromisedRequest struct {
 // email. Shape is intentionally flat + JSON-friendly so the customer
 // can read it directly without specialized tools.
 type adminMarkKeyCompromisedResponse struct {
-	OK              bool                       `json:"ok"`
-	KeyID           string                     `json:"key_id"`
-	KeyPrefix       string                     `json:"key_prefix"`
-	ProjectID       string                     `json:"project_id"`
-	SignalID        string                     `json:"signal_id"`
-	SuspendedAt     string                     `json:"suspended_at"`
-	WindowStart     string                     `json:"window_start"`
-	WindowEnd       string                     `json:"window_end"`
-	ExecutionCount  int                        `json:"execution_count"`
-	RequestCount    int                        `json:"request_count"`
-	Executions      []reportExecution          `json:"executions"`
-	RequestLog      []reportRequest            `json:"request_log"`
-	GeneratedAt     string                     `json:"generated_at"`
+	OK             bool              `json:"ok"`
+	KeyID          string            `json:"key_id"`
+	KeyPrefix      string            `json:"key_prefix"`
+	ProjectID      string            `json:"project_id"`
+	SignalID       string            `json:"signal_id"`
+	SuspendedAt    string            `json:"suspended_at"`
+	WindowStart    string            `json:"window_start"`
+	WindowEnd      string            `json:"window_end"`
+	ExecutionCount int               `json:"execution_count"`
+	RequestCount   int               `json:"request_count"`
+	Executions     []reportExecution `json:"executions"`
+	RequestLog     []reportRequest   `json:"request_log"`
+	GeneratedAt    string            `json:"generated_at"`
 }
 
 type reportExecution struct {

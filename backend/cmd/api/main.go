@@ -70,14 +70,14 @@ type runtimeConfig struct {
 	DashboardURL  string
 	// Stripe billing config. Any of these may be empty in
 	// local dev, the billing endpoints respond 503 when missing.
-	StripeSecretKey         string
+	StripeSecretKey string
 	// StripeSecretKeyTest (follow-on): optional test-mode API
 	// secret. Pairs with StripeWebhookSecretTest so test-mode events
 	// not only validate signature but also let handlers call back to
 	// Stripe (e.g., charge.Get to enrich a dispute) without hitting
 	// 401 on a live key against a test-mode object.
-	StripeSecretKeyTest     string
-	StripeWebhookSecret     string
+	StripeSecretKeyTest string
+	StripeWebhookSecret string
 	// StripeWebhookSecretTest: optional second webhook signing
 	// secret so test-mode events from the Stripe Dashboard validate
 	// against the same endpoint as live events. Empty = behavior
@@ -923,11 +923,11 @@ func handleHealth(logger *slog.Logger) http.HandlerFunc {
 
 func loadConfig() runtimeConfig {
 	cfg := runtimeConfig{
-		Port:                envInt("MESEDI_PORT", 8080),
-		LogLevel:            envString("MESEDI_LOG_LEVEL", "info"),
-		DBURL:               envString("MESEDI_DB_URL", defaultDBURL),
-		DBURLPostgres:       envString("MESEDI_DB_URL_POSTGRES", ""),
-		DashboardURL:        envString("MESEDI_DASHBOARD_URL", ""),
+		Port:                    envInt("MESEDI_PORT", 8080),
+		LogLevel:                envString("MESEDI_LOG_LEVEL", "info"),
+		DBURL:                   envString("MESEDI_DB_URL", defaultDBURL),
+		DBURLPostgres:           envString("MESEDI_DB_URL_POSTGRES", ""),
+		DashboardURL:            envString("MESEDI_DASHBOARD_URL", ""),
 		StripeSecretKey:         envString("MESEDI_STRIPE_SECRET_KEY", ""),
 		StripeSecretKeyTest:     envString("MESEDI_STRIPE_SECRET_KEY_TEST", ""),
 		StripeWebhookSecret:     envString("MESEDI_STRIPE_WEBHOOK_SECRET", ""),

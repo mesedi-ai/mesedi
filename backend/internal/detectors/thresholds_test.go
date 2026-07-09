@@ -267,15 +267,13 @@ func Test_ContextOverflow_LowerHighPctFiresEarlier(t *testing.T) {
 func Test_ContextOverflow_BadOrderingFallsBackToDefaults(t *testing.T) {
 	// HighPct >= CriticalPct is invalid; detector must use defaults.
 	bad := ContextOverflowThresholds{HighPct: 0.95, CriticalPct: 0.95}
+	// At 50% util (100K tokens) with defaults, neither warn (0.9) nor
+	// fail (1.0) fires. If the bad config WERE used, 0.95 would also
+	// not fire. To make the fallback-vs-bad distinction observable, we
+	// pick a HIGHER utilization (190K = 95%) which fires under the
+	// default warn threshold but would NOT fire if the bad-config
+	// 0.95/0.95 pair were applied literally. If fallback works, fires.
 	payloads := []json.RawMessage{
-		json.RawMessage(`{"model":"claude-opus-4-6","input_tokens":100000}`),
-	}
-	// At 50% util with defaults, neither warn (0.9) nor fail (1.0)
-	// fires. If the bad config WERE used, 0.95 would also not fire.
-	// The key is no panic + behaves sanely. Try a higher utilization
-	// (190K = 95%) which would fire under default warn but NOT under
-	// the bad config if it were applied as-is. With fallback, fires.
-	payloads = []json.RawMessage{
 		json.RawMessage(`{"model":"claude-opus-4-6","input_tokens":190000}`),
 	}
 	sig, fired := DetectContextOverflowWithThresholds(payloads, bad)

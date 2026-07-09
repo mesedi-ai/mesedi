@@ -1179,13 +1179,13 @@ const adminHaikuCostPerAnalysisUSD = 0.03
 // estimated Anthropic cost so the dashboard can render a single
 // table without extra math.
 type AdminAIAnalysesByProjectRow struct {
-	ProjectID        string   `json:"project_id"`
-	Name             string   `json:"name"`
-	OwnerEmail       string   `json:"owner_email,omitempty"`
-	Tier             string   `json:"tier"`
-	TenantID         string   `json:"tenant_id,omitempty"`
-	Count            int      `json:"count"`
-	EstimatedCostUSD float64  `json:"estimated_cost_usd"`
+	ProjectID        string  `json:"project_id"`
+	Name             string  `json:"name"`
+	OwnerEmail       string  `json:"owner_email,omitempty"`
+	Tier             string  `json:"tier"`
+	TenantID         string  `json:"tenant_id,omitempty"`
+	Count            int     `json:"count"`
+	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
 	// FailureClasses powers the per-row chip filter on the admin
 	// dashboard. Distinct failure_class slugs the project
 	// ran analyses against during this window. Empty omitted.
@@ -1197,9 +1197,9 @@ type AdminAIAnalysesByProjectRow struct {
 // breakdown plus aggregate totals so the dashboard can render the
 // summary chip without a second round trip.
 type AdminAIAnalysesByProjectResponse struct {
-	Since                 string                       `json:"since"`
-	TotalCount            int                          `json:"total_count"`
-	TotalEstimatedCostUSD float64                      `json:"total_estimated_cost_usd"`
+	Since                 string                        `json:"since"`
+	TotalCount            int                           `json:"total_count"`
+	TotalEstimatedCostUSD float64                       `json:"total_estimated_cost_usd"`
 	Projects              []AdminAIAnalysesByProjectRow `json:"projects"`
 }
 
@@ -1330,17 +1330,18 @@ type AdminAnthropicCreditResponse struct {
 
 // AdminDailySpendBucket is one bar of the 14-day spend chart.
 type AdminDailySpendBucket struct {
-	Date string  `json:"date"`     // YYYY-MM-DD UTC
-	USD  float64 `json:"usd"`      // total spend that day
+	Date string  `json:"date"` // YYYY-MM-DD UTC
+	USD  float64 `json:"usd"`  // total spend that day
 }
 
 // HandleAdminGetAnthropicCredit assembles the founder burn-rate
 // widget payload. Three pieces:
-//   1. Latest recorded balance snapshot (manual entry, infrequent).
-//   2. Spend SINCE that snapshot (Anthropic Cost Report). Auto-
-//      decrements the displayed balance so the founder rarely has
-//      to re-enter anything.
-//   3. Last 14 days of daily spend (chart + 7-day burn rate).
+//  1. Latest recorded balance snapshot (manual entry, infrequent).
+//  2. Spend SINCE that snapshot (Anthropic Cost Report). Auto-
+//     decrements the displayed balance so the founder rarely has
+//     to re-enter anything.
+//  3. Last 14 days of daily spend (chart + 7-day burn rate).
+//
 // Cost Report failures degrade gracefully: the snapshot fields are
 // always returned even if Anthropic's API is down, and the
 // derived numbers are simply omitted with a logged warning.
@@ -1530,10 +1531,10 @@ func newCreditSnapshotID() string {
 // the analyze handler. Sorted recent-first; paginated via limit +
 // offset query params.
 type AdminListAIAnalysesResponse struct {
-	OK       bool                 `json:"ok"`
-	Analyses []*store.AIAnalysis  `json:"analyses"`
-	Limit    int                  `json:"limit"`
-	Offset   int                  `json:"offset"`
+	OK       bool                `json:"ok"`
+	Analyses []*store.AIAnalysis `json:"analyses"`
+	Limit    int                 `json:"limit"`
+	Offset   int                 `json:"offset"`
 }
 
 // HandleAdminListAIAnalyses returns a flat cross-tenant list of
@@ -1849,13 +1850,13 @@ type AdminGDPRPurgeResponse struct {
 //
 // Compliance posture (the meta-audit-event):
 //
-//   Action     = AuditAuditGDPRPurge
-//   ProjectID  = store.APIKeyAdminProjectID ("_admin" system project)
-//   TargetType = "project"
-//   TargetID   = <the purged project id>
-//   ActorEmail = AuditActorPlatformAdmin (synthetic sentinel)
-//   Metadata   = { "rows_purged": N, "reason": "...", "admin_key_id": "...",
-//                  "admin_key_name": "...", "admin_auth_method": "..." }
+//	Action     = AuditAuditGDPRPurge
+//	ProjectID  = store.APIKeyAdminProjectID ("_admin" system project)
+//	TargetType = "project"
+//	TargetID   = <the purged project id>
+//	ActorEmail = AuditActorPlatformAdmin (synthetic sentinel)
+//	Metadata   = { "rows_purged": N, "reason": "...", "admin_key_id": "...",
+//	               "admin_key_name": "...", "admin_auth_method": "..." }
 //
 // This row survives the deletion because it is owned by the _admin
 // system project, not the purged project. It is also covered by the
