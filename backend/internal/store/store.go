@@ -333,6 +333,14 @@ type ProjectWebhook struct {
 	Name           string    `json:"name,omitempty"`
 	URL            string    `json:"url"`
 	Secret         string    `json:"-"` // never returned in list responses
+	// AuthToken is a customer-provided receiver-side auth value used
+	// when the receiver has its own auth scheme instead of Mesedi's
+	// HMAC signature. Currently used only for PagerDuty (the value
+	// is their integration key / routing_key, ~32 chars). Never
+	// returned in list responses. Empty for Slack / Discord / generic
+	// receivers; the dispatcher falls back to HMAC signing in those
+	// cases. Added by migration 055.
+	AuthToken      string    `json:"-"`
 	EnabledClasses []string  `json:"enabled_classes"`
 	Enabled        bool      `json:"enabled"`
 	CreatedAt      time.Time `json:"created_at"`

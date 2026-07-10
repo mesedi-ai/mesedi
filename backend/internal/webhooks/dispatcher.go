@@ -169,10 +169,10 @@ func Deliver(
 	// recomputed over the adapted body so the on-wire header is
 	// correct for whatever leaves the dispatcher.
 	//
-	// PagerDuty adapter needs the webhook Secret repurposed as the
-	// PagerDuty routing_key, so we pass it through as an argument
-	// rather than have the adapter look up the whole webhook.
-	if adapted, ok, adaptErr := adaptedBody(webhook.URL, webhook.Secret, payload); ok {
+	// PagerDuty adapter needs the customer-provided routing_key
+	// (webhook.AuthToken), never the auto-generated HMAC Secret.
+	// See adapters.go for the auth model.
+	if adapted, ok, adaptErr := adaptedBody(webhook.URL, webhook.AuthToken, payload); ok {
 		if adaptErr != nil {
 			return DeliveryResult{
 					Status:   "failed",

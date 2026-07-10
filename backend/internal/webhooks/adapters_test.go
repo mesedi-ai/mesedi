@@ -357,24 +357,24 @@ func TestBuildPagerDutyBody_SeverityMappingDefensive(t *testing.T) {
 func TestAdaptedBody_Routing(t *testing.T) {
 	t.Parallel()
 	p := sampleCreatedPayload()
-	// Slack path
-	b, ok, err := adaptedBody("https://hooks.slack.com/services/T/B/x", "secret", p)
+	// Slack path — authToken unused, pass empty
+	b, ok, err := adaptedBody("https://hooks.slack.com/services/T/B/x", "", p)
 	if err != nil || !ok || len(b) == 0 {
 		t.Errorf("slack route: ok=%v err=%v len=%d", ok, err, len(b))
 	}
-	// Discord path
-	b, ok, err = adaptedBody("https://discord.com/api/webhooks/1/x", "secret", p)
+	// Discord path — authToken unused, pass empty
+	b, ok, err = adaptedBody("https://discord.com/api/webhooks/1/x", "", p)
 	if err != nil || !ok || len(b) == 0 {
 		t.Errorf("discord route: ok=%v err=%v len=%d", ok, err, len(b))
 	}
-	// PagerDuty path — routing_key must appear in body
+	// PagerDuty path — authToken IS the routing_key and must appear in body
 	b, ok, err = adaptedBody("https://events.pagerduty.com/v2/enqueue", "rk_pd", p)
 	if err != nil || !ok || !strings.Contains(string(b), "rk_pd") {
 		t.Errorf("pagerduty route: ok=%v err=%v body-has-rk=%v",
 			ok, err, strings.Contains(string(b), "rk_pd"))
 	}
 	// Unknown URL: no adapter matched
-	b, ok, _ = adaptedBody("https://example.com/hook", "secret", p)
+	b, ok, _ = adaptedBody("https://example.com/hook", "", p)
 	if ok || b != nil {
 		t.Errorf("unknown url: expected no adapter (ok=false, nil body), got ok=%v len=%d",
 			ok, len(b))

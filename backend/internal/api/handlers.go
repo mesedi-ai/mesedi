@@ -5176,6 +5176,12 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		// RecurrenceMode is "throttled". Below the 60s floor the
 		// dispatcher promotes the value to 60.
 		RecurrenceWindowSeconds int `json:"recurrence_window_seconds,omitempty"`
+		// AuthToken is a customer-provided receiver-side auth value
+		// for receivers that don't use Mesedi's HMAC signing.
+		// Currently required for PagerDuty (their routing_key /
+		// integration key), optional for anything else. See
+		// tier_change_cascade.go and adapters.go for the routing.
+		AuthToken string `json:"auth_token,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
@@ -5198,6 +5204,29 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		writeError(w, http.StatusBadRequest, "url must use http or https scheme")
 		return
+	}
+
+	// PagerDuty enforcement: their Events API v2 authenticates via a
+	// routing_key inside the request body, not via HTTP headers, so
+	// the customer MUST supply their PagerDuty integration key here.
+	// Without it, every delivery would silently be rejected by
+	// PagerDuty with an unhelpful 400. Fail loud at create-time
+	// instead. Length range guards against a fat-finger paste (real
+	// keys are 32 hex-ish characters); the outer bounds are
+	// deliberately loose because PagerDuty has changed their key
+	// format across API versions.
+	body.AuthToken = strings.TrimSpace(body.AuthToken)
+	if webhooks.IsPagerDutyReceiver(body.URL) {
+		if body.AuthToken == "" {
+			writeError(w, http.StatusBadRequest,
+				"PagerDuty webhooks require the integration key (routing_key) in the auth_token field")
+			return
+		}
+		if len(body.AuthToken) < 20 || len(body.AuthToken) > 128 {
+			writeError(w, http.StatusBadRequest,
+				"auth_token length looks wrong for a PagerDuty integration key (expected ~32 chars)")
+			return
+		}
 	}
 
 	// Validate enabled_classes, every entry must match a known class.
@@ -5283,6 +5312,7 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		Name:                    body.Name,
 		URL:                     body.URL,
 		Secret:                  secret,
+		AuthToken:               body.AuthToken,
 		EnabledClasses:          body.EnabledClasses,
 		Enabled:                 enabled,
 		SeverityFilter:          body.SeverityFilter,

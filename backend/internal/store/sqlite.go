@@ -1271,14 +1271,20 @@ func (s *SQLiteStore) CreateProjectWebhook(ctx context.Context, wh *ProjectWebho
 		windowSeconds = sql.NullInt64{Int64: int64(wh.RecurrenceWindowSeconds), Valid: true}
 	}
 
+	// auth_token is nullable in the schema; NULL for non-PagerDuty
+	// webhooks so the reverse migration is a clean drop.
+	var authTokenNS sql.NullString
+	if wh.AuthToken != "" {
+		authTokenNS = sql.NullString{String: wh.AuthToken, Valid: true}
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO project_webhooks (
-			webhook_id, project_id, name, url, secret,
+			webhook_id, project_id, name, url, secret, auth_token,
 			enabled_classes, enabled, created_at, severity_filter,
 			recurrence_mode, recurrence_window_seconds
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		wh.WebhookID, wh.ProjectID, wh.Name, wh.URL, wh.Secret,
+		wh.WebhookID, wh.ProjectID, wh.Name, wh.URL, wh.Secret, authTokenNS,
 		classesJSON, enabled, wh.CreatedAt.UTC().Format(time.RFC3339),
 		wh.SeverityFilter,
 		recurrenceMode, windowSeconds,
@@ -1345,7 +1351,7 @@ func (s *SQLiteStore) ListEnabledProjectWebhooks(
 	projectID string,
 ) ([]*ProjectWebhook, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT webhook_id, project_id, name, url, secret,
+		SELECT webhook_id, project_id, name, url, secret, auth_token,
 		       enabled_classes, enabled, created_at, severity_filter,
 		       recurrence_mode, recurrence_window_seconds
 		FROM project_webhooks
@@ -1361,15 +1367,19 @@ func (s *SQLiteStore) ListEnabledProjectWebhooks(
 	for rows.Next() {
 		var wh ProjectWebhook
 		var classesJSON sql.NullString
+		var authTokenNS sql.NullString
 		var createdAt string
 		var enabled int
 		var windowSeconds sql.NullInt64
 		if err := rows.Scan(
-			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
+			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret, &authTokenNS,
 			&classesJSON, &enabled, &createdAt, &wh.SeverityFilter,
 			&wh.RecurrenceMode, &windowSeconds,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_webhook: %w", err)
+		}
+		if authTokenNS.Valid {
+			wh.AuthToken = authTokenNS.String
 		}
 		wh.Enabled = enabled != 0
 		wh.EnabledClasses = parseEnabledClasses(classesJSON)
@@ -1418,17 +1428,18 @@ func (s *SQLiteStore) GetProjectWebhook(
 ) (*ProjectWebhook, error) {
 	var wh ProjectWebhook
 	var classesJSON sql.NullString
+	var authTokenNS sql.NullString
 	var createdAt string
 	var enabled int
 	var windowSeconds sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT webhook_id, project_id, name, url, secret,
+		SELECT webhook_id, project_id, name, url, secret, auth_token,
 		       enabled_classes, enabled, created_at, severity_filter,
 		       recurrence_mode, recurrence_window_seconds
 		FROM project_webhooks
 		WHERE webhook_id = ? AND project_id = ?
 	`, webhookID, projectID).Scan(
-		&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
+		&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret, &authTokenNS,
 		&classesJSON, &enabled, &createdAt, &wh.SeverityFilter,
 		&wh.RecurrenceMode, &windowSeconds,
 	)
@@ -1437,6 +1448,9 @@ func (s *SQLiteStore) GetProjectWebhook(
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get project_webhook: %w", err)
+	}
+	if authTokenNS.Valid {
+		wh.AuthToken = authTokenNS.String
 	}
 	wh.Enabled = enabled != 0
 	wh.EnabledClasses = parseEnabledClasses(classesJSON)

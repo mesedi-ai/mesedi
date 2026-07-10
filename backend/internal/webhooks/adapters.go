@@ -51,19 +51,31 @@ func isSlackURL(rawURL string) bool {
 		strings.HasPrefix(rawURL, "https://hooks.slack.com/workflows/")
 }
 
-// isPagerDutyURL returns true if the URL is a PagerDuty Events API
-// v2 endpoint. PagerDuty publishes exactly one URL for this API
+// IsPagerDutyReceiver returns true if the URL is a PagerDuty Events
+// API v2 endpoint. PagerDuty publishes exactly one URL for this API
 // (identical across every customer's integration); the customer's
 // identity is carried inside the body as `routing_key`. See
 // BuildPagerDutyBody for how the routing_key is sourced from the
-// webhook's Secret field.
+// webhook's AuthToken field.
 //
 // PagerDuty does NOT verify HMAC signatures on inbound events; the
 // dispatcher recognizes PagerDuty URLs and skips the X-Mesedi-
 // Signature header for them (see AdapterSkipsHMAC).
-func isPagerDutyURL(rawURL string) bool {
+//
+// Exported so the API layer can enforce the routing_key requirement
+// at webhook-create time (HandleCreateWebhook) rather than letting
+// deliveries silently fail against PagerDuty's server.
+func IsPagerDutyReceiver(rawURL string) bool {
 	return strings.HasPrefix(rawURL, "https://events.pagerduty.com/v2/enqueue") ||
 		strings.HasPrefix(rawURL, "https://events.eu.pagerduty.com/v2/enqueue")
+}
+
+// isPagerDutyURL is retained as the package-internal alias for
+// callers within adapters.go. Kept separate from IsPagerDutyReceiver
+// so an accidental rename of the internal shape doesn't break the
+// exported API layer.
+func isPagerDutyURL(rawURL string) bool {
+	return IsPagerDutyReceiver(rawURL)
 }
 
 // AdapterSkipsHMAC reports whether the receiver at rawURL uses its
@@ -490,12 +502,12 @@ func orDefault(v, def string) string {
 // (body, true) when an adapter matched; (nil, false) otherwise —
 // the caller falls back to the canonical JSON marshal of Payload.
 //
-// PagerDuty requires the routing_key sourced from the webhook Secret
-// field, so this signature takes the whole webhook, not just its URL.
-// Slack + Discord don't need the secret at adaptation time (they use
-// it, if at all, for their own header-based verification which the
-// dispatcher wires separately).
-func adaptedBody(rawURL, webhookSecret string, p Payload) ([]byte, bool, error) {
+// PagerDuty requires the routing_key sourced from the webhook
+// AuthToken field, so this signature takes it explicitly rather
+// than reading the whole webhook. Slack + Discord don't need the
+// token at adaptation time (they use HMAC via the Secret field,
+// which the dispatcher wires separately).
+func adaptedBody(rawURL, authToken string, p Payload) ([]byte, bool, error) {
 	if isDiscordURL(rawURL) {
 		b, err := BuildDiscordBody(p)
 		return b, true, err
@@ -505,7 +517,7 @@ func adaptedBody(rawURL, webhookSecret string, p Payload) ([]byte, bool, error) 
 		return b, true, err
 	}
 	if isPagerDutyURL(rawURL) {
-		b, err := BuildPagerDutyBody(p, webhookSecret)
+		b, err := BuildPagerDutyBody(p, authToken)
 		return b, true, err
 	}
 	return nil, false, nil

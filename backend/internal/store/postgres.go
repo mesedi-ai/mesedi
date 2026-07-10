@@ -1048,14 +1048,18 @@ func (s *PostgresStore) CreateProjectWebhook(ctx context.Context, wh *ProjectWeb
 		windowSeconds = sql.NullInt64{Int64: int64(wh.RecurrenceWindowSeconds), Valid: true}
 	}
 
+	var authTokenNS sql.NullString
+	if wh.AuthToken != "" {
+		authTokenNS = sql.NullString{String: wh.AuthToken, Valid: true}
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO project_webhooks (
-			webhook_id, project_id, name, url, secret,
+			webhook_id, project_id, name, url, secret, auth_token,
 			enabled_classes, enabled, created_at, severity_filter,
 			recurrence_mode, recurrence_window_seconds
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`,
-		wh.WebhookID, wh.ProjectID, wh.Name, wh.URL, wh.Secret,
+		wh.WebhookID, wh.ProjectID, wh.Name, wh.URL, wh.Secret, authTokenNS,
 		classesJSON, wh.Enabled, wh.CreatedAt.UTC(),
 		wh.SeverityFilter,
 		recurrenceMode, windowSeconds,
@@ -1103,7 +1107,7 @@ func (s *PostgresStore) ListProjectWebhooksForProject(ctx context.Context, proje
 
 func (s *PostgresStore) ListEnabledProjectWebhooks(ctx context.Context, projectID string) ([]*ProjectWebhook, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT webhook_id, project_id, name, url, secret,
+		SELECT webhook_id, project_id, name, url, secret, auth_token,
 		       enabled_classes, enabled, created_at, severity_filter,
 		       recurrence_mode, recurrence_window_seconds
 		FROM project_webhooks
@@ -1119,13 +1123,17 @@ func (s *PostgresStore) ListEnabledProjectWebhooks(ctx context.Context, projectI
 	for rows.Next() {
 		var wh ProjectWebhook
 		var classesJSON sql.NullString
+		var authTokenNS sql.NullString
 		var windowSeconds sql.NullInt64
 		if err := rows.Scan(
-			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
+			&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret, &authTokenNS,
 			&classesJSON, &wh.Enabled, &wh.CreatedAt, &wh.SeverityFilter,
 			&wh.RecurrenceMode, &windowSeconds,
 		); err != nil {
 			return nil, fmt.Errorf("scan project_webhook: %w", err)
+		}
+		if authTokenNS.Valid {
+			wh.AuthToken = authTokenNS.String
 		}
 		wh.EnabledClasses = parseEnabledClasses(classesJSON)
 		if windowSeconds.Valid {
@@ -1157,15 +1165,16 @@ func (s *PostgresStore) DeleteProjectWebhook(ctx context.Context, webhookID, pro
 func (s *PostgresStore) GetProjectWebhook(ctx context.Context, webhookID, projectID string) (*ProjectWebhook, error) {
 	var wh ProjectWebhook
 	var classesJSON sql.NullString
+	var authTokenNS sql.NullString
 	var windowSeconds sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT webhook_id, project_id, name, url, secret,
+		SELECT webhook_id, project_id, name, url, secret, auth_token,
 		       enabled_classes, enabled, created_at, severity_filter,
 		       recurrence_mode, recurrence_window_seconds
 		FROM project_webhooks
 		WHERE webhook_id = $1 AND project_id = $2
 	`, webhookID, projectID).Scan(
-		&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret,
+		&wh.WebhookID, &wh.ProjectID, &wh.Name, &wh.URL, &wh.Secret, &authTokenNS,
 		&classesJSON, &wh.Enabled, &wh.CreatedAt, &wh.SeverityFilter,
 		&wh.RecurrenceMode, &windowSeconds,
 	)
@@ -1174,6 +1183,9 @@ func (s *PostgresStore) GetProjectWebhook(ctx context.Context, webhookID, projec
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get project_webhook: %w", err)
+	}
+	if authTokenNS.Valid {
+		wh.AuthToken = authTokenNS.String
 	}
 	wh.EnabledClasses = parseEnabledClasses(classesJSON)
 	if windowSeconds.Valid {
