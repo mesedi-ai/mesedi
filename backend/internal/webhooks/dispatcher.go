@@ -163,12 +163,16 @@ func Deliver(
 			}}
 	}
 
-	// Receiver-specific payload reshape. Discord (and future chat
-	// targets) need a body shape Mesedi's generic Payload doesn't
-	// match. When an adapter applies, the HMAC signature is recomputed
-	// over the adapted body so the on-wire signature header is correct
-	// for whatever leaves the dispatcher.
-	if adapted, ok, adaptErr := adaptedBody(webhook.URL, payload); ok {
+	// Receiver-specific payload reshape. Slack, Discord, and PagerDuty
+	// each require a body shape Mesedi's generic Payload doesn't
+	// match. When an adapter applies, the HMAC signature is
+	// recomputed over the adapted body so the on-wire header is
+	// correct for whatever leaves the dispatcher.
+	//
+	// PagerDuty adapter needs the webhook Secret repurposed as the
+	// PagerDuty routing_key, so we pass it through as an argument
+	// rather than have the adapter look up the whole webhook.
+	if adapted, ok, adaptErr := adaptedBody(webhook.URL, webhook.Secret, payload); ok {
 		if adaptErr != nil {
 			return DeliveryResult{
 					Status:   "failed",
@@ -185,7 +189,15 @@ func Deliver(
 		body = adapted
 	}
 
-	signature := Sign(body, []byte(webhook.Secret))
+	// HMAC signature. Skipped for receivers that use their own auth
+	// scheme in the body (currently: PagerDuty via routing_key). See
+	// AdapterSkipsHMAC for the full rationale — sending an HMAC to
+	// PagerDuty would leak the Secret field's value into their logs
+	// while doing nothing to authenticate the event on their end.
+	signature := ""
+	if !AdapterSkipsHMAC(webhook.URL) {
+		signature = Sign(body, []byte(webhook.Secret))
+	}
 
 	attempts := make([]store.WebhookDelivery, 0, MaxAttempts)
 	backoff := InitialBackoff
@@ -217,7 +229,9 @@ func Deliver(
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", UserAgent)
-		req.Header.Set(SignatureHeader, signature)
+		if signature != "" {
+			req.Header.Set(SignatureHeader, signature)
+		}
 		req.Header.Set(EventIDHeader, payload.DeliveryID)
 
 		resp, err := httpClient.Do(req)

@@ -2,15 +2,22 @@
 //
 // Mesedi's canonical Payload is a generic, versioned JSON envelope
 // designed for customer-side parsers (their own services consuming
-// the webhook). For first-party chat receivers (Discord today; Slack
-// is the obvious next adapter), that generic shape doesn't render ,
-// Discord requires a {content, embeds, file} body or it returns 400.
+// the webhook). For first-party chat / on-call receivers (Slack,
+// Discord, PagerDuty), that generic shape doesn't render — each
+// service requires its own body schema or the message either fails
+// outright (400) or shows up as an unhelpful raw-JSON blob.
 //
-// Rather than ask customers to stand up a transformer, the dispatcher
-// detects known receiver URL patterns and reshapes the body before
-// send. The HMAC signature is still computed over the body actually
-// sent, so the signing contract stays correct (Discord ignores the
-// header, but other adapters in the same shape would not).
+// The dispatcher detects known receiver URL patterns and reshapes
+// the body before send. The HMAC signature (when we sign at all —
+// PagerDuty verifies via routing_key inside the body, so we skip
+// the header there) is computed over the body actually sent, so the
+// signing contract stays correct.
+//
+// Adapter ordering: URL detection is exact-prefix, order of checks
+// is stable, and each adapter returns (body, true, err) to signal
+// "I claim this URL; use my body." When no adapter matches, the
+// dispatcher falls back to canonical Payload JSON.
+
 package webhooks
 
 import (
@@ -21,7 +28,7 @@ import (
 )
 
 // isDiscordURL returns true if the URL is a Discord webhook endpoint.
-// Discord uses two host names interchangeably; both are recognized.
+// Discord uses several host names interchangeably; all are recognized.
 //
 // Note: this matches the canonical webhook path. Discord also offers
 // a /slack-compatibility variant (URL + "/slack") that accepts Slack
@@ -35,42 +42,147 @@ func isDiscordURL(rawURL string) bool {
 		strings.HasPrefix(rawURL, "https://ptb.discord.com/api/webhooks/")
 }
 
-// discordEmbedColor returns the Discord embed accent color (decimal
-// int, Discord rejects strings here) for a failure class. Mirrors
-// the dashboard's failure-class color map so on-screen and in-Discord
-// rendering match.
-func discordEmbedColor(failureClass string) int {
+// isSlackURL returns true if the URL is a Slack incoming-webhook
+// endpoint. Slack has shipped three URL shapes over time; we match
+// the documented modern path plus two legacy variants.
+func isSlackURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "https://hooks.slack.com/services/") ||
+		strings.HasPrefix(rawURL, "https://hooks.slack.com/triggers/") ||
+		strings.HasPrefix(rawURL, "https://hooks.slack.com/workflows/")
+}
+
+// isPagerDutyURL returns true if the URL is a PagerDuty Events API
+// v2 endpoint. PagerDuty publishes exactly one URL for this API
+// (identical across every customer's integration); the customer's
+// identity is carried inside the body as `routing_key`. See
+// BuildPagerDutyBody for how the routing_key is sourced from the
+// webhook's Secret field.
+//
+// PagerDuty does NOT verify HMAC signatures on inbound events; the
+// dispatcher recognizes PagerDuty URLs and skips the X-Mesedi-
+// Signature header for them (see AdapterSkipsHMAC).
+func isPagerDutyURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "https://events.pagerduty.com/v2/enqueue") ||
+		strings.HasPrefix(rawURL, "https://events.eu.pagerduty.com/v2/enqueue")
+}
+
+// AdapterSkipsHMAC reports whether the receiver at rawURL uses its
+// own authentication scheme instead of Mesedi's HMAC-SHA256
+// signature. Used by the dispatcher to skip the X-Mesedi-Signature
+// header when it would be meaningless or actively confusing.
+//
+// PagerDuty: the customer's integration key (routing_key) travels
+// in the body itself; PagerDuty authenticates the event based on
+// that value and ignores any headers we set. Sending an HMAC would
+// just leak our webhook Secret field's value to PagerDuty's logs
+// (they proxy through their infra), so we skip it.
+//
+// Slack + Discord: they don't verify signatures either, but they
+// also don't leak them back to any third party, so we keep the
+// header — it lets customers who front their own Slack app with a
+// receiver still verify the payload.
+func AdapterSkipsHMAC(rawURL string) bool {
+	return isPagerDutyURL(rawURL)
+}
+
+// severityHexColor returns the hex color (with leading #) that the
+// dashboard uses for a given severity. Used by Slack and Discord
+// adapters so on-screen and in-chat rendering match; higher severity
+// = warmer color. When severity is missing or unrecognized, falls
+// back to the failure-class color for backward compatibility with
+// pre-severity webhooks.
+func severityHexColor(severityValue, failureClass string) string {
+	switch strings.ToLower(severityValue) {
+	case "critical":
+		return "#EF4444" // red
+	case "warning":
+		return "#F59E0B" // amber
+	case "info":
+		return "#60A5FA" // blue
+	}
+	// Legacy fallback: color by failure_class if the payload doesn't
+	// carry a severity (should not happen post-#281 but guards
+	// against old test fixtures / partial rollouts).
+	return failureClassHexColor(failureClass)
+}
+
+// failureClassHexColor returns the pre-severity per-class color
+// palette. Retained as the fallback for severityHexColor and as the
+// truth for the discordEmbedColor decimal conversion below.
+//
+// Bug history: two entries previously omitted the leading '#', which
+// Slack silently rejected (falling back to grey) and Discord parsed
+// as garbage. Fixed here; adapter tests pin the shape.
+func failureClassHexColor(failureClass string) string {
 	switch failureClass {
 	case "crashes", "validator_failures", "tool_failures":
-		return 0xEF4444 // red
+		return "#EF4444" // red
 	case "time_budget", "step_count", "cost_velocity":
-		return 0xF59E0B // amber
+		return "#F59E0B" // amber
 	case "drift":
-		return 0x60A5FA // blue
+		return "#60A5FA" // blue
 	case "prompt_injection":
-		return 0xFF8C42 // mesedi orange
+		return "#FF8C42" // mesedi orange
 	default:
-		return 0x6B7280 // muted gray
+		return "#6B7280" // muted gray
+	}
+}
+
+// discordEmbedColor returns the Discord embed accent color (decimal
+// int; Discord rejects strings here) matched to failureClassHexColor.
+// Kept as a separate function because Discord's numeric API is
+// specific to that adapter — Slack expects strings.
+func discordEmbedColor(severityValue, failureClass string) int {
+	hex := severityHexColor(severityValue, failureClass)
+	// Strip leading '#' and parse as decimal int. Guaranteed safe
+	// because every code path above returns a properly-formatted
+	// 6-char hex string with the '#' prefix.
+	var n int
+	_, _ = fmt.Sscanf(strings.TrimPrefix(hex, "#"), "%x", &n)
+	return n
+}
+
+// eventHumanKind returns a short customer-facing label describing
+// what happened. The canonical Payload.Event slug (dot-notation) is
+// good for programmatic routing but too terse for a Slack/Discord
+// header. Kept as a helper so all three adapters agree on wording.
+func eventHumanKind(event string) string {
+	switch event {
+	case "failure_group.recurred":
+		return "recurred"
+	case "failure_group.created":
+		return "new failure group"
+	case "failure_group.test":
+		return "test delivery"
+	default:
+		return event
 	}
 }
 
 // BuildDiscordBody returns a JSON body shaped for Discord's webhook
-// API. One embed per delivery; failure_class drives title + color,
-// signature appears in the description, and the sample-execution /
-// playbook deep-links become embed fields with proper markdown links.
+// API. One embed per delivery. Fields:
+//   - title = "Mesedi <kind> · <failure_class>"
+//   - description = severity chip + monospace signature
+//   - color = severity-driven (falls back to class palette)
+//   - embed fields = sample execution + playbook deep-links
+//   - footer = delivery id
 //
-// Test deliveries get a "Mesedi test" prefix so the receiving channel
-// can tell setup pings apart from real alerts.
+// Test deliveries get a "Mesedi test" title prefix so the receiving
+// channel can tell setup pings apart from real alerts.
 func BuildDiscordBody(p Payload) ([]byte, error) {
-	titlePrefix := "Mesedi alert"
+	titlePrefix := "Mesedi"
 	if p.Test {
 		titlePrefix = "Mesedi test"
 	}
 
-	// `code` ticks around the signature for monospace rendering. Long
-	// signatures (lexical_drift hashes etc.) wrap naturally inside a
-	// Discord embed description so no truncation needed.
-	description := fmt.Sprintf("`%s` · `%s`", p.FailureClass, p.Signature)
+	// Description carries severity and signature. Discord renders
+	// **bold** markdown in embed descriptions and `code` for inline
+	// monospace; both are used here for scan-ability at a glance.
+	description := fmt.Sprintf("**severity: %s** · `%s` · `%s`",
+		orDefault(p.Severity, "info"),
+		p.FailureClass,
+		p.Signature,
+	)
 
 	type embedField struct {
 		Name   string `json:"name"`
@@ -79,8 +191,6 @@ func BuildDiscordBody(p Payload) ([]byte, error) {
 	}
 	var fields []embedField
 
-	// Execution deep link. DashboardURL is the React dashboard root
-	// (no path); the executions route is /app/executions/{id}.
 	if p.SampleExecutionID != "" && p.DashboardURL != "" {
 		execURL := dashboardExecutionURL(p.DashboardURL, p.SampleExecutionID)
 		fields = append(fields, embedField{
@@ -88,7 +198,6 @@ func BuildDiscordBody(p Payload) ([]byte, error) {
 			Value: fmt.Sprintf("[`%s`](%s)", p.SampleExecutionID, execURL),
 		})
 	}
-
 	if p.PlaybookURL != "" {
 		fields = append(fields, embedField{
 			Name:  "Playbook",
@@ -113,13 +222,12 @@ func BuildDiscordBody(p Payload) ([]byte, error) {
 	}
 
 	e := embed{
-		Title:       fmt.Sprintf("%s · %s", titlePrefix, p.FailureClass),
+		Title: fmt.Sprintf("%s %s · %s",
+			titlePrefix, eventHumanKind(p.Event), p.FailureClass),
 		Description: description,
-		Color:       discordEmbedColor(p.FailureClass),
+		Color:       discordEmbedColor(p.Severity, p.FailureClass),
 		Fields:      fields,
-		Footer: &embedFooter{
-			Text: fmt.Sprintf("delivery %s", p.DeliveryID),
-		},
+		Footer:      &embedFooter{Text: "delivery " + p.DeliveryID},
 	}
 	if !p.Timestamp.IsZero() {
 		e.Timestamp = p.Timestamp.UTC().Format(time.RFC3339)
@@ -131,20 +239,263 @@ func BuildDiscordBody(p Payload) ([]byte, error) {
 	})
 }
 
+// BuildSlackBody returns a JSON body shaped for Slack's incoming-
+// webhook API using Block Kit. Modern Slack blocks render with
+// consistent typography, are copy-pasteable, and support inline
+// button actions — none of which the legacy attachments API did well.
+//
+// Block layout:
+//
+//	header    "Mesedi <kind> · <failure_class>"
+//	section   fields grid: severity, signature, dashboard link, playbook link
+//	context   "delivery <id>"
+//
+// The legacy attachments API supported a colored border stripe;
+// Block Kit dropped that in favor of emoji indicators in the header.
+// Severity is surfaced textually inside the section, which is more
+// accessible for color-blind receivers anyway.
+func BuildSlackBody(p Payload) ([]byte, error) {
+	kind := eventHumanKind(p.Event)
+	headerText := fmt.Sprintf("Mesedi %s · %s", kind, p.FailureClass)
+	if p.Test {
+		headerText = fmt.Sprintf("Mesedi test %s · %s", kind, p.FailureClass)
+	}
+
+	sev := orDefault(p.Severity, "info")
+
+	// Section fields render as a 2-column grid in Slack when total
+	// count is even. Keep it 4 fields (severity, class, signature,
+	// project) for consistent layout across desktop + mobile.
+	type slackText struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	fields := []slackText{
+		{Type: "mrkdwn", Text: fmt.Sprintf("*Severity*\n%s", sev)},
+		{Type: "mrkdwn", Text: fmt.Sprintf("*Class*\n`%s`", p.FailureClass)},
+		{Type: "mrkdwn", Text: fmt.Sprintf("*Signature*\n`%s`", p.Signature)},
+	}
+	if p.SampleExecutionID != "" && p.DashboardURL != "" {
+		execURL := dashboardExecutionURL(p.DashboardURL, p.SampleExecutionID)
+		fields = append(fields, slackText{
+			Type: "mrkdwn",
+			Text: fmt.Sprintf("*Sample execution*\n<%s|%s>", execURL, p.SampleExecutionID),
+		})
+	}
+
+	type slackBlock struct {
+		Type     string       `json:"type"`
+		Text     *slackText   `json:"text,omitempty"`
+		Fields   []slackText  `json:"fields,omitempty"`
+		Elements []slackText  `json:"elements,omitempty"`
+	}
+	blocks := []slackBlock{
+		{
+			Type: "header",
+			Text: &slackText{Type: "plain_text", Text: headerText},
+		},
+		{
+			Type:   "section",
+			Fields: fields,
+		},
+	}
+	if p.PlaybookURL != "" {
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Text: &slackText{
+				Type: "mrkdwn",
+				Text: fmt.Sprintf("<%s|Open recommended remediation>", p.PlaybookURL),
+			},
+		})
+	}
+	blocks = append(blocks, slackBlock{
+		Type: "context",
+		Elements: []slackText{
+			{Type: "mrkdwn", Text: fmt.Sprintf("Mesedi · delivery `%s`", p.DeliveryID)},
+		},
+	})
+
+	type slackBody struct {
+		// text is Slack's required fallback string for notifications
+		// (mobile lockscreen + a11y). Provide the same header text so
+		// there's no truncated JSON blob in the notification preview.
+		Text   string       `json:"text"`
+		Blocks []slackBlock `json:"blocks"`
+	}
+	return json.Marshal(slackBody{
+		Text:   headerText,
+		Blocks: blocks,
+	})
+}
+
+// BuildPagerDutyBody returns a JSON body shaped for PagerDuty Events
+// API v2. This is a "trigger" event; PagerDuty deduplicates on
+// dedup_key so recurrences update the same incident rather than
+// creating new ones. The dedup_key is (project_id + group_id) —
+// stable for the lifetime of the failure group, unique across
+// projects, and long enough to satisfy PagerDuty's requirements.
+//
+// The routing_key is sourced from the webhook's Secret field. The
+// dispatcher passes it in via the pagerDutyRoutingKey parameter; the
+// Secret column is the natural home for this because it's already
+// nullable, per-webhook, and never appears in outbound logs.
+//
+// Severity mapping mirrors PagerDuty's own convention:
+//
+//	mesedi "critical" -> pd "critical"  (page)
+//	mesedi "warning"  -> pd "warning"   (ticket)
+//	mesedi "info"     -> pd "info"      (log-only)
+//
+// Test deliveries force severity to "info" so setup pings don't
+// wake the on-call engineer.
+func BuildPagerDutyBody(p Payload, routingKey string) ([]byte, error) {
+	sev := orDefault(p.Severity, "info")
+	if p.Test {
+		sev = "info"
+	}
+	// PagerDuty accepts "critical" | "error" | "warning" | "info".
+	// Map defensively so an unrecognized value doesn't 400 the event.
+	pdSeverity := sev
+	switch strings.ToLower(sev) {
+	case "critical", "error", "warning", "info":
+		// pass-through (already valid)
+	default:
+		pdSeverity = "info"
+	}
+
+	summary := fmt.Sprintf("Mesedi %s: %s (%s)",
+		eventHumanKind(p.Event), p.FailureClass, p.Signature)
+	if p.Test {
+		summary = "Mesedi test: " + summary
+	}
+
+	// Real events: dedup by (project, group) so recurrences update
+	// the same PagerDuty incident. Test events: always use the
+	// delivery_id — a test must never share dedup with a real
+	// incident, even if the payload happens to carry a group_id, or
+	// the "Test Webhook" button on the dashboard could quietly merge
+	// into an active on-call incident.
+	var dedupKey string
+	switch {
+	case p.Test:
+		dedupKey = p.ProjectID + ":test:" + p.DeliveryID
+	case p.GroupID != "":
+		dedupKey = p.ProjectID + ":" + p.GroupID
+	default:
+		dedupKey = p.ProjectID + ":test:" + p.DeliveryID
+	}
+
+	// custom_details is a free-form object PagerDuty renders on the
+	// incident detail page. Everything we'd want a responder to see
+	// goes here.
+	details := map[string]any{
+		"failure_class":       p.FailureClass,
+		"signature":           p.Signature,
+		"severity":            sev,
+		"event":               p.Event,
+		"project_id":          p.ProjectID,
+		"group_id":            p.GroupID,
+		"sample_execution_id": p.SampleExecutionID,
+		"dashboard_url":       p.DashboardURL,
+		"playbook_url":        p.PlaybookURL,
+		"delivery_id":         p.DeliveryID,
+	}
+
+	// Links appear as clickable buttons on the incident page. Only
+	// include the ones we actually have URLs for; PagerDuty rejects
+	// empty href fields.
+	type pdLink struct {
+		Href string `json:"href"`
+		Text string `json:"text"`
+	}
+	var links []pdLink
+	if p.SampleExecutionID != "" && p.DashboardURL != "" {
+		links = append(links, pdLink{
+			Href: dashboardExecutionURL(p.DashboardURL, p.SampleExecutionID),
+			Text: "Sample execution",
+		})
+	}
+	if p.PlaybookURL != "" {
+		links = append(links, pdLink{
+			Href: p.PlaybookURL,
+			Text: "Playbook",
+		})
+	}
+
+	type pdPayload struct {
+		Summary       string         `json:"summary"`
+		Source        string         `json:"source"`
+		Severity      string         `json:"severity"`
+		Timestamp     string         `json:"timestamp,omitempty"`
+		Component     string         `json:"component,omitempty"`
+		Group         string         `json:"group,omitempty"`
+		Class         string         `json:"class,omitempty"`
+		CustomDetails map[string]any `json:"custom_details,omitempty"`
+	}
+	type pdEvent struct {
+		RoutingKey  string    `json:"routing_key"`
+		EventAction string    `json:"event_action"`
+		DedupKey    string    `json:"dedup_key"`
+		Client      string    `json:"client"`
+		ClientURL   string    `json:"client_url,omitempty"`
+		Payload     pdPayload `json:"payload"`
+		Links       []pdLink  `json:"links,omitempty"`
+	}
+
+	e := pdEvent{
+		RoutingKey:  routingKey,
+		EventAction: "trigger",
+		DedupKey:    dedupKey,
+		Client:      "Mesedi",
+		ClientURL:   p.DashboardURL,
+		Payload: pdPayload{
+			Summary:       summary,
+			Source:        "mesedi:" + p.ProjectID,
+			Severity:      pdSeverity,
+			Component:     p.FailureClass,
+			Group:         "agent-failures",
+			Class:         p.FailureClass,
+			CustomDetails: details,
+		},
+		Links: links,
+	}
+	if !p.Timestamp.IsZero() {
+		e.Payload.Timestamp = p.Timestamp.UTC().Format(time.RFC3339)
+	}
+
+	return json.Marshal(e)
+}
+
 // dashboardExecutionURL builds the React-dashboard execution detail
 // URL from the DashboardURL (root, no path) and an execution ID. The
 // /app/executions/{id} route lives in the dispatcher's knowledge,
-// not the receiver's, receivers consuming the raw payload get just
+// not the receiver's — receivers consuming the raw payload get just
 // the base and can build their own deep links.
 func dashboardExecutionURL(dashboardURL, executionID string) string {
 	base := strings.TrimRight(dashboardURL, "/")
 	return base + "/app/executions/" + executionID
 }
 
+// orDefault returns v if non-empty, otherwise def. Small helper so
+// the template-rendering paths above don't have to nest three-line
+// if-blocks around every optional field.
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
+
 // adaptedBody applies any receiver-specific payload reshape. Returns
-// (body, true) when an adapter matched; (nil, false) otherwise, the
-// caller should fall back to the canonical JSON marshal of Payload.
-func adaptedBody(rawURL string, p Payload) ([]byte, bool, error) {
+// (body, true) when an adapter matched; (nil, false) otherwise —
+// the caller falls back to the canonical JSON marshal of Payload.
+//
+// PagerDuty requires the routing_key sourced from the webhook Secret
+// field, so this signature takes the whole webhook, not just its URL.
+// Slack + Discord don't need the secret at adaptation time (they use
+// it, if at all, for their own header-based verification which the
+// dispatcher wires separately).
+func adaptedBody(rawURL, webhookSecret string, p Payload) ([]byte, bool, error) {
 	if isDiscordURL(rawURL) {
 		b, err := BuildDiscordBody(p)
 		return b, true, err
@@ -153,107 +504,9 @@ func adaptedBody(rawURL string, p Payload) ([]byte, bool, error) {
 		b, err := BuildSlackBody(p)
 		return b, true, err
 	}
+	if isPagerDutyURL(rawURL) {
+		b, err := BuildPagerDutyBody(p, webhookSecret)
+		return b, true, err
+	}
 	return nil, false, nil
-}
-
-// isSlackURL returns true if the URL is a Slack incoming-webhook
-// endpoint. Slack has shipped three URL shapes over time; we match
-// the documented modern path and the legacy variant.
-func isSlackURL(rawURL string) bool {
-	return strings.HasPrefix(rawURL, "https://hooks.slack.com/services/") ||
-		strings.HasPrefix(rawURL, "https://hooks.slack.com/triggers/") ||
-		strings.HasPrefix(rawURL, "https://hooks.slack.com/workflows/")
-}
-
-// slackAttachmentColor returns the Slack attachment "color" value
-// (hex with leading # NOT decimal, Slack and Discord disagree on
-// this) for a failure class. Mirrors the dashboard / Discord palette
-// so on-screen, in-Discord, and in-Slack rendering match.
-func slackAttachmentColor(failureClass string) string {
-	switch failureClass {
-	case "crashes", "validator_failures", "tool_failures":
-		return "#EF4444" // red
-	case "time_budget", "step_count", "cost_velocity":
-		return "#F59E0B" // amber
-	case "drift":
-		return "A5FA" // blue
-	case "prompt_injection":
-		return "#FF8C42" // mesedi orange
-	default:
-		return "B7280" // muted gray
-	}
-}
-
-// BuildSlackBody returns a JSON body shaped for Slack's incoming-
-// webhook API. One attachment per delivery; failure_class drives the
-// pretext (above the attachment) and the color bar; signature
-// appears in the title. The sample-execution and playbook deep-links
-// become attachment fields with Slack-flavored <URL|label> markup.
-//
-// Test deliveries get a "Mesedi test" pretext so the receiving
-// channel can tell setup pings apart from real alerts.
-func BuildSlackBody(p Payload) ([]byte, error) {
-	pretext := "*Mesedi alert*"
-	if p.Test {
-		pretext = "*Mesedi test*"
-	}
-
-	type slackField struct {
-		Title string `json:"title"`
-		Value string `json:"value"`
-		Short bool   `json:"short,omitempty"`
-	}
-	var fields []slackField
-
-	if p.SampleExecutionID != "" && p.DashboardURL != "" {
-		execURL := dashboardExecutionURL(p.DashboardURL, p.SampleExecutionID)
-		fields = append(fields, slackField{
-			Title: "Sample execution",
-			Value: fmt.Sprintf("<%s|%s>", execURL, p.SampleExecutionID),
-			Short: true,
-		})
-	}
-	if p.PlaybookURL != "" {
-		fields = append(fields, slackField{
-			Title: "Playbook",
-			Value: fmt.Sprintf("<%s|Open recommended remediation>", p.PlaybookURL),
-			Short: true,
-		})
-	}
-
-	type slackAttachment struct {
-		Color      string       `json:"color"`
-		Pretext    string       `json:"pretext"`
-		Title      string       `json:"title"`
-		Text       string       `json:"text"`
-		Fields     []slackField `json:"fields,omitempty"`
-		Footer     string       `json:"footer,omitempty"`
-		Timestamp  int64        `json:"ts,omitempty"`
-		MarkdownIn []string     `json:"mrkdwn_in,omitempty"`
-	}
-	type slackBody struct {
-		Username    string            `json:"username"`
-		Attachments []slackAttachment `json:"attachments"`
-	}
-
-	att := slackAttachment{
-		Color:   slackAttachmentColor(p.FailureClass),
-		Pretext: pretext,
-		Title:   fmt.Sprintf("%s · %s", p.FailureClass, p.Signature),
-		Text:    fmt.Sprintf("First occurrence of `%s` in project.", p.FailureClass),
-		Fields:  fields,
-		Footer:  fmt.Sprintf("Mesedi · delivery %s", p.DeliveryID),
-		// mrkdwn_in tells Slack which fields to parse for *bold* /
-		// `code` markup. Without this, the pretext stars render
-		// literally instead of as bold.
-		MarkdownIn: []string{"pretext", "text"},
-	}
-	if !p.Timestamp.IsZero() {
-		att.Timestamp = p.Timestamp.UTC().Unix()
-	}
-
-	return json.Marshal(slackBody{
-		Username:    "Mesedi",
-		Attachments: []slackAttachment{att},
-	})
 }
