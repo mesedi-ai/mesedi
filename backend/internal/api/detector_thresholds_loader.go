@@ -205,7 +205,7 @@ func LoadProjectDetectorThresholds(
 // correct field of the aggregate. The switch is explicit per
 // (detector, threshold_key) so the compiler enforces full coverage:
 // a future tunable added to the registry must also be wired here, or
-// the loader silently drops it (which we catch via the 
+// the loader silently drops it (which we catch via the
 // integration tests).
 func applyDetectorThresholdValue(
 	out *ProjectDetectorThresholds,

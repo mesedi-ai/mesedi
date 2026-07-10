@@ -1,8 +1,8 @@
 // Unit tests for the grounding_failure detector.
 //
 // Fire conditions:
-//   1. Any payload with passed=false (customer's own verdict, authoritative)
-//   2. Mean score below configured floor on higher_is_better evaluators
+//  1. Any payload with passed=false (customer's own verdict, authoritative)
+//  2. Mean score below configured floor on higher_is_better evaluators
 //
 // Two API surfaces:
 //   - DetectGroundingFailure(With Thresholds): legacy first-match-wins

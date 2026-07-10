@@ -57,7 +57,7 @@ func TestConstructStripeEvent_LiveSecretMatches(t *testing.T) {
 	}
 }
 
-// TestConstructStripeEvent_FallsBackToTestSecret covers the 
+// TestConstructStripeEvent_FallsBackToTestSecret covers the
 // fallback: a test-mode event signed with the test secret fails
 // against the live secret on the first try, then succeeds against
 // the test secret. The matched label should reflect "test" so the

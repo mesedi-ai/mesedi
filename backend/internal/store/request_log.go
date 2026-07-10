@@ -29,14 +29,14 @@ import (
 // captured because they sometimes carry secrets and we do not want
 // secrets sitting in the audit log.
 type RequestLog struct {
-	LogID       int64     `json:"log_id"`
-	ProjectID   string    `json:"project_id"`
-	APIKeyID    string    `json:"api_key_id"`
-	IPAddress   string    `json:"ip_address,omitempty"`
-	Method      string    `json:"method"`
-	Path        string    `json:"path"`
-	StatusCode  int       `json:"status_code"`
-	ReceivedAt  time.Time `json:"received_at"`
+	LogID      int64     `json:"log_id"`
+	ProjectID  string    `json:"project_id"`
+	APIKeyID   string    `json:"api_key_id"`
+	IPAddress  string    `json:"ip_address,omitempty"`
+	Method     string    `json:"method"`
+	Path       string    `json:"path"`
+	StatusCode int       `json:"status_code"`
+	ReceivedAt time.Time `json:"received_at"`
 }
 
 // RequestLogFilter parameterizes ListRequestLog for the admin
@@ -106,6 +106,11 @@ func (s *SQLiteStore) ListRequestLog(
 		args = append(args, filter.T2.UTC())
 	}
 	args = append(args, filter.Limit)
+	// G202: clauses are built above from allowlisted literal strings
+	// ("project_id = ?", "api_key_id = ?", etc.). All user-supplied
+	// values flow through args... as parameterized placeholders, never
+	// into the concatenated SQL fragment.
+	//nolint:gosec // G202: false positive — see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT log_id, project_id, api_key_id, ip_address,
 		       method, path, status_code, received_at
@@ -214,6 +219,11 @@ func (s *PostgresStore) ListRequestLog(
 	}
 	args = append(args, filter.Limit)
 	limitPlaceholder := fmt.Sprintf("$%d", len(args))
+	// G202: clauses are built above from allowlisted fragments built
+	// via fmt.Sprintf format strings under this function's control.
+	// All user-supplied values flow through args... as parameterized
+	// placeholders, never into the concatenated SQL fragment.
+	//nolint:gosec // G202: false positive — see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT log_id, project_id, api_key_id, ip_address,
 		       method, path, status_code, received_at

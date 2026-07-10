@@ -143,11 +143,11 @@ func TestSupportedModels_CoversAllProviders(t *testing.T) {
 	// zero entries this test fails noisily so the maintainer sees
 	// what disappeared.
 	wantPrefixes := []string{
-		"claude-",    // Anthropic
-		"gpt-",       // OpenAI
-		"gemini-",    // Google
-		"llama-",     // Meta
-		"mistral-",   // Mistral (also matches mistral-large/medium/small/nemo)
+		"claude-",  // Anthropic
+		"gpt-",     // OpenAI
+		"gemini-",  // Google
+		"llama-",   // Meta
+		"mistral-", // Mistral (also matches mistral-large/medium/small/nemo)
 	}
 	models := SupportedModels()
 	for _, prefix := range wantPrefixes {

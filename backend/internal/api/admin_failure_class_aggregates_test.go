@@ -25,14 +25,14 @@ func Test_validPeriod_RejectsBad(t *testing.T) {
 	bad := []string{
 		"",
 		"2026",
-		"2026-13",      // month out of range
-		"2026-00",      // month out of range
-		"2026/06",      // wrong delimiter
-		"26-06",        // 2-digit year
-		"2026-6",       // 1-digit month
-		"abcd-ef",      // non-numeric
-		"2026-06-15",   // too many parts
-		" 2026-06 ",    // leading/trailing space
+		"2026-13",    // month out of range
+		"2026-00",    // month out of range
+		"2026/06",    // wrong delimiter
+		"26-06",      // 2-digit year
+		"2026-6",     // 1-digit month
+		"abcd-ef",    // non-numeric
+		"2026-06-15", // too many parts
+		" 2026-06 ",  // leading/trailing space
 	}
 	for _, p := range bad {
 		if validPeriod(p) {

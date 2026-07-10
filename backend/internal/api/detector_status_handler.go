@@ -36,16 +36,16 @@ import (
 // Generic-shaped so future detectors can add fields without
 // breaking the existing keys.
 type DetectorStatusResponse struct {
-	ProjectID       string                       `json:"project_id"`
-	SemanticLoop    SemanticLoopStatus           `json:"semantic_loop"`
-	ToolSchemaDrift ToolSchemaDriftStatus        `json:"tool_schema_drift"`
+	ProjectID       string                `json:"project_id"`
+	SemanticLoop    SemanticLoopStatus    `json:"semantic_loop"`
+	ToolSchemaDrift ToolSchemaDriftStatus `json:"tool_schema_drift"`
 	// — skip-reason chips for the 3 N/A detectors when
 	// project is Ollama-only. SkipReason is empty when the detector
 	// is firing normally; populated with a customer-facing string
 	// when the detector is architecturally inapplicable.
-	ProviderIncident         DetectorSkipStatus `json:"provider_incident"`
-	InfrastructureThrottled  DetectorSkipStatus `json:"infrastructure_throttled"`
-	CostVelocity             DetectorSkipStatus `json:"cost_velocity"`
+	ProviderIncident        DetectorSkipStatus `json:"provider_incident"`
+	InfrastructureThrottled DetectorSkipStatus `json:"infrastructure_throttled"`
+	CostVelocity            DetectorSkipStatus `json:"cost_velocity"`
 	// Error is populated when the underlying store reads failed but
 	// the response was still rendered so the dashboard can show a
 	// non-crashing fallback. Empty when all data loaded cleanly.
@@ -64,9 +64,9 @@ type DetectorSkipStatus struct {
 // emitted a checkpoint event + the most-recent one. The empty state
 // fires when has_checkpoint_data is false.
 type SemanticLoopStatus struct {
-	HasCheckpointData  bool       `json:"has_checkpoint_data"`
-	LastCheckpointAt   *time.Time `json:"last_checkpoint_at,omitempty"`
-	CheckpointCount    int        `json:"checkpoint_count"`
+	HasCheckpointData bool       `json:"has_checkpoint_data"`
+	LastCheckpointAt  *time.Time `json:"last_checkpoint_at,omitempty"`
+	CheckpointCount   int        `json:"checkpoint_count"`
 }
 
 // ToolSchemaDriftStatus carries the per-tool priming progress for

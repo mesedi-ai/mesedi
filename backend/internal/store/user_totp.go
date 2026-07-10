@@ -18,20 +18,20 @@ import (
 // applied at the API layer, NOT the store layer. The store sees
 // opaque bytes.
 type UserTOTP struct {
-	UserID           string
-	SecretEncrypted  []byte
-	CreatedAt        time.Time
-	LastUsedAt       time.Time // zero if never used
+	UserID          string
+	SecretEncrypted []byte
+	CreatedAt       time.Time
+	LastUsedAt      time.Time // zero if never used
 }
 
 // BackupCode is one row of the user_backup_codes table. CodeHash is
 // the SHA-256 hex of the raw backup code; raw codes are shown to the
 // customer exactly once at enrollment / regenerate.
 type BackupCode struct {
-	CodeHash   string
-	UserID     string
-	CreatedAt  time.Time
-	UsedAt     time.Time // zero if unused
+	CodeHash  string
+	UserID    string
+	CreatedAt time.Time
+	UsedAt    time.Time // zero if unused
 }
 
 // Pending2FAToken is one row of the pending_2fa_tokens table.
@@ -39,11 +39,11 @@ type BackupCode struct {
 // HandleTwoFactorVerify. TokenHash is the SHA-256 hex of the raw
 // token (which is returned exactly once in the signin response).
 type Pending2FAToken struct {
-	TokenHash  string
-	UserID     string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	UsedAt     time.Time // zero if unused
+	TokenHash string
+	UserID    string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    time.Time // zero if unused
 }
 
 // ─────────────────────────────────────────────────────────────────────

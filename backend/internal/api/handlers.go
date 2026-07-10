@@ -1626,7 +1626,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					authProjectID, "pricing",
 					"pricing_unknown_model", "execution", executionID,
 					map[string]any{
-						"models":         unknownModels,
+						"models":                unknownModels,
 						"pricing_table_version": pricing.PricingTableVersion,
 					},
 				)
@@ -1796,9 +1796,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					authProjectID, "config_fallback",
 					"config_fallback", "project_config", "cost_velocity_rate_config",
 					map[string]any{
-						"error":                 rcErr.Error(),
-						"fallback_threshold":    rateCfg.ThresholdUSDPerMin,
-						"fallback_window_mins":  rateCfg.WindowMinutes,
+						"error":                rcErr.Error(),
+						"fallback_threshold":   rateCfg.ThresholdUSDPerMin,
+						"fallback_window_mins": rateCfg.WindowMinutes,
 					},
 				)
 			}
@@ -3240,7 +3240,8 @@ func (h *Handlers) HandleListExecutionsInFailureGroup(w http.ResponseWriter, r *
 // separately rather than silently dropping it. Rows are ordered by
 // total cost descending.
 //
-//  bridges the gap between project-scoped cost_velocity
+//	bridges the gap between project-scoped cost_velocity
+//
 // alerts ("something is expensive") and the SaaS host's customer
 // granularity ("Customer X drove $Y of that spend"). The host
 // application sets tenant_id on POST /executions; this endpoint reads
@@ -4545,7 +4546,7 @@ func (h *Handlers) HandleGetConfigFallbackStats(w http.ResponseWriter, r *http.R
 
 // HandleListClassSeverities returns the full map of failure classes
 // to their currently-effective severity for the authenticated project
-//. The map includes EVERY known failure class with its current
+// . The map includes EVERY known failure class with its current
 // value, sourced from:
 //
 //  1. project_class_severities row, if one exists for that class
@@ -4772,10 +4773,10 @@ func computeExecutionCost(
 			continue
 		}
 		var p struct {
-			Model             string  `json:"model"`
-			InputTokens       int     `json:"input_tokens"`
-			OutputTokens      int     `json:"output_tokens"`
-			EstimatedCostUSD  float64 `json:"estimated_cost_usd"`
+			Model            string  `json:"model"`
+			InputTokens      int     `json:"input_tokens"`
+			OutputTokens     int     `json:"output_tokens"`
+			EstimatedCostUSD float64 `json:"estimated_cost_usd"`
 		}
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			continue
@@ -5057,26 +5058,26 @@ func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 // routing), so the only consumer of this list now is API-direct
 // users posting to /webhooks via curl or SDK.
 var validFailureClasses = map[string]struct{}{
-	store.FailureClassCrashes:             {},
-	store.FailureClassLoops:               {},
-	store.FailureClassToolFailures:        {},
-	store.FailureClassValidator:           {},
-	store.FailureClassDrift:               {},
-	store.FailureClassCostVelocity:        {},
-	store.FailureClassInjection:           {},
-	store.FailureClassInfraThrottled:      {},
-	store.FailureClassDataLeakage:         {},
-	store.FailureClassSemanticLoop:        {},
-	store.FailureClassToolSchemaDrift:     {},
-	store.FailureClassContextOverflow:     {},
-	store.FailureClassTokenWaste:          {},
-	store.FailureClassSandboxEscape:       {},
-	store.FailureClassGroundingFailure:    {},
-	store.FailureClassCascadingFailure:    {},
+	store.FailureClassCrashes:              {},
+	store.FailureClassLoops:                {},
+	store.FailureClassToolFailures:         {},
+	store.FailureClassValidator:            {},
+	store.FailureClassDrift:                {},
+	store.FailureClassCostVelocity:         {},
+	store.FailureClassInjection:            {},
+	store.FailureClassInfraThrottled:       {},
+	store.FailureClassDataLeakage:          {},
+	store.FailureClassSemanticLoop:         {},
+	store.FailureClassToolSchemaDrift:      {},
+	store.FailureClassContextOverflow:      {},
+	store.FailureClassTokenWaste:           {},
+	store.FailureClassSandboxEscape:        {},
+	store.FailureClassGroundingFailure:     {},
+	store.FailureClassCascadingFailure:     {},
 	store.FailureClassCoordinationDeadlock: {},
-	store.FailureClassProviderIncident:    {},
-	store.FailureClassHITLTimeout:         {},
-	store.FailureClassHITLRejectionSpike:  {},
+	store.FailureClassProviderIncident:     {},
+	store.FailureClassHITLTimeout:          {},
+	store.FailureClassHITLRejectionSpike:   {},
 }
 
 // HandleListWebhooks returns the calling project's webhooks. The

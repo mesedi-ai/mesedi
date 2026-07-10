@@ -54,9 +54,9 @@ func Test_DetectHITLTimeout_ExplicitTimeout(t *testing.T) {
 func Test_DetectHITLTimeout_SLAExceeded(t *testing.T) {
 	payloads := []json.RawMessage{
 		raw(map[string]any{
-			"response_kind":     "approved",
-			"sla_seconds":       1,
-			"wait_duration_ms":  2000, // 2s > 1s SLA
+			"response_kind":    "approved",
+			"sla_seconds":      1,
+			"wait_duration_ms": 2000, // 2s > 1s SLA
 		}),
 	}
 	sig, detected := DetectHITLTimeout(payloads)
@@ -72,9 +72,9 @@ func Test_DetectHITLTimeout_ExplicitWinsOverSLA(t *testing.T) {
 	// Explicit timeout must beat SLA exceeded even when both present.
 	payloads := []json.RawMessage{
 		raw(map[string]any{
-			"response_kind":     "approved",
-			"sla_seconds":       1,
-			"wait_duration_ms":  5000, // SLA exceeded
+			"response_kind":    "approved",
+			"sla_seconds":      1,
+			"wait_duration_ms": 5000, // SLA exceeded
 		}),
 		raw(map[string]any{"response_kind": "timeout"}),
 	}
@@ -91,8 +91,8 @@ func Test_DetectHITLTimeout_NoSLAdeclared_NoFire(t *testing.T) {
 	// Without sla_seconds we cannot detect a breach — must not fire.
 	payloads := []json.RawMessage{
 		raw(map[string]any{
-			"response_kind":     "approved",
-			"wait_duration_ms":  60_000_000, // 60s — would breach any reasonable SLA
+			"response_kind":    "approved",
+			"wait_duration_ms": 60_000_000, // 60s — would breach any reasonable SLA
 		}),
 	}
 	sig, detected := DetectHITLTimeout(payloads)
@@ -105,9 +105,9 @@ func Test_DetectHITLTimeout_ZeroSLA_NoFire(t *testing.T) {
 	// sla_seconds == 0 means "no SLA" and should not fire.
 	payloads := []json.RawMessage{
 		raw(map[string]any{
-			"response_kind":     "approved",
-			"sla_seconds":       0,
-			"wait_duration_ms":  5000,
+			"response_kind":    "approved",
+			"sla_seconds":      0,
+			"wait_duration_ms": 5000,
 		}),
 	}
 	if _, detected := DetectHITLTimeout(payloads); detected {
@@ -140,9 +140,9 @@ func Test_DetectHITLTimeoutAllMatches_BothFire(t *testing.T) {
 	payloads := []json.RawMessage{
 		raw(map[string]any{"response_kind": "timeout"}),
 		raw(map[string]any{
-			"response_kind":     "approved",
-			"sla_seconds":       1,
-			"wait_duration_ms":  3000,
+			"response_kind":    "approved",
+			"sla_seconds":      1,
+			"wait_duration_ms": 3000,
 		}),
 	}
 	sigs := DetectHITLTimeoutAllMatches(payloads)
@@ -157,9 +157,9 @@ func Test_DetectHITLTimeoutAllMatches_OrderingExplicitFirst(t *testing.T) {
 	// ordering of the result must put explicit before sla_exceeded.
 	payloads := []json.RawMessage{
 		raw(map[string]any{
-			"response_kind":     "approved",
-			"sla_seconds":       1,
-			"wait_duration_ms":  3000,
+			"response_kind":    "approved",
+			"sla_seconds":      1,
+			"wait_duration_ms": 3000,
 		}),
 		raw(map[string]any{"response_kind": "timeout"}),
 	}
@@ -205,9 +205,9 @@ func Test_DetectHITLTimeoutAllMatchesWithThresholds_RestrictsToExplicit(t *testi
 	payloads := []json.RawMessage{
 		raw(map[string]any{"response_kind": "timeout"}),
 		raw(map[string]any{
-			"response_kind":     "approved",
-			"sla_seconds":       1,
-			"wait_duration_ms":  3000,
+			"response_kind":    "approved",
+			"sla_seconds":      1,
+			"wait_duration_ms": 3000,
 		}),
 	}
 	thresh := HITLTimeoutThresholds{FireModes: []string{"explicit"}}
@@ -222,9 +222,9 @@ func Test_DetectHITLTimeoutAllMatchesWithThresholds_RestrictsToSLA(t *testing.T)
 	payloads := []json.RawMessage{
 		raw(map[string]any{"response_kind": "timeout"}),
 		raw(map[string]any{
-			"response_kind":     "approved",
-			"sla_seconds":       1,
-			"wait_duration_ms":  3000,
+			"response_kind":    "approved",
+			"sla_seconds":      1,
+			"wait_duration_ms": 3000,
 		}),
 	}
 	thresh := HITLTimeoutThresholds{FireModes: []string{"sla_exceeded"}}

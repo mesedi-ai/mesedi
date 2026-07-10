@@ -549,10 +549,10 @@ func (h *Handlers) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	// the team-management audit set. Captured after the row persists
 	// so a failed insert never produces a misleading audit entry.
 	h.recordAuditEvent(r, AuditTeamInviteCreate, "invite", inviteID, map[string]any{
-		"org_id":      orgID,
-		"email":       body.Email,
-		"role":        body.Role,
-		"expires_at":  expiresAt.Format(time.RFC3339),
+		"org_id":     orgID,
+		"email":      body.Email,
+		"role":       body.Role,
+		"expires_at": expiresAt.Format(time.RFC3339),
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -67,8 +67,8 @@ var failureTerminalStatuses = map[string]struct{}{
 //     failed later is arguably a supervision gap rather than a
 //     cascade. Default false preserves the historical behavior.
 type CascadingFailureThresholds struct {
-	CascadeWindowSeconds  int
-	ExcludeSpawnHandoffs  bool
+	CascadeWindowSeconds int
+	ExcludeSpawnHandoffs bool
 }
 
 // DefaultCascadingFailureThresholds returns the historical hardcoded

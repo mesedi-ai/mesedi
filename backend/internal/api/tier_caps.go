@@ -42,14 +42,14 @@ import "context"
 
 const (
 	// time_budget_ms tier caps (milliseconds).
-	tierCapTimeBudgetHobbyMs      = 5 * 60 * 1_000        // 300_000
-	tierCapTimeBudgetTeamMs       = 60 * 60 * 1_000       // 3_600_000
-	tierCapTimeBudgetEnterpriseMs = 24 * 60 * 60 * 1_000  // 86_400_000
+	tierCapTimeBudgetHobbyMs      = 5 * 60 * 1_000       // 300_000
+	tierCapTimeBudgetTeamMs       = 60 * 60 * 1_000      // 3_600_000
+	tierCapTimeBudgetEnterpriseMs = 24 * 60 * 60 * 1_000 // 86_400_000
 
 	// tool_return_value_max_bytes tier caps.
-	tierCapToolReturnValueHobbyBytes      = 4 * 1024     // 4 KB
-	tierCapToolReturnValueTeamBytes       = 32 * 1024    // 32 KB
-	tierCapToolReturnValueEnterpriseBytes = 1024 * 1024  // 1 MB
+	tierCapToolReturnValueHobbyBytes      = 4 * 1024    // 4 KB
+	tierCapToolReturnValueTeamBytes       = 32 * 1024   // 32 KB
+	tierCapToolReturnValueEnterpriseBytes = 1024 * 1024 // 1 MB
 
 	// ─── detector-threshold tier caps ───────────────────
 	//
@@ -68,9 +68,9 @@ const (
 	// would burn through a Hobby customer's per-execution budget.
 
 	// token_waste prefix_window_chars tier caps (characters).
-	tierCapTokenWastePrefixWindowHobby      = 4096   // 4 KB
-	tierCapTokenWastePrefixWindowTeam       = 16384  // 16 KB
-	tierCapTokenWastePrefixWindowEnterprise = 65536  // 64 KB
+	tierCapTokenWastePrefixWindowHobby      = 4096  // 4 KB
+	tierCapTokenWastePrefixWindowTeam       = 16384 // 16 KB
+	tierCapTokenWastePrefixWindowEnterprise = 65536 // 64 KB
 )
 
 // TierCapTimeBudgetMs returns the maximum time_budget_ms a customer

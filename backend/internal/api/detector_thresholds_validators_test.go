@@ -276,7 +276,7 @@ func Test_DetectorThresholds_DefaultsMatchExistingHardcoded(t *testing.T) {
 }
 
 func Test_DetectorThresholds_TierCapOrderingPreserved(t *testing.T) {
-	// Hobby <= Team <= Enterprise for the one tier-capped 
+	// Hobby <= Team <= Enterprise for the one tier-capped
 	// threshold. Drift guard against accidental cap inversion.
 	hobby := tierCapTokenWastePrefixWindow(TierHobby)
 	team := tierCapTokenWastePrefixWindow(TierTeam)

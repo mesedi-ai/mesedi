@@ -149,7 +149,7 @@ func (s *PostgresStore) DetachHobbyCardForBillingFailure(
 }
 
 // MarkCardDetached is the customer-initiated detach store method
-//. See store.go for the contract.
+// . See store.go for the contract.
 func (s *PostgresStore) MarkCardDetached(
 	ctx context.Context, projectID string,
 ) error {

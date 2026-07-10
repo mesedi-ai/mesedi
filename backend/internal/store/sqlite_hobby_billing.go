@@ -160,7 +160,7 @@ func (s *SQLiteStore) DetachHobbyCardForBillingFailure(
 }
 
 // MarkCardDetached is the customer-initiated detach store method
-//. See store.go for the contract.
+// . See store.go for the contract.
 func (s *SQLiteStore) MarkCardDetached(
 	ctx context.Context, projectID string,
 ) error {

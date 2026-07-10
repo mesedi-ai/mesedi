@@ -169,10 +169,10 @@ func TestStripeScopes(t *testing.T) {
 
 	t.Run("CheckoutSessionSubscription", func(t *testing.T) {
 		params := &stripe.CheckoutSessionParams{
-			Customer:           stripe.String(cust.ID),
-			Mode:               stripe.String(string(stripe.CheckoutSessionModeSubscription)),
-			SuccessURL:         stripe.String("https://app.mesedi.ai/app/billing?success=1"),
-			CancelURL:          stripe.String("https://app.mesedi.ai/app/billing?cancelled=1"),
+			Customer:   stripe.String(cust.ID),
+			Mode:       stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+			SuccessURL: stripe.String("https://app.mesedi.ai/app/billing?success=1"),
+			CancelURL:  stripe.String("https://app.mesedi.ai/app/billing?cancelled=1"),
 			LineItems: []*stripe.CheckoutSessionLineItemParams{
 				{
 					Price:    stripe.String(teamPriceID),

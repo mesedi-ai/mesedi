@@ -1,6 +1,6 @@
 package store
 
-// Config-fallback telemetry queries. Since 
+// Config-fallback telemetry queries. Since
 // (migration 050) these rows live in the dedicated system_events
 // table instead of audit_events — they're operational telemetry,
 // not customer-initiated admin actions.

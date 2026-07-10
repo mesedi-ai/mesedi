@@ -47,3 +47,11 @@ fly.staging.toml
 fly.dev.toml
 fly.*.toml
 !fly.toml
+
+# Stress-test config swap backups. The harness workflow copies the
+# tracked prod config aside as `stress-test.config.sh.prod-bak` before
+# dropping the staging override in, then restores it. If the workflow
+# is interrupted the backup lingers — this rule keeps it from ever
+# being staged accidentally.
+*.prod-bak
+*.staging-bak

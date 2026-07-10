@@ -13,8 +13,8 @@ func TestTierCapTimeBudgetMs(t *testing.T) {
 		want int
 	}{
 		// Documented caps.
-		{TierHobby, 300_000},       // 5 minutes
-		{TierTeam, 3_600_000},      // 1 hour
+		{TierHobby, 300_000},         // 5 minutes
+		{TierTeam, 3_600_000},        // 1 hour
 		{TierEnterprise, 86_400_000}, // 24 hours
 		// Legacy alias from pre-migration-019 days; normalizeTier
 		// folds it to Team.
@@ -39,11 +39,11 @@ func TestTierCapToolReturnValueBytes(t *testing.T) {
 		tier string
 		want int
 	}{
-		{TierHobby, 4 * 1024},          // 4 KB
-		{TierTeam, 32 * 1024},          // 32 KB
-		{TierEnterprise, 1024 * 1024},  // 1 MB
-		{TierProLegacy, 32 * 1024},     // legacy alias -> Team
-		{"", 4 * 1024},                 // unknown -> Hobby
+		{TierHobby, 4 * 1024},         // 4 KB
+		{TierTeam, 32 * 1024},         // 32 KB
+		{TierEnterprise, 1024 * 1024}, // 1 MB
+		{TierProLegacy, 32 * 1024},    // legacy alias -> Team
+		{"", 4 * 1024},                // unknown -> Hobby
 		{"random", 4 * 1024},
 	}
 	for _, tc := range cases {

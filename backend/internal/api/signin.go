@@ -307,7 +307,7 @@ func (h *Handlers) HandleSignin(w http.ResponseWriter, r *http.Request) {
 			NeedsTOTP:             true,
 			PendingToken:          rawPending,
 			PendingTokenExpiresAt: pendingRow.ExpiresAt.UTC().Format(time.RFC3339Nano),
-			Warning: "Two-factor authentication is enabled. Enter your 6-digit code to finish signing in.",
+			Warning:               "Two-factor authentication is enabled. Enter your 6-digit code to finish signing in.",
 		})
 		return
 	} else if !errors.Is(totpErr, store.ErrNotFound) {

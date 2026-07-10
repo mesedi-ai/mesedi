@@ -19,7 +19,7 @@ import (
 // Billing fields (Tier, StripeCustomerID, StripeSubscriptionID,
 // CurrentPeriodStart, CurrentPeriodEnd, ExecutionsThisPeriod) were
 // added in migration 006 as part of the Stripe integration slice
-//. For existing projects created before that migration ran,
+// . For existing projects created before that migration ran,
 // Tier defaults to "hobby" and the Stripe identifiers are empty
 // until a Checkout completes.
 type Project struct {
@@ -272,10 +272,10 @@ const (
 // filtered out of customer-facing listings (see
 // IsAPIKeySourceSessionGrade) and out of admin listings by default.
 const (
-	APIKeySourceManual     = "manual"
-	APIKeySourceSignup     = "signup"
-	APIKeySourceSSOLogin   = "sso_login"
-	APIKeySourceMagicLink  = "magic_link"
+	APIKeySourceManual    = "manual"
+	APIKeySourceSignup    = "signup"
+	APIKeySourceSSOLogin  = "sso_login"
+	APIKeySourceMagicLink = "magic_link"
 )
 
 // IsAPIKeySourceSessionGrade reports whether the given source value
@@ -387,9 +387,9 @@ const (
 // cheap (one timestamp) and bounded by the lifetime of the parent
 // webhook's group population.
 type WebhookRecurrenceState struct {
-	WebhookID    string    `json:"webhook_id"`
-	GroupID      string    `json:"group_id"`
-	LastFiredAt  time.Time `json:"last_fired_at"`
+	WebhookID   string    `json:"webhook_id"`
+	GroupID     string    `json:"group_id"`
+	LastFiredAt time.Time `json:"last_fired_at"`
 }
 
 // ProjectClassSeverity is the per-project override of the hardcoded
@@ -405,7 +405,7 @@ type ProjectClassSeverity struct {
 }
 
 // ProjectRetention is one row returned by ListProjectsForRetention
-//. Carries just the project_id + retention_days the
+// . Carries just the project_id + retention_days the
 // scheduler needs to compute the delete cutoff. Skips rows where
 // retention_days IS NULL (indefinite retention).
 type ProjectRetention struct {
@@ -640,10 +640,10 @@ type FailureGroup struct {
 	// them on the group header entirely (Tier 3 — HITL / tool /
 	// coordination classes where tokens are non-diagnostic). See
 	// mesedi-web/dashboard/lib/failureClass.ts for the policy.
-	TotalTokensIn      *int64    `json:"total_tokens_in,omitempty"`
-	TotalTokensOut     *int64    `json:"total_tokens_out,omitempty"`
-	TotalTokens        *int64    `json:"total_tokens,omitempty"`
-	SampleExecutionID  string    `json:"sample_execution_id,omitempty"`
+	TotalTokensIn     *int64 `json:"total_tokens_in,omitempty"`
+	TotalTokensOut    *int64 `json:"total_tokens_out,omitempty"`
+	TotalTokens       *int64 `json:"total_tokens,omitempty"`
+	SampleExecutionID string `json:"sample_execution_id,omitempty"`
 	// AnalysisMarkdown is the LLM-generated root-cause analysis
 	// (). Nil when no analysis has been generated for
 	// this group yet. Rendered as Markdown on the dashboard.

@@ -660,8 +660,8 @@ func Test_HandleSetRetention_FiresAuditEvent(t *testing.T) {
 	// tier's 90-day cap. Without a valid tier the handler returns 403
 	// before reaching the audit-write step.
 	const (
-		projectID    = "proj-capture-retention"
-		actor        = "retention-actor@example.com"
+		projectID     = "proj-capture-retention"
+		actor         = "retention-actor@example.com"
 		requestedDays = 30
 	)
 	s := &auditCaptureStubStore{
@@ -742,9 +742,9 @@ func teamCaptureSetup(t *testing.T, projectID, actor, orgID string) *auditCaptur
 
 func Test_HandleCreateInvite_FiresAuditEvent(t *testing.T) {
 	const (
-		projectID  = "proj-capture-invite-create"
-		actor      = "admin@example.com"
-		orgID      = "org-team-cap-1"
+		projectID   = "proj-capture-invite-create"
+		actor       = "admin@example.com"
+		orgID       = "org-team-cap-1"
 		inviteEmail = "alice@example.com"
 		inviteRole  = "write"
 	)

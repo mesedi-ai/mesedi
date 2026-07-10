@@ -57,10 +57,10 @@ const PricingTableVersion = "2026-06-25"
 // the over-tier fields are ignored — the existing flat-rate semantics
 // are unchanged.
 type modelPrice struct {
-	InputPer1M              float64
-	OutputPer1M             float64
-	InputPer1MOverTier      float64
-	OutputPer1MOverTier     float64
+	InputPer1M                float64
+	OutputPer1M               float64
+	InputPer1MOverTier        float64
+	OutputPer1MOverTier       float64
 	TierBreakpointInputTokens int
 }
 
@@ -110,7 +110,7 @@ var priceTable = map[string]modelPrice{
 	// Gemini Pro families use long-context tier pricing: when a single
 	// call's input_tokens exceeds 200,000, BOTH input and output get
 	// billed at the higher rate. Flash families are flat-rate per
-	// Google's current docs (no tier breakpoint). See 
+	// Google's current docs (no tier breakpoint). See
 	// closeout for the per-rate breakdown and source links.
 	"gemini-2.5-pro": {
 		InputPer1M:                1.25,
@@ -126,9 +126,9 @@ var priceTable = map[string]modelPrice{
 		OutputPer1MOverTier:       18.00,
 		TierBreakpointInputTokens: 200_000,
 	},
-	"gemini-3.5-flash":       {InputPer1M: 1.50, OutputPer1M: 9.00},
-	"gemini-3.1-flash-lite":  {InputPer1M: 0.25, OutputPer1M: 1.50},
-	"gemini-2.5-flash":       {InputPer1M: 0.30, OutputPer1M: 2.50},
+	"gemini-3.5-flash":      {InputPer1M: 1.50, OutputPer1M: 9.00},
+	"gemini-3.1-flash-lite": {InputPer1M: 0.25, OutputPer1M: 1.50},
+	"gemini-2.5-flash":      {InputPer1M: 0.30, OutputPer1M: 2.50},
 	// gemini-2.0-pro and gemini-1.5-pro retain the legacy flat-rate
 	// shipped before (Google's current pricing page no longer
 	// documents them; preserving customer-visible cost continuity
@@ -185,18 +185,18 @@ var priceTable = map[string]modelPrice{
 	// Coverage: the dominant Ollama model families as of 2026-06.
 	// Update when ollama.com/library ships a new family that gets
 	// material adoption.
-	"llama3":          {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"llama4":          {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"qwen2":           {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"qwen3":           {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"deepseek-r1":     {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"deepseek-v3":     {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"deepseek-coder":  {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"gemma2":          {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"gemma3":          {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"phi3":            {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"phi4":            {InputPer1M: 0.00, OutputPer1M: 0.00},
-	"codellama":       {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"llama3":         {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"llama4":         {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"qwen2":          {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"qwen3":          {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"deepseek-r1":    {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"deepseek-v3":    {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"deepseek-coder": {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"gemma2":         {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"gemma3":         {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"phi3":           {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"phi4":           {InputPer1M: 0.00, OutputPer1M: 0.00},
+	"codellama":      {InputPer1M: 0.00, OutputPer1M: 0.00},
 }
 
 // ComputeLLMCost returns the estimated USD cost of a single LLM call
@@ -212,6 +212,7 @@ var priceTable = map[string]modelPrice{
 //	cost := ComputeLLMCost("claude-opus-4-6", 1200, 800)
 //	// = 1200/1_000_000 * 15.00 + 800/1_000_000 * 75.00
 //	// = 0.018 + 0.060 = $0.078
+//
 // ModelPriceOverride is the per-tenant override shape carried by the
 // per-project custom_model_pricing knob. Both rates
 // are USD per 1M tokens — same units as the canonical priceTable so

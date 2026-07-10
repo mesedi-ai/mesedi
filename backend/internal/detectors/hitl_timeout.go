@@ -68,8 +68,8 @@ func (t HITLTimeoutThresholds) EffectiveFireModes() []string {
 		return DefaultHITLTimeoutThresholds().FireModes
 	}
 	allowed := map[string]struct{}{
-		"explicit":      {},
-		"sla_exceeded":  {},
+		"explicit":     {},
+		"sla_exceeded": {},
 	}
 	for _, m := range t.FireModes {
 		if _, ok := allowed[m]; !ok {

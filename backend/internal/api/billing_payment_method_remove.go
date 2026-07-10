@@ -230,9 +230,9 @@ func (h *Handlers) HandleRemovePaymentMethod(w http.ResponseWriter, r *http.Requ
 			"project_id", p.ProjectID, "tier", tier)
 		// audit log: removal with no settlement charge.
 		h.recordAuditEvent(r, AuditBillingPaymentMethodRm, "payment_method", p.StripeCustomerID, map[string]any{
-			"tier":         tier,
-			"charged_usd":  0,
-			"settlement":   "no_pending_charges",
+			"tier":        tier,
+			"charged_usd": 0,
+			"settlement":  "no_pending_charges",
 		})
 		writeJSON(w, http.StatusOK, PaymentMethodRemoveResponse{
 			OK:                     true,

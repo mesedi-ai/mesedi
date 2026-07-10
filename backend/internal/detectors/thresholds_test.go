@@ -503,10 +503,10 @@ func Test_HITLTimeout_BadFireModesFallsBackToDefault(t *testing.T) {
 		json.RawMessage(`{"sla_seconds":60,"wait_duration_ms":120000,"response_kind":"approved"}`),
 	}
 	bad := []HITLTimeoutThresholds{
-		{FireModes: nil},                              // nil → default
-		{FireModes: []string{}},                       // empty → default
-		{FireModes: []string{"typo"}},                 // invalid → default
-		{FireModes: []string{"explicit", "invalid"}},  // partial-bad → default
+		{FireModes: nil},                             // nil → default
+		{FireModes: []string{}},                      // empty → default
+		{FireModes: []string{"typo"}},                // invalid → default
+		{FireModes: []string{"explicit", "invalid"}}, // partial-bad → default
 	}
 	for _, c := range bad {
 		got := DetectHITLTimeoutAllMatchesWithThresholds(payloads, c)
@@ -641,11 +641,11 @@ func Test_DataLeakage_EffectiveAllowedSeverities_AcceptsCustom(t *testing.T) {
 
 func Test_DataLeakage_EffectiveAllowedSeverities_FallsBackOnBadValues(t *testing.T) {
 	bad := []DataLeakageThresholds{
-		{AllowedSeverities: nil},                              // nil
-		{AllowedSeverities: []string{}},                       // empty
-		{AllowedSeverities: []string{"hi"}},                   // typo
-		{AllowedSeverities: []string{"low"}},                  // not defined in code
-		{AllowedSeverities: []string{"critical", "invalid"}},  // partial-bad
+		{AllowedSeverities: nil},                             // nil
+		{AllowedSeverities: []string{}},                      // empty
+		{AllowedSeverities: []string{"hi"}},                  // typo
+		{AllowedSeverities: []string{"low"}},                 // not defined in code
+		{AllowedSeverities: []string{"critical", "invalid"}}, // partial-bad
 	}
 	want := []string{"critical", "high"}
 	for _, c := range bad {

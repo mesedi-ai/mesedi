@@ -62,21 +62,22 @@ var vertexSuffixRe = regexp.MustCompile(`-\d{3}$`)
 // match).
 //
 // Examples:
-//   "anthropic.claude-3-5-sonnet-20240620-v1:0" → "claude-3-5-sonnet"
-//   "cohere.command-r-plus-v1:0"                → ""
-//     (wait — this case: `cohere.` strips first → `command-r-plus-v1:0`;
-//      then bedrockSuffixRe doesn't match because no date; Vertex
-//      doesn't match because no 3-digit suffix. Returns
-//      `command-r-plus-v1:0`. NOT in registry. This is the right
-//      behavior — Bedrock with no date segment isn't a valid
-//      Bedrock identifier; we treat it as unknown rather than
-//      guessing.)
-//   "gemini-1.5-pro-001"                        → "gemini-1.5-pro"
-//   "claude-3-5-sonnet"                         → "claude-3-5-sonnet"
-//     (canonical input passes through unchanged)
-//   "my-prod-gpt4"                              → "my-prod-gpt4"
-//     (Azure deployment name; no normalization possible;
-//      registry lookup will return ok=false)
+//
+//	"anthropic.claude-3-5-sonnet-20240620-v1:0" → "claude-3-5-sonnet"
+//	"cohere.command-r-plus-v1:0"                → ""
+//	  (wait — this case: `cohere.` strips first → `command-r-plus-v1:0`;
+//	   then bedrockSuffixRe doesn't match because no date; Vertex
+//	   doesn't match because no 3-digit suffix. Returns
+//	   `command-r-plus-v1:0`. NOT in registry. This is the right
+//	   behavior — Bedrock with no date segment isn't a valid
+//	   Bedrock identifier; we treat it as unknown rather than
+//	   guessing.)
+//	"gemini-1.5-pro-001"                        → "gemini-1.5-pro"
+//	"claude-3-5-sonnet"                         → "claude-3-5-sonnet"
+//	  (canonical input passes through unchanged)
+//	"my-prod-gpt4"                              → "my-prod-gpt4"
+//	  (Azure deployment name; no normalization possible;
+//	   registry lookup will return ok=false)
 func normalizeModelID(modelID string) string {
 	if modelID == "" {
 		return modelID

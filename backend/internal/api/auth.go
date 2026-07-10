@@ -191,8 +191,8 @@ func MintSessionToken() (raw, hash string, err error) {
 // authMiddleware constructs the request-auth middleware. It accepts
 // two credential paths:
 //
-//   1. Bearer API key (SDK / curl) — Authorization: Bearer mesedi_sk_*
-//   2. Session cookie (dashboard) — Cookie: mesedi_session=<raw token>
+//  1. Bearer API key (SDK / curl) — Authorization: Bearer mesedi_sk_*
+//  2. Session cookie (dashboard) — Cookie: mesedi_session=<raw token>
 //
 // API key path is tried first because the SDK is the higher-volume
 // caller; the cookie path runs only when no Authorization header is

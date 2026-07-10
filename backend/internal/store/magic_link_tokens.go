@@ -13,13 +13,13 @@ import (
 
 // MagicLinkToken is one row of the magic_link_tokens table.
 type MagicLinkToken struct {
-	TokenID    string    `json:"token_id"`
-	TokenHash  string    `json:"-"` // never serialized
-	Email      string    `json:"email"`
-	CreatedAt  time.Time `json:"created_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
-	UsedAt     time.Time `json:"used_at,omitempty"`
-	RequestIP  string    `json:"request_ip,omitempty"`
+	TokenID   string    `json:"token_id"`
+	TokenHash string    `json:"-"` // never serialized
+	Email     string    `json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	UsedAt    time.Time `json:"used_at,omitempty"`
+	RequestIP string    `json:"request_ip,omitempty"`
 }
 
 // MagicLinkTTL is how long a magic-link token stays valid from mint.

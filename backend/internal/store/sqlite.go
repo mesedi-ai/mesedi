@@ -579,7 +579,7 @@ func (s *SQLiteStore) DeleteFailureGroupsByProject(ctx context.Context, projectI
 
 // ListAllProjects returns every project plus activity aggregates from
 // the executions table. Used only by the founder-side admin dashboard
-//; the customer-facing API has no equivalent endpoint.
+// ; the customer-facing API has no equivalent endpoint.
 //
 // The LEFT JOIN preserves projects that have never produced an
 // execution (signup-without-integration accounts), they show up with
@@ -1145,7 +1145,7 @@ func (s *SQLiteStore) DeleteProjectCascade(
 
 // UpdateProjectBillingCap sets projects.billing_cap_usd. Called from
 // HandleUpdateBillingCap to honor the customer's overage spend cap
-//. 0 is allowed and means "no project-level override; fall
+// . 0 is allowed and means "no project-level override; fall
 // back to the constants default that the hobby billing scheduler
 // applies elsewhere."
 func (s *SQLiteStore) UpdateProjectBillingCap(
@@ -3363,7 +3363,7 @@ func (s *SQLiteStore) GroupCoordinationDeadlock(ctx context.Context, executionID
 // event with the given provider + error_class since the supplied
 // time. NULL tenant_id collapses to a single bucket and counts as
 // one tenant when present. Used by the provider_incident detector
-//.
+// .
 //
 // SQLite-flavor implementation note: the query uses a sub-select
 // to extract distinct (execution_id × tenant_id) pairs that match

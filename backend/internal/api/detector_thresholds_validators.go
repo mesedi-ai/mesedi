@@ -344,7 +344,7 @@ func init() {
 	// extensions wave — closes grounding_failure.G3 +
 	// cascading_failure.G2 + cascading_failure.G3 + hitl_rejection_
 	// spike.G3. Introduces two new ValueTypes ('bool' and 'json')
-	// to the validators registry. After this wave, the 
+	// to the validators registry. After this wave, the
 	// primitive supports the full {int, float, bool, json} value
 	// space — any future detector with structured config can ride
 	// it without inventing new storage.
@@ -677,7 +677,7 @@ func capFloat(v, cap float64, name, tier string) error {
 	return nil
 }
 
-// parseBoolJSON unmarshals a JSON-encoded boolean. Used by 
+// parseBoolJSON unmarshals a JSON-encoded boolean. Used by
 // extensions wave 'bool' ValueType for simple per-project toggle
 // knobs (e.g. cascading_failure.exclude_spawn_handoffs).
 func parseBoolJSON(valueJSON string) (bool, error) {

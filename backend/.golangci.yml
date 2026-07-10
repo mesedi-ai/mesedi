@@ -17,6 +17,13 @@ run:
   timeout: 3m
   tests: true
 
+issues:
+  # Show every issue rather than golangci-lint's default caps of
+  # max-issues-per-linter=50 and max-same-issues=3. Pre-launch, we
+  # want the full picture in a single pass, not iterative discovery.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 linters:
   default: none
   enable:
@@ -93,6 +100,22 @@ linters:
       # G104 (errors unhandled) overlaps with errcheck on close/rollback;
       # accept the same Go idiom under both linters' text headers.
       - text: "G104"
+        linters:
+          - gosec
+
+      # G202 (SQL string formatting): the internal/store/ package builds
+      # dynamic WHERE clauses by concatenating allowlisted literal
+      # fragments (from `clauses []string` slices populated with fixed
+      # templates like "project_id = ?" or fmt.Sprintf("$%d", ...) for
+      # server-controlled Postgres placeholders). Every user-supplied
+      # value flows through args... as a parameterized placeholder,
+      # never into the concatenated SQL. gosec cannot statically prove
+      # this invariant, so it flags every one. Rather than sprinkle
+      # per-call nolint suppressions across the package, the whole
+      # store/ path is exempt from G202. Any query that violates the
+      # invariant would still be caught in code review.
+      - path: ^internal/store/
+        text: "G202"
         linters:
           - gosec
 

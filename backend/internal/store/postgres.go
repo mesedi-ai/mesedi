@@ -841,7 +841,7 @@ func scanPostgresAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 
 // DeleteProjectCascade hard-deletes a project and every dependent row
 // in one transaction. Postgres counterpart to the SQLiteStore method
-//.
+// .
 func (s *PostgresStore) DeleteProjectCascade(
 	ctx context.Context,
 	projectID string,
@@ -951,7 +951,7 @@ func (s *PostgresStore) UpdateProjectBillingCap(
 // DeleteAPIKeysByUserID hard-deletes every API key whose user_id
 // matches. Postgres counterpart to the SQLiteStore method; called by
 // HandleRemoveMember to revoke a removed team member's credentials
-//. Returns the number of rows deleted.
+// . Returns the number of rows deleted.
 func (s *PostgresStore) DeleteAPIKeysByUserID(
 	ctx context.Context,
 	userID string,
@@ -3095,6 +3095,12 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 	limitPlaceholder := fmt.Sprintf("$%d", len(args)-1)
 	offsetPlaceholder := fmt.Sprintf("$%d", len(args))
 
+	// G202: whereClause is built above from allowlisted fragments
+	// (project_id / severity / resolved-status filters). limitPlaceholder
+	// and offsetPlaceholder are server-controlled $N tokens, never user
+	// input. All user-supplied values flow through args... as
+	// parameterized placeholders.
+	//nolint:gosec // G202: false positive — see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			fg.group_id, fg.project_id, fg.failure_class, fg.signature,

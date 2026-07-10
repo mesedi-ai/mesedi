@@ -18,10 +18,10 @@ import (
 // ToolReturnValueStats aggregates clipping signal across a recent
 // window of tool_call events for one project.
 type ToolReturnValueStats struct {
-	WindowHours      int
-	TotalCalls       int
-	TruncatedCount   int // SDK shipped the literal "<truncated>" sentinel
-	OversizedCount   int // return_value JSON exceeded the backend cap
+	WindowHours    int
+	TotalCalls     int
+	TruncatedCount int // SDK shipped the literal "<truncated>" sentinel
+	OversizedCount int // return_value JSON exceeded the backend cap
 }
 
 // GetToolReturnValueStats counts tool_call events in the last

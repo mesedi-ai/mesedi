@@ -48,12 +48,12 @@ type AIAnalysis struct {
 
 // AIAnalysesTotals is the lifetime + window summary (top tile).
 type AIAnalysesTotals struct {
-	LifetimeCount       int     `json:"lifetime_count"`
-	LifetimeCostUSD     float64 `json:"lifetime_cost_usd"`
-	LifetimeInputTokens int64   `json:"lifetime_input_tokens"`
-	LifetimeOutputTokens int64  `json:"lifetime_output_tokens"`
-	MonthCount          int     `json:"month_count"`
-	MonthCostUSD        float64 `json:"month_cost_usd"`
+	LifetimeCount        int     `json:"lifetime_count"`
+	LifetimeCostUSD      float64 `json:"lifetime_cost_usd"`
+	LifetimeInputTokens  int64   `json:"lifetime_input_tokens"`
+	LifetimeOutputTokens int64   `json:"lifetime_output_tokens"`
+	MonthCount           int     `json:"month_count"`
+	MonthCostUSD         float64 `json:"month_cost_usd"`
 }
 
 // --- SQLite impl --------------------------------------------------

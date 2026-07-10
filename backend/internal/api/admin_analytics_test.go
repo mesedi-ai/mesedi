@@ -3,7 +3,7 @@
 // Coverage:
 //   - MRR counts only Team projects with a Stripe subscription id.
 //     Admin-comped tier flips (tier='team' AND
-//     stripe_subscription_id='') do NOT count toward MRR.
+//     stripe_subscription_id=”) do NOT count toward MRR.
 //   - CompedTeamProjects surfaces the comped count separately.
 //   - Hobby + Enterprise rows are ignored entirely.
 //   - Tier comparison is case-insensitive (matches the existing
@@ -12,7 +12,7 @@
 // The Stripe-derived fields (ThisMonthGrossUSD, etc.) are NOT
 // exercised here: those require a live Stripe.Configured() == true
 // and would need an HTTP-level Stripe mock. They sit behind a clear
-// branch in the handler and the local-DB MRR path is what 
+// branch in the handler and the local-DB MRR path is what
 // changed.
 package api
 

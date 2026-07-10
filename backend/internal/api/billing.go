@@ -1330,7 +1330,7 @@ func (h *Handlers) handleInvoicePaid(event stripe.Event) error {
 // modes are usually card expired, lost, blocked, or insufficient
 // funds; functionally it's a dunning signal that ops needs to nudge
 // the customer to update payment method before service is interrupted
-//.
+// .
 //
 // We do NOT auto-downgrade or auto-suspend on this event. Stripe's
 // own Smart Retries scheduler keeps trying the card on its dunning
@@ -1410,7 +1410,7 @@ func (h *Handlers) handleInvoicePaymentFailed(event stripe.Event, logger *slog.L
 // customer initiates a chargeback through their card issuer. Often a
 // fraud signal (stolen-card-used-on-Mesedi pattern), so this is
 // marked HIGH severity by default; the dispute reason refines that
-//.
+// .
 //
 // The Stripe Dispute object on the webhook contains the charge as a
 // string ID only; we fetch the Charge once to resolve the customer.
@@ -2143,8 +2143,8 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 		// until the period rolls. Captured here so a customer can
 		// see who scheduled the cancel and at what time.
 		h.recordAuditEvent(r, AuditBillingDowngrade, "subscription", p.StripeSubscriptionID, map[string]any{
-			"from_tier":           p.Tier,
-			"to_tier":             TierHobby,
+			"from_tier":            p.Tier,
+			"to_tier":              TierHobby,
 			"cancel_at_period_end": true,
 		})
 
@@ -2180,10 +2180,10 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 	// audit log: Path-B (immediate flip) variant. Same action
 	// slug; metadata records that this was the synchronous path.
 	h.recordAuditEvent(r, AuditBillingDowngrade, "project", projectID, map[string]any{
-		"from_tier":     p.Tier,
-		"to_tier":       TierHobby,
-		"immediate":     true,
-		"path":          "no_active_subscription",
+		"from_tier": p.Tier,
+		"to_tier":   TierHobby,
+		"immediate": true,
+		"path":      "no_active_subscription",
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{

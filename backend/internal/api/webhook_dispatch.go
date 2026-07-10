@@ -22,13 +22,13 @@
 // same runFailureGroupDispatch function runs with isRecurrence=true,
 // which:
 //
-//   * Sets the payload event name to "failure_group.recurred" so
+//   - Sets the payload event name to "failure_group.recurred" so
 //     receivers can tell repeats apart from first-time failures.
-//   * Applies the per-webhook RecurrenceMode policy: "off" skips this
+//   - Applies the per-webhook RecurrenceMode policy: "off" skips this
 //     webhook entirely; "every_event" fires every time; "throttled"
 //     fires only when the rolling window has elapsed since the last
 //     fire for this (webhook, group) pair.
-//   * On every fired recurrence (regardless of delivery outcome),
+//   - On every fired recurrence (regardless of delivery outcome),
 //     upserts webhook_recurrence_state so the throttle baseline
 //     advances. We update on attempt rather than on success so a
 //     broken receiver mid-storm doesn't cause us to retry every

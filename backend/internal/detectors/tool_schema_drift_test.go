@@ -101,7 +101,7 @@ func TestReturnShapeHash_DistinctByValueType(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// SDK COMPATIBILITY — typed sentinels from 
+// SDK COMPATIBILITY — typed sentinels from
 // ──────────────────────────────────────────────────────────────────
 
 func TestReturnShapeHash_TypedSentinelDistinctFromPlainString(t *testing.T) {
@@ -153,7 +153,7 @@ func TestReturnShapeHash_TypedSentinelsByTypeAreDistinct(t *testing.T) {
 }
 
 func TestReturnShapeHash_TypedSentinelObjectClassDistinguishesUserVsAdminUser(t *testing.T) {
-	// The "returns User vs returns AdminUser" case from the 
+	// The "returns User vs returns AdminUser" case from the
 	// audit. Both have the same field names but distinct class
 	// names; the object sentinel must surface that distinction.
 	user := rawJSON(t, map[string]any{

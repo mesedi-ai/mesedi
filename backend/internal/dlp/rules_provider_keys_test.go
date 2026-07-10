@@ -5,7 +5,7 @@ package dlp
 //
 // The Cohere built-in is intentionally NOT included (40-char
 // bare-alphanumeric format would false-positive on SHA-1 hex,
-// git SHAs, Stripe IDs, etc). Cohere customers use the 
+// git SHAs, Stripe IDs, etc). Cohere customers use the
 // custom-pattern editor to add a context-aware regex.
 
 import (

@@ -17,14 +17,14 @@ import (
 // Lookups happen by computing the hash of the incoming cookie and
 // querying on TokenHash.
 type Session struct {
-	TokenHash       string    `json:"-"`
-	UserID          string    `json:"user_id"`
-	ProjectID       string    `json:"project_id"`
-	CreatedAt       time.Time `json:"created_at"`
-	ExpiresAt       time.Time `json:"expires_at"`
-	LastUsedAt      time.Time `json:"last_used_at"`
-	UserAgent       string    `json:"user_agent,omitempty"`
-	IPAddress       string    `json:"ip_address,omitempty"`
+	TokenHash  string    `json:"-"`
+	UserID     string    `json:"user_id"`
+	ProjectID  string    `json:"project_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	LastUsedAt time.Time `json:"last_used_at"`
+	UserAgent  string    `json:"user_agent,omitempty"`
+	IPAddress  string    `json:"ip_address,omitempty"`
 	// PassedTwoFactor is true iff the session was minted via
 	// the /auth/2fa-verify path OR was upgraded by HandleTOTPSetupVerify
 	// at enrollment time. Auth middleware compares this against the

@@ -5,23 +5,23 @@ package detectors
 // ErrorClassValues maps canonical class names to their wire-
 // format string values.
 var ErrorClassValues = map[string]string{
-	"RATE_LIMITED": "rate_limited",
-	"QUOTA_EXHAUSTED": "quota_exhausted",
-	"INTERNAL_ERROR": "internal_error",
+	"RATE_LIMITED":        "rate_limited",
+	"QUOTA_EXHAUSTED":     "quota_exhausted",
+	"INTERNAL_ERROR":      "internal_error",
 	"SERVICE_UNAVAILABLE": "service_unavailable",
-	"TIMEOUT": "timeout",
-	"INVALID_API_KEY": "invalid_api_key",
-	"CLIENT_ERROR": "client_error",
-	"UNKNOWN": "unknown",
+	"TIMEOUT":             "timeout",
+	"INVALID_API_KEY":     "invalid_api_key",
+	"CLIENT_ERROR":        "client_error",
+	"UNKNOWN":             "unknown",
 }
 
 // ProviderSideErrorClassValues is the subset of canonical
 // values the provider_incident detector treats as provider-
 // side. Customer-side classes are explicitly excluded.
 var ProviderSideErrorClassValues = map[string]struct{}{
-	"rate_limited": {}, // RATE_LIMITED
-	"quota_exhausted": {}, // QUOTA_EXHAUSTED
-	"internal_error": {}, // INTERNAL_ERROR
+	"rate_limited":        {}, // RATE_LIMITED
+	"quota_exhausted":     {}, // QUOTA_EXHAUSTED
+	"internal_error":      {}, // INTERNAL_ERROR
 	"service_unavailable": {}, // SERVICE_UNAVAILABLE
-	"timeout": {}, // TIMEOUT
+	"timeout":             {}, // TIMEOUT
 }

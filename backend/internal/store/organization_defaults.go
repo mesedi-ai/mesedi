@@ -42,10 +42,10 @@ type OrgConfigFallbackRollupTarget struct {
 // enterprise UX where the customer would otherwise have to click
 // into 50 tiles to spot operational degradation.
 type OrgConfigFallbackRollup struct {
-	WindowHours           int
-	AffectedProjectCount  int
-	TotalEvents           int
-	TopTargets            []OrgConfigFallbackRollupTarget
+	WindowHours          int
+	AffectedProjectCount int
+	TotalEvents          int
+	TopTargets           []OrgConfigFallbackRollupTarget
 }
 
 // --- SQLite impl --------------------------------------------------
