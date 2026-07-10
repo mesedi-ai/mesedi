@@ -4856,7 +4856,11 @@ func extractLLMUserMessages(evts []*events.Event) []string {
 // ─────────────────────────────────────────────────────────────────────────
 
 // HandleListAPIKeys returns the calling project's API keys (without
-// the hash, never serialized).
+// the hash, never serialized). Each key is annotated with the
+// effective org role of its owner so the dashboard can render an
+// ADMIN / WRITE / READ badge and disable revoke on the last
+// admin-role key. See api_key_role_resolver.go for the resolver
+// semantics + legacy-key fallback.
 func (h *Handlers) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	authProjectID, ok := ProjectIDFromContext(r.Context())
 	if !ok {
@@ -4869,10 +4873,22 @@ func (h *Handlers) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "list failed: "+err.Error())
 		return
 	}
+	// Resolve per-key roles for badge rendering. Wrap each key in a
+	// small shape so we can add the `role` field without touching
+	// store.APIKey (which stays a pure data-model type).
+	roles := h.resolveKeyRoles(r.Context(), authProjectID, keys)
+	type apiKeyListItem struct {
+		*store.APIKey
+		Role string `json:"role"`
+	}
+	items := make([]apiKeyListItem, 0, len(keys))
+	for _, k := range keys {
+		items = append(items, apiKeyListItem{APIKey: k, Role: roles[k.KeyID]})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
-		"api_keys": keys,
-		"count":    len(keys),
+		"api_keys": items,
+		"count":    len(items),
 	})
 }
 
@@ -4991,6 +5007,18 @@ func (h *Handlers) HandleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	if len(keys) <= 1 {
 		writeError(w, http.StatusConflict,
 			"cannot revoke the project's last API key; mint a new key first, or close the account from settings to remove the project entirely")
+		return
+	}
+	// Admin-role guard: if this key belongs to an admin AND revoking
+	// it would leave the project with zero admin-role keys, refuse.
+	// Prevents a project on Team+ (with mixed-role members) from
+	// silently losing all admin-authenticated SDK access when the
+	// last admin key is revoked. Hobby-tier projects hit this via
+	// the simpler "last key overall" branch above because a Hobby
+	// project has exactly one user (admin) who owns every key.
+	if h.wouldStrandProjectWithoutAdminKey(r.Context(), authProjectID, keyID, keys) {
+		writeError(w, http.StatusConflict,
+			"cannot revoke the project's last admin-role API key; mint another admin-role key first")
 		return
 	}
 	// Batch 2: find the target key's UserID so we can kill that
