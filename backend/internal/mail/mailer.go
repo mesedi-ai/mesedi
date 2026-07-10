@@ -48,6 +48,12 @@ type Mailer interface {
 	// SendAccountClosed confirms the project has been hard-deleted.
 	SendDowngradeScheduled(ctx context.Context, in DowngradeScheduledInput) error
 	SendAccountClosed(ctx context.Context, in AccountClosedInput) error
+	// SendTierSettingsClamped ships the post-downgrade notification
+	// telling the customer that one of their per-project settings
+	// (currently: retention) was reduced to fit the new tier's cap.
+	// Fires from applyTierChangeCascade after the clamp is persisted.
+	// See internal/api/tier_change_cascade.go for the trigger site.
+	SendTierSettingsClamped(ctx context.Context, in TierSettingsClampedInput) error
 	// SendMagicLink ships the one-time sign-in link (commit 2).
 	// The body contains a single tappable URL and a short explanation
 	// of the 15-minute expiry window; no marketing, no images.
@@ -150,6 +156,31 @@ type DowngradeScheduledInput struct {
 	ImmediateFlip bool
 }
 
+// TierSettingsClampedInput carries everything the post-downgrade
+// settings-clamp email template renders. Fired ONCE per tier flip
+// per setting that had to be reduced (retention today; more settings
+// as the tier-cap surface grows). The template is short and
+// action-oriented: it tells the customer what changed, why, and
+// gives them the upgrade path back if they want the old value.
+type TierSettingsClampedInput struct {
+	ToEmail      string
+	ProjectName  string
+	// Setting is a customer-readable label (e.g. "retention",
+	// "custom-pattern count"). Avoids exposing the underlying
+	// column name.
+	Setting      string
+	// OldValue and NewValue are pre-formatted strings ("90 days" or
+	// "indefinite" — not raw integers). The cascade layer formats
+	// them to keep unit-handling out of the mail template.
+	OldValue     string
+	NewValue     string
+	// NewTier is the tier the project landed on (customer-readable
+	// slug: "hobby" | "team" | "enterprise"). Used to phrase
+	// "your project is now on Cloud <NewTier>".
+	NewTier      string
+	DashboardURL string
+}
+
 // AccountClosedInput carries everything the account-closed
 // confirmation email template renders. Sent after
 // DeleteProjectCascade succeeds; this is the last touch with the
@@ -248,6 +279,20 @@ func (m NoopMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeSche
 			"project", in.ProjectName,
 			"period_end", in.PeriodEnd,
 			"immediate_flip", in.ImmediateFlip,
+		)
+	}
+	return nil
+}
+
+func (m NoopMailer) SendTierSettingsClamped(ctx context.Context, in TierSettingsClampedInput) error {
+	if m.Logger != nil {
+		m.Logger.Debug("mail: tier settings clamped (noop, no RESEND_API_KEY)",
+			"to", in.ToEmail,
+			"project", in.ProjectName,
+			"setting", in.Setting,
+			"old_value", in.OldValue,
+			"new_value", in.NewValue,
+			"new_tier", in.NewTier,
 		)
 	}
 	return nil
@@ -767,6 +812,95 @@ func (m *ResendMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeS
 			"to", in.ToEmail,
 			"project", in.ProjectName,
 			"immediate_flip", in.ImmediateFlip,
+		)
+	}
+	return nil
+}
+
+// SendTierSettingsClamped notifies the customer that a per-project
+// setting was reduced because their project's tier changed. Fires
+// AFTER the retention_days (or future setting) has already been
+// clamped in the DB by applyTierChangeCascade — the email is a
+// courtesy heads-up, not a request for permission.
+//
+// Design notes:
+//   - Short body. Customer just downgraded (or was auto-downgraded on
+//     a canceled subscription) and doesn't need a full re-onboarding
+//     paragraph. Three lines: what changed, when it takes effect,
+//     upgrade path if they want the old value back.
+//   - No "was this a mistake" affordance. By the time this email
+//     lands, the tier flip already happened. Reversing is a separate
+//     billing flow (re-subscribe from /app/billing), so we point
+//     there rather than pretend the email itself can undo anything.
+func (m *ResendMailer) SendTierSettingsClamped(ctx context.Context, in TierSettingsClampedInput) error {
+	subject := fmt.Sprintf("Mesedi: %s reduced to fit Cloud %s", in.Setting, in.NewTier)
+
+	textBody := fmt.Sprintf(
+		"Hi,\n\n"+
+			"Your Mesedi project %q is now on Cloud %s. As part of that change, one "+
+			"of your project settings was reduced to fit the new tier's cap:\n\n"+
+			"  - %s: %s (was %s)\n\n"+
+			"Executions that fall outside the new %s window will be pruned at the next "+
+			"nightly cleanup. If you want the old value back, you can upgrade from "+
+			"%s/app/billing.\n\n"+
+			"See your project's audit log at %s/app/settings#audit for the full record "+
+			"of this change.\n",
+		in.ProjectName, in.NewTier,
+		in.Setting, in.NewValue, in.OldValue,
+		in.NewValue,
+		in.DashboardURL, in.DashboardURL,
+	)
+	htmlBody := fmt.Sprintf(
+		"<p>Your Mesedi project <strong>%s</strong> is now on Cloud %s. As part of "+
+			"that change, one of your project settings was reduced to fit the new tier's cap:</p>"+
+			"<ul><li><strong>%s:</strong> %s (was %s)</li></ul>"+
+			"<p>Executions that fall outside the new %s window will be pruned at the next "+
+			"nightly cleanup. If you want the old value back, you can "+
+			"<a href=\"%s/app/billing\">upgrade from your billing page</a>.</p>"+
+			"<p>See your project's <a href=\"%s/app/settings#audit\">audit log</a> for the "+
+			"full record of this change.</p>",
+		in.ProjectName, in.NewTier,
+		in.Setting, in.NewValue, in.OldValue,
+		in.NewValue,
+		in.DashboardURL, in.DashboardURL,
+	)
+
+	body, err := json.Marshal(resendRequest{
+		From:    m.From,
+		To:      []string{in.ToEmail},
+		Subject: subject,
+		HTML:    htmlBody,
+		Text:    textBody,
+	})
+	if err != nil {
+		return fmt.Errorf("mail: marshal tier settings clamped: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("mail: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mail: post to resend: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mail: resend returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	if m.Logger != nil {
+		m.Logger.Info("mail: tier settings clamped sent",
+			"to", in.ToEmail,
+			"project", in.ProjectName,
+			"setting", in.Setting,
+			"new_tier", in.NewTier,
 		)
 	}
 	return nil

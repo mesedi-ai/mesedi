@@ -715,6 +715,22 @@ func (h *Handlers) HandleAdminSetTier(w http.ResponseWriter, r *http.Request) {
 		projectID,
 		tierMeta,
 	)
+	// #392 — clamp any per-project settings that now exceed the new
+	// tier's caps (retention_days today; more settings as the tier-cap
+	// surface grows). Actor is AuditActorPlatformAdmin so the audit
+	// row attributes the clamp to Mesedi staff, matching the tier
+	// change itself. See tier_change_cascade.go for the full policy.
+	if cerr := h.applyTierChangeCascade(
+		context.Background(), projectID, AuditActorPlatformAdmin, fromTier, tier,
+	); cerr != nil {
+		// Cascade errors are logged but do NOT roll back the tier
+		// change — the tier flip has already been persisted and
+		// audited above, and a partial-clamp state is preferable to
+		// an incomplete tier change.
+		h.Logger.Warn("admin: tier-change cascade failed",
+			"project_id", projectID,
+			"error", cerr.Error())
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
 		"project_id": projectID,

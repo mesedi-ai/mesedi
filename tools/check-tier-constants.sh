@@ -282,6 +282,70 @@ assert_pattern "Hobby team-invite refuses tier (Go)" \
   "$MESEDI_ROOT/backend/internal/api/handlers_team.go" \
   "TierHobby" || true
 
+# #392 — tier-change cascade coverage check.
+#
+# Every site in backend/internal/api/ that flips a project's tier via
+# UpdateProjectTier or UpdateProjectBilling MUST call
+# applyTierChangeCascade within 20 lines of the tier flip. The
+# cascade is the ONLY thing that clamps per-project settings
+# (retention today, more later) to the destination tier's caps —
+# without it, downgraded projects silently keep the old tier's
+# looser caps, which is both a marketing lie and a storage-cost hit.
+#
+# Enforcement is grep-based to keep it lightweight. False positives
+# are possible if a call site legitimately doesn't need the cascade
+# (e.g. a test helper); use `// tier-cascade-exempt: <reason>` on
+# the call line to suppress the check. There are no exemptions in
+# production code today.
+echo ""
+echo "=== Tier-change cascade coverage check ==="
+cascade_drift=0
+# Loop over both critical function names. For each call site, check
+# that applyTierChangeCascade appears within the next 50 lines. The
+# window is generous enough to allow error handling, audit writes,
+# and a cascade that lands after both (cascade audit rows come from
+# the cascade helper itself, so calling it AFTER the tier-change
+# audit is the right ordering), but tight enough that a truly orphan
+# tier flip trips the check.
+for fn in "UpdateProjectTier" "UpdateProjectBilling"; do
+  # Only enforce inside internal/api/ — the store package's own
+  # method definitions and test stubs legitimately don't cascade.
+  # -n prints line numbers so we can grep the following window.
+  # Skip *_test.go: test-only handlers that flip tiers directly for
+  # scenario setup do not need the cascade wired in.
+  while IFS=: read -r file lineno _; do
+    if [[ "$file" == *_test.go ]]; then
+      continue
+    fi
+    # Read a 50-line window starting at the call site — enough for
+    # error handling, audit writes, and the cascade call which
+    # legitimately comes AFTER those.
+    window=$(sed -n "${lineno},$((lineno + 50))p" "$file")
+    # Also read 5 lines above the call for the exempt marker check —
+    # a leading comment block like "// tier-cascade-exempt: <reason>"
+    # is the natural place to document a legitimately-skipped site,
+    # so accept the marker either above or inside the window.
+    exempt_window=$(sed -n "$((lineno - 5 > 0 ? lineno - 5 : 1)),$((lineno + 50))p" "$file")
+    if echo "$exempt_window" | grep -q "tier-cascade-exempt"; then
+      echo "SKIP (exempt): $file:$lineno ($fn)"
+      continue
+    fi
+    if echo "$window" | grep -q "applyTierChangeCascade"; then
+      echo "OK: $file:$lineno ($fn cascade wired)"
+    else
+      echo "DRIFT: $file:$lineno ($fn without applyTierChangeCascade within 50 lines)"
+      echo "       every tier flip in internal/api/ must call applyTierChangeCascade"
+      echo "       to clamp per-project settings to the destination tier's caps."
+      echo "       Suppress with '// tier-cascade-exempt: <reason>' on the call line."
+      cascade_drift=1
+    fi
+  done < <(grep -rnE "h\.Store\.(UpdateProjectTier|UpdateProjectBilling)\(" \
+    "$MESEDI_ROOT/backend/internal/api/" 2>/dev/null | grep "\\.$fn(") || true
+done
+if [ "$cascade_drift" -ne 0 ]; then
+  drift=1
+fi
+
 echo ""
 if [ "$drift" -ne 0 ]; then
   echo "=== TIER CONSTANTS DRIFT detected ==="

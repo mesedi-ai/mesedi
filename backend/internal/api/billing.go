@@ -1239,10 +1239,29 @@ func (h *Handlers) handleCheckoutCompleted(event stripe.Event) error {
 	// subsequent customer.subscription.updated event will fill them
 	// in. For now, set to nil, the dashboard handles missing bounds
 	// gracefully.
-	return h.Store.UpdateProjectBilling(
+	fromTier := ""
+	if p, gerr := h.Store.GetProject(context.Background(), projectID); gerr == nil && p != nil {
+		fromTier = p.Tier
+	}
+	if err := h.Store.UpdateProjectBilling(
 		context.Background(),
 		projectID, TierTeam, customerID, subscriptionID, nil, nil,
-	)
+	); err != nil {
+		return err
+	}
+	// #392 — Checkout completion is an upgrade path (Hobby→Team). The
+	// cascade no-ops on upgrades but we call it anyway for symmetry
+	// with the other tier-flip sites and CI-guard coverage. Actor is
+	// AuditActorBillingSystem: Checkout succeeded, no customer email
+	// on the request context.
+	if cerr := h.applyTierChangeCascade(
+		context.Background(), projectID, AuditActorBillingSystem, fromTier, TierTeam,
+	); cerr != nil {
+		h.Logger.Warn("checkout-session: tier-change cascade failed",
+			"project_id", projectID,
+			"error", cerr.Error())
+	}
+	return nil
 }
 
 // handleSubscriptionUpdated refreshes period bounds and (if the
@@ -1261,15 +1280,35 @@ func (h *Handlers) handleSubscriptionUpdated(event stripe.Event) error {
 		return fmt.Errorf("lookup project by customer %s: %w", sub.Customer.ID, err)
 	}
 	periodStart, periodEnd := subscriptionPeriodBounds(&sub)
-	tier := normalizeTier(p.Tier)
+	fromTier := normalizeTier(p.Tier)
+	tier := fromTier
 	if sub.Status == stripe.SubscriptionStatusActive ||
 		sub.Status == stripe.SubscriptionStatusTrialing {
 		tier = TierTeam
 	}
-	return h.Store.UpdateProjectBilling(
+	if err := h.Store.UpdateProjectBilling(
 		context.Background(),
 		p.ProjectID, tier, sub.Customer.ID, sub.ID, periodStart, periodEnd,
-	)
+	); err != nil {
+		return err
+	}
+	// #392 — clamp per-project settings that now exceed the new tier's
+	// caps. In practice this path only upgrades (Hobby→Team when a
+	// subscription goes Active or Trialing), so the cascade is a
+	// no-op on the current code path. Called anyway for symmetry with
+	// the other tier-change sites and to satisfy the CI drift guard
+	// in tools/check-tier-constants.sh — future refactors that make
+	// this path capable of a downgrade will inherit the clamp for
+	// free. Actor is the project owner: subscription events are
+	// customer-initiated.
+	if cerr := h.applyTierChangeCascade(
+		context.Background(), p.ProjectID, p.OwnerEmail, fromTier, tier,
+	); cerr != nil {
+		h.Logger.Warn("subscription-updated: tier-change cascade failed",
+			"project_id", p.ProjectID,
+			"error", cerr.Error())
+	}
+	return nil
 }
 
 // handleSubscriptionDeleted downgrades the project back to Hobby
@@ -1290,10 +1329,28 @@ func (h *Handlers) handleSubscriptionDeleted(event stripe.Event) error {
 	// Keep the customer id so the user can re-subscribe later
 	// without re-collecting card data; clear the subscription id and
 	// period bounds. Tier returns to Hobby.
-	return h.Store.UpdateProjectBilling(
+	fromTier := normalizeTier(p.Tier)
+	if err := h.Store.UpdateProjectBilling(
 		context.Background(),
 		p.ProjectID, TierHobby, sub.Customer.ID, "", nil, nil,
-	)
+	); err != nil {
+		return err
+	}
+	// #392 — clamp per-project settings that now exceed Hobby's caps.
+	// This is the canonical downgrade path: a Team-tier project that
+	// cancels its subscription lands here, its retention_days=90 gets
+	// clamped to 7, an audit row lands, and the customer gets an email
+	// heads-up before the nightly scheduler prunes their old data.
+	// Actor is the project owner: subscription-deleted is customer-
+	// initiated (they clicked Cancel in Stripe or from /app/billing).
+	if cerr := h.applyTierChangeCascade(
+		context.Background(), p.ProjectID, p.OwnerEmail, fromTier, TierHobby,
+	); cerr != nil {
+		h.Logger.Warn("subscription-deleted: tier-change cascade failed",
+			"project_id", p.ProjectID,
+			"error", cerr.Error())
+	}
+	return nil
 }
 
 // handleInvoicePaid resets the per-period execution counter when a
@@ -1842,6 +1899,8 @@ func (h *Handlers) HandleCreateSetupCheckout(w http.ResponseWriter, r *http.Requ
 		// Persist the customer id immediately. Even if the Checkout
 		// session creation below fails, the next attempt will reuse
 		// this customer rather than create a duplicate.
+		// tier-cascade-exempt: same-tier persist (only customer_id
+		// changes; the tier field is set to its current value).
 		if upErr := h.Store.UpdateProjectBilling(
 			r.Context(),
 			p.ProjectID,
@@ -2156,6 +2215,7 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 	}
 
 	// Path (B): no live subscription. Flip DB tier immediately.
+	priorTier := p.Tier
 	if err := h.Store.UpdateProjectBilling(
 		r.Context(),
 		p.ProjectID,
@@ -2169,9 +2229,22 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 			"could not update tier: "+err.Error())
 		return
 	}
+	// #392 — clamp per-project settings that now exceed Hobby's caps.
+	// Path B is the corrupted-state variant of subscription-deleted:
+	// the DB tier flipped to Hobby instantly because no Stripe
+	// subscription existed to cancel. Same downgrade semantics as
+	// handleSubscriptionDeleted, same cascade behavior. Actor is the
+	// project owner: this endpoint is customer-initiated.
+	if cerr := h.applyTierChangeCascade(
+		r.Context(), p.ProjectID, p.OwnerEmail, priorTier, TierHobby,
+	); cerr != nil {
+		h.Logger.Warn("downgrade path-B: tier-change cascade failed",
+			"project_id", projectID,
+			"error", cerr.Error())
+	}
 	h.Logger.Info("downgrade: direct tier flip (no active Stripe subscription)",
 		"project_id", projectID,
-		"prior_tier", p.Tier,
+		"prior_tier", priorTier,
 		"stripe_customer_id", p.StripeCustomerID)
 	// Path-B email: ImmediateFlip=true so the template phrases it as
 	// "reverted to Cloud Hobby" rather than "scheduled cancel".
