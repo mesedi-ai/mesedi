@@ -151,13 +151,15 @@ func newSlackWebhook() *store.ProjectWebhook {
 	return &store.ProjectWebhook{
 		WebhookID: "wh_wireshape",
 		ProjectID: "proj_wireshape",
-		// The /triggers/ prefix satisfies isSlackURL exactly the same
-		// way the modern /services/ path does, but doesn't match
-		// GitHub's incoming-webhook secret-scan regex — so this test
-		// fixture can live in a public repo without tripping push
-		// protection. See isSlackURL in adapters.go for all three
-		// accepted prefixes.
-		URL:    "https://hooks.slack.com/triggers/T0000000000/0000000000000/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+		// isSlackURL is a prefix match — segments after the prefix can
+		// be arbitrarily short. We use T0/B0/xxx so the URL passes
+		// isSlackURL without matching GitHub's secret-scan regex for
+		// Slack incoming-webhook or workflow-trigger URLs (both
+		// require minimum-length segment shapes that these three
+		// characters explicitly can't satisfy). Same shape as the
+		// existing adapters_test.go fixtures which have lived in the
+		// public repo since #390 shipped.
+		URL:    "https://hooks.slack.com/services/T0/B0/xxx",
 		Secret: "0000000000000000000000000000000000000000000000000000000000000000",
 	}
 }
