@@ -913,9 +913,9 @@ func (s *SQLiteStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 		source = APIKeySourceManual
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at, source)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt, source)
+		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at, source, role)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt, source, nullString(k.Role))
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
 	}
@@ -926,10 +926,11 @@ func (s *SQLiteStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*API
 	k := &APIKey{}
 	var name, userID sql.NullString
 	var lastUsed sql.NullTime
+	var role sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at, source
+		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at, source, role
 		FROM api_keys WHERE key_hash = ?
-	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt, &k.Source)
+	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt, &k.Source, &role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -941,6 +942,9 @@ func (s *SQLiteStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*API
 	}
 	if userID.Valid {
 		k.UserID = userID.String
+	}
+	if role.Valid {
+		k.Role = role.String
 	}
 	if lastUsed.Valid {
 		t := lastUsed.Time
@@ -973,7 +977,7 @@ func (s *SQLiteStore) ListAPIKeysForProject(
 	// would clutter the list and the "revoke" affordance would
 	// silently log the customer out.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source, role
 		FROM api_keys
 		WHERE project_id = ?
 		  AND source NOT IN ('sso_login', 'magic_link')
@@ -997,7 +1001,7 @@ func (s *SQLiteStore) ListAPIKeysForProject(
 // operator should be reasoning about in the admin UI.
 func (s *SQLiteStore) ListAllAPIKeys(ctx context.Context) ([]*APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source, role
 		FROM api_keys
 		WHERE source NOT IN ('sso_login', 'magic_link')
 		ORDER BY created_at DESC
@@ -1021,15 +1025,19 @@ func scanAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 			createdAt  string
 			lastUsedAt sql.NullString
 			name       sql.NullString
+			role       sql.NullString
 		)
 		if err := rows.Scan(
 			&k.KeyID, &k.ProjectID, &k.KeyPrefix,
-			&name, &createdAt, &lastUsedAt, &k.Scope, &k.ExpiresAt, &k.Source,
+			&name, &createdAt, &lastUsedAt, &k.Scope, &k.ExpiresAt, &k.Source, &role,
 		); err != nil {
 			return nil, err
 		}
 		if name.Valid {
 			k.Name = name.String
+		}
+		if role.Valid {
+			k.Role = role.String
 		}
 		k.CreatedAt = parseFlexTime(createdAt)
 		if lastUsedAt.Valid {

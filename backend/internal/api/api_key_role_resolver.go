@@ -67,6 +67,14 @@ func (h *Handlers) resolveKeyRoles(
 	// where every key is owned by them).
 	roleByUser := map[string]string{}
 	for _, k := range keys {
+		// Explicit per-key role (migration 056) wins over the
+		// user-role fallback. This is what lets an admin mint a
+		// scoped read/write key without inviting a new user just
+		// to hold the lower role.
+		if k.Role != "" {
+			out[k.KeyID] = k.Role
+			continue
+		}
 		if k.UserID == "" {
 			// Pre-migration-014 keys with no user_id inherit admin
 			// per the rbac.go legacy path.

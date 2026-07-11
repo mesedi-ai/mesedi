@@ -4897,7 +4897,12 @@ func (h *Handlers) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 // ever sees it. The server only persists the hash. Caller must store
 // the raw key immediately; a lost raw key requires a new mint.
 //
-// Request body (optional): {"name": "human-readable label"}.
+// Request body (optional): {"name": "human-readable label",
+// "role": "admin|write|read"}. When role is omitted the minted key
+// inherits the caller's user role (legacy behavior); when present,
+// the minted key resolves to that role verbatim regardless of the
+// caller's identity — the mechanism that lets an admin create
+// scoped credentials for CI, monitoring scripts, or partners.
 func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	if !h.requireRole(w, r, "admin") {
 		return
@@ -4910,11 +4915,24 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	var body struct {
 		Name string `json:"name,omitempty"`
+		Role string `json:"role,omitempty"`
 	}
-	// Empty body is fine, name is optional. Skip the strict-decode
-	// path here because the field is intentionally permissive.
+	// Empty body is fine, both fields are optional. Skip the strict-
+	// decode path here because the shape is intentionally permissive.
 	if r.ContentLength > 0 {
 		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+
+	// Normalize + validate role. Case-insensitive so a customer
+	// pasting "ADMIN" from a form doesn't get a confusing 400.
+	role := strings.ToLower(strings.TrimSpace(body.Role))
+	switch role {
+	case "", "admin", "write", "read":
+		// ok
+	default:
+		writeError(w, http.StatusBadRequest,
+			"role must be one of: admin, write, read (or omit to inherit caller's role)")
+		return
 	}
 
 	rawKey, hash, prefix, err := MintAPIKey()
@@ -4945,6 +4963,7 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		KeyPrefix: prefix,
 		Name:      body.Name,
 		UserID:    callerUserID,
+		Role:      role,
 	}
 	if err := h.Store.CreateAPIKey(r.Context(), rec); err != nil {
 		writeError(w, http.StatusInternalServerError, "persist key: "+err.Error())
@@ -4956,6 +4975,7 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		"prefix", prefix,
 		"project_id", authProjectID,
 		"name", body.Name,
+		"role", role,
 	)
 
 	// audit log: API key creation is a top-tier admin action.
@@ -4964,6 +4984,7 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	h.recordAuditEvent(r, AuditAPIKeyCreate, "api_key", keyID, map[string]any{
 		"name":   body.Name,
 		"prefix": prefix,
+		"role":   role,
 	})
 
 	// Return the raw key in this ONE response. The hash never leaves.
@@ -4973,6 +4994,7 @@ func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		"raw_key": rawKey,
 		"prefix":  prefix,
 		"name":    body.Name,
+		"role":    role,
 		"warning": "Store this raw_key now, it will never be shown again.",
 	})
 }

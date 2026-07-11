@@ -254,6 +254,15 @@ type APIKey struct {
 	// filter session-grade rows OUT so the /admin/api-keys page only
 	// surfaces keys the user consciously created.
 	Source string `json:"source,omitempty"`
+	// Role is the explicit per-key authorization override. When set
+	// (admin/write/read), the api_key_role_resolver returns this
+	// value verbatim instead of falling back to the minting user's
+	// org role. Added by migration 056 so an admin can mint scoped
+	// credentials (e.g. a read-only key for a monitoring script or
+	// a write key for a CI pipeline) without having to invite a new
+	// user to hold the reduced role. Empty preserves legacy
+	// behavior — every pre-056 key resolves via user role.
+	Role string `json:"role,omitempty"`
 }
 
 // APIKeyScopeCustomer / APIKeyScopeAdmin are the only legal values of

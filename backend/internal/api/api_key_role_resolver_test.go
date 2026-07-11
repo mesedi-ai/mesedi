@@ -186,6 +186,48 @@ func TestResolveKeyRoles(t *testing.T) {
 			// N-keys/1-owner caching correctness assertion.
 			wantMemberCalls: map[string]int{"u1": 1, "u2": 1},
 		},
+		{
+			// Migration 056: an admin can mint a scoped read/write key
+			// under their own user_id. When the per-key Role column is
+			// set, the resolver returns it verbatim WITHOUT looking up
+			// the owner's org role — that's the whole point.
+			name:      "explicit per-key Role overrides user-role AND skips member lookup",
+			tenantPtr: strPtr("t1"),
+			members: map[string]*store.OrganizationMember{
+				"u-admin": {UserID: "u-admin", Role: "admin"},
+			},
+			keys: []*store.APIKey{
+				// Key with explicit Role="read" owned by an admin —
+				// resolver returns "read", not "admin".
+				{KeyID: "kScoped", UserID: "u-admin", Role: "read"},
+				// Same owner, no explicit role → falls through to
+				// admin via the user-role lookup.
+				{KeyID: "kInherit", UserID: "u-admin"},
+			},
+			checks: []check{
+				{"kScoped", apiKeyRoleRead},
+				{"kInherit", apiKeyRoleAdmin},
+			},
+			wantTenantCalls: 1,
+			// Only kInherit triggers the DB lookup; kScoped short-
+			// circuits on Role. u-admin counted once.
+			wantMemberCalls: map[string]int{"u-admin": 1},
+		},
+		{
+			// Belt-and-suspenders: explicit Role wins even when the key
+			// has no UserID (which would otherwise fall through to the
+			// legacy-admin path).
+			name:      "explicit per-key Role beats the legacy no-user-id admin fallback",
+			tenantPtr: strPtr("t1"),
+			keys: []*store.APIKey{
+				{KeyID: "kLegacyScoped", UserID: "", Role: "write"},
+			},
+			checks: []check{
+				{"kLegacyScoped", apiKeyRoleWrite},
+			},
+			wantTenantCalls: 1,
+			wantMemberCalls: nil,
+		},
 	}
 
 	for _, tc := range cases {

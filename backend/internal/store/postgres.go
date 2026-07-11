@@ -732,9 +732,9 @@ func (s *PostgresStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 		source = APIKeySourceManual
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at, source)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt, source)
+		INSERT INTO api_keys (key_id, project_id, key_hash, key_prefix, name, created_at, user_id, scope, expires_at, source, role)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, k.KeyID, k.ProjectID, k.KeyHash, k.KeyPrefix, nullString(k.Name), k.CreatedAt, nullString(k.UserID), scope, k.ExpiresAt, source, nullString(k.Role))
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
 	}
@@ -743,12 +743,12 @@ func (s *PostgresStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 
 func (s *PostgresStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error) {
 	k := &APIKey{}
-	var name, userID sql.NullString
+	var name, userID, role sql.NullString
 	var lastUsed sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at, source
+		SELECT key_id, project_id, key_hash, key_prefix, name, created_at, last_used_at, user_id, scope, expires_at, source, role
 		FROM api_keys WHERE key_hash = $1
-	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt, &k.Source)
+	`, keyHash).Scan(&k.KeyID, &k.ProjectID, &k.KeyHash, &k.KeyPrefix, &name, &k.CreatedAt, &lastUsed, &userID, &k.Scope, &k.ExpiresAt, &k.Source, &role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -760,6 +760,9 @@ func (s *PostgresStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*A
 	}
 	if userID.Valid {
 		k.UserID = userID.String
+	}
+	if role.Valid {
+		k.Role = role.String
 	}
 	if lastUsed.Valid {
 		t := lastUsed.Time
@@ -780,7 +783,7 @@ func (s *PostgresStore) ListAPIKeysForProject(ctx context.Context, projectID str
 	// Filter session-grade keys (sso_login, magic_link) out of the
 	// customer-facing listing. See sqlite.go counterpart.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source, role
 		FROM api_keys
 		WHERE project_id = $1
 		  AND source NOT IN ('sso_login', 'magic_link')
@@ -798,7 +801,7 @@ func (s *PostgresStore) ListAPIKeysForProject(ctx context.Context, projectID str
 // keys are filtered out for the same reason there).
 func (s *PostgresStore) ListAllAPIKeys(ctx context.Context) ([]*APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source
+		SELECT key_id, project_id, key_prefix, name, created_at, last_used_at, scope, expires_at, source, role
 		FROM api_keys
 		WHERE source NOT IN ('sso_login', 'magic_link')
 		ORDER BY created_at DESC
@@ -820,15 +823,19 @@ func scanPostgresAPIKeyList(rows *sql.Rows) ([]*APIKey, error) {
 			k          APIKey
 			lastUsedAt sql.NullTime
 			name       sql.NullString
+			role       sql.NullString
 		)
 		if err := rows.Scan(
 			&k.KeyID, &k.ProjectID, &k.KeyPrefix,
-			&name, &k.CreatedAt, &lastUsedAt, &k.Scope, &k.ExpiresAt, &k.Source,
+			&name, &k.CreatedAt, &lastUsedAt, &k.Scope, &k.ExpiresAt, &k.Source, &role,
 		); err != nil {
 			return nil, err
 		}
 		if name.Valid {
 			k.Name = name.String
+		}
+		if role.Valid {
+			k.Role = role.String
 		}
 		if lastUsedAt.Valid {
 			t := lastUsedAt.Time

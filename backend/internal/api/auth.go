@@ -52,6 +52,14 @@ const (
 	// key (e.g. "founder-laptop-2026-06"). Empty for the legacy-token
 	// path.
 	ctxKeyAdminKeyName
+	// ctxKeyAPIKeyRole is the explicit per-key role set at mint time
+	// (migration 056). When present, resolveCallerRole returns this
+	// value directly and skips the user-role fallback. This is what
+	// lets an admin mint a scoped "read" or "write" credential
+	// without inviting a new user just to hold the lower role.
+	// Empty when the key was minted before migration 056 or when the
+	// caller opted for the legacy user-role-inheriting behavior.
+	ctxKeyAPIKeyRole
 )
 
 // Admin auth method constants surfaced via /admin/whoami.
@@ -107,6 +115,16 @@ func APIKeyIDFromContext(ctx context.Context) (string, bool) {
 // or OwnerEmail when this is empty.
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(ctxKeyUserID).(string)
+	return v, ok
+}
+
+// APIKeyRoleFromContext returns the explicit per-key role set at
+// mint time (migration 056). Empty + false when the caller used a
+// pre-056 key or a session cookie. Callers that want the effective
+// role should use resolveCallerRole, which layers this on top of
+// the user-role fallback.
+func APIKeyRoleFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(ctxKeyAPIKeyRole).(string)
 	return v, ok
 }
 
@@ -280,6 +298,11 @@ func authViaBearer(
 	ctx = context.WithValue(ctx, ctxKeyAPIKeyID, key.KeyID)
 	if key.UserID != "" {
 		ctx = context.WithValue(ctx, ctxKeyUserID, key.UserID)
+	}
+	// Explicit per-key role wins in resolveCallerRole. See rbac.go +
+	// migration 056 for the full story.
+	if key.Role != "" {
+		ctx = context.WithValue(ctx, ctxKeyAPIKeyRole, key.Role)
 	}
 
 	SetProjectIDForLogging(w, key.ProjectID)

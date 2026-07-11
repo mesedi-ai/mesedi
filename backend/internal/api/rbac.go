@@ -54,6 +54,15 @@ func (h *Handlers) resolveCallerRole(r *http.Request) (string, error) {
 		return "", errors.New("no project context")
 	}
 
+	// Explicit per-key role (migration 056) wins over every fallback.
+	// Set only when the caller authenticated via an API key that had a
+	// role column populated at mint time. Session-cookie callers and
+	// pre-056 API keys skip this branch and fall through to the
+	// existing tenant + membership lookup.
+	if keyRole, ok := APIKeyRoleFromContext(r.Context()); ok && keyRole != "" {
+		return keyRole, nil
+	}
+
 	tenantPtr, err := h.Store.GetProjectTenantID(r.Context(), projectID)
 	if err != nil {
 		return "", err
