@@ -51,8 +51,8 @@ type stubRoleStore struct {
 	// project's tenant once per resolveKeyRoles invocation. Per-user
 	// memberCalls asserts we only look up each unique user_id once
 	// (multiple keys owned by the same user share a cached role).
-	tenantCalls  int
-	memberCalls  map[string]int
+	tenantCalls int
+	memberCalls map[string]int
 }
 
 func (s *stubRoleStore) GetProjectTenantID(_ context.Context, _ string) (*string, error) {
@@ -91,13 +91,13 @@ func TestResolveKeyRoles(t *testing.T) {
 		want  string
 	}
 	cases := []struct {
-		name              string
-		tenantPtr         *string
-		members           map[string]*store.OrganizationMember
-		keys              []*store.APIKey
-		checks            []check
-		wantTenantCalls   int
-		wantMemberCalls   map[string]int
+		name            string
+		tenantPtr       *string
+		members         map[string]*store.OrganizationMember
+		keys            []*store.APIKey
+		checks          []check
+		wantTenantCalls int
+		wantMemberCalls map[string]int
 	}{
 		{
 			name:      "empty key set returns empty map, no DB calls",

@@ -143,13 +143,13 @@ func TestApplyTierChangeCascade(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name            string
-		fromTier        string
-		toTier          string
-		startRetention  *int
-		expectClampTo   *int // nil = expect no write; pointer = expect this value written
-		expectAudit     bool
-		expectEmail     bool
+		name           string
+		fromTier       string
+		toTier         string
+		startRetention *int
+		expectClampTo  *int // nil = expect no write; pointer = expect this value written
+		expectAudit    bool
+		expectEmail    bool
 	}{
 		{
 			name:           "upgrade Hobby to Team is a no-op",

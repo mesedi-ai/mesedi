@@ -296,10 +296,10 @@ func BuildSlackBody(p Payload) ([]byte, error) {
 	}
 
 	type slackBlock struct {
-		Type     string       `json:"type"`
-		Text     *slackText   `json:"text,omitempty"`
-		Fields   []slackText  `json:"fields,omitempty"`
-		Elements []slackText  `json:"elements,omitempty"`
+		Type     string      `json:"type"`
+		Text     *slackText  `json:"text,omitempty"`
+		Fields   []slackText `json:"fields,omitempty"`
+		Elements []slackText `json:"elements,omitempty"`
 	}
 	blocks := []slackBlock{
 		{

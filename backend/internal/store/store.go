@@ -337,11 +337,11 @@ const APIKeyAdminProjectID = "_admin"
 // supplied class names match the FailureClass* constants happens at
 // the handler layer.
 type ProjectWebhook struct {
-	WebhookID      string    `json:"webhook_id"`
-	ProjectID      string    `json:"project_id"`
-	Name           string    `json:"name,omitempty"`
-	URL            string    `json:"url"`
-	Secret         string    `json:"-"` // never returned in list responses
+	WebhookID string `json:"webhook_id"`
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name,omitempty"`
+	URL       string `json:"url"`
+	Secret    string `json:"-"` // never returned in list responses
 	// AuthToken is a customer-provided receiver-side auth value used
 	// when the receiver has its own auth scheme instead of Mesedi's
 	// HMAC signature. Currently used only for PagerDuty (the value

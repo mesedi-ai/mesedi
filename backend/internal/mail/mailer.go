@@ -163,17 +163,17 @@ type DowngradeScheduledInput struct {
 // action-oriented: it tells the customer what changed, why, and
 // gives them the upgrade path back if they want the old value.
 type TierSettingsClampedInput struct {
-	ToEmail      string
-	ProjectName  string
+	ToEmail     string
+	ProjectName string
 	// Setting is a customer-readable label (e.g. "retention",
 	// "custom-pattern count"). Avoids exposing the underlying
 	// column name.
-	Setting      string
+	Setting string
 	// OldValue and NewValue are pre-formatted strings ("90 days" or
 	// "indefinite" — not raw integers). The cascade layer formats
 	// them to keep unit-handling out of the mail template.
-	OldValue     string
-	NewValue     string
+	OldValue string
+	NewValue string
 	// NewTier is the tier the project landed on (customer-readable
 	// slug: "hobby" | "team" | "enterprise"). Used to phrase
 	// "your project is now on Cloud <NewTier>".
