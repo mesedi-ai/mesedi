@@ -1,34 +1,19 @@
 #!/usr/bin/env bash
-# stress-test-159/backend-staging.config.sh
+# stress-test.config.sh for the Mesedi backend (Go service on Fly.io).
 #
-# STAGING-TARGET OVERRIDE for the #159 pre-launch stress test run.
-# Points every live-API category at mesedi-api-staging.fly.dev instead
-# of production so we can hammer the backend without disturbing the
-# real deploy.
+# Run via:
+#     ~/stress-test/stress-test.sh ~/mesedi/backend
 #
-# Usage (from ~/mesedi/backend/, mesedi backend repo root):
-#
-#     # 1. Swap the public config aside and drop this one in
-#     cp stress-test.config.sh stress-test.config.sh.prod-bak
-#     cp ~/mesedi/internal-extract/stress-test-159/backend-staging.config.sh \
-#        stress-test.config.sh
-#
-#     # 2. Run the harness (uses MESEDI_STAGING_API_KEY env var below)
-#     export MESEDI_STAGING_API_KEY="Bearer mesedi_sk_<your_staging_test_key>"
-#     ~/stress-test/back-end/stress-test.sh ~/mesedi/backend
-#
-#     # 3. When done, revert the public config
-#     mv stress-test.config.sh.prod-bak stress-test.config.sh
-#
-# NEVER commit this staging override into the public backend repo. This
-# file lives in `internal-extract/` so its `mesedi-api-staging.fly.dev`
-# hostname stays out of the public tree.
+# The Python SDK (~/mesedi/sdk-python) and TypeScript SDK
+# (~/mesedi/sdk-typescript) live outside this PROJECT_DIR. If you want
+# pip-audit / npm-audit coverage on them, run the harness against
+# those directories separately with their own config files.
 
 # ── Project identity ──────────────────────────────────────────────────────
-PROJECT_NAME="mesedi-backend-staging"
+PROJECT_NAME="mesedi-backend"
 PROJECT_LANGUAGE="go"
 
-# ── MCD source scan (unchanged from prod config) ─────────────────────────
+# ── MCD source scan ───────────────────────────────────────────────────────
 SCAN_DIRS=("internal" "cmd")
 SCAN_EXCLUDE=(
   "vendor"
@@ -42,28 +27,36 @@ SCAN_EXCLUDE=(
   "internal/api/home_export"
 )
 
-# ── Dependency vulnerability scan (unchanged) ────────────────────────────
+# ── Dependency vulnerability scan ────────────────────────────────────────
 DEPS_GO="go.mod"
 DEPS_PYTHON=""
 DEPS_NODE=""
 
-# ── Static analysis (unchanged) ──────────────────────────────────────────
-STATIC_TOOLS="AUTO"
+# ── Static analysis ──────────────────────────────────────────────────────
+STATIC_TOOLS="AUTO"   # picks golangci-lint for go projects
 
-# ── Live API tests (STAGING) ─────────────────────────────────────────────
-API_BASE_URL="https://mesedi-api-staging.fly.dev"
+# ── Live API tests (against production) ──────────────────────────────────
+API_BASE_URL="https://api.mesedi.ai"
 API_HEALTH_PATH="/health"
 
-# The staging harness needs its own bearer token — do NOT reuse the prod
-# MESEDI_API_KEY. Mint a synthetic-customer key on staging and export as
-# MESEDI_STAGING_API_KEY="Bearer mesedi_sk_..." before running.
+# Mesedi uses standard Bearer auth. The header name is literally
+# "Authorization" and the env var value MUST include the "Bearer "
+# prefix so the assembled header line reads:
+#     Authorization: Bearer mesedi_sk_...
+# Export with the prefix included:
+#     export MESEDI_API_KEY="Bearer mesedi_sk_<your_test_key>"
 API_AUTH_HEADER="Authorization"
-API_AUTH_ENV="MESEDI_STAGING_API_KEY"
+API_AUTH_ENV="MESEDI_API_KEY"
 
-# Same value — staging has no scope split either.
-API_CUSTOMER_AUTH_ENV="MESEDI_STAGING_API_KEY"
+# Mesedi does not have a customer-vs-admin SCOPE split inside its key
+# system — admin endpoints sit behind a separately-configured
+# adminToken (a Fly secret), not a derived scope on the regular key.
+# Reusing MESEDI_API_KEY here verifies that a normal mesedi_sk_ token
+# cannot reach /admin/* (it should hit AdminAuth and 401).
+API_CUSTOMER_AUTH_ENV="MESEDI_API_KEY"
 
-# Fuzz targets (unchanged from prod config).
+# Endpoints to fuzz with malformed payloads.
+# Format: METHOD|PATH|REQUIRES_AUTH(true|false)|SAMPLE_PAYLOAD_FILE
 FUZZ_ENDPOINTS=(
   "POST|/executions|true|"
   "POST|/events|true|"
@@ -71,57 +64,64 @@ FUZZ_ENDPOINTS=(
   "GET|/stats|true|"
 )
 
-# Auth boundary tests (unchanged).
+# Auth boundary tests.
+# Customer-scope token must receive 401/403 against admin endpoints.
 AUTH_BOUNDARIES=(
   "customer|/admin/projects"
   "customer|/admin/storage"
   "customer|/admin/abuse"
 )
 
-# ── TLS posture (staging hostname) ───────────────────────────────────────
-TLS_HOSTNAME="mesedi-api-staging.fly.dev"
+# ── TLS posture ──────────────────────────────────────────────────────────
+TLS_HOSTNAME="api.mesedi.ai"
 TLS_PORT=443
 
-# ── Load / soak (unchanged — 20s @ 10 RPS is safe on Fly ord region) ────
+# ── Load / soak ──────────────────────────────────────────────────────────
 LOAD_DURATION="20s"
 LOAD_RPS=10
 LOAD_TARGET_PATH="/health"
 
-# ── Advanced categories ──────────────────────────────────────────────────
+# ── Advanced (Tier 1+2+3+missed) categories ──────────────────────────────
 
-# Cat. 23 horizontal BOLA — mint a SECOND staging customer key before
-# running. If unset the BOLA test SKIPs cleanly rather than failing.
-API_CUSTOMER_AUTH_ENV_2="MESEDI_STAGING_CUSTOMER_KEY_2"
+# Cat. 23 horizontal BOLA: Customer-B trying to read Customer-A's resources.
+# Requires two customer-scope keys minted via /signup (each gets its own
+# project_id). Configure both, then point BOLA_PROBES at a Customer-A
+# resource Customer-B should NOT be able to read.
+API_CUSTOMER_AUTH_ENV_2="MESEDI_CUSTOMER_KEY_2"
 BOLA_PROBES=(
-  # Placeholder — swap in a known staging execution id from the
-  # synthetic-customer project. If left as-is the probe returns 404
-  # (still verifies cross-tenant isolation, just not on a real row).
-  "GET|/executions/exec-staging-placeholder"
+  # exec-000eb09a839b is owned by Default project. Synthetic Org's
+  # customer key (sent via MESEDI_CUSTOMER_KEY_2) should get 401/403/404
+  # against this path. If it gets 200, Mesedi has a cross-tenant leak.
+  "GET|/executions/exec-000eb09a839b"
 )
 
-# Cat. 24 Slowloris — conservative defaults.
+# Cat. 24 Slowloris: conservative defaults so the test doesn't DoS prod.
 SLOWLORIS_N=30
 SLOWLORIS_HOLD_S=8
 
-# Cat. 27 HPP target.
+# Cat. 27 HPP target: cheap read-only endpoint.
 HPP_TARGET_PATH="/health"
 
-# Cat. 31 container image scan (unchanged — local Trivy against the
-# locally-built image, no Fly registry pull).
-CONTAINER_IMAGE="mesedi-api:stress-test"
+# Cat. 31 container image scan (Trivy). After building locally with
+# `docker build -t mesedi-api:stress-test ~/mesedi/backend`, point at
+# the local tag (Fly's registry doesn't allow pulls of deploy tags).
+CONTAINER_IMAGE=""
 
-# Cat. 34 second-order SQLi (unchanged — hits /api-keys round-trip).
+# Cat. 34 second-order SQLi marker (light). Tests the admin api-keys
+# round-trip: name field is stored on POST, then read back on GET. If
+# the marker crashes the read, the read path is constructing SQL via
+# string concat against a user-controlled stored field. Requires the
+# bearer in MESEDI_API_KEY to be admin-scope.
 SECOND_ORDER_SQLI_PROBES=(
   "POST|/api-keys|name|GET|/api-keys"
 )
 
-# Cat. 38 subdomain takeover scan — staging-relevant hosts.
+# Cat. 38 subdomain takeover scan: Mesedi-owned hosts.
 SUBDOMAIN_TAKEOVER_TARGETS=(
   "mesedi.ai"
   "app.mesedi.ai"
   "api.mesedi.ai"
-  "mesedi-api-staging.fly.dev"
 )
 
-# Cat. 40 WebSocket upgrade (staging matches prod: no WS surface).
+# Cat. 40 WebSocket upgrade: Mesedi doesn't expose WebSockets, expect 404.
 WEBSOCKET_PATH="/ws"
