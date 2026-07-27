@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/klauspost/compress v1.18.6
+	github.com/klauspost/compress v1.19.1
 	github.com/pquerna/otp v1.5.0
 	github.com/stripe/stripe-go/v82 v82.5.1
 	github.com/testcontainers/testcontainers-go v0.43.0
