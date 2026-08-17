@@ -389,20 +389,40 @@ func authViaSessionCookie(
 // must NOT block, even when the authenticated email is not
 // yet verified. Only the status endpoint qualifies: the dashboard
 // interstitial polls it to know when the customer has clicked the
-// link in another tab. Every other authed route is gated.
+// link in another tab. Every other authed customer route is gated.
 //
 // Auth/logout is a public endpoint (no middleware), so it doesn't
-// need to be listed here.
+// need to be listed here. /admin/* is exempted separately by
+// prefix inside requireEmailVerified — see the prefix check there
+// for the rationale (admin auth is not the customer email-verify
+// flow; blocking admin login on unverified customer email is a
+// category error the gate wasn't designed to enforce).
 var emailVerifyExemptPaths = map[string]struct{}{
 	"/me/email-verification-status": {},
+}
+
+// emailVerifyExemptPathPrefixes lists URL prefixes that bypass the
+// email-verify gate. Currently only /admin/ — admin routes sit
+// behind AdminAuth (a stricter, credential-based gate) and never
+// carry a customer-onboarding email that could be verified in the
+// first place. Locking an admin out of the dashboard because their
+// customer-facing email is unverified is the wrong failure mode.
+//
+// Prefix match uses strings.HasPrefix — the trailing slash matters:
+// "/admin/" matches /admin/projects, /admin/storage, /admin/api-keys,
+// etc., but does NOT match "/administrator" or any customer route
+// that coincidentally starts with "admin".
+var emailVerifyExemptPathPrefixes = []string{
+	"/admin/",
 }
 
 // requireEmailVerified is the shared gate run by both auth
 // paths. Returns true when the caller may proceed, false when a 403
 // response has already been written. Exempts the routes the gate
-// itself depends on (see emailVerifyExemptPaths). Best-effort on
-// transient errors: a DB hiccup must not lock a verified customer
-// out, so we fail open in that case (the next request retries).
+// itself depends on (see emailVerifyExemptPaths) and admin routes
+// (see emailVerifyExemptPathPrefixes). Best-effort on transient
+// errors: a DB hiccup must not lock a verified customer out, so we
+// fail open in that case (the next request retries).
 //
 // Integration-test bypass: when MESEDI_DISABLE_EMAIL_VERIFY_GATE=1,
 // the gate skips for every path. This exists so the backend
@@ -419,6 +439,11 @@ func requireEmailVerified(
 	}
 	if _, exempt := emailVerifyExemptPaths[r.URL.Path]; exempt {
 		return true
+	}
+	for _, prefix := range emailVerifyExemptPathPrefixes {
+		if strings.HasPrefix(r.URL.Path, prefix) {
+			return true
+		}
 	}
 	project, err := s.GetProject(r.Context(), projectID)
 	if err != nil {
