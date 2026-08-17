@@ -142,6 +142,18 @@ func (s *auditCaptureStubStore) UpdateProjectTier(_ context.Context, _, _ string
 	return nil
 }
 
+// GetProjectRetentionDays backs the tier-change cascade
+// (applyTierChangeCascade → clampRetentionForTier), which runs on
+// every downgrade path. Returning (nil, nil) means "retention not
+// explicitly set" — the cascade treats this as indefinite; for tiers
+// that don't allow indefinite (Hobby, Team) it then clamps and calls
+// SetProjectRetentionDays (stubbed separately below). Returns
+// zero-value success so the cascade path completes without touching
+// the audit-capture assertions the test actually cares about.
+func (s *auditCaptureStubStore) GetProjectRetentionDays(_ context.Context, _ string) (*int, error) {
+	return nil, nil
+}
+
 // --- Batch 2 session-related stubs ---------------------------
 //
 // The embedded store.Store is nil, so the new session methods on the
