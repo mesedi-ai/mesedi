@@ -358,6 +358,22 @@ func (h *Handlers) HandleEmailVerificationStatus(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusUnauthorized, "no project context")
 		return
 	}
+	// Admin-scope keys are bound to the synthetic _admin project,
+	// whose OwnerEmail was never routed through the customer
+	// email-verify flow. The enforcement gate (authViaBearer) already
+	// skips them; this status endpoint must AGREE, otherwise the
+	// dashboard's client-side AuthGate polls this route, sees
+	// verified=false, and traps the operator on the "verify your
+	// email" interstitial forever (there is no welcome email to
+	// click). Reporting verified=true here keeps the two layers
+	// consistent. _admin is the unique discriminator: only
+	// admin-scope keys carry that project_id.
+	if projectID == store.APIKeyAdminProjectID {
+		writeJSON(w, http.StatusOK, EmailVerifyStatusResponse{
+			OK: true, Verified: true, Email: "", Method: "admin",
+		})
+		return
+	}
 	project, err := h.Store.GetProject(r.Context(), projectID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
