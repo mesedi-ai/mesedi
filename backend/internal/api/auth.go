@@ -290,8 +290,22 @@ func authViaBearer(
 	// emailVerifyExemptPaths. Customer-grandfathered projects (every
 	// signup before migration 032) sail through; new raw-email
 	// signups must click the link in their welcome email first.
-	if !requireEmailVerified(w, r, s, key.ProjectID) {
-		return
+	//
+	// Admin-scope keys skip the gate entirely, on EVERY route. The
+	// gate is a customer-onboarding safety mechanism; an admin key
+	// is an internal operator credential bound to the synthetic
+	// _admin project, whose OwnerEmail was never routed through the
+	// customer email-verify flow. Gating it produces a permanent
+	// 403 the operator can never clear (there's no welcome email to
+	// click). This is broader than the /admin/ path exemption in
+	// requireEmailVerified: the dashboard's key-paste sign-in
+	// validates against /stats (a CUSTOMER route), so a path-only
+	// exemption would still 403 an admin pasting their key on the
+	// login screen. Scope is the correct discriminator, not path.
+	if key.Scope != store.APIKeyScopeAdmin {
+		if !requireEmailVerified(w, r, s, key.ProjectID) {
+			return
+		}
 	}
 
 	ctx := context.WithValue(r.Context(), ctxKeyProjectID, key.ProjectID)
