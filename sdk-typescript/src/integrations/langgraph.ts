@@ -629,7 +629,7 @@ function extractRoleMessages(conversation: unknown[]): {
       typeof m.type === "string"
         ? m.type.toLowerCase()
         : typeof m._getType === "function"
-          ? String((m._getType as => unknown)())
+          ? String((m._getType as () => unknown)())
           : String(m.constructor?.name ?? "").toLowerCase();
     let content = m.content;
     if (Array.isArray(content)) {
