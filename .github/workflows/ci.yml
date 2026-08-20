@@ -1,0 +1,106 @@
+# Test CI.
+#
+# Why this exists: before 2026-08-20 no workflow ran a single test.
+# fly-deploy.yml shipped straight to production on every push to main
+# with 562 Go tests and 228 Python tests gating nothing. The gap proved
+# itself the day this was written — publishing the Python SDK surfaced a
+# staleness test that had been failing silently (a phantom
+# RetryableError entry in the Anthropic error map) because nothing ran
+# it.
+#
+# Scope note: this workflow runs UNIT tests only. Anything that needs a
+# live provider, a real API key, or money is excluded and stays a manual
+# harness:
+#   - backend/test/integration/  (pytest, needs a running backend)
+#   - sdk-typescript *.integration.test.ts  (real Anthropic calls)
+#   - Go files tagged `stripe_integration`  (excluded by default)
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least-privilege: these jobs only read the tree and run tests.
+permissions:
+  contents: read
+
+# A newer push supersedes an in-flight run on the same ref. Deploy
+# gating lives in fly-deploy.yml, so cancelling here is safe.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend (go test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: go build
+        working-directory: backend
+        run: go build ./...
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+      - name: go test
+        working-directory: backend
+        run: go test ./...
+
+  sdk-python:
+    name: sdk-python (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install SDK + test deps
+        working-directory: sdk-python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          # anthropic + openai are NOT runtime dependencies of the SDK
+          # (provider instrumentation is import-on-use). They are
+          # installed here on purpose: tests/test_mapping_staleness.py
+          # walks the real provider exception hierarchies to catch
+          # drift between our error maps and the shipped SDKs, and it
+          # SKIPS when the package is absent. Without these two lines
+          # the drift guard would pass vacuously in CI — which is
+          # exactly how the phantom RetryableError entry survived.
+          pip install anthropic openai
+      - name: pytest
+        working-directory: sdk-python
+        run: python -m pytest -q
+
+  sdk-typescript:
+    name: sdk-typescript (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: sdk-typescript/package-lock.json
+      - name: Install
+        working-directory: sdk-typescript
+        run: npm ci
+      - name: tsc build
+        working-directory: sdk-typescript
+        run: npm run build
+      - name: vitest (unit only)
+        working-directory: sdk-typescript
+        # *.integration.test.ts drive real Anthropic traffic and need
+        # ANTHROPIC_API_KEY + a live backend. They cost money per run
+        # and are a manual harness, not CI.
+        run: npx vitest run --exclude '**/*.integration.test.ts'

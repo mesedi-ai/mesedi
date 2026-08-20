@@ -38,8 +38,41 @@ concurrency:
   # deploys correctly.
 
 jobs:
+  # Gate. Until 2026-08-20 this workflow deployed straight to production
+  # on every push to main with nothing verifying the build first — a
+  # broken commit reached prod and was only caught by a customer-facing
+  # symptom. This job runs the backend suite and `deploy` needs it, so a
+  # red test now blocks the rollout instead of following it.
+  #
+  # Deliberately duplicated from ci.yml rather than referenced: GitHub
+  # Actions cannot express "wait for a job in another workflow" without
+  # brittle status-polling, and the deploy gate is important enough to
+  # keep self-contained. ci.yml still covers both SDKs on every push.
+  test:
+    name: go test (deploy gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: go build
+        working-directory: backend
+        run: go build ./...
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+      - name: go test
+        working-directory: backend
+        run: go test ./...
+
   deploy:
     name: flyctl deploy
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Least-privilege GITHUB_TOKEN scope (CodeQL alert ). This
