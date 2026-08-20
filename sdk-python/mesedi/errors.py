@@ -103,10 +103,6 @@ _ANTHROPIC_EXCEPTION_MAP = {
     "StreamAlreadyConsumed": ErrorClass.CLIENT_ERROR,
     # Auth-adjacent: Bedrock / Vertex workload-identity probe failed.
     "WorkloadIdentityError": ErrorClass.INVALID_API_KEY,
-    # Internal SDK marker exception for transient failures the SDK's
-    # own retry loop classifies as retryable. Safe default is
-    # SERVICE_UNAVAILABLE so the detector still picks up signal.
-    "RetryableError": ErrorClass.SERVICE_UNAVAILABLE,
     # Base classes — caught last, treated as unknown rather than
     # falsely attributed to a specific bucket.
     "APIStatusError": ErrorClass.UNKNOWN,
