@@ -103,8 +103,8 @@ func welcomeHTML(in WelcomeInput) string {
 <meta charset="utf-8">
 <title>Welcome to Mesedi</title>
 </head>
-<body style="margin:0;padding:0;background:a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e5e5e5;">
-<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:a0a0a;">
+<body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e5e5e5;">
+<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#0a0a0a;">
   <tr>
     <td align="center" style="padding:32px 16px;">
       <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%%;">
@@ -117,7 +117,7 @@ func welcomeHTML(in WelcomeInput) string {
         <tr>
           <td style="font-size:15px;line-height:1.6;color:#b5b5b5;padding-bottom:24px;">
             Your project <strong style="color:#fafafa;">%s</strong> is live. The API key prefix is
-            <code style="background:a1a1a;padding:2px 6px;border-radius:4px;color:#fafafa;">%s</code>
+            <code style="background:#1a1a1a;padding:2px 6px;border-radius:4px;color:#fafafa;">%s</code>
             (the raw key was shown to you once during signup; we don&rsquo;t store it).
           </td>
         </tr>
@@ -131,7 +131,7 @@ func welcomeHTML(in WelcomeInput) string {
         <tr><td style="padding:12px 0;font-size:15px;color:#fafafa;font-weight:600;">1. Install the SDK</td></tr>
         <tr>
           <td>
-            <pre style="background:a1a1a;border:1px solid a2a2a;border-radius:6px;padding:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;color:#fafafa;overflow-x:auto;margin:0;">pip install mesedi          # Python
+            <pre style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;padding:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;color:#fafafa;overflow-x:auto;margin:0;">pip install mesedi          # Python
 npm install mesedi          # TypeScript / Node</pre>
           </td>
         </tr>
@@ -139,7 +139,7 @@ npm install mesedi          # TypeScript / Node</pre>
         <tr><td style="padding:18px 0 8px;font-size:15px;color:#fafafa;font-weight:600;">2. Wrap your agent</td></tr>
         <tr>
           <td>
-            <pre style="background:a1a1a;border:1px solid a2a2a;border-radius:6px;padding:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;color:#fafafa;overflow-x:auto;margin:0;">import mesedi
+            <pre style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;padding:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;color:#fafafa;overflow-x:auto;margin:0;">import mesedi
 mesedi.configure(api_key="mesedi_sk_...")
 
 @mesedi.wrap
@@ -158,12 +158,12 @@ run_my_agent("hello")</pre>
         </tr>
         <tr>
           <td style="padding-bottom:24px;">
-            <a href="%s" style="display:inline-block;background:#f97316;color:a0a0a;text-decoration:none;font-weight:600;padding:12px 18px;border-radius:6px;font-size:14px;">Open dashboard &rarr;</a>
+            <a href="%s" style="display:inline-block;background:#f97316;color:#0a0a0a;text-decoration:none;font-weight:600;padding:12px 18px;border-radius:6px;font-size:14px;">Open dashboard &rarr;</a>
           </td>
         </tr>
 
         <tr>
-          <td style="font-size:15px;line-height:1.6;color:#b5b5b5;padding:24px 0 0;border-top:1px solid a2a2a;">
+          <td style="font-size:15px;line-height:1.6;color:#b5b5b5;padding:24px 0 0;border-top:1px solid #2a2a2a;">
             The full quickstart is at
             <a href="%s" style="color:#fafafa;">app.mesedi.ai/docs/quickstart</a>,
             including the LangChain, LangGraph, CrewAI, OpenAI Agents SDK, and Vercel AI SDK adapters.
@@ -176,7 +176,7 @@ run_my_agent("hello")</pre>
         </tr>
 
         <tr>
-          <td style="font-size:12px;color:;padding:24px 0 0;border-top:1px solid a2a2a;">
+          <td style="font-size:12px;color:#6b6b6b;padding:24px 0 0;border-top:1px solid #2a2a2a;">
             Mesedi &middot; Verdifax, LLC d/b/a Mesedi
           </td>
         </tr>
@@ -203,11 +203,11 @@ func welcomeVerifyHTMLBlock(in WelcomeInput) string {
 		return ""
 	}
 	return fmt.Sprintf(`<tr>
-  <td style="background:f1505;border:1px solid #f97316;border-radius:8px;padding:18px 18px 22px;margin-bottom:24px;font-size:14px;line-height:1.55;color:#fde8c8;">
+  <td style="background:#1f1505;border:1px solid #f97316;border-radius:8px;padding:18px 18px 22px;margin-bottom:24px;font-size:14px;line-height:1.55;color:#fde8c8;">
     <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#f97316;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;padding-bottom:6px;">Step 0 &middot; Verify this email</div>
     Before you can open the dashboard, click the link below within 24 hours.
     <div style="padding-top:14px;">
-      <a href="%s" style="display:inline-block;background:#f97316;color:;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:600;font-size:14px;">Verify my email &rarr;</a>
+      <a href="%s" style="display:inline-block;background:#f97316;color:#0a0a0a;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:600;font-size:14px;">Verify my email &rarr;</a>
     </div>
     <div style="font-size:12px;color:#b5b5b5;padding-top:12px;">Single-use. If the link expires you can ask for a fresh one from the dashboard&rsquo;s &ldquo;check your email&rdquo; screen.</div>
   </td>
