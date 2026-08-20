@@ -22,6 +22,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -173,27 +174,43 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2a. Duplicate-account guard: one VERIFIED email owns one account.
-	//     We block only when the email is already verified, not merely
-	//     present on some project. This is deliberate:
-	//       - An unverified prior signup (a typo, a throwaway, or someone
-	//         pre-registering a stranger's address) must NOT lock the real
-	//         owner out; they can still sign up and verify.
-	//       - Gating on "verified" rather than "any project with this
-	//         email" avoids an email-enumeration oracle on unverified
-	//         addresses and closes the squat-griefing vector.
-	//     A customer who already verified should sign in via magic link /
-	//     SSO rather than mint a second parallel account. Runs after input
-	//     validation (so 400s win over 409s) and before any project row is
-	//     created (so a duplicate never leaves an orphan project).
-	if verified, err := h.Store.IsEmailVerified(r.Context(), email); err != nil {
-		h.Logger.Error("signup: verified-email check failed", "error", err.Error(), "email", email)
+	// 2a. Duplicate-account guard: one VERIFIED, still-existing account
+	//     per email. Block only when BOTH hold:
+	//       (a) a project with this owner_email still exists, AND
+	//       (b) that email is verified.
+	//     Why both:
+	//       - The verified check keeps the block off unverified prior
+	//         signups (a typo, a throwaway, or someone pre-registering a
+	//         stranger's address), so the real owner is never locked out
+	//         and there is no enumeration oracle on unverified addresses.
+	//       - The existence check makes account DELETION free the email
+	//         again. verified_emails is a permanent "has ever proved
+	//         ownership" ledger and is never pruned on delete, so it alone
+	//         cannot gate reuse; a hard-deleted project leaves no row, so
+	//         GetMostRecentProjectByOwnerEmail returns ErrNotFound and the
+	//         signup proceeds.
+	//     A customer with a live verified account should sign in via magic
+	//     link / SSO rather than mint a second parallel account. Runs after
+	//     input validation (400s win over 409s) and before any project row
+	//     is created (a duplicate never leaves an orphan project).
+	existing, err := h.Store.GetMostRecentProjectByOwnerEmail(r.Context(), email)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		h.Logger.Error("signup: existing-project check failed", "error", err.Error(), "email", email)
 		writeError(w, http.StatusInternalServerError, "could not check account status, please retry")
 		return
-	} else if verified {
-		writeError(w, http.StatusConflict,
-			"an account with this email already exists. Sign in with a magic link at https://app.mesedi.ai/login instead.")
-		return
+	}
+	if existing != nil {
+		verified, verr := h.Store.IsEmailVerified(r.Context(), email)
+		if verr != nil {
+			h.Logger.Error("signup: verified-email check failed", "error", verr.Error(), "email", email)
+			writeError(w, http.StatusInternalServerError, "could not check account status, please retry")
+			return
+		}
+		if verified {
+			writeError(w, http.StatusConflict,
+				"an account with this email already exists. Sign in with a magic link at https://app.mesedi.ai/login instead.")
+			return
+		}
 	}
 
 	// 3. Create the project.
