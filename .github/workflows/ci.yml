@@ -74,9 +74,16 @@ jobs:
           # walks the real provider exception hierarchies to catch
           # drift between our error maps and the shipped SDKs, and it
           # SKIPS when the package is absent. Without these two lines
-          # the drift guard would pass vacuously in CI — which is
-          # exactly how the phantom RetryableError entry survived.
-          pip install anthropic openai
+          # the drift guard passes vacuously in CI.
+          #
+          # PINNED DELIBERATELY. Unpinned, CI resolves to whatever the
+          # provider shipped that morning, so OpenAI or Anthropic
+          # adding one exception class turns this build red with no
+          # commit from us — a bad failure mode in general and a very
+          # bad one during a launch week. Bumping these is a normal
+          # reviewed change: raise the pin, run the suite, map whatever
+          # new exception classes the coverage guard reports.
+          pip install 'anthropic==0.125.0' 'openai==3.3.1'
       - name: pytest
         working-directory: sdk-python
         run: python -m pytest -q

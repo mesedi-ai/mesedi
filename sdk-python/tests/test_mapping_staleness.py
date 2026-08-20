@@ -245,6 +245,35 @@ def test_gemini_mapping_covers_every_installed_exception() -> None:
 # ──────────────────────────────────────────────────────────────────────
 
 
+# Names permitted to be absent from the INSTALLED provider SDK.
+#
+# Why this exists. The Mesedi SDK does not pin its provider versions —
+# a customer installs whatever anthropic/openai they already use, and
+# our error map has to serve that whole range. So the map is
+# deliberately a SUPERSET of any single provider release, and the two
+# guards in this file pull in opposite directions:
+#
+#   test_*_covers_every_installed_exception : installed SDK  ⊆ our map
+#   test_no_stale_entries_in_map            : our map ⊆ installed SDK
+#
+# A class that exists in a newer provider release but not an older one
+# satisfies neither guard on both machines at once. This allowlist
+# resolves it: the coverage guard stays strict (a genuinely new provider
+# exception still fails the build), while the staleness guard tolerates
+# these specific names.
+#
+# Keep it SHORT and justify every entry with the version boundary. An
+# entry here is a promise that the name is real in some supported
+# version — not a way to silence a typo.
+_VERSION_TOLERANT_NAMES = {
+    # Added to anthropic between 0.102.0 and 0.125.0. Present in CI
+    # (0.125.0), absent on older local installs. Removing it from the
+    # map because a local check didn't find it is a mistake that has
+    # already been made once — see the note in errors.py.
+    "RetryableError",
+}
+
+
 @pytest.mark.parametrize(
     "package,attr,map_name",
     [
@@ -257,10 +286,13 @@ def test_no_stale_entries_in_map(package: str, attr: str, map_name: str) -> None
     actual class in the provider's exception hierarchy. Catches
     typos and entries left behind after a provider deletes a class.
 
-    Some legacy names (e.g. CohereAPIError on cohere v5+) ARE
-    permitted to be stale to preserve backward compatibility; that
-    map is excluded from this strict check. The legacy retention is
-    documented in errors.py inline."""
+    Two documented escape hatches:
+      - Names in _VERSION_TOLERANT_NAMES exist in some supported
+        provider versions but not others (see that constant).
+      - Some legacy names (e.g. CohereAPIError on cohere v5+) ARE
+        permitted to be stale to preserve backward compatibility; that
+        map is excluded from this check entirely. The legacy retention
+        is documented in errors.py inline."""
     base = _import_attr_or_skip(package, attr)
     actual_names = {c.__name__ for c in _all_subclasses(base)}
     mapped_names = set(getattr(merrors, map_name).keys())
@@ -270,9 +302,11 @@ def test_no_stale_entries_in_map(package: str, attr: str, map_name: str) -> None
     # Stale entries that are present-with-purpose: the base class
     # itself, which we list to ensure UNKNOWN classification.
     stale.discard(attr)
+    stale -= _VERSION_TOLERANT_NAMES
     assert not stale, (
         f"{map_name} contains entries that don't correspond to any "
         f"installed {package} exception class: {sorted(stale)}. "
-        f"Either remove the entries OR pin a comment justifying why "
-        f"they're kept (e.g. backward-compat for legacy SDK versions)."
+        f"Either remove the entries, OR add them to "
+        f"_VERSION_TOLERANT_NAMES with the version boundary if they "
+        f"exist in a different supported {package} release."
     )

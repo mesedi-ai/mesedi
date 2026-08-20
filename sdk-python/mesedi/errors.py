@@ -103,6 +103,19 @@ _ANTHROPIC_EXCEPTION_MAP = {
     "StreamAlreadyConsumed": ErrorClass.CLIENT_ERROR,
     # Auth-adjacent: Bedrock / Vertex workload-identity probe failed.
     "WorkloadIdentityError": ErrorClass.INVALID_API_KEY,
+    # Transient failure marker the SDK's own retry loop classifies as
+    # retryable. Safe default is SERVICE_UNAVAILABLE so the detector
+    # still picks up provider signal.
+    #
+    # VERSION-DEPENDENT: absent in anthropic 0.102.0, present by
+    # 0.125.0. Listed in _VERSION_TOLERANT_NAMES in
+    # tests/test_mapping_staleness.py so the staleness guard doesn't
+    # flag it when someone runs the suite against an older anthropic.
+    # (It was briefly removed on 2026-08-20 after a local check against
+    # 0.102.0 concluded it never existed; CI on 0.125.0 proved
+    # otherwise. Do not remove it again without checking BOTH ends of
+    # the supported version range.)
+    "RetryableError": ErrorClass.SERVICE_UNAVAILABLE,
     # Base classes — caught last, treated as unknown rather than
     # falsely attributed to a specific bucket.
     "APIStatusError": ErrorClass.UNKNOWN,
@@ -164,6 +177,34 @@ _OPENAI_EXCEPTION_MAP = {
     "NotFoundError": ErrorClass.CLIENT_ERROR,
     "ConflictError": ErrorClass.CLIENT_ERROR,
     "UnprocessableEntityError": ErrorClass.CLIENT_ERROR,
+    # Response arrived but didn't match the expected schema. Mirrors the
+    # Anthropic mapping of the same class name.
+    "APIResponseValidationError": ErrorClass.INTERNAL_ERROR,
+    # Auth-adjacent. OAuthError is a failed OAuth exchange;
+    # SubjectTokenProviderError is a workload-identity token provider
+    # failing to mint a token (the OpenAI analogue of Anthropic's
+    # WorkloadIdentityError).
+    "OAuthError": ErrorClass.INVALID_API_KEY,
+    "SubjectTokenProviderError": ErrorClass.INVALID_API_KEY,
+    # Realtime / WebSocket transport. A closed connection is a provider
+    # availability signal; a full local queue means the consumer isn't
+    # draining fast enough, which is caller-side.
+    "WebSocketConnectionClosedError": ErrorClass.SERVICE_UNAVAILABLE,
+    "WebSocketQueueFullError": ErrorClass.CLIENT_ERROR,
+    # Client construction / usage errors — raised before or around the
+    # network call, and always a caller-side bug rather than a provider
+    # incident. MutuallyExclusiveAuthError and StreamAlreadyConsumed
+    # mirror the Anthropic mappings of the same names.
+    "MutuallyExclusiveAuthError": ErrorClass.CLIENT_ERROR,
+    "StreamAlreadyConsumed": ErrorClass.CLIENT_ERROR,
+    "APIRemovedInV1": ErrorClass.CLIENT_ERROR,
+    "_AmbiguousModuleClientUsageError": ErrorClass.CLIENT_ERROR,
+    # Structured-output helpers raise these when the completion stopped
+    # for a reason the caller has to handle: the safety filter tripped,
+    # or max_tokens truncated the response. Both are caller-side
+    # (prompt or config), not provider incidents.
+    "ContentFilterFinishReasonError": ErrorClass.CLIENT_ERROR,
+    "LengthFinishReasonError": ErrorClass.CLIENT_ERROR,
     # Base classes — caught last, treated as unknown rather than
     # falsely attributed to a specific bucket.
     "APIStatusError": ErrorClass.UNKNOWN,
