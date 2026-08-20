@@ -149,7 +149,7 @@ backend/
 
 ## Status
 
-All 24 failure-class detectors are live. See `internal/severity/severity.go` for the canonical list. Failure-group deduplication, webhook escalation on first occurrence, hard-halt with local budgets + SSE remote channel, multi-agent topology tracking, human-in-the-loop lifecycle, and OpenTelemetry parallel emission are all shipped.
+All failure-class detectors are live: 20+ named classes (24 detector signatures, counting the loop sub-variants — identical-call, similar-call, step-count, time-budget). See `internal/severity/severity.go` for the canonical list. Failure-group deduplication, webhook escalation on first occurrence, hard-halt with local budgets + SSE remote channel, multi-agent topology tracking, human-in-the-loop lifecycle, and OpenTelemetry parallel emission are all shipped.
 
 Postgres is the primary storage backend in production. SQLite is supported for single-node self-hosting via the `MESEDI_DB_URL` `file:` scheme. The store interface abstracts both behind the same call shape.
 
