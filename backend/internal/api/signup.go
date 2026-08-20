@@ -173,6 +173,29 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 2a. Duplicate-account guard: one VERIFIED email owns one account.
+	//     We block only when the email is already verified, not merely
+	//     present on some project. This is deliberate:
+	//       - An unverified prior signup (a typo, a throwaway, or someone
+	//         pre-registering a stranger's address) must NOT lock the real
+	//         owner out; they can still sign up and verify.
+	//       - Gating on "verified" rather than "any project with this
+	//         email" avoids an email-enumeration oracle on unverified
+	//         addresses and closes the squat-griefing vector.
+	//     A customer who already verified should sign in via magic link /
+	//     SSO rather than mint a second parallel account. Runs after input
+	//     validation (so 400s win over 409s) and before any project row is
+	//     created (so a duplicate never leaves an orphan project).
+	if verified, err := h.Store.IsEmailVerified(r.Context(), email); err != nil {
+		h.Logger.Error("signup: verified-email check failed", "error", err.Error(), "email", email)
+		writeError(w, http.StatusInternalServerError, "could not check account status, please retry")
+		return
+	} else if verified {
+		writeError(w, http.StatusConflict,
+			"an account with this email already exists. Sign in with a magic link at https://app.mesedi.ai/login instead.")
+		return
+	}
+
 	// 3. Create the project.
 	now := time.Now().UTC()
 	projectID := fmt.Sprintf("proj_%d", now.UnixNano())
