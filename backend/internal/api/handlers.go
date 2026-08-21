@@ -3667,7 +3667,8 @@ func tierRetentionCap(tier string) (maxDays int, allowIndefinite bool) {
 	// returning the old label still gets the same retention cap as
 	// the renamed tier.
 	switch normalizeTier(strings.ToLower(tier)) {
-	case TierEnterprise:
+	case TierProduction, TierEnterprise:
+		// Retention is contract-negotiated on both hand-sold tiers.
 		return 3650, true
 	case TierTeam:
 		return TeamDefaultRetentionDays, false

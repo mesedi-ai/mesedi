@@ -19,13 +19,17 @@ func TestAnalysisModelForTier_SelfServeTiersUseStandardModel(t *testing.T) {
 	}
 }
 
-// Enterprise is the backend tier that hand-sold Cloud Production
-// customers are provisioned as, so this is the case that delivers the
-// premium-model promise on the pricing card.
-func TestAnalysisModelForTier_EnterpriseUsesPremiumModel(t *testing.T) {
+// Both hand-sold tiers deliver the premium-model promise printed on
+// the pricing card. Production is the one customers actually buy at
+// $1,500/mo, so a regression here is a paid-for feature silently not
+// being delivered.
+func TestAnalysisModelForTier_HandSoldTiersUsePremiumModel(t *testing.T) {
 	t.Parallel()
-	if got := analysisModelForTier(TierEnterprise); got != AnalysisModelPremium {
-		t.Fatalf("expected %s for enterprise, got %s", AnalysisModelPremium, got)
+	for _, tier := range []string{TierProduction, TierEnterprise} {
+		if got := analysisModelForTier(tier); got != AnalysisModelPremium {
+			t.Errorf("tier %q: expected %s, got %s",
+				tier, AnalysisModelPremium, got)
+		}
 	}
 }
 

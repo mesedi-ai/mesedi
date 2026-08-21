@@ -310,7 +310,7 @@ func (h *Handlers) HandleListAuditEvents(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	tier := normalizeTier(proj.Tier)
-	if tier != TierTeam && tier != TierEnterprise {
+	if tier != TierTeam && tier != TierProduction && tier != TierEnterprise {
 		writeError(w, http.StatusPaymentRequired,
 			"Audit logs are a Cloud Team feature. On a single-admin Hobby project every event is 'you did it', so the log has no accountability value. Upgrade to Cloud Team at /app/billing to enable multi-admin audit trail.")
 		return

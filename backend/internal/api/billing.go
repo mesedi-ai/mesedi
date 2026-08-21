@@ -78,8 +78,28 @@ import (
 // the old label doesn't crash the dispatcher.
 
 const (
-	TierHobby      = "hobby"
-	TierTeam       = "team"
+	TierHobby = "hobby"
+	TierTeam  = "team"
+
+	// TierProduction is the hand-sold tier between Team and
+	// Enterprise (Cloud Production, from $1,500/mo). It behaves
+	// EXACTLY like Enterprise everywhere in the backend — same caps,
+	// same overage exemption, same audit-log access, same premium
+	// analysis model. The only real difference is the name the
+	// customer sees, which is why it is a distinct tier rather than
+	// an alias: a Production customer whose dashboard said "Cloud
+	// Enterprise" would reasonably think they had been billed wrong.
+	//
+	// Consequence for maintainers: anywhere you write
+	// `case TierEnterprise:` you almost certainly want
+	// `case TierProduction, TierEnterprise:`. The exceptions, if any
+	// ever arise, should carry a comment saying why.
+	//
+	// No migration was needed to add this — projects.tier is a plain
+	// TEXT column with no CHECK constraint in either the SQLite or
+	// Postgres schema.
+	TierProduction = "production"
+
 	TierEnterprise = "enterprise"
 
 	// TierProLegacy is the pre-rewrite name for what is now "team".
@@ -398,7 +418,9 @@ func tierExecutionLimit(tier string) int64 {
 		return EffectiveHobbyExecutionLimit()
 	case TierTeam:
 		return EffectiveTeamExecutionIncluded()
-	case TierEnterprise:
+	case TierProduction, TierEnterprise:
+		// Volume is contract-negotiated on both hand-sold tiers, so
+		// there is no included quota to enforce here.
 		return 0
 	default:
 		return EffectiveHobbyExecutionLimit()
@@ -835,8 +857,9 @@ func (h *Handlers) HandleGetAIAnalysesUsage(w http.ResponseWriter, r *http.Reque
 		Tier: tier,
 	}
 
-	if tier == TierEnterprise {
-		// Enterprise: counter not applicable, no per-analysis billing.
+	if tier == TierProduction || tier == TierEnterprise {
+		// Hand-sold tiers: counter not applicable, no per-analysis
+		// billing (allocation is contract-negotiated).
 		// Dashboard interprets Applicable=false to hide the card.
 		writeJSON(w, http.StatusOK, resp)
 		return

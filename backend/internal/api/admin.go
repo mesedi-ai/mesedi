@@ -660,10 +660,11 @@ func (h *Handlers) HandleAdminSetTier(w http.ResponseWriter, r *http.Request) {
 	// dropdown sends the new name; the legacy fallback is defensive.
 	tier = normalizeTier(tier)
 	switch tier {
-	case TierHobby, TierTeam, TierEnterprise:
+	case TierHobby, TierTeam, TierProduction, TierEnterprise:
 		// ok
 	default:
-		writeError(w, http.StatusBadRequest, "tier must be hobby, team, or enterprise")
+		writeError(w, http.StatusBadRequest,
+			"tier must be hobby, team, production, or enterprise")
 		return
 	}
 	var expiresAt *time.Time

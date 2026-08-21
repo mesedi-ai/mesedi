@@ -78,7 +78,7 @@ const (
 // unknown / empty tiers — the strictest cap, safest default.
 func TierCapTimeBudgetMs(tier string) int {
 	switch normalizeTier(tier) {
-	case TierEnterprise:
+	case TierProduction, TierEnterprise:
 		return tierCapTimeBudgetEnterpriseMs
 	case TierTeam:
 		return tierCapTimeBudgetTeamMs
@@ -93,7 +93,7 @@ func TierCapTimeBudgetMs(tier string) int {
 // tiers — the strictest cap.
 func TierCapToolReturnValueBytes(tier string) int {
 	switch normalizeTier(tier) {
-	case TierEnterprise:
+	case TierProduction, TierEnterprise:
 		return tierCapToolReturnValueEnterpriseBytes
 	case TierTeam:
 		return tierCapToolReturnValueTeamBytes
@@ -110,7 +110,7 @@ func TierCapToolReturnValueBytes(tier string) int {
 // to the Hobby cap (strictest).
 func tierCapTokenWastePrefixWindow(tier string) int {
 	switch normalizeTier(tier) {
-	case TierEnterprise:
+	case TierProduction, TierEnterprise:
 		return tierCapTokenWastePrefixWindowEnterprise
 	case TierTeam:
 		return tierCapTokenWastePrefixWindowTeam

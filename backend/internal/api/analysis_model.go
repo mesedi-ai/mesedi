@@ -20,12 +20,12 @@
 // 200 analyses on Team cost about $1.40 in total. AI analysis is not a
 // cost center at this scale; it is a quality lever.
 //
-// Tier mapping note. There is no backend "production" tier — Cloud
-// Production is a hand-sold marketing tier with no self-serve checkout,
-// and its customers are provisioned as backend tier `enterprise` (see
-// internal-extract/launch/production-onboarding-checklist.md). So the
-// premium model follows TierEnterprise, which covers both Production
-// and Enterprise customers.
+// Tier mapping note. Both hand-sold tiers get the premium model:
+// TierProduction (Cloud Production, from $1,500/mo) and TierEnterprise.
+// Production is a real backend tier rather than an alias for
+// enterprise, because the customer's own dashboard renders the tier
+// name and a Production customer seeing "Cloud Enterprise" would
+// reasonably think they had been billed wrong.
 
 package api
 
@@ -42,6 +42,15 @@ const (
 	AnalysisModelPremium = "claude-sonnet-5"
 )
 
+// premiumAnalysisTiers is the set of tiers that receive
+// AnalysisModelPremium. Declared as data rather than inline cases so
+// the pricing-card promise ("analyses run on a more capable model")
+// has exactly one place it can drift from.
+var premiumAnalysisTiers = map[string]bool{
+	TierProduction: true,
+	TierEnterprise: true,
+}
+
 // analysisModelForTier returns the Anthropic model id used for AI
 // root-cause analysis on the given tier.
 //
@@ -51,10 +60,8 @@ const (
 // tier must never silently escalate a customer onto the more expensive
 // model.
 func analysisModelForTier(tier string) string {
-	switch tier {
-	case TierEnterprise:
+	if premiumAnalysisTiers[normalizeTier(tier)] {
 		return AnalysisModelPremium
-	default:
-		return AnalysisModelStandard
 	}
+	return AnalysisModelStandard
 }

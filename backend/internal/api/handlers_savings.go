@@ -98,6 +98,15 @@ const (
 	// changes, update this constant.
 	subscriptionCostTeamMonthly float64 = 99
 
+	// subscriptionCostProductionMonthly is the entry rate for Cloud
+	// Production. Unlike Enterprise this is a real listed price
+	// ("from $1,500/mo" on the pricing page), so ROI math for a
+	// Production customer uses the floor of the actual range rather
+	// than a placeholder. Deals negotiated above the floor make the
+	// reported ROI conservative, which is the safe direction.
+	// Keep in sync with the pricing page.
+	subscriptionCostProductionMonthly float64 = 1500
+
 	// subscriptionCostEnterpriseMonthly is the placeholder monthly
 	// rate used in ROI math for Enterprise customers. Real Enterprise
 	// pricing is contract-driven; the savings card only uses this as
@@ -377,6 +386,8 @@ func subscriptionCostFor(tier string) float64 {
 	switch normalizeTier(tier) {
 	case TierTeam:
 		return subscriptionCostTeamMonthly
+	case TierProduction:
+		return subscriptionCostProductionMonthly
 	case TierEnterprise:
 		return subscriptionCostEnterpriseMonthly
 	default:
