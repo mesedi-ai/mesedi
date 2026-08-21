@@ -36,10 +36,16 @@ type ModelRate struct {
 var modelRates = map[string]ModelRate{
 	"claude-haiku-4-5":        {InputUSDPerMTok: 1.00, OutputUSDPerMTok: 5.00},
 	"claude-haiku-4-5-2025xx": {InputUSDPerMTok: 1.00, OutputUSDPerMTok: 5.00},
-	"claude-sonnet-4":         {InputUSDPerMTok: 3.00, OutputUSDPerMTok: 15.00},
-	"claude-sonnet-4-6":       {InputUSDPerMTok: 3.00, OutputUSDPerMTok: 15.00},
-	"claude-opus-4":           {InputUSDPerMTok: 15.00, OutputUSDPerMTok: 75.00},
-	"claude-opus-4-6":         {InputUSDPerMTok: 15.00, OutputUSDPerMTok: 75.00},
+	// Sonnet 5 is both NEWER and CHEAPER than sonnet-4-6 ($2/$10 vs
+	// $3/$15). Added 2026-08-20 when the premium analysis tier started
+	// using it; without this entry LookupRate fell through to
+	// UnknownModelRate, which happens to be $2/$10 as well — correct by
+	// coincidence, not by design.
+	"claude-sonnet-5":   {InputUSDPerMTok: 2.00, OutputUSDPerMTok: 10.00},
+	"claude-sonnet-4":   {InputUSDPerMTok: 3.00, OutputUSDPerMTok: 15.00},
+	"claude-sonnet-4-6": {InputUSDPerMTok: 3.00, OutputUSDPerMTok: 15.00},
+	"claude-opus-4":     {InputUSDPerMTok: 15.00, OutputUSDPerMTok: 75.00},
+	"claude-opus-4-6":   {InputUSDPerMTok: 15.00, OutputUSDPerMTok: 75.00},
 }
 
 // UnknownModelRate is the fallback when a model id isn't in
@@ -76,6 +82,33 @@ func LookupRate(modelID string) ModelRate {
 		return modelRates[bestPrefix]
 	}
 	return UnknownModelRate
+}
+
+// HasExplicitRate reports whether modelID resolves to a real entry in
+// the rate table (exact or prefix match) rather than falling through to
+// UnknownModelRate.
+//
+// This exists because LookupRate's return value alone cannot answer the
+// question: a listed model whose price happens to equal UnknownModelRate
+// is indistinguishable from an unlisted one. claude-sonnet-5 is exactly
+// that case — it really is $2/$10, identical to the fallback — so a test
+// comparing rates by value reported it as missing even after it was
+// added. Callers that need "is this model actually known to us" (cost
+// reporting, drift guards) must use this, not a value comparison.
+func HasExplicitRate(modelID string) bool {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	if id == "" {
+		return false
+	}
+	if _, ok := modelRates[id]; ok {
+		return true
+	}
+	for known := range modelRates {
+		if strings.HasPrefix(id, known) {
+			return true
+		}
+	}
+	return false
 }
 
 // ComputeCostUSD returns the USD cost of one call given token

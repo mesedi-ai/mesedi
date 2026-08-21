@@ -2579,7 +2579,11 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 	// empty stored signatures as "outdated, recommend re-analyze."
 	playbookSig, _ := playbooks.Signature(group.FailureClass, group.Signature)
 
-	model := "claude-haiku-4-5"
+	// Per-tier model. Hand-sold tiers (Production, Enterprise) get the
+	// stronger model; self-serve tiers get the standard one. `tier` was
+	// normalized above. See analysis_model.go for the cost math behind
+	// the split.
+	model := analysisModelForTier(tier)
 	res, err := h.Anthropic.Call(r.Context(), anthropic.CallOptions{
 		Model:       model,
 		System:      analysisSystemPrompt,
