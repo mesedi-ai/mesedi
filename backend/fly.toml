@@ -41,30 +41,40 @@ primary_region = "iad"
 # HTTP service config. Force HTTPS, auto-start machines on inbound
 # traffic.
 #
-# PRE-LAUNCH NEON COST FIX (2026-06-14): auto_stop_machines is set
-# to "stop" and min_machines_running is 0 to let the backend fully
-# shut down during idle periods. Reason: the Go database/sql pool
-# keeps Neon connections open 24/7 while the machine is running,
-# preventing Neon's serverless compute from scaling to zero, which
-# was burning 6.1 CU-hrs/day against the 100 CU-hr Free-tier
-# monthly cap (projection: ~180 CU-hrs/month). With these two
-# settings the machine stops when idle, Neon's connections drop,
-# Neon's compute scales to zero, and CU-hr burn essentially stops
-# during quiet hours. Cold-start cost: 10-30 seconds for the first
-# request after idle.
+# ALWAYS-ON (reverted 2026-08-24, the night before public launch).
 #
-# REVERT BEFORE PUBLIC LAUNCH:
-#   auto_stop_machines = false
-#   min_machines_running = 1
-# Real customers cannot tolerate 10-30s cold starts. The Neon plan
-# at launch time will be Launch ($19/mo) or Scale ($69/mo), which
-# accommodate always-on compute.
+# History: on 2026-06-14 this was set to auto_stop_machines="stop" +
+# min_machines_running=0 as a Neon cost fix. The Go database/sql pool
+# holds Neon connections open while the machine runs, which prevented
+# Neon's serverless compute from scaling to zero and was burning
+# ~6.1 CU-hrs/day against the 100 CU-hr FREE-tier monthly cap. Letting
+# the machine stop fixed that, at the cost of a 10-30 second cold start
+# on the first request after idle.
+#
+# Why it is safe to revert now:
+#   - The Neon project is on the LAUNCH plan, which is fully
+#     usage-based ($0.106/CU-hr). There is no monthly allowance to
+#     exhaust and therefore no suspension risk — the original cap
+#     concern does not apply.
+#   - Measured burn over Aug 1-24 was 153 CU-hrs (~6.4/day) WITH
+#     scale-to-zero already enabled, i.e. roughly what an always-on
+#     0.25 CU compute costs anyway. The synthetic-customer worker keeps
+#     waking the database regardless, so scale-to-zero was buying
+#     very little.
+#
+# Why it MUST be reverted: a cold start means the first visitor after
+# a quiet period waits 10-30 seconds. On launch morning that visitor
+# arrives from Hacker News.
+#
+# If cost ever needs revisiting, reduce the compute size or pause the
+# synthetic-customer worker — do NOT reintroduce scale-to-zero while
+# real customers are using the API.
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = false
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
   [http_service.concurrency]
     type = "requests"
