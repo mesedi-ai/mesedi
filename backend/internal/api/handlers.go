@@ -2347,7 +2347,13 @@ const analysisSystemPrompt = "You are Mesedi's senior on-call engineer for AI ag
 	"cost_$0.10+, the level + model in context_overflow:warn:claude-haiku-4-5, " +
 	"the agent pair in coordination_deadlock:critique_agent:planner_agent), " +
 	"interpret those parts explicitly rather than treating the signature as " +
-	"an opaque string."
+	"an opaque string. " +
+	"When the playbook block includes a 'Published at:' URL and you refer " +
+	"to the playbook by name or by one of its numbered causes or shapes, " +
+	"link it as a Markdown link on that reference so the reader can open " +
+	"it directly. Link it at most once; do not repeat the URL. If no " +
+	"'Published at:' line is present, refer to the playbook in plain text " +
+	"and never invent a URL."
 
 func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Request) {
 	groupID := r.PathValue("id")
@@ -2570,7 +2576,10 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	prompt := buildFailureGroupAnalysisPrompt(group, sampleExecs, sampleEvents)
+	prompt := buildFailureGroupAnalysisPrompt(
+		group, sampleExecs, sampleEvents,
+		playbookDocURL(h.DocsURL, group.FailureClass),
+	)
 
 	// Capture the playbook signature for staleness tracking
 	// (Wave ai-analysis-staleness-tracking). Empty string when
@@ -2741,6 +2750,7 @@ func buildFailureGroupAnalysisPrompt(
 	group *store.FailureGroup,
 	sampleExecs []*events.Execution,
 	sampleEvents []*events.Event,
+	playbookURL string,
 ) string {
 	var sb strings.Builder
 
@@ -2751,6 +2761,15 @@ func buildFailureGroupAnalysisPrompt(
 	playbookContent, playbookErr := playbooks.Load(group.FailureClass, group.Signature)
 	if playbookErr == nil && playbookContent != "" {
 		sb.WriteString("# Mesedi playbook for this failure class\n\n")
+		// Give the model the canonical URL so when it references the
+		// playbook (which it does naturally — "this matches the
+		// playbook's cause #2") it can link instead of leaving the
+		// reader to go find the doc. Omitted entirely when no URL can
+		// be built, so the model is never handed a broken link.
+		if playbookURL != "" {
+			sb.WriteString(fmt.Sprintf(
+				"Published at: %s\n\n", playbookURL))
+		}
 		sb.WriteString(playbookContent)
 		sb.WriteString("\n\n---\n\n")
 	}

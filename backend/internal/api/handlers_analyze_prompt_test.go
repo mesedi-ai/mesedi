@@ -47,7 +47,7 @@ func TestBuildFailureGroupAnalysisPrompt_InjectsPlaybook(t *testing.T) {
 		},
 	}
 
-	prompt := buildFailureGroupAnalysisPrompt(group, execs, nil)
+	prompt := buildFailureGroupAnalysisPrompt(group, execs, nil, "")
 
 	// (1) Playbook header is present, anchoring the model on the
 	//     interpretation framework before it sees the failure data.
@@ -103,7 +103,7 @@ func TestBuildFailureGroupAnalysisPrompt_FallsBackWhenPlaybookMissing(t *testing
 		EventCount:         1,
 	}
 
-	prompt := buildFailureGroupAnalysisPrompt(group, nil, nil)
+	prompt := buildFailureGroupAnalysisPrompt(group, nil, nil, "")
 
 	// (1) Playbook header is NOT present — we fell back.
 	if strings.Contains(prompt, "# Mesedi playbook for this failure class") {
@@ -183,7 +183,7 @@ func TestBuildFailureGroupAnalysisPrompt_HandlesSubSignaturePlaybook(t *testing.
 		EventCount:         2,
 	}
 
-	prompt := buildFailureGroupAnalysisPrompt(group, nil, nil)
+	prompt := buildFailureGroupAnalysisPrompt(group, nil, nil, "")
 
 	// The similar_call playbook is specifically titled with that
 	// phrase; the identical_call sibling playbook is titled
@@ -255,7 +255,7 @@ func TestBuildFailureGroupAnalysisPrompt_RendersSampleEvents(t *testing.T) {
 		},
 	}
 
-	prompt := buildFailureGroupAnalysisPrompt(group, execs, evs)
+	prompt := buildFailureGroupAnalysisPrompt(group, execs, evs, "")
 
 	// (1) Events section header is anchored on the execution ID so
 	//     operators reading the analysis can correlate it with the
@@ -320,7 +320,7 @@ func TestBuildFailureGroupAnalysisPrompt_OmitsEventsSectionWhenEmpty(t *testing.
 		{ExecutionID: "exec-empty-1", Status: "failed"},
 	}
 
-	prompt := buildFailureGroupAnalysisPrompt(group, execs, nil)
+	prompt := buildFailureGroupAnalysisPrompt(group, execs, nil, "")
 
 	if strings.Contains(prompt, "## Sample events from execution") {
 		t.Errorf("did not expect events section when sampleEvents is nil; got:\n%s", prompt)
@@ -366,7 +366,7 @@ func TestBuildFailureGroupAnalysisPrompt_CapsAtMaxSampleEvents(t *testing.T) {
 		}
 	}
 
-	prompt := buildFailureGroupAnalysisPrompt(group, execs, evs)
+	prompt := buildFailureGroupAnalysisPrompt(group, execs, evs, "")
 
 	// (1) Footer present, mentioning both the cap and the actual count.
 	if !strings.Contains(prompt, "showing first 30 of 35 events") {
