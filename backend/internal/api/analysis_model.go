@@ -51,6 +51,39 @@ var premiumAnalysisTiers = map[string]bool{
 	TierEnterprise: true,
 }
 
+const (
+	// analysisMaxTokensStandard is the long-standing output cap. Sized
+	// for Haiku, which answers directly and rarely approaches it.
+	analysisMaxTokensStandard = 1024
+
+	// analysisMaxTokensPremium gives the premium model room to reason
+	// BEFORE it writes.
+	//
+	// Why this exists: on 2026-08-24, coordination_deadlock — the most
+	// reasoning-heavy class in the taxonomy, a cycle in a handoff graph
+	// across named agents — came back HTTP 200, 13 seconds, correct
+	// model recorded, and completely EMPTY. Nineteen simpler classes
+	// succeeded through the identical path. The output budget was
+	// consumed before any prose was emitted, so the response carried no
+	// text block at all.
+	//
+	// 1024 was chosen when Haiku was the only model. A larger model
+	// asked a harder question needs more headroom, and the cost of
+	// headroom is nothing: output is billed per token USED, not per
+	// token allowed, so raising the ceiling costs $0 on the analyses
+	// that never approach it.
+	analysisMaxTokensPremium = 4096
+)
+
+// analysisMaxTokensForModel returns the output cap for an analysis
+// call. Unknown models get the conservative standard cap.
+func analysisMaxTokensForModel(model string) int {
+	if model == AnalysisModelPremium {
+		return analysisMaxTokensPremium
+	}
+	return analysisMaxTokensStandard
+}
+
 // analysisModelForTier returns the Anthropic model id used for AI
 // root-cause analysis on the given tier.
 //

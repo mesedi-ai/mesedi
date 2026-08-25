@@ -2585,16 +2585,43 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 	// the split.
 	model := analysisModelForTier(tier)
 	res, err := h.Anthropic.Call(r.Context(), anthropic.CallOptions{
-		Model:       model,
-		System:      analysisSystemPrompt,
-		User:        prompt,
-		MaxTokens:   1024,
+		Model:  model,
+		System: analysisSystemPrompt,
+		User:   prompt,
+		// Per-model cap: the premium model needs room to reason before
+		// it writes. See analysisMaxTokensForModel.
+		MaxTokens:   analysisMaxTokensForModel(model),
 		Temperature: 0.2,
 	})
 	if err != nil {
 		h.Logger.Error("anthropic call failed",
 			"group_id", groupID, "error", err.Error())
 		writeError(w, http.StatusBadGateway, "AI analysis failed: "+err.Error())
+		return
+	}
+
+	// An empty completion is a FAILURE, not a success.
+	//
+	// Without this guard the handler persisted "" as the analysis and
+	// returned 200: analyzed_at set, analysis_model set, and no text.
+	// The customer clicks "Analyze with AI", waits thirteen seconds,
+	// gets a blank card — and on Hobby is billed $0.75 for it. Observed
+	// on 2026-08-24 with coordination_deadlock, reproducibly.
+	//
+	// Log StopReason: "max_tokens" means the output budget was spent
+	// before any prose was emitted and the cap for this model needs
+	// raising, which is a different fix from a genuine refusal.
+	if strings.TrimSpace(res.Text) == "" {
+		h.Logger.Error("anthropic returned an empty analysis",
+			"group_id", groupID,
+			"model", model,
+			"stop_reason", res.StopReason,
+			"input_tokens", res.InputTokens,
+			"output_tokens", res.OutputTokens,
+		)
+		writeError(w, http.StatusBadGateway,
+			"AI analysis returned no content. Nothing was saved or billed. "+
+				"Please retry; if it persists, contact support.")
 		return
 	}
 
