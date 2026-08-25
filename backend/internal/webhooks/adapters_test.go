@@ -180,6 +180,52 @@ func TestBuildSlackBody_TestPrefix(t *testing.T) {
 	if !strings.Contains(string(body), "Mesedi test") {
 		t.Errorf("test delivery missing 'Mesedi test' prefix: %s", body)
 	}
+	// A Contains check alone passed while the header actually read
+	// "Mesedi test test delivery" — the prefix and the event label
+	// each contributed a "test". Pin the exact header instead.
+	assertNoDuplicatedTestWord(t, string(body))
+}
+
+// assertNoDuplicatedTestWord guards every adapter against the
+// prefix/label collision: Payload.Test adds "test" to the title, and
+// an event label that also says "test" doubles it. Shipped once; the
+// customer's Discord read "Mesedi test test delivery · crashes".
+func assertNoDuplicatedTestWord(t *testing.T, body string) {
+	t.Helper()
+	for _, bad := range []string{"test test", "Mesedi test: Mesedi"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("duplicated wording %q in rendered body: %s", bad, body)
+		}
+	}
+}
+
+// Discord is the channel this bug was actually seen in, so pin the
+// full title rather than a substring.
+func TestBuildDiscordBody_TestTitleExact(t *testing.T) {
+	t.Parallel()
+	p := sampleCreatedPayload()
+	p.Test = true
+	p.Event = "failure_group.test"
+	body, err := BuildDiscordBody(p)
+	if err != nil {
+		t.Fatalf("BuildDiscordBody: %v", err)
+	}
+	var parsed struct {
+		Embeds []struct {
+			Title string `json:"title"`
+		} `json:"embeds"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(parsed.Embeds) != 1 {
+		t.Fatalf("want 1 embed, got %d", len(parsed.Embeds))
+	}
+	const want = "Mesedi test delivery · tool_failures"
+	if parsed.Embeds[0].Title != want {
+		t.Errorf("embed title = %q, want %q", parsed.Embeds[0].Title, want)
+	}
+	assertNoDuplicatedTestWord(t, string(body))
 }
 
 func TestBuildDiscordBody_EmbedShape(t *testing.T) {
@@ -328,6 +374,7 @@ func TestBuildPagerDutyBody_TestDeliveryForcesInfoSeverity(t *testing.T) {
 		t.Errorf("test delivery severity: got %q want info (must not page on-call)",
 			parsed.Payload.Severity)
 	}
+	assertNoDuplicatedTestWord(t, parsed.Payload.Summary)
 	if !strings.Contains(parsed.Payload.Summary, "Mesedi test") {
 		t.Errorf("summary missing 'Mesedi test' prefix: %s", parsed.Payload.Summary)
 	}
@@ -420,7 +467,9 @@ func TestEventHumanKind(t *testing.T) {
 	cases := map[string]string{
 		"failure_group.created":  "new failure group",
 		"failure_group.recurred": "recurred",
-		"failure_group.test":     "test delivery",
+		// "delivery", not "test delivery": the adapters own the word
+		// "test" via Payload.Test. See eventHumanKind's comment.
+		"failure_group.test": "delivery",
 		"unrecognized":           "unrecognized",
 	}
 	for input, want := range cases {

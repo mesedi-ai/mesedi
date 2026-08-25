@@ -165,7 +165,13 @@ func eventHumanKind(event string) string {
 	case "failure_group.created":
 		return "new failure group"
 	case "failure_group.test":
-		return "test delivery"
+		// Deliberately NOT "test delivery". Every adapter already
+		// prepends "Mesedi test" when Payload.Test is set, so saying
+		// "test" here too produced "Mesedi test test delivery" in the
+		// customer's Discord/Slack channel — and "Mesedi test: Mesedi
+		// test delivery: ..." in PagerDuty. The word "test" belongs to
+		// the Test flag, not to the event label.
+		return "delivery"
 	default:
 		return event
 	}
@@ -375,11 +381,16 @@ func BuildPagerDutyBody(p Payload, routingKey string) ([]byte, error) {
 		pdSeverity = "info"
 	}
 
-	summary := fmt.Sprintf("Mesedi %s: %s (%s)",
-		eventHumanKind(p.Event), p.FailureClass, p.Signature)
+	// Prefix is built in one place rather than wrapping an already-
+	// built summary, which is what produced "Mesedi test: Mesedi
+	// delivery: ..." — the product name appearing twice in a single
+	// PagerDuty incident title.
+	prefix := "Mesedi"
 	if p.Test {
-		summary = "Mesedi test: " + summary
+		prefix = "Mesedi test"
 	}
+	summary := fmt.Sprintf("%s %s: %s (%s)",
+		prefix, eventHumanKind(p.Event), p.FailureClass, p.Signature)
 
 	// Real events: dedup by (project, group) so recurrences update
 	// the same PagerDuty incident. Test events: always use the
