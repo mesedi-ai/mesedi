@@ -306,6 +306,24 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		"ip", ip,
 	)
 
+	// Tell the operator a human just signed up. Fire-and-forget on a
+	// goroutine and fails open — a webhook outage must never affect a
+	// signup that has already succeeded.
+	//
+	// The email is masked. The operator channel is a Discord server
+	// reached by a bearer URL, and the domain is the part that actually
+	// tells you whether this is a company or a throwaway; the full
+	// address is one click away in the admin dashboard when it matters.
+	fireOperatorNotice(
+		"New signup",
+		fmt.Sprintf("`%s` created a project.", maskEmailForNotice(email)),
+		map[string]string{
+			"Project":    projectName,
+			"Project ID": projectID,
+		},
+		h.Logger,
+	)
+
 	// 6. Fire the welcome+verify email out-of-band. Non-blocking: if
 	//    Resend is slow or down, the user still gets their key.
 	//    NoopMailer in local dev makes this a no-op. For raw-email
