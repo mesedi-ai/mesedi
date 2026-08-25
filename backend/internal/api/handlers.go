@@ -2578,7 +2578,7 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 
 	prompt := buildFailureGroupAnalysisPrompt(
 		group, sampleExecs, sampleEvents,
-		playbookDocURL(h.DocsURL, group.FailureClass),
+		playbookDocURL(h.docsBaseURL(), group.FailureClass),
 	)
 
 	// Capture the playbook signature for staleness tracking

@@ -28,6 +28,29 @@ var playbookDocSlugs = map[string]string{
 	"sandbox_escape": "security/sandbox_escape",
 }
 
+// docsBaseURL resolves the docs-site origin, mirroring the fallback
+// chain the transactional-email path already uses.
+//
+// This matters: Handlers.DocsURL is NOT assigned anywhere at startup —
+// there is no flag and no env var for it — so it is always "" in
+// production. Reading it directly would make every playbook link
+// silently disappear. MESEDI_DASHBOARD_URL is set in fly.toml
+// ("https://app.mesedi.ai") and marketingOrigin strips the app.
+// subdomain, which yields the marketing origin the docs are published
+// under.
+//
+// Returns "" only if both are unset (local dev without config), which
+// callers must treat as "omit the link".
+func (h *Handlers) docsBaseURL() string {
+	if s := strings.TrimSpace(h.DocsURL); s != "" {
+		return strings.TrimRight(s, "/")
+	}
+	if s := strings.TrimSpace(h.DashboardURL); s != "" {
+		return marketingOrigin(s) + "/docs"
+	}
+	return ""
+}
+
 // playbookDocURL returns the public URL for a failure class's playbook,
 // or "" when no URL can be built. Callers must treat "" as "omit the
 // link" rather than rendering a broken one.
