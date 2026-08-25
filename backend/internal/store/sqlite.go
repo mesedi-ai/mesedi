@@ -2509,7 +2509,15 @@ func (s *SQLiteStore) groupExecutionInternal(
 		ON CONFLICT(group_id) DO UPDATE SET
 			event_count = event_count + 1,
 			affected_executions = affected_executions + 1,
-			last_seen = excluded.last_seen
+			last_seen = excluded.last_seen,
+			-- Auto-reopen on recurrence. Twin of the Postgres upsert in
+			-- postgres.go — see the full rationale there. Both stores
+			-- MUST carry this: changing only one is the exact failure
+			-- mode that caused the migration-056 production outage,
+			-- and it would mean self-hosters on SQLite silently keep
+			-- the old never-reopen behaviour.
+			resolved_at = NULL,
+			resolved_by = NULL
 	`, groupID, projectID, failureClass, signature, now, now, executionID)
 	if err != nil {
 		return false, fmt.Errorf("upsert failure_group: %w", err)

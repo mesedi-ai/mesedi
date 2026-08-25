@@ -1990,7 +1990,26 @@ func (s *PostgresStore) groupExecutionInternalPg(
 		ON CONFLICT(group_id) DO UPDATE SET
 			event_count = failure_groups.event_count + 1,
 			affected_executions = failure_groups.affected_executions + 1,
-			last_seen = excluded.last_seen
+			last_seen = excluded.last_seen,
+			-- Auto-reopen on recurrence. A resolved group that fires
+			-- again is, by definition, not resolved.
+			--
+			-- Before this, resolved_at was never cleared: the counters
+			-- kept climbing behind a row the customer could no longer
+			-- see (the list filters resolved_at IS NULL) and no webhook
+			-- fired because the class was not new. A customer could
+			-- ship a fix that did not work, click Resolve, and receive
+			-- no signal that the failure was still happening — the
+			-- product having told them it was handled.
+			--
+			-- Matches Sentry, which reopens an issue on regression.
+			-- That is what "Resolve" means to an engineer, and Mesedi
+			-- is positioned as Sentry for AI agents.
+			--
+			-- resolved_by is cleared too, so the audit trail does not
+			-- credit the reopened state to whoever closed it last.
+			resolved_at = NULL,
+			resolved_by = NULL
 	`, groupID, projectID, failureClass, signature, now, now, executionID)
 	if err != nil {
 		return false, fmt.Errorf("upsert failure_group: %w", err)
