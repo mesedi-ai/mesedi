@@ -1342,13 +1342,49 @@ type AdminAnthropicCreditResponse struct {
 	// first. Powers the inline bar chart on the admin card so the
 	// founder can spot a spike at a glance. Empty (omitted)
 	// when admin API isn't configured.
+	//
+	// The final entry is TODAY and carries Estimated=true when
+	// today's usage was retrievable. Anthropic's cost report omits
+	// the in-progress day entirely, so today is reconstructed from
+	// hourly token counts priced with our own rate table.
 	DailySpend []AdminDailySpendBucket `json:"daily_spend,omitempty"`
+
+	// TodaySpendUSD is spend so far during the current UTC day, our
+	// own computation from token counts rather than a figure
+	// Anthropic returned. Nil when the usage report was unavailable.
+	//
+	// This field is the whole reason the Usage Report path exists.
+	// On 2026-08-25 the panel showed "$0.00 / day" while real spend
+	// was happening, because every dollar landed on the in-progress
+	// day that the cost report refuses to return. A burn widget that
+	// cannot see today is a burn widget that cannot catch a runaway
+	// on the day it runs away.
+	TodaySpendUSD *float64 `json:"today_spend_usd,omitempty"`
+
+	// TodaySpendByModel breaks today's estimate down per model, so a
+	// spike can be attributed without opening the Anthropic console.
+	TodaySpendByModel map[string]float64 `json:"today_spend_by_model,omitempty"`
+
+	// TodayUnpricedModels lists model ids seen in today's usage that
+	// have no explicit entry in the rate table. Non-empty means the
+	// estimate used a fallback rate for those models and is
+	// therefore approximate — surfaced so the UI can say so rather
+	// than presenting a confidently wrong number. The usual cause is
+	// Anthropic shipping a new model.
+	TodayUnpricedModels []string `json:"today_unpriced_models,omitempty"`
 }
 
 // AdminDailySpendBucket is one bar of the 14-day spend chart.
 type AdminDailySpendBucket struct {
 	Date string  `json:"date"` // YYYY-MM-DD UTC
 	USD  float64 `json:"usd"`  // total spend that day
+	// Estimated marks a bucket we priced ourselves from token counts
+	// rather than one Anthropic returned as dollars. Only ever true
+	// for the current in-progress UTC day — see the Usage Report
+	// notes in internal/anthropic/admin.go. The UI must render these
+	// differently; a partial day that looks settled invites the
+	// wrong conclusion about a spend spike.
+	Estimated bool `json:"estimated,omitempty"`
 }
 
 // HandleAdminGetAnthropicCredit assembles the founder burn-rate
@@ -1427,11 +1463,48 @@ func (h *Handlers) HandleAdminGetAnthropicCredit(w http.ResponseWriter, r *http.
 			return buckets[i].Date.Before(buckets[j].Date)
 		})
 
-		out.DailySpend = make([]AdminDailySpendBucket, 0, len(buckets))
+		out.DailySpend = make([]AdminDailySpendBucket, 0, len(buckets)+1)
 		for _, b := range buckets {
 			out.DailySpend = append(out.DailySpend, AdminDailySpendBucket{
 				Date: b.Date.Format("2006-01-02"),
 				USD:  b.USD,
+			})
+		}
+
+		// Today, from the Usage Report. The cost report above cannot
+		// return the in-progress UTC day at all, so without this the
+		// chart's newest bar is yesterday and the burn widget is blind
+		// to a runaway happening right now. Priced from token counts
+		// against our own rate table, hence Estimated=true.
+		//
+		// A failure here degrades to "no today bar" rather than failing
+		// the endpoint: settled history is still worth showing, and
+		// this is the newer of the two Anthropic calls.
+		startOfTodayUTC := time.Date(
+			now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC,
+		)
+		todayUsage, uerr := h.AnthropicAdmin.GetUsageCost(
+			r.Context(), startOfTodayUTC, now,
+		)
+		switch {
+		case uerr != nil:
+			h.Logger.Warn("anthropic usage report (today) failed; today's spend omitted",
+				"error", uerr.Error())
+		case todayUsage != nil:
+			todaySpend := todayUsage.TotalUSD
+			out.TodaySpendUSD = &todaySpend
+			if len(todayUsage.ByModel) > 0 {
+				out.TodaySpendByModel = todayUsage.ByModel
+			}
+			out.TodayUnpricedModels = todayUsage.UnpricedModels
+			if len(todayUsage.UnpricedModels) > 0 {
+				h.Logger.Warn("usage report contained models with no explicit rate; today's estimate uses the fallback rate",
+					"models", strings.Join(todayUsage.UnpricedModels, ","))
+			}
+			out.DailySpend = append(out.DailySpend, AdminDailySpendBucket{
+				Date:      startOfTodayUTC.Format("2006-01-02"),
+				USD:       todaySpend,
+				Estimated: true,
 			})
 		}
 

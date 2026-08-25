@@ -123,3 +123,60 @@ func ComputeCostUSD(modelID string, inputTokens, outputTokens int) float64 {
 	out := float64(outputTokens) / tokensPerMTok * r.OutputUSDPerMTok
 	return in + out
 }
+
+// Prompt-caching multipliers, expressed against the model's base
+// input rate. Anthropic prices cached tokens relative to normal
+// input rather than publishing separate per-model numbers, so one
+// set of multipliers covers every model in the table above.
+//
+//	writing to a 5-minute cache costs 1.25x input
+//	writing to a 1-hour cache costs 2.00x input
+//	reading from either cache costs 0.10x input
+//
+// These exist because the Admin API's usage report breaks tokens
+// into uncached input, cache-creation (split by TTL) and cache-read
+// buckets. Summing them as if they were all plain input would
+// over-report reads by 10x and under-report writes — and today they
+// are all zero only because prompt caching is not in use yet. The
+// moment it is, a naive sum silently becomes wrong.
+const (
+	cacheWrite5mMultiplier = 1.25
+	cacheWrite1hMultiplier = 2.00
+	cacheReadMultiplier    = 0.10
+)
+
+// TokenUsage is a full breakdown of one model's token consumption
+// over some window, matching the shape the Admin API's usage report
+// returns.
+type TokenUsage struct {
+	UncachedInputTokens  int
+	CacheWrite5mTokens   int
+	CacheWrite1hTokens   int
+	CacheReadInputTokens int
+	OutputTokens         int
+}
+
+// TotalInputTokens returns every input-side token regardless of
+// cache treatment. Useful for display ("2.1M tokens in") where the
+// billing distinction does not matter.
+func (u TokenUsage) TotalInputTokens() int {
+	return u.UncachedInputTokens + u.CacheWrite5mTokens +
+		u.CacheWrite1hTokens + u.CacheReadInputTokens
+}
+
+// ComputeUsageCostUSD prices a full token breakdown, applying the
+// cache multipliers above. Prefer this over ComputeCostUSD anywhere
+// the caller has cache detail; ComputeCostUSD remains correct for
+// the analyze path, which makes uncached calls.
+func ComputeUsageCostUSD(modelID string, u TokenUsage) float64 {
+	r := LookupRate(modelID)
+	const tokensPerMTok = 1_000_000.0
+	inRate := r.InputUSDPerMTok / tokensPerMTok
+
+	cost := float64(u.UncachedInputTokens) * inRate
+	cost += float64(u.CacheWrite5mTokens) * inRate * cacheWrite5mMultiplier
+	cost += float64(u.CacheWrite1hTokens) * inRate * cacheWrite1hMultiplier
+	cost += float64(u.CacheReadInputTokens) * inRate * cacheReadMultiplier
+	cost += float64(u.OutputTokens) / tokensPerMTok * r.OutputUSDPerMTok
+	return cost
+}
