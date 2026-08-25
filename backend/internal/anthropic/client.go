@@ -117,6 +117,45 @@ type Result struct {
 	StopReason   string
 }
 
+// modelsRejectingTemperature lists model-id prefixes whose Messages
+// API rejects the `temperature` parameter outright with:
+//
+//	400 invalid_request_error:
+//	"`temperature` is deprecated for this model."
+//
+// This is a HARD failure, not a warning — the whole call 400s, so a
+// single unsupported parameter takes the entire feature down.
+//
+// Discovered 2026-08-24, the night before launch: switching the
+// hand-sold tiers to claude-sonnet-5 made every AI root-cause analysis
+// on Production and Enterprise return 502, because the analysis call
+// site hardcodes Temperature: 0.2. That is the exact tier whose
+// pricing page advertises "a more capable model", so it would have
+// been a paying customer's first experience.
+//
+// The list is OBSERVATIONAL — it holds models we have actually seen
+// reject the parameter. Default is "supported", which preserves the
+// long-standing behaviour for haiku/sonnet-4/opus-4 rather than
+// silently dropping a deliberate low-variance setting across the whole
+// customer base. If a future model starts rejecting temperature, the
+// symptom is a 400 with the message above; add its prefix here.
+var modelsRejectingTemperature = []string{
+	"claude-sonnet-5",
+}
+
+// ModelSupportsTemperature reports whether modelID accepts the
+// `temperature` request parameter. Callers should omit temperature
+// when this returns false.
+func ModelSupportsTemperature(modelID string) bool {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	for _, prefix := range modelsRejectingTemperature {
+		if strings.HasPrefix(id, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
 // requestBody is the JSON shape we POST to /v1/messages.
 type requestBody struct {
 	Model       string           `json:"model"`
@@ -173,7 +212,7 @@ func (c *Client) Call(ctx context.Context, opts CallOptions) (*Result, error) {
 			{Role: "user", Content: opts.User},
 		},
 	}
-	if opts.Temperature > 0 {
+	if opts.Temperature > 0 && ModelSupportsTemperature(opts.Model) {
 		t := opts.Temperature
 		body.Temperature = &t
 	}
