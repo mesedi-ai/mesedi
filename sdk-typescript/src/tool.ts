@@ -38,9 +38,38 @@ const MAX_EXC_MSG = 500;
  * would happily fingerprint. */
 const MAX_RETURN_VALUE_JSON = 16384;
 
+/**
+ * Cap on the tool description sent with each tool_call.
+ *
+ * Tool descriptions are what the MODEL reads when deciding whether and
+ * how to call a tool. Under MCP they come from a third-party server and
+ * are not sanitized, which is the attack behind CVE-2026-75130
+ * (Context7, published 2026-08-18): a compromised server puts
+ * instructions in what looks like help text and the agent follows them.
+ *
+ * Before this the SDK sent only the return shape, so a poisoned
+ * description with an unchanged return shape produced no signal at all.
+ * Verified against production 2026-08-27: 50 failure groups before,
+ * 50 after, zero fired.
+ *
+ * 2000 matches the Python SDK. Truncation is marked inline so a hash
+ * change caused by truncation cannot be mistaken for a real edit.
+ */
+const MAX_TOOL_DESCRIPTION = 2000;
+
 export interface ToolOptions {
   /** Override the tool name (defaults to fn.name). */
   name?: string;
+  /**
+   * The description the model sees for this tool.
+   *
+   * TypeScript has no docstring equivalent the runtime can read, so
+   * unlike the Python SDK (which reads __doc__) this has to be passed
+   * explicitly. Pass the same string you give your agent framework as
+   * the tool description, otherwise the backend is fingerprinting
+   * something the model never saw.
+   */
+  description?: string;
 }
 
 /**
@@ -67,6 +96,7 @@ export function tool<TArgs extends unknown[], TResult>(
     fn = maybeFn;
   }
   const toolName = opts.name ?? fn.name ?? "<unknown>";
+  const toolDescription = truncateDescription(opts.description);
 
   return async function inner(...args: TArgs): Promise<TResult> {
     const ctx = currentExecutionContext();
@@ -104,6 +134,9 @@ export function tool<TArgs extends unknown[], TResult>(
         // render whatever shape the customer's tool returns.
         result_summary: truncate(safeRepr(result), MAX_RESULT_REPR),
       };
+      if (toolDescription) {
+        payload.tool_description = toolDescription;
+      }
       // Structured JSON-native form for backend detectors
       // (tool_schema_drift fingerprints the return shape). Only
       // present when the result is JSON-serializable AND under
@@ -145,6 +178,7 @@ export function tool<TArgs extends unknown[], TResult>(
             err instanceof Error ? err.message : String(err),
             MAX_EXC_MSG,
           ),
+          ...(toolDescription ? { tool_description: toolDescription } : {}),
         },
       };
       client.submitEvent(event);
@@ -331,4 +365,22 @@ function safeRepr(value: unknown): string {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 3) + "...";
+}
+
+/**
+ * Normalise a tool description for transport.
+ *
+ * Returns undefined when absent or blank, so the caller omits the
+ * field entirely rather than sending "". The backend needs to tell
+ * "no description" apart from "description was emptied": those are
+ * different events, and only one of them is drift.
+ */
+function truncateDescription(desc: string | undefined): string | undefined {
+  if (typeof desc !== "string") return undefined;
+  const trimmed = desc.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > MAX_TOOL_DESCRIPTION) {
+    return trimmed.slice(0, MAX_TOOL_DESCRIPTION) + "...[truncated]";
+  }
+  return trimmed;
 }

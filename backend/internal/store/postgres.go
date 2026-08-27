@@ -2340,6 +2340,54 @@ func (s *PostgresStore) ListSuccessfulToolReturns(
 	return out, rows.Err()
 }
 
+// ListToolDescriptions is the Postgres twin of the SQLite method of
+// the same name.
+//
+// PRODUCTION PATH. This store and the SQLite one carry separate
+// hand-written SQL, and a change applied to one and not the other is
+// invisible to a test that only exercises the other. That is exactly
+// the shape of the migration-056 outage. Both were written together
+// here and both are covered by tests.
+func (s *PostgresStore) ListToolDescriptions(
+	ctx context.Context,
+	projectID, toolName, excludeExecutionID string,
+	limit int,
+) ([]string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT (ev.payload::jsonb->>'tool_description')
+		FROM events ev
+		JOIN executions ex ON ex.execution_id = ev.execution_id
+		WHERE ex.project_id = $1
+		  AND ev.event_type = 'tool_call'
+		  AND (ev.payload::jsonb->>'tool_name') = $2
+		  AND ev.execution_id != $3
+		ORDER BY ev.timestamp DESC
+		LIMIT $4
+	`, projectID, toolName, excludeExecutionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list tool descriptions: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var d sql.NullString
+		if err := rows.Scan(&d); err != nil {
+			return nil, fmt.Errorf("scan tool description: %w", err)
+		}
+		// See the SQLite twin: pre-upgrade SDKs send no description,
+		// and counting "" as a value would let it form a majority
+		// baseline that every upgraded client then "drifts" from.
+		if !d.Valid || d.String == "" {
+			continue
+		}
+		out = append(out, d.String)
+	}
+	return out, rows.Err()
+}
+
 // ListToolNamesInExecution is the Postgres twin of the SQLite method
 // of the same name.
 func (s *PostgresStore) ListToolNamesInExecution(ctx context.Context, executionID string) ([]string, error) {

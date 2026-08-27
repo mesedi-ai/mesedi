@@ -3053,6 +3053,52 @@ func (s *SQLiteStore) ListSuccessfulToolReturns(
 	return out, rows.Err()
 }
 
+// ListToolDescriptions returns recent tool_description values from
+// tool_call events for a (project, tool). Twin of the Postgres method
+// of the same name. See the interface doc in store.go for why this is
+// separate from ListSuccessfulToolReturns.
+func (s *SQLiteStore) ListToolDescriptions(
+	ctx context.Context,
+	projectID, toolName, excludeExecutionID string,
+	limit int,
+) ([]string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT json_extract(ev.payload, '$.tool_description')
+		FROM events ev
+		JOIN executions ex ON ex.execution_id = ev.execution_id
+		WHERE ex.project_id = ?
+		  AND ev.event_type = 'tool_call'
+		  AND json_extract(ev.payload, '$.tool_name') = ?
+		  AND ev.execution_id != ?
+		ORDER BY ev.timestamp DESC
+		LIMIT ?
+	`, projectID, toolName, excludeExecutionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list tool descriptions: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var d sql.NullString
+		if err := rows.Scan(&d); err != nil {
+			return nil, fmt.Errorf("scan tool description: %w", err)
+		}
+		// SDKs older than the version that added tool_description
+		// send nothing here. Skipping rather than counting "" as a
+		// value matters: an empty string would form its own majority
+		// baseline and then every upgraded client would look like
+		// drift on its first call.
+		if !d.Valid || d.String == "" {
+			continue
+		}
+		out = append(out, d.String)
+	}
+	return out, rows.Err()
+}
+
 // ListToolNamesInExecution returns the distinct tool_names invoked
 // successfully in the execution. Used by the schema-drift detector
 // to enumerate tools to query history for.

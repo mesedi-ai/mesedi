@@ -251,3 +251,80 @@ func DetectSchemaDriftWithThresholds(
 	}
 	return fmt.Sprintf("%s:%s", toolName, suffix), true
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Description drift
+// ─────────────────────────────────────────────────────────────────
+//
+// WHY THIS EXISTS
+// A tool's contract has two halves: the shape it RETURNS, and the
+// description the model READS when deciding whether and how to call
+// it. Everything above fingerprints the first half. Until 2026-08-27
+// nothing fingerprinted the second, which was verified empirically
+// rather than assumed: a tool whose description was rewritten to
+// carry injected instructions, with its return shape held
+// byte-identical, produced zero failure groups in production.
+//
+// That is the mechanism behind CVE-2026-75130 (Context7 MCP server,
+// published 2026-08-18) and the MCP tool-poisoning class generally:
+// the tool-description field is unsanitised, a compromised server
+// puts instructions in what reads as help text, and the agent obeys
+// them. 30+ MCP CVEs were filed in a single 60-day window in early
+// 2026.
+//
+// DELIBERATELY A SEPARATE SIGNAL, NOT A WIDER HASH
+// Folding the description into ReturnShapeHash would have been fewer
+// lines and worse. It would invalidate every stored baseline, so the
+// first call after deploy would look like drift for every tool every
+// customer has. It would also collapse two different events into one
+// signature: "the tool's author shipped a change" and "the text my
+// model reads was rewritten underneath me" want different alerts.
+
+// DescriptionHash fingerprints a tool description for drift
+// comparison. Whitespace is normalised first so reflowing a docstring
+// does not read as an edit, but the text is otherwise compared
+// verbatim: in an injection the payload IS the wording.
+func DescriptionHash(description string) string {
+	trimmed := strings.Join(strings.Fields(description), " ")
+	if trimmed == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	return hex.EncodeToString(sum[:])
+}
+
+// DetectDescriptionDrift reports whether a tool's description has
+// changed away from a stable majority baseline.
+//
+// Reuses the majority/threshold logic of DetectSchemaDriftWithThresholds
+// unchanged: that function is agnostic about what its hashes mean, it
+// only asks whether the current one differs from a dominant baseline
+// with enough history behind it. Reusing it means description drift
+// inherits the same MinHistoryCalls floor and the same majority rule
+// for free, and any future tuning applies to both.
+//
+// The signature carries a "desc:" marker so description drift and
+// return-shape drift never collide in the same failure group. Reading
+// "checkout_tool:desc:1a2b3c4d" in an alert should immediately say
+// which half of the contract moved.
+func DetectDescriptionDrift(
+	toolName string,
+	currentDescriptionHash string,
+	historicalHashes map[string]int,
+	t ToolSchemaDriftThresholds,
+) (signature string, detected bool) {
+	// The signature that comes back is discarded, only the decision
+	// is reused. Sharing the decision is the point; sharing the
+	// signature would put description drift and return-shape drift in
+	// the same failure group.
+	if _, fired := DetectSchemaDriftWithThresholds(
+		toolName, currentDescriptionHash, historicalHashes, t,
+	); !fired {
+		return "", false
+	}
+	suffix := currentDescriptionHash
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	return fmt.Sprintf("%s:desc:%s", toolName, suffix), true
+}

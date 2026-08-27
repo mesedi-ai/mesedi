@@ -45,6 +45,24 @@ F = TypeVar("F", bound=Callable[..., Any])
 _MAX_ARG_REPR = 200
 _MAX_RESULT_REPR = 500
 _MAX_EXC_MSG = 500
+
+# Tool descriptions are what the MODEL reads when deciding whether and
+# how to call a tool. Under MCP they arrive from a third-party server
+# and are not sanitized, which is the attack behind CVE-2026-75130
+# (Context7, 2026-08-18): a compromised server embeds instructions in
+# what looks like help text and the agent follows them.
+#
+# Sending the description makes that visible to the backend. Before
+# this, Mesedi fingerprinted the tool's RETURN SHAPE and nothing else,
+# so a poisoned description with an unchanged return shape produced no
+# signal at all. Verified against production on 2026-08-27: 50 failure
+# groups before, 50 after, zero fired.
+#
+# 2000 chars because a legitimate docstring is far shorter and the
+# per-event payload cap is 32 KB; a description longer than this is
+# itself worth noticing, and truncation is recorded so a hash change
+# caused by truncation cannot be mistaken for a real edit.
+_MAX_TOOL_DESCRIPTION = 2000
 # Cap for the JSON-serialized return_value field on the wire.
 # The SDK uses this as a generous upper bound; the backend applies
 # its OWN per-project cap (default 8 KB) at fingerprint time so
@@ -303,6 +321,7 @@ def tool(func: F) -> F:
 
         client = get_client()
         tool_name = getattr(func, "__name__", "<unknown>")
+        tool_description = _tool_description(func)
         sequence = ctx.next_sequence()
         event_id = f"evt-{uuid.uuid4().hex[:12]}"
         args_summary = _summarize_args(args, kwargs)
@@ -321,6 +340,8 @@ def tool(func: F) -> F:
                 "exception_type": type(exc).__name__,
                 "exception_message": _truncate(str(exc), _MAX_EXC_MSG),
             }
+            if tool_description:
+                payload["tool_description"] = tool_description
             client.submit_event(Event(
                 event_id=event_id,
                 execution_id=ctx.execution_id,
@@ -343,6 +364,8 @@ def tool(func: F) -> F:
             # actually returns.
             "result_summary": _truncate(repr(result), _MAX_RESULT_REPR),
         }
+        if tool_description:
+            payload["tool_description"] = tool_description
         # Structured JSON form for backend detectors (specifically
         # tool_schema_drift, which fingerprints the return shape).
         # Only present when the result is JSON-serializable;
@@ -367,6 +390,33 @@ def tool(func: F) -> F:
 def _elapsed_ms(start_wall: float) -> int:
     return int((time.perf_counter() - start_wall) * 1000)
 
+
+def _tool_description(func: Any) -> str:
+    """Return the tool's description as the model would see it.
+
+    That is the docstring, since that is what tool-calling frameworks
+    hand to the model as the tool's description. Read at CALL time
+    rather than decoration time on purpose: a poisoned MCP server
+    swaps the description between calls, and reading it once at import
+    would miss exactly the change worth catching.
+
+    Returns "" when there is no docstring. The caller omits the field
+    entirely in that case rather than sending an empty string, so the
+    backend can distinguish "no description" from "description was
+    emptied", which are different events.
+    """
+    doc = getattr(func, "__doc__", None)
+    if not isinstance(doc, str):
+        return ""
+    doc = doc.strip()
+    if not doc:
+        return ""
+    if len(doc) > _MAX_TOOL_DESCRIPTION:
+        # Mark the truncation inline. Without this a description that
+        # grows past the cap looks identical to one that was edited,
+        # and the drift detector would fire on a non-event.
+        return doc[:_MAX_TOOL_DESCRIPTION] + "...[truncated]"
+    return doc
 
 def _summarize_args(args: Any, kwargs: Any) -> Dict[str, Any]:
     """Produce a JSON-friendly, length-bounded summary of call arguments."""

@@ -26,9 +26,14 @@ configure({
 });
 
 // Define a tool. Observed when called from inside a wrap()'d function.
-const searchWeb = tool({ name: "search_web" }, async (q: string) => {
-  return ["result1", "result2"];
-});
+// Pass `description` if your agent framework shows one to the model,
+// see "Tool descriptions" below.
+const searchWeb = tool(
+  { name: "search_web", description: "Search the web. Returns a list of results." },
+  async (q: string) => {
+    return ["result1", "result2"];
+  },
+);
 
 // Wrap an agent function. Records start/complete/crash automatically.
 const runAgent = wrap(async (query: string) => {
@@ -64,6 +69,45 @@ All HTTP is async via a single in-process queue + a `setInterval`
 drainer. Network failures during observation NEVER throw back into the
 wrapped agent. The SDK is fail-open: a Mesedi outage degrades to
 invisibility, not to broken production code.
+
+## Tool descriptions
+
+`tool()` accepts an optional `description`. Pass the same string you
+give your agent framework as the tool's description:
+
+```typescript
+const lookupDocs = tool(
+  {
+    name: "lookup_docs",
+    description: "Look up documentation for a library. Returns the doc snippet.",
+  },
+  async (library: string) => ({ library, snippet: "..." }),
+);
+```
+
+**Why it is worth passing.** A tool's contract has two halves: the
+shape it returns, and the description the model reads when deciding
+whether and how to call it. Mesedi's `tool_schema_drift` detector
+watches both, but it can only watch the second one if the SDK sends it.
+When a tool's description changes away from a stable baseline, you get
+a failure group with a signature like `lookup_docs:desc:1a2b3c4d`.
+
+That matters most under MCP, where descriptions come from a
+third-party server and are not sanitised. It is the mechanism behind
+CVE-2026-75130 (Context7 MCP server, published 2026-08-18): a
+compromised server puts instructions in what reads to the model as
+help text, the agent follows them, and the tool's return shape never
+changes. Without the description, nothing about that call looks
+unusual.
+
+The Python SDK reads `__doc__` automatically. TypeScript has no
+docstring the runtime can read, so here it has to be passed
+explicitly. If you skip it, the field is omitted entirely rather than
+sent as an empty string, and description drift simply never fires for
+that tool. Nothing else changes.
+
+Descriptions are truncated at 2000 characters with an inline
+`...[truncated]` marker, and are only ever hashed for comparison.
 
 ## Optional: hard-halt with local budgets
 

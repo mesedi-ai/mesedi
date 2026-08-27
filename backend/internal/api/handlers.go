@@ -1038,6 +1038,30 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 					}
 					shapeCounts[shape]++
 				}
+				// Description drift, checked BEFORE return-shape
+				// drift. A rewritten description is the signal that a
+				// tool the model trusts was tampered with (the MCP
+				// tool-poisoning class, CVE-2026-75130), whereas a
+				// changed return shape is usually its author shipping
+				// a release. When both moved, the security reading is
+				// the one worth surfacing, and the `break` below means
+				// only one drift signal fires per execution.
+				if descSig, descFired := h.detectToolDescriptionDrift(
+					r.Context(), authProjectID, executionID, toolName,
+					detectorThresholds.ToolSchemaDrift,
+				); descFired {
+					isNew, gErr := h.Store.GroupToolSchemaDrift(r.Context(), executionID, authProjectID, descSig)
+					if gErr != nil {
+						h.Logger.Warn("tool-description-drift grouping failed (continuing)",
+							"execution_id", executionID,
+							"signature", descSig,
+							"error", gErr.Error(),
+						)
+					}
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassToolSchemaDrift, descSig, isNew, gErr)
+					break
+				}
+
 				if sig, fired := detectors.DetectSchemaDriftWithThresholds(toolName, currentShape, shapeCounts, detectorThresholds.ToolSchemaDrift); fired {
 					isNew, gErr := h.Store.GroupToolSchemaDrift(r.Context(), executionID, authProjectID, sig)
 					if gErr != nil {

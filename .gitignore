@@ -74,3 +74,8 @@ dashboard/
 local/
 # Root-level gap / capability audit docs belong in internal-extract
 docs/GAPS_*.md
+
+# foundation-audit scope files are inputs to the pre/post run, not
+# source. They are written per-task, read once, and would otherwise
+# accumulate at the repo root forever.
+.audit-scope-*.json

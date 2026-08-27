@@ -10,7 +10,8 @@ backend for failure-class detection and analysis. The v1 surface:
   records start, completion (or crash), wall-clock duration, and a stable
   crash signature suitable for grouping identical exceptions.
 - `@mesedi.tool`: decorate any function as an observed tool call. Emits
-  `tool_call` events into the surrounding execution context.
+  `tool_call` events into the surrounding execution context, including
+  the function's docstring (see "Tool descriptions" below).
 - Framework adapters for LangChain, LangGraph, OpenAI Agents SDK, and CrewAI (see below).
 
 ## Install
@@ -52,6 +53,45 @@ For each `@wrap`-decorated call:
 Network failures during observation NEVER block the wrapped function. The
 SDK is fail-open: a Mesedi outage degrades to invisibility, not to broken
 production code.
+
+## Tool descriptions
+
+`@mesedi.tool` reads the decorated function's docstring and sends it as
+`tool_description` on each `tool_call` event. Nothing to configure:
+
+```python
+@mesedi.tool
+def lookup_docs(library: str) -> dict:
+    """Look up documentation for a library. Returns the doc snippet."""
+    return {"library": library, "snippet": "..."}
+```
+
+**Why this exists.** A tool's contract has two halves: the shape it
+returns, and the description the model reads when deciding whether and
+how to call it. Mesedi's `tool_schema_drift` detector watches both.
+When a description changes away from a stable baseline you get a
+failure group with a signature like `lookup_docs:desc:1a2b3c4d`,
+distinct from a return-shape change so you can tell which half moved.
+
+That matters most under MCP, where descriptions come from a
+third-party server and are not sanitised. It is the mechanism behind
+CVE-2026-75130 (Context7 MCP server, published 2026-08-18): a
+compromised server puts instructions in what reads to the model as
+help text, the agent follows them, and the tool's return shape never
+changes. Without the description, nothing about that call looks
+unusual.
+
+Two details worth knowing:
+
+- The docstring is read **at call time**, not when the decorator runs.
+  A description swapped at runtime, which is exactly what a
+  compromised MCP server does, is therefore visible.
+- A tool with no docstring omits the field entirely rather than
+  sending an empty string, and description drift never fires for it.
+  Nothing else changes.
+
+Descriptions are truncated at 2000 characters with an inline
+`...[truncated]` marker, and are only ever hashed for comparison.
 
 ## Optional: hard-halt with local budgets
 

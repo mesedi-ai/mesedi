@@ -1831,6 +1831,31 @@ type Store interface {
 		projectID, toolName, excludeExecutionID string,
 		limit int,
 	) ([][]byte, error)
+	// ListToolDescriptions returns up to `limit` recent
+	// tool_description values from tool_call events for the
+	// (project, tool) pair, ordered newest-first. Excludes the
+	// calling execution so the detector compares against PRIOR runs.
+	//
+	// Separate from ListSuccessfulToolReturns rather than folded into
+	// it, deliberately. The description and the return shape are
+	// independent halves of a tool's contract and drift in each means
+	// something different: a changed return shape is usually the
+	// tool's author shipping a change, while a changed description is
+	// the text the MODEL reads being rewritten underneath it. That is
+	// the shape of CVE-2026-75130 and the MCP tool-poisoning class
+	// generally. Keeping them separate also avoids rehashing existing
+	// history: folding description into the existing shape hash would
+	// invalidate every stored baseline and make every tool look like
+	// it drifted once on deploy.
+	//
+	// Includes failed calls as well as successful ones: a poisoned
+	// description is worth seeing even when the call it accompanied
+	// blew up.
+	ListToolDescriptions(
+		ctx context.Context,
+		projectID, toolName, excludeExecutionID string,
+		limit int,
+	) ([]string, error)
 	// ListToolNamesInExecution returns the distinct tool_names
 	// invoked successfully in the execution. The schema-drift
 	// detector walks this list and queries history per tool.
