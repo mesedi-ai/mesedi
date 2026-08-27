@@ -1,6 +1,6 @@
 # Mesedi Python SDK
 
-**Status:** v0.5.2. Live on PyPI.
+**Status:** v0.5.3. Live on PyPI.
 
 The Mesedi SDK observes autonomous AI agent runs and ships them to the Mesedi
 backend for failure-class detection and analysis. The v1 surface:

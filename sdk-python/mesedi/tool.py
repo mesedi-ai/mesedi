@@ -321,7 +321,26 @@ def tool(func: F) -> F:
 
         client = get_client()
         tool_name = getattr(func, "__name__", "<unknown>")
-        tool_description = _tool_description(func)
+        # `inner`, NOT `func`. This is the whole point and it was
+        # wrong until 2026-08-27.
+        #
+        # `inner` is the object the caller holds and the object a
+        # tool-calling framework introspects: inspect.getdoc(my_tool)
+        # returns inner.__doc__, and that is the text handed to the
+        # model as the tool's description. `func` is the undecorated
+        # original, reachable only from this closure.
+        #
+        # functools.wraps copies __doc__ from func to inner ONCE, at
+        # decoration time, in one direction. So any later change to
+        # the description, which is precisely the MCP tool-poisoning
+        # case this field exists to catch, lands on `inner` and is
+        # invisible from `func`.
+        #
+        # Reading `func` made the field technically present and
+        # practically useless: the synthetic-customer test poisoned a
+        # description, the SDK sent the clean one eleven times, and
+        # the detector correctly reported no drift.
+        tool_description = _tool_description(inner)
         sequence = ctx.next_sequence()
         event_id = f"evt-{uuid.uuid4().hex[:12]}"
         args_summary = _summarize_args(args, kwargs)
@@ -399,6 +418,11 @@ def _tool_description(func: Any) -> str:
     rather than decoration time on purpose: a poisoned MCP server
     swaps the description between calls, and reading it once at import
     would miss exactly the change worth catching.
+
+    Callers must pass the DECORATED object, not the function it
+    wraps. Reading at call time is necessary but not sufficient: read
+    the wrong object at the right time and a swapped description is
+    still invisible. See the comment at the call site.
 
     Returns "" when there is no docstring. The caller omits the field
     entirely in that case rather than sending an empty string, so the
