@@ -104,7 +104,7 @@ class Execution:
     total_tokens_out: Optional[int] = None
     estimated_cost_usd: Optional[float] = None
     sdk_language: str = "python"
-    sdk_version: str = "0.5.1"
+    sdk_version: str = "0.5.2"
     crash_signature: Optional[str] = None
     #  optional per-execution tenant identifier from the
     # host SaaS application. When set, it surfaces in the

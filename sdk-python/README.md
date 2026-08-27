@@ -1,6 +1,6 @@
 # Mesedi Python SDK
 
-**Status:** v0.2.0. Live on PyPI.
+**Status:** v0.5.2. Live on PyPI.
 
 The Mesedi SDK observes autonomous AI agent runs and ships them to the Mesedi
 backend for failure-class detection and analysis. The v1 surface:
@@ -43,7 +43,7 @@ For local backend development against `localhost:8080`, pass an explicit
 For each `@wrap`-decorated call:
 
 - **On entry:** `POST /executions` with `execution_id`, `status="started"`,
-  `sdk_language="python"`, `sdk_version="0.2.0"`.
+  `sdk_language="python"`, `sdk_version` (from `mesedi.__version__`).
 - **On normal return:** `PATCH /executions/{id}` with `status="completed"`,
   `ended_at`, `duration_ms`.
 - **On exception:** `PATCH /executions/{id}` with `status="crashed"`,
