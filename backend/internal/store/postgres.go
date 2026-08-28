@@ -85,7 +85,14 @@ func (s *PostgresStore) Close() error {
 	return err
 }
 
-// Ping verifies the database is reachable. Used by /health.
+// Ping verifies the database is reachable. Called by the /ready
+// readiness probe (cmd/api/ready.go) and by cmd/mesedi-pg-smoke.
+//
+// This comment previously said "Used by /health". That was false for
+// the entire life of the endpoint: /health returned a hardcoded
+// {"ok":true} and never called this, so external uptime monitors could
+// not detect a database outage. Corrected 2026-08-27 along with the
+// endpoint itself.
 func (s *PostgresStore) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }

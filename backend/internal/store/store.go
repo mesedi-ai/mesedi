@@ -2263,6 +2263,12 @@ type Store interface {
 	// Lifecycle.
 	Close() error
 	Ping(ctx context.Context) error
+
+	// SchemaStatus reports how many migrations this binary embeds
+	// versus how many the connected database has applied. Used by the
+	// /ready endpoint. See readiness.go for why a Ping alone is not
+	// sufficient.
+	SchemaStatus(ctx context.Context) (SchemaStatus, error)
 }
 
 // AbuseSignal is one detected abuse event. Schema mirrors

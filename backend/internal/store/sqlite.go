@@ -80,7 +80,10 @@ func (s *SQLiteStore) Close() error {
 	return err
 }
 
-// Ping verifies the database is reachable. Used by /health (eventually).
+// Ping verifies the database is reachable. Called by the /ready
+// readiness probe (cmd/api/ready.go). The "(eventually)" that used to
+// end this line was accurate and nobody read it: /health never called
+// this at all. Wired up for real on 2026-08-27.
 func (s *SQLiteStore) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }

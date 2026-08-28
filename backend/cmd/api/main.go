@@ -291,6 +291,10 @@ func main() {
 	// /health is never blocked by an auth failure.
 	publicMux := http.NewServeMux()
 	publicMux.HandleFunc("GET /health", handleHealth(logger))
+	// /ready is the check that can actually fail. /health deliberately
+	// cannot: Fly polls it as a liveness probe and cycling machines on
+	// a database blip would make an outage worse. See cmd/api/ready.go.
+	publicMux.HandleFunc("GET /ready", handleReady(st, logger))
 	// Local-dev dashboard: served from embedded files in the backend
 	// binary itself, so same-origin (no CORS gymnastics) and no
 	// separate web server needed. NOT the production dashboard. See
@@ -561,6 +565,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /health", publicMux)
+	mux.Handle("GET /ready", publicMux)
 	mux.Handle("GET /ui/", publicMux)
 	mux.Handle("POST /signup", signupHandler)
 	mux.Handle("OPTIONS /signup", signupHandler)
