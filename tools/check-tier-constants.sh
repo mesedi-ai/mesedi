@@ -282,6 +282,126 @@ assert_pattern "Hobby team-invite refuses tier (Go)" \
   "$MESEDI_ROOT/backend/internal/api/handlers_team.go" \
   "TierHobby" || true
 
+# ─── Hand-sold tiers: Production + Enterprise (7.38) ───────────
+#
+# Pre-2026-08-28 this script asserted Hobby and Team only. Every one
+# of its 30 assertions covered the two self-serve tiers, and neither
+# hand-sold tier was checked at all. Production was added days before
+# launch, which made it simultaneously the newest tier and the least
+# guarded — and the newest is the one most likely to drift.
+#
+# Found by reading the script's OUTPUT after wiring it into CI, not by
+# the script itself. A passing check says nothing about its coverage.
+
+# Both hand-sold tier slugs must exist in Go. The dashboard looks up
+# TIER_CONSTANTS[status.tier] by these exact strings; a rename on one
+# side makes a paying customer's billing page crash or, worse, render
+# the wrong plan name.
+assert_pattern "TierProduction slug (Go)" \
+  "$GO_BILLING" 'TierProduction[[:space:]]*=[[:space:]]*"production"' || true
+assert_pattern "TierEnterprise slug (Go)" \
+  "$GO_BILLING" 'TierEnterprise[[:space:]]*=[[:space:]]*"enterprise"' || true
+
+# Retention cap: 3650 days, indefinite allowed, on BOTH hand-sold
+# tiers. This is the one number a customer could actually be harmed
+# by: if the Go cap dropped below the claim, their data would be
+# deleted earlier than the contract says.
+assert_pattern "Hand-sold retention cap = 3650 (Go)" \
+  "$MESEDI_ROOT/backend/internal/api/handlers.go" \
+  "return 3650, true" || true
+assert_tier_field "Production retention = 3650 (TS)" \
+  "$TS_CONSTANTS" "production" 'retentionDays:[[:space:]]*3650' || true
+assert_tier_field "Enterprise retention = 3650 (TS)" \
+  "$TS_CONSTANTS" "enterprise" 'retentionDays:[[:space:]]*3650' || true
+
+# Volume is contract-negotiated on both, represented as UNLIMITED.
+# If either flipped to a finite number the pricing card would start
+# advertising a metered allowance that the backend does not enforce.
+assert_tier_field "Production executions UNLIMITED (TS)" \
+  "$TS_CONSTANTS" "production" 'executionsIncluded:[[:space:]]*UNLIMITED' || true
+assert_tier_field "Enterprise executions UNLIMITED (TS)" \
+  "$TS_CONSTANTS" "enterprise" 'executionsIncluded:[[:space:]]*UNLIMITED' || true
+
+# No per-execution overage on either: computeOverageCostUSD returns 0
+# for both, so a non-zero claim here would bill on paper only.
+assert_tier_field "Production overage = 0 (TS)" \
+  "$TS_CONSTANTS" "production" 'overagePerExecutionUSD:[[:space:]]*0' || true
+assert_tier_field "Enterprise overage = 0 (TS)" \
+  "$TS_CONSTANTS" "enterprise" 'overagePerExecutionUSD:[[:space:]]*0' || true
+
+# Audit logs are the Team+ gate; both hand-sold tiers sit above it.
+assert_tier_field "Production auditLogs = true (TS)" \
+  "$TS_CONSTANTS" "production" 'auditLogs:[[:space:]]*true' || true
+assert_tier_field "Enterprise auditLogs = true (TS)" \
+  "$TS_CONSTANTS" "enterprise" 'auditLogs:[[:space:]]*true' || true
+
+# Listed floor price. Marketing-surface only: the backend never
+# hard-codes it because these tiers are invoiced, not Stripe-metered.
+assert_tier_field "Production price = 1500 (TS)" \
+  "$TS_CONSTANTS" "production" 'pricePerMonthUSD:[[:space:]]*1500' || true
+assert_tier_field "Enterprise price = null (TS)" \
+  "$TS_CONSTANTS" "enterprise" 'pricePerMonthUSD:[[:space:]]*null' || true
+
+# ─── Production must never be handled without Enterprise ────────
+#
+# billing.go says this in a comment and nothing enforced it:
+#
+#   "If you find yourself writing `case TierEnterprise:` you almost
+#    certainly want `case TierProduction, TierEnterprise:`"
+#
+# Production behaves exactly like Enterprise everywhere in the
+# backend. A branch that names only Enterprise silently drops
+# Production into the default case, which for most switches here
+# means Hobby limits applied to a customer paying from $1,500/mo.
+# That failure is invisible: no error, no log, just the wrong caps.
+#
+# Suppress a legitimately Enterprise-only branch with
+# `// tier-production-exempt: <reason>` on or near the line. There
+# are no exemptions in production code today.
+echo ""
+echo "=== Production/Enterprise pairing check ==="
+pairing_drift=0
+pairing_checked=0
+while IFS=: read -r file lineno line; do
+  case "$file" in *_test.go) continue ;; esac
+  # The constant declaration itself is not a branch.
+  case "$line" in *"TierEnterprise ="*) continue ;; esac
+  # Skip pure comment lines (leading whitespace then //).
+  if printf '%s' "$line" | grep -qE '^[[:space:]]*//'; then
+    continue
+  fi
+  pairing_checked=$((pairing_checked + 1))
+  if printf '%s' "$line" | grep -q "TierProduction"; then
+    continue
+  fi
+  ctx=$(sed -n "$(( lineno - 3 > 0 ? lineno - 3 : 1 )),$(( lineno + 3 ))p" "$file")
+  if printf '%s' "$ctx" | grep -q "tier-production-exempt"; then
+    echo "SKIP (exempt): $file:$lineno"
+    continue
+  fi
+  if printf '%s' "$ctx" | grep -q "TierProduction"; then
+    continue
+  fi
+  echo "DRIFT: $file:$lineno names TierEnterprise without TierProduction"
+  echo "       $(printf '%s' "$line" | sed 's/^[[:space:]]*//')"
+  echo "       Production behaves identically to Enterprise in the backend."
+  echo "       Suppress with '// tier-production-exempt: <reason>' if genuinely"
+  echo "       Enterprise-only."
+  pairing_drift=1
+done < <(grep -rn "TierEnterprise" "$MESEDI_ROOT/backend/internal/api/" 2>/dev/null)
+
+if [ "$pairing_checked" -eq 0 ]; then
+  echo "DRIFT: the pairing check matched zero TierEnterprise references."
+  echo "       Either the constant was renamed or this check is broken."
+  echo "       A guard that silently checks nothing is worse than none."
+  pairing_drift=1
+elif [ "$pairing_drift" -eq 0 ]; then
+  echo "OK: all $pairing_checked TierEnterprise references also handle Production"
+fi
+if [ "$pairing_drift" -ne 0 ]; then
+  drift=1
+fi
+
 # #392 — tier-change cascade coverage check.
 #
 # Every site in backend/internal/api/ that flips a project's tier via

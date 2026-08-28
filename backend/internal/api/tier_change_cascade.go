@@ -247,13 +247,34 @@ func (h *Handlers) sendTierClampEmail(
 }
 
 // isTierDowngrade returns true when toNorm is strictly lower than
-// fromNorm in the tier ordering Hobby < Team < Enterprise. Empty
-// fromNorm returns false (safe fallback: no clamp when we can't
-// establish a direction).
+// fromNorm in the tier ordering Hobby < Team < {Production,
+// Enterprise}. Empty fromNorm returns false (safe fallback: no clamp
+// when we can't establish a direction).
+//
+// PRODUCTION AND ENTERPRISE SHARE RANK 3 DELIBERATELY.
+// They have identical caps everywhere in the backend, so a move
+// between them clamps nothing and must not be treated as a downgrade
+// in either direction.
+//
+// Production was missing from this switch entirely until 2026-08-28,
+// which meant rank("production") hit the default and returned 0. The
+// consequence was not a crash:
+//
+//	Production -> Hobby   f == 0, so the function returned false
+//	                      and the settings clamp never ran. The
+//	                      project kept 3650-day retention on a free
+//	                      tier, indefinitely.
+//	Production -> Team     same.
+//
+// billing.go warns about exactly this: "If you find yourself writing
+// `case TierEnterprise:` you almost certainly want
+// `case TierProduction, TierEnterprise:`". The warning was there;
+// nothing enforced it. tools/check-tier-constants.sh now does, and
+// this was the first thing it found.
 func isTierDowngrade(fromNorm, toNorm string) bool {
 	rank := func(t string) int {
 		switch t {
-		case TierEnterprise:
+		case TierProduction, TierEnterprise:
 			return 3
 		case TierTeam:
 			return 2

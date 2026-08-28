@@ -405,6 +405,32 @@ func TestIsTierDowngrade(t *testing.T) {
 		{TierHobby, TierHobby, false},
 		{TierTeam, TierTeam, false},
 		{TierEnterprise, TierEnterprise, false},
+
+		// PRODUCTION. Absent from this table until 2026-08-28, and
+		// absent from the rank switch, so it fell to the default and
+		// ranked 0. The first two cases below are the bug: a source
+		// rank of 0 makes the function return false, the cascade never
+		// runs, and a project leaving Production keeps 3650-day
+		// retention on a tier that permits 7 or 90.
+		//
+		// Nothing crashed and nothing logged. This was found by a CI
+		// check added the same day, not by review.
+		{TierProduction, TierHobby, true},
+		{TierProduction, TierTeam, true},
+		{TierHobby, TierProduction, false},
+		{TierTeam, TierProduction, false},
+		{TierProduction, TierProduction, false},
+
+		// Production and Enterprise share rank 3 on purpose: identical
+		// caps everywhere in the backend, so a move between them
+		// clamps nothing and is a downgrade in neither direction.
+		// Ranking Enterprise above Production would make
+		// Enterprise -> Production clamp settings that need no
+		// clamping, and fire a "your settings were changed" email at a
+		// customer whose settings were not changed.
+		{TierEnterprise, TierProduction, false},
+		{TierProduction, TierEnterprise, false},
+
 		// Unknown source: false (safe fallback).
 		{"", TierHobby, false},
 		{"unknown", TierHobby, false},
