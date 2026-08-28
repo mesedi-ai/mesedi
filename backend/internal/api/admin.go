@@ -548,6 +548,22 @@ func (h *Handlers) HandleAdminDeleteProject(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "delete project: "+err.Error())
 		return
 	}
+	// audit_events is deliberately NOT in the delete cascade, and the
+	// table carries project_name_snapshot / project_deleted_at for
+	// exactly this case, so the row outlives the project it describes.
+	// The Privacy Policy promises an audit log of administrative
+	// actions "including project closure" kept for seven years. Until
+	// 2026-08-27 that was true of customer-initiated closure and false
+	// of founder-initiated deletion.
+	h.recordAuditEventForProject(
+		context.Background(),
+		projectID,
+		AuditActorPlatformAdmin,
+		AuditAdminProjectDelete,
+		"project",
+		projectID,
+		map[string]any{"project_name": p.Name, "owner_email": p.OwnerEmail},
+	)
 	h.Logger.Info("admin: project deleted",
 		"project_id", projectID,
 		"project_name", p.Name,
@@ -609,6 +625,21 @@ func (h *Handlers) HandleAdminResetFailureGroups(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "reset failure_groups: "+err.Error())
 		return
 	}
+	// Audit BEFORE responding. This endpoint deleted 886 rows from
+	// production on 2026-08-27 leaving no trace beyond a log line
+	// that later aged out of Fly's retention window. The deletion was
+	// only discovered by restoring an R2 backup and comparing counts,
+	// and by then there was no way to tell which project had been
+	// reset or by whom.
+	h.recordAuditEventForProject(
+		context.Background(),
+		projectID,
+		AuditActorPlatformAdmin,
+		AuditAdminFailureGroupsReset,
+		"project",
+		projectID,
+		map[string]any{"deleted": deleted, "project_name": p.Name},
+	)
 	h.Logger.Info("admin: failure_groups reset",
 		"project_id", projectID,
 		"project_name", p.Name,
@@ -1106,6 +1137,13 @@ func (h *Handlers) HandleAdminRevokeAPIKey(w http.ResponseWriter, r *http.Reques
 				"mint a replacement admin key first, then revoke this one with the new key")
 		return
 	}
+	// Resolve the owning project BEFORE the delete. Afterwards the row
+	// is gone and the audit event has nothing to attach to, which is
+	// precisely how a destructive action becomes unattributable.
+	revokedProjectID := ""
+	if k, kerr := h.Store.GetAPIKeyByID(r.Context(), keyID); kerr == nil && k != nil {
+		revokedProjectID = k.ProjectID
+	}
 	if err := h.Store.DeleteAPIKeyByID(r.Context(), keyID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "key not found: "+keyID)
@@ -1116,6 +1154,15 @@ func (h *Handlers) HandleAdminRevokeAPIKey(w http.ResponseWriter, r *http.Reques
 	}
 	method, _ := AdminAuthMethodFromContext(r.Context())
 	actorKeyID, _ := AdminKeyIDFromContext(r.Context())
+	h.recordAuditEventForProject(
+		context.Background(),
+		revokedProjectID,
+		AuditActorPlatformAdmin,
+		AuditAdminAPIKeyRevoke,
+		"api_key",
+		keyID,
+		map[string]any{"actor_method": method, "actor_key_id": actorKeyID},
+	)
 	h.Logger.Info("admin: api key revoked",
 		"key_id", keyID,
 		"actor_method", method,

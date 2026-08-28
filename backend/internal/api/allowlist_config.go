@@ -331,6 +331,7 @@ func (h *Handlers) HandleDeleteAllowlist(w http.ResponseWriter, r *http.Request)
 			"could not delete allowlist entry")
 		return
 	}
+	h.recordAuditEvent(r, AuditAllowlistDelete, "allowlist", allowlistID, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

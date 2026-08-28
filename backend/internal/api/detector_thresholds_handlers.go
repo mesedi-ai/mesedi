@@ -264,6 +264,8 @@ func (h *Handlers) HandleDeleteDetectorThreshold(w http.ResponseWriter, r *http.
 			"could not delete detector threshold")
 		return
 	}
+	h.recordAuditEvent(r, AuditDetectorThresholdDelete, "detector_threshold",
+		detector+"."+thresholdKey, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

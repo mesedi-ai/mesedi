@@ -210,6 +210,19 @@ func (h *Handlers) HandleAdminResetPeriodCounter(w http.ResponseWriter, r *http.
 		return
 	}
 
+	h.recordAuditEventForProject(
+		context.Background(),
+		projectID,
+		AuditActorPlatformAdmin,
+		AuditAdminPeriodCounterReset,
+		"project",
+		projectID,
+		map[string]any{
+			"previous_executions_this_period": previousExecutions,
+			"new_period_start":                now.Format(time.RFC3339),
+			"new_period_end":                  newEnd.Format(time.RFC3339),
+		},
+	)
 	h.Logger.Info("admin reset period counter",
 		"project_id", projectID,
 		"previous_executions_this_period", previousExecutions,

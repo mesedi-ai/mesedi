@@ -64,6 +64,27 @@ const (
 	// land here without a new action slug.
 	AuditFailureGroupResolve   = "failure_group.resolved"
 	AuditFailureGroupUnresolve = "failure_group.unresolved"
+
+	// Destructive actions that wrote only a log line until 2026-08-27.
+	//
+	// The gap was found by comparing an R2 backup against live: 886
+	// failure_groups had been deleted from production with no audit
+	// row anywhere, because the reset endpoint logged and did not
+	// audit. A log line ages out of Fly's retention window; an audit
+	// row is what the Privacy Policy promises to keep for seven years.
+	//
+	// The customer-facing consequence is sharper than the internal
+	// one. The Privacy Policy states we keep an audit log of
+	// administrative actions including project closure. Founder-side
+	// project deletion was not audited, so that claim was not true.
+	AuditAdminProjectDelete       = "admin.project_delete"
+	AuditAdminFailureGroupsReset  = "admin.failure_groups_reset"
+	AuditAdminAPIKeyRevoke        = "admin.api_key_revoke"
+	AuditAdminPeriodCounterReset  = "admin.period_counter_reset"
+	AuditAllowlistDelete          = "allowlist.delete"
+	AuditClassSeverityDelete      = "class_severity.delete"
+	AuditDetectorThresholdDelete  = "detector_threshold.delete"
+	AuditPatternDelete            = "pattern.delete"
 )
 
 // AuditActorPlatformAdmin is the synthetic actor_email written by

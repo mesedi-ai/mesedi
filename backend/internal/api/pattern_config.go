@@ -296,6 +296,8 @@ func (h *Handlers) HandleDeletePatternConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "could not delete pattern")
 		return
 	}
+	h.recordAuditEvent(r, AuditPatternDelete, "pattern", patternID,
+		map[string]any{"detector": detector})
 	w.WriteHeader(http.StatusNoContent)
 }
 

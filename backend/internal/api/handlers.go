@@ -4800,6 +4800,7 @@ func (h *Handlers) HandleDeleteClassSeverity(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "could not delete override")
 		return
 	}
+	h.recordAuditEvent(r, AuditClassSeverityDelete, "failure_class", class, nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":            true,
 		"failure_class": class,
