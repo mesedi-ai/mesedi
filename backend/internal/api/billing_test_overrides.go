@@ -72,7 +72,7 @@ func InitTestOverrides(t TestOverrides, logger *slog.Logger) {
 	}
 	active := ActiveTestOverrides()
 	logger.Warn(
-		"TEST-MODE TIER OVERRIDES ACTIVE — this build will use synthetic "+
+		"TEST-MODE TIER OVERRIDES ACTIVE: this build will use synthetic "+
 			"quotas instead of production values. Confirm you are on "+
 			"staging or CI, NEVER on prod.",
 		"overrides", active,

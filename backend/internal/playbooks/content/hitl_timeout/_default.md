@@ -50,9 +50,9 @@ After deploying, watch new HITL executions in the same project. The hitl_timeout
 
 One configurable knob via the detector_thresholds primitive:
 
-- **`fire_modes`** (default `["explicit", "sla_exceeded"]`; closed set — only those two strings are valid). Controls which firing modes promote to failure_groups. Restrict to `["explicit"]` to mute SLA-exceeded clusters when SLA tracking lives in a different system. Restrict to `["sla_exceeded"]` to mute explicit-timeout clusters (rare — usually treated as control flow rather than an alert). Empty input or any value outside the closed set reverts the whole slice to the default (defensive fallback against bad config that escapes the validators registry).
+- **`fire_modes`** (default `["explicit", "sla_exceeded"]`; closed set, only those two strings are valid). Controls which firing modes promote to failure_groups. Restrict to `["explicit"]` to mute SLA-exceeded clusters when SLA tracking lives in a different system. Restrict to `["sla_exceeded"]` to mute explicit-timeout clusters (rare: usually treated as control flow rather than an alert). Empty input or any value outside the closed set reverts the whole slice to the default (defensive fallback against bad config that escapes the validators registry).
 
-The `sla_seconds` and `wait_duration_ms` themselves are not per-project tunables — they're per-handle on the customer's own SDK code via `request_human_intervention(sla_seconds=...)`.
+The `sla_seconds` and `wait_duration_ms` themselves are not per-project tunables: they're per-handle on the customer's own SDK code via `request_human_intervention(sla_seconds=...)`.
 
 ## A note on what wait_duration_ms measures
 

@@ -151,7 +151,7 @@ func init() {
 		ValueType:    "float",
 		Description: "Below this mean score across the execution's " +
 			"higher_is_better=true eval_score events, grounding_failure " +
-			"fires. Default 0.5 — half the evaluator's pass band.",
+			"fires. Default 0.5: half the evaluator's pass band.",
 		Default: 0.5,
 		Parse: func(valueJSON, _ string) (any, error) {
 			v, err := parseFloatJSON(valueJSON)
@@ -441,12 +441,12 @@ func init() {
 		ValueType:    "json",
 		Description: "HITL timeout firing modes the detector " +
 			"promotes to failure_groups. Closed set " +
-			"[\"explicit\", \"sla_exceeded\"]. Default both fire — " +
+			"[\"explicit\", \"sla_exceeded\"]. Default both fire: " +
 			"matches the historical hardcoded posture. Restrict to " +
 			"[\"explicit\"] to mute SLA-exceeded clusters (e.g. " +
 			"projects where SLA tracking lives outside Mesedi) or " +
 			"[\"sla_exceeded\"] to mute the explicit-timeout " +
-			"cluster (rare — usually treated as control flow).",
+			"cluster (rare: usually treated as control flow).",
 		Default: []string{"explicit", "sla_exceeded"},
 		Parse: func(valueJSON, _ string) (any, error) {
 			v, err := parseJSONStringSlice(valueJSON)
@@ -548,7 +548,7 @@ func init() {
 			"regulated-industry projects can tighten to include " +
 			"\"medium\" so PII patterns page; low-noise projects can " +
 			"restrict to [\"critical\"]. The full rule set scans " +
-			"regardless — this knob only controls firing.",
+			"regardless: this knob only controls firing.",
 		Default: []string{"critical", "high"},
 		Parse: func(valueJSON, _ string) (any, error) {
 			v, err := parseJSONStringSlice(valueJSON)

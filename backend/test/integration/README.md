@@ -45,7 +45,7 @@ session, spawns it on a random localhost port with an in-memory
 SQLite store, mints a test project + API key via the public signup
 endpoint, and tears down after the suite finishes.
 
-Each test in `test_detectors.py` is independent — fires one SDK
+Each test in `test_detectors.py` is independent, fires one SDK
 scenario per test, polls `GET /failure-groups` until the expected
 class+signature appears within a 10-second timeout, asserts the
 result. A failing assertion means the SDK + backend pair has drifted

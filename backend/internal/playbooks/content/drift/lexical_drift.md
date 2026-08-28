@@ -58,7 +58,7 @@ The three bucket cutoffs are configurable via the detector_thresholds primitive:
 
 Cross-threshold ordering (`low < medium < high`) is enforced detector-side. If a customer writes values that violate the ordering OR any value falls outside [0.0, 1.0], the detector defensively reverts the WHOLE set to defaults rather than producing bucketing chaos. Customer-tuned values are embedded into the signature (`lexical_drift_0.60+` if the customer set low=0.60) so dashboard filters stay meaningful for tuned projects.
 
-No tier cap on any of the three — alerting sensitivity is the customer's call regardless of plan.
+No tier cap on any of the three: alerting sensitivity is the customer's call regardless of plan.
 
 ## Why this detector exists separately from new-model
 

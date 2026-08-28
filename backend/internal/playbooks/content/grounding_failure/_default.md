@@ -4,7 +4,7 @@ An external evaluator that you wired into your agent (Ragas, Promptfoo, Vectara 
 
 The signature is `grounding_failure:<evaluator_id>:<metric_type>` so each unique (evaluator, metric) pair clusters separately. A project running both Ragas faithfulness and HHEM hallucination produces two distinct groups, even if both fire on the same executions.
 
-The detector emits **all distinct (evaluator, metric) failures per execution**, capped at 20. A RAG pipeline whose Ragas faithfulness, Ragas answer-relevancy, and HHEM hallucination all flag the same output produces three failure_groups — not one.
+The detector emits **all distinct (evaluator, metric) failures per execution**, capped at 20. A RAG pipeline whose Ragas faithfulness, Ragas answer-relevancy, and HHEM hallucination all flag the same output produces three failure_groups, not one.
 
 ## What's usually happening
 
@@ -12,7 +12,7 @@ Two firing conditions, in priority order:
 
 1. **Any single `eval_score` event has `passed=false`.** The evaluator's own pass/fail verdict is authoritative; Mesedi does not second-guess it. This pass runs first; matching (evaluator, metric) pairs fire under this path.
 
-2. **Mean score across the execution's `higher_is_better=true` evaluators falls below the floor.** The default floor is 0.5 (a coin-flip), tunable globally via `mean_floor` and per-evaluator via `per_evaluator_floors`. Only `higher_is_better=true` evaluators participate in the mean rollup — inverse metrics like `hallucination_rate` need their own threshold semantics (banked for a future wave).
+2. **Mean score across the execution's `higher_is_better=true` evaluators falls below the floor.** The default floor is 0.5 (a coin-flip), tunable globally via `mean_floor` and per-evaluator via `per_evaluator_floors`. Only `higher_is_better=true` evaluators participate in the mean rollup: inverse metrics like `hallucination_rate` need their own threshold semantics (banked for a future wave).
 
 Same (evaluator, metric) pair triggering both passes fires once (the pass=false path wins, dedup ensures no double-emit).
 

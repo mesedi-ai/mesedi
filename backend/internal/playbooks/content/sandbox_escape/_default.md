@@ -2,22 +2,22 @@
 
 A code-execution tool on this execution attempted behavior that matches one of Mesedi's twelve sandbox-escape patterns. The detector scans both arguments and return values of every `tool_call` (regardless of whether the call itself succeeded) and fires when any of the patterns match.
 
-The signature is `sandbox_escape:<pattern_id>` for built-in patterns and `sandbox_escape:custom:<pattern_id>` for per-project custom patterns. Distinct attempt patterns cluster separately. The production detector emits ALL matching signatures per execution (capped at 20), so an execution that hits multiple escape vectors produces multiple failure_groups — one per vector — rather than collapsing them into the first match.
+The signature is `sandbox_escape:<pattern_id>` for built-in patterns and `sandbox_escape:custom:<pattern_id>` for per-project custom patterns. Distinct attempt patterns cluster separately. The production detector emits ALL matching signatures per execution (capped at 20), so an execution that hits multiple escape vectors produces multiple failure_groups, one per vector, rather than collapsing them into the first match.
 
 The twelve built-in pattern ids:
 
-- `python_os_import` — `import os` or `from os import` from the sandboxed Python runtime.
-- `python_subprocess_import` — `import subprocess` or `from subprocess import`.
-- `shell_invocation` — `os.system`, `os.popen`, `subprocess.run`/`call`/`Popen`/`check_output`, `child_process.exec`, `child_process.spawn`.
-- `dynamic_code_eval` — `eval(...)` or `exec(...)` called with an argument.
-- `js_vm_module` — Node `vm.runInNewContext`, `vm.runInContext`, `vm.createContext`.
-- `js_dynamic_require` — `require(...)` with a non-literal argument (variable, expression, function call). The safe form `require('fs')` with a string literal is NOT flagged.
-- `js_function_constructor` — `(new) Function('...')` constructing a runnable function from a string.
-- `raw_socket_open` — `import socket`, `socket.socket`, `socket.create_connection`, `socket.gethostbyname`.
-- `instance_metadata_access` — `169.254.169.254`, `metadata.google.internal`, `metadata.azure.com` (link-local IMDS endpoints).
-- `proc_sys_access` — `/proc/self`, `/proc/1`, `/sys/kernel`, `/sys/class`.
-- `privilege_escalation` — `chmod <numeric>`, `chown root`, `setuid(0)`. Does not match `sudo` or `su -` directly; those need a custom pattern.
-- `host_secret_read` — `.aws/credentials`, `.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/known_hosts`, `/etc/passwd`, `/etc/shadow`.
+- `python_os_import`: `import os` or `from os import` from the sandboxed Python runtime.
+- `python_subprocess_import`: `import subprocess` or `from subprocess import`.
+- `shell_invocation`: `os.system`, `os.popen`, `subprocess.run`/`call`/`Popen`/`check_output`, `child_process.exec`, `child_process.spawn`.
+- `dynamic_code_eval`: `eval(...)` or `exec(...)` called with an argument.
+- `js_vm_module`: Node `vm.runInNewContext`, `vm.runInContext`, `vm.createContext`.
+- `js_dynamic_require`: `require(...)` with a non-literal argument (variable, expression, function call). The safe form `require('fs')` with a string literal is NOT flagged.
+- `js_function_constructor`: `(new) Function('...')` constructing a runnable function from a string.
+- `raw_socket_open`: `import socket`, `socket.socket`, `socket.create_connection`, `socket.gethostbyname`.
+- `instance_metadata_access`: `169.254.169.254`, `metadata.google.internal`, `metadata.azure.com` (link-local IMDS endpoints).
+- `proc_sys_access`: `/proc/self`, `/proc/1`, `/sys/kernel`, `/sys/class`.
+- `privilege_escalation`: `chmod <numeric>`, `chown root`, `setuid(0)`. Does not match `sudo` or `su -` directly; those need a custom pattern.
+- `host_secret_read`: `.aws/credentials`, `.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/known_hosts`, `/etc/passwd`, `/etc/shadow`.
 
 ## What's usually happening
 

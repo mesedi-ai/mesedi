@@ -41,7 +41,7 @@ After deploying, look at the parent execution again or run an equivalent workloa
 Two knobs via the detector_thresholds primitive:
 
 - **`cascade_window_seconds`** (default 86400 = 24 h; bounds [10, 86400]; no tier cap). Rows where `child_ended_at - handoff_emitted_at` exceeds this window are excluded from scoring. The default preserves the historical "no window" posture; lower it (e.g. 300 for 5 minutes) when long-lived spawn handoffs whose children fail hours later are showing up as false-positive cascades.
-- **`exclude_spawn_handoffs`** (default `false`; boolean; no tier cap). When true, rows whose `handoff_kind = "spawn"` are skipped before scoring. Fire-and-forget spawns are arguably a supervision gap rather than a cascade — turn this on if your topology uses spawn semantics and the parent's success shouldn't depend on the spawn-child's outcome.
+- **`exclude_spawn_handoffs`** (default `false`; boolean; no tier cap). When true, rows whose `handoff_kind = "spawn"` are skipped before scoring. Fire-and-forget spawns are arguably a supervision gap rather than a cascade: turn this on if your topology uses spawn semantics and the parent's success shouldn't depend on the spawn-child's outcome.
 
 Both defaults preserve the original detector behavior so customers who don't tune see no change. Defensive: `cascade_window_seconds` outside [10, 86400] reverts to default at read time.
 

@@ -2888,7 +2888,7 @@ func buildFailureGroupAnalysisPrompt(
 			"For this specific failure group, identify which of the playbook's " +
 			"named causes most plausibly fits the signature and sample executions, " +
 			"then propose two concrete remediation hypotheses drawn from the " +
-			"playbook's recommended fixes — applied to this customer's specific " +
+			"playbook's recommended fixes: applied to this customer's specific " +
 			"data, not stated in the abstract. Reference the playbook's " +
 			"diagnostic surfaces (events to read, fields to inspect, related " +
 			"detectors to cross-check, per-project knobs to tune) when they " +
@@ -2897,9 +2897,9 @@ func buildFailureGroupAnalysisPrompt(
 			"specific additional data the operator should collect.\n\n")
 	}
 	sb.WriteString("Write a short Markdown analysis with three sections:\n")
-	sb.WriteString("1. **Likely cause** — one paragraph naming the most plausible root cause given the signature and the sample executions.\n")
-	sb.WriteString("2. **Two remediation hypotheses** — two bullet items, each a concrete action the operator can test.\n")
-	sb.WriteString("3. **Confidence** — one line: how confident you are (low / medium / high) and the single biggest unknown.\n")
+	sb.WriteString("1. **Likely cause**: one paragraph naming the most plausible root cause given the signature and the sample executions.\n")
+	sb.WriteString("2. **Two remediation hypotheses**: two bullet items, each a concrete action the operator can test.\n")
+	sb.WriteString("3. **Confidence**: one line: how confident you are (low / medium / high) and the single biggest unknown.\n")
 	sb.WriteString("\nKeep the entire output under 250 words. Do not include a disclaimer about the analysis being non-authoritative; the dashboard already renders one.\n")
 	return sb.String()
 }

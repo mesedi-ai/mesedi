@@ -1,6 +1,6 @@
 # Coordination deadlock
 
-Mesedi detected a cycle in the agent_handoff graph within this execution's topology subtree. Two or more agents are waiting on each other to release control — Coffman's circular-wait condition expressed in agent-role terms. The SDK semantics make the other three Coffman conditions (mutual exclusion, hold-and-wait, no-preemption) implicit, so the detector's job is to find the fourth.
+Mesedi detected a cycle in the agent_handoff graph within this execution's topology subtree. Two or more agents are waiting on each other to release control: Coffman's circular-wait condition expressed in agent-role terms. The SDK semantics make the other three Coffman conditions (mutual exclusion, hold-and-wait, no-preemption) implicit, so the detector's job is to find the fourth.
 
 ## How the detector finds cycles
 
@@ -12,7 +12,7 @@ Two-layer detection:
 
 When both a 2-cycle and an N≥3 cycle exist in the same topology, the 2-cycle wins. The 2-cycle is the simpler and more actionable signal, and demoting it would silently change behavior for existing customer dashboards that filter on specific 2-cycle signatures.
 
-Self-loops (an agent handing off to itself) are excluded — that's not a deadlock, that's a single-agent recursion pattern caught by other detectors.
+Self-loops (an agent handing off to itself) are excluded: that's not a deadlock, that's a single-agent recursion pattern caught by other detectors.
 
 ## What's usually happening
 
@@ -28,7 +28,7 @@ Three common shapes:
 
 ## How to investigate
 
-Open the execution and look at the topology view. The agents that form the cycle are visible in the parent/child graph; for an N≥3 cycle the signature lists every member alphabetically so you can identify the participating roles directly. Read the `agent_handoff` events on each side — the `task_summary` field on each handoff usually reveals what was being asked for and why the recipient deferred.
+Open the execution and look at the topology view. The agents that form the cycle are visible in the parent/child graph; for an N≥3 cycle the signature lists every member alphabetically so you can identify the participating roles directly. Read the `agent_handoff` events on each side: the `task_summary` field on each handoff usually reveals what was being asked for and why the recipient deferred.
 
 Cross-reference with other recent `coordination_deadlock` failure_groups in this project. A single execution is investigation; many executions hitting the same agent pair (or SCC) is a systemic prompt-or-routing problem rather than a one-off bug.
 
@@ -54,5 +54,5 @@ The detector consumes a flat slice of `HandoffEdge` records produced from `agent
 
 ## Related detectors
 
-- **`cascading_failure`** is the parallel multi-agent signal — instead of two agents waiting on each other (deadlock), one agent crashes and the parent inherits the failure (cascade). Both detectors consume the same `agent_handoff` events but answer different questions. If your topology has multiple handoffs and you're seeing one of these groups, check the other: a deadlock that times out can also trigger a cascading_failure when the timing-out side counts as a child terminal failure. Open both failure_groups for the same execution side-by-side to determine the root cause (deadlock first, cascade second is the usual reading).
+- **`cascading_failure`** is the parallel multi-agent signal: instead of two agents waiting on each other (deadlock), one agent crashes and the parent inherits the failure (cascade). Both detectors consume the same `agent_handoff` events but answer different questions. If your topology has multiple handoffs and you're seeing one of these groups, check the other: a deadlock that times out can also trigger a cascading_failure when the timing-out side counts as a child terminal failure. Open both failure_groups for the same execution side-by-side to determine the root cause (deadlock first, cascade second is the usual reading).
 - **`hitl_timeout`** is the human-in-the-loop sibling. When the cycle includes a step that asks a human reviewer to break the tie and the human never responds, you may see both a coordination_deadlock and an hitl_timeout. The hitl_timeout is usually the root cause and the deadlock the symptom.

@@ -8,9 +8,9 @@ The signature is `tool_schema_drift:<tool_name>:<shape_hex8>` so each unique (to
 
 The shape walk preserves structure and drops values:
 
-- **Primitives** become their type name: `null`, `bool`, `string`, `number`. Integers and floats both render as `number` — the shape doesn't distinguish numeric subtypes.
+- **Primitives** become their type name: `null`, `bool`, `string`, `number`. Integers and floats both render as `number`: the shape doesn't distinguish numeric subtypes.
 - **Arrays** render as `[<element-shape>]` using ONLY the first element's shape. Heterogeneous arrays still hash deterministically, but a tool returning `[int, string]` then `[string, int]` would NOT cluster together because the first element differs.
-- **Objects** sort keys alphabetically and emit `{key:shape, key:shape, ...}`. ALL keys participate — there is no optional-field tolerance. A field that appears in some responses but not others produces a different shape.
+- **Objects** sort keys alphabetically and emit `{key:shape, key:shape, ...}`. ALL keys participate: there is no optional-field tolerance. A field that appears in some responses but not others produces a different shape.
 - **Typed sentinels** (`{"__type__": "datetime", "value": "..."}` style): when an object carries a string `__type__` marker, the shape emits `<typed:<typename>>` (e.g. `<typed:datetime>`) or `<typed:<typename>:<class>>` (e.g. `<typed:object:User>`) instead of treating the sentinel as a plain object. This honors the SDK's convention for non-JSON-native values (datetimes, custom objects) shipped via `{"__type__": ..., "value": ...}`.
 
 ## When the detector fires
@@ -18,7 +18,7 @@ The shape walk preserves structure and drops values:
 Three conditions all need to hold:
 
 1. **Enough history.** The project must have at least `min_history_calls` (default 10) prior successful tool_call events for this tool. Brand-new tools sit in a priming state and don't fire.
-2. **Stable baseline.** A single shape must dominate the history — at least 2/3 of the historical calls must share the same fingerprint. Tools whose return shape legitimately varies (e.g. a generic web fetcher) never establish a stable baseline and never fire drift.
+2. **Stable baseline.** A single shape must dominate the history, at least 2/3 of the historical calls must share the same fingerprint. Tools whose return shape legitimately varies (e.g. a generic web fetcher) never establish a stable baseline and never fire drift.
 3. **Current shape differs.** The execution's current return shape must differ from the dominant baseline.
 
 ## What's usually happening
@@ -60,7 +60,7 @@ After deploying the fix, the `tool_schema_drift` failure_group should stop accum
 Two configurable knobs:
 
 - **`min_history_calls`** (default 10; bounds [2, 1000]; no tier cap). Lower it to fire on tools with little history; raise it to require a longer baseline before firing. Detector-thresholds primitive.
-- **`tool_return_value_max_bytes`** (default 8192; tier-capped). A handler-layer cap, NOT a detector knob — it's applied at event ingest before the detector sees the data. Returns above this threshold are excluded from fingerprinting (treated as inconclusive, mirroring the SDK's `<truncated>` sentinel). Raise it if your tools legitimately return large payloads whose tail bytes are signal-bearing; lower it to amortize storage costs if your tools return mostly-irrelevant tail bytes. The Settings dashboard surfaces a truncation-rate telemetry tile so you can see whether the cap is firing.
+- **`tool_return_value_max_bytes`** (default 8192; tier-capped). A handler-layer cap, NOT a detector knob: it's applied at event ingest before the detector sees the data. Returns above this threshold are excluded from fingerprinting (treated as inconclusive, mirroring the SDK's `<truncated>` sentinel). Raise it if your tools legitimately return large payloads whose tail bytes are signal-bearing; lower it to amortize storage costs if your tools return mostly-irrelevant tail bytes. The Settings dashboard surfaces a truncation-rate telemetry tile so you can see whether the cap is firing.
 
 The 2/3 majority threshold for baseline stability is hardcoded and not per-project tunable.
 

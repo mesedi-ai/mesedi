@@ -2,7 +2,7 @@
 
 **Guardians for autonomous AI agents.**
 
-Mesedi observes agent executions in production and detects 20+ named failure classes — loops, runaway costs, prompt-injection attacks, validator failures, drift, silent tool failures, data leakage, context overflow, semantic loops, MCP tool drift, multi-agent cascading failures and coordination deadlocks, HITL timeouts, sandbox escapes, and more. We cluster related failures so the same problem doesn't page you a hundred times, and notify you out-of-band via webhook the first time a new failure class appears. Per-failure-class canonical fix descriptions (Tier 1 Playbooks) ship in the dashboard.
+Mesedi observes agent executions in production and detects 20+ named failure classes: loops, runaway costs, prompt-injection attacks, validator failures, drift, silent tool failures, data leakage, context overflow, semantic loops, MCP tool drift, multi-agent cascading failures and coordination deadlocks, HITL timeouts, sandbox escapes, and more. We cluster related failures so the same problem doesn't page you a hundred times, and notify you out-of-band via webhook the first time a new failure class appears. Per-failure-class canonical fix descriptions (Tier 1 Playbooks) ship in the dashboard.
 
 Mesedi observes out-of-band via a one-line SDK wrap. We never reach into your agent's process. The SDK includes an optional hard-halt feature: the customer configures local budgets (input tokens, output tokens, wall-clock time, or step count) and the SDK enforces them at safe boundaries. Operators can also trigger a halt remotely from the dashboard. Mesedi never decides to halt your agent on its own. A Mesedi outage cannot break your production agent.
 

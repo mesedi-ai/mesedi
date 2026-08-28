@@ -2514,7 +2514,7 @@ func (s *SQLiteStore) groupExecutionInternal(
 			affected_executions = affected_executions + 1,
 			last_seen = excluded.last_seen,
 			-- Auto-reopen on recurrence. Twin of the Postgres upsert in
-			-- postgres.go — see the full rationale there. Both stores
+			-- postgres.go: see the full rationale there. Both stores
 			-- MUST carry this: changing only one is the exact failure
 			-- mode that caused the migration-056 production outage,
 			-- and it would mean self-hosters on SQLite silently keep

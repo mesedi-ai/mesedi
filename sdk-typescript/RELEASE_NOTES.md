@@ -1,4 +1,4 @@
-# v0.7.0 — LangChain.js callback handler adapter
+# v0.7.0: LangChain.js callback handler adapter
 
 Adds a first-class **LangChain.js** integration. Wire it into any
 LangChain runnable and every LLM invocation and tool call flows into
@@ -15,7 +15,7 @@ handler.
   execution boundary) and the handler emits `llm_call` and
   `tool_call` events for the LLM and tool invocations inside.
 - Extractors handle LangChain's `Serialized` + `LLMResult` shape
-  churn across versions — `kwargs.model` → `id[]` → `name` → fallback
+  churn across versions: `kwargs.model` → `id[]` → `name` → fallback
   chain for model identification; `text` vs `message.content` vs
   multi-modal blocks for response text; `tokenUsage` /
   `token_usage` / `usage` / newer `usage_metadata` for token counts.

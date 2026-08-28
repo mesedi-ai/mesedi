@@ -1,6 +1,6 @@
 # Security Policy
 
-Mesedi detects security-relevant failures in AI agents — prompt
+Mesedi detects security-relevant failures in AI agents: prompt
 injection, data leakage, sandbox escape. A tool that makes security
 claims has to be reportable-against, so this document exists to give
 you a private channel and a straight answer about what happens next.
@@ -14,10 +14,10 @@ patch.
 
 Two private channels, either is fine:
 
-1. **GitHub private vulnerability reporting** — the "Report a
+1. **GitHub private vulnerability reporting**: the "Report a
    vulnerability" button under this repository's **Security** tab.
    Preferred, because the whole exchange stays attached to the repo.
-2. **Email <security@mesedi.ai>** — if you would rather not use
+2. **Email <security@mesedi.ai>**: if you would rather not use
    GitHub, or the report involves the hosted service rather than the
    source.
 
@@ -31,7 +31,7 @@ The more of this you can provide, the faster it gets fixed:
   and version or commit
 - Whether it affects self-hosted deployments, the hosted service, or
   both
-- Any conditions required — specific tier, configuration, or
+- Any conditions required: specific tier, configuration, or
   authentication state
 
 A detector **bypass** is in scope and genuinely useful to us: if you
@@ -48,7 +48,7 @@ not dressed up as an SLA:
 
 - **Acknowledgement within 48 hours.** If you have not heard back in
   that window, assume the mail went astray and send a follow-up.
-- **An initial assessment within 5 business days** — whether it
+- **An initial assessment within 5 business days**, whether it
   reproduces, rough severity, and intended fix timeline.
 - **Progress updates** at least every 10 days while the issue is open.
 - **Credit in the release notes** when the fix ships, unless you would
@@ -61,7 +61,7 @@ payout.
 ## Coordinated disclosure
 
 Please give us **90 days** from acknowledgement before publishing.
-If a fix ships sooner, publish as soon as it is released — there is no
+If a fix ships sooner, publish as soon as it is released. There is no
 reason to sit on it. If 90 days pass without a fix, publish anyway;
 an unfixed vulnerability that stays quiet only protects the vendor.
 
@@ -88,7 +88,7 @@ first message and we will treat the timeline as irrelevant.
 - Missing security headers or cookie flags on the marketing pages
   where no session data is involved
 - Vulnerabilities in a self-hosted deployment that stem from that
-  operator's own configuration — an exposed database port, a missing
+  operator's own configuration: an exposed database port, a missing
   reverse-proxy auth layer, secrets committed to their fork
 - Findings from automated scanners submitted without a working
   reproduction

@@ -186,7 +186,7 @@ func (h *Handlers) HandleGetDetectorStatus(w http.ResponseWriter, r *http.Reques
 			commercialCount += n
 		}
 		if ollamaCount > 0 && commercialCount == 0 {
-			const localRuntimeSkip = "No upstream provider — local runtime (Ollama)"
+			const localRuntimeSkip = "No upstream provider: local runtime (Ollama)"
 			resp.ProviderIncident.SkipReason = localRuntimeSkip
 			resp.InfrastructureThrottled.SkipReason = localRuntimeSkip
 			resp.CostVelocity.SkipReason = localRuntimeSkip

@@ -4,11 +4,11 @@ The agent revisited the same canonical state three or more times across `checkpo
 
 This is distinct from `identical_call` (same LLM prompt repeated) and `similar_call` (lexically similar LLM prompts). Semantic loops show up even when the agent is producing different prompts each time, because the agent is fundamentally doing the same work over and over.
 
-The signature is `semantic_loop:<hex8>` — the first 8 hex chars of SHA-256 over the canonical state. Note that the checkpoint `name` argument (the first positional arg to `mesedi.checkpoint(name, **state)`) is NOT in the signature; same state under different names still clusters into one group.
+The signature is `semantic_loop:<hex8>`: the first 8 hex chars of SHA-256 over the canonical state. Note that the checkpoint `name` argument (the first positional arg to `mesedi.checkpoint(name, **state)`) is NOT in the signature; same state under different names still clusters into one group.
 
 ## How the canonical state is computed
 
-The detector reads the `metadata` field from each checkpoint payload. (The SDK helper `mesedi.checkpoint(name, **state)` accepts state as kwargs and serializes them under the `metadata` field on the wire — so when investigating raw events, look for `metadata`, not `state`.)
+The detector reads the `metadata` field from each checkpoint payload. (The SDK helper `mesedi.checkpoint(name, **state)` accepts state as kwargs and serializes them under the `metadata` field on the wire: so when investigating raw events, look for `metadata`, not `state`.)
 
 Canonicalization applies a structure-preserving normalization before hashing:
 
@@ -32,7 +32,7 @@ Three common causes, in rough order of frequency:
 
 ## How to investigate
 
-Open the execution and look at the `checkpoint` events. They were the input to the detector and they share a canonical state hash. Read the `metadata` field on three consecutive checkpoints. If the values are semantically equivalent (same items, same flags, same decisions, just rephrased), the detector caught a real loop. If they look genuinely different, the canonical normalization may need tuning for your domain — particularly the key-lowercasing + value-lowercasing rules might be collapsing distinctions you care about.
+Open the execution and look at the `checkpoint` events. They were the input to the detector and they share a canonical state hash. Read the `metadata` field on three consecutive checkpoints. If the values are semantically equivalent (same items, same flags, same decisions, just rephrased), the detector caught a real loop. If they look genuinely different, the canonical normalization may need tuning for your domain, particularly the key-lowercasing + value-lowercasing rules might be collapsing distinctions you care about.
 
 A useful debugging step: emit a `checkpoint` event at every major decision point with a state dict that captures only the fields that should change between iterations. The detector will fire faster and more accurately if it sees state that is supposed to evolve.
 

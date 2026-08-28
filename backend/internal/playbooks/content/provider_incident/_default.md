@@ -6,11 +6,11 @@ The signature is `provider_incident:<provider>:<error_class>` (e.g. `provider_in
 
 ## What's usually happening
 
-The error_class segment is drawn from Mesedi's canonical provider-error vocabulary (sourced from `spec/error_classes.yaml`). Only the **provider-side** subset can trigger this detector — customer-side classes (bad API keys, malformed requests) are explicitly excluded because they signal customer code defects, not provider outages.
+The error_class segment is drawn from Mesedi's canonical provider-error vocabulary (sourced from `spec/error_classes.yaml`). Only the **provider-side** subset can trigger this detector: customer-side classes (bad API keys, malformed requests) are explicitly excluded because they signal customer code defects, not provider outages.
 
 Provider-side error classes:
 
-- **`service_unavailable`** is the canonical class for HTTP 500 / 502 / 503 / 529 — the provider's API is returning infrastructure-trouble status codes. Check their status page first.
+- **`service_unavailable`** is the canonical class for HTTP 500 / 502 / 503 / 529: the provider's API is returning infrastructure-trouble status codes. Check their status page first.
 
 - **`internal_error`** is the provider's "something went wrong on our side" response (typically a generic 500 with no further detail). Same investigation as `service_unavailable`.
 
@@ -48,4 +48,4 @@ After the provider recovers or you cut over to a fallback, the provider_incident
 
 ## A note on cross-tenant detection
 
-This detector is specifically a cross-tenant signal. It looks at the `tenant_id` field on executions and counts distinct tenants with the same provider error in the recent window. If you do not populate `tenant_id` on your executions (single-tenant project, or you have not wired the field), **this detector silently does not fire** — there is no error, no warning, just no failure_group. Cross-reference with the cost-by-tenant report to see whether you are passing the tenant_id correctly; if that report shows everything under a single empty-string tenant bucket, provider_incident is non-functional for your project until you start populating tenant_id.
+This detector is specifically a cross-tenant signal. It looks at the `tenant_id` field on executions and counts distinct tenants with the same provider error in the recent window. If you do not populate `tenant_id` on your executions (single-tenant project, or you have not wired the field), **this detector silently does not fire**: there is no error, no warning, just no failure_group. Cross-reference with the cost-by-tenant report to see whether you are passing the tenant_id correctly; if that report shows everything under a single empty-string tenant bucket, provider_incident is non-functional for your project until you start populating tenant_id.

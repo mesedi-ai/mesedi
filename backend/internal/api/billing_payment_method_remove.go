@@ -215,7 +215,7 @@ func (h *Handlers) HandleRemovePaymentMethod(w http.ResponseWriter, r *http.Requ
 			periodEndCopy = p.CurrentPeriodEnd.Format("2006-01-02")
 		}
 		teamWarning = fmt.Sprintf(
-			"You will keep Cloud Team access through %s (hard-capped at the included 100K executions and %d AI analyses since there is no card on file for overage). At that point, if you have not added a new payment method, your subscription will auto-downgrade to Cloud Hobby — no failed-charge emails, no dunning. To stay on Team, add a card on /app/billing before then.",
+			"You will keep Cloud Team access through %s (hard-capped at the included 100K executions and %d AI analyses since there is no card on file for overage). At that point, if you have not added a new payment method, your subscription will auto-downgrade to Cloud Hobby, no failed-charge emails, no dunning. To stay on Team, add a card on /app/billing before then.",
 			periodEndCopy, EffectiveTeamAIAnalysisLimit(),
 		)
 	}

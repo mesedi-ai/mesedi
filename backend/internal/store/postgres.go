@@ -2006,7 +2006,7 @@ func (s *PostgresStore) groupExecutionInternalPg(
 			-- see (the list filters resolved_at IS NULL) and no webhook
 			-- fired because the class was not new. A customer could
 			-- ship a fix that did not work, click Resolve, and receive
-			-- no signal that the failure was still happening — the
+			-- no signal that the failure was still happening, the
 			-- product having told them it was handled.
 			--
 			-- Matches Sentry, which reopens an issue on regression.

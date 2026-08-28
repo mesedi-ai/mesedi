@@ -111,7 +111,7 @@ Descriptions are truncated at 2000 characters with an inline
 
 ## Optional: hard-halt with local budgets
 
-Cap a single execution across four axes — input tokens, output tokens,
+Cap a single execution across four axes: input tokens, output tokens,
 wall-clock seconds, and step count. Pass any subset; unset fields impose
 no limit on that axis. When any budget is exceeded, the SDK throws
 `MesediHalt` at the next safe boundary (between LLM calls, tool calls,
@@ -137,8 +137,7 @@ export const myAgent = wrap(
 When a budget is supplied, the SDK also opens an SSE subscription to
 `GET /executions/{id}/halt-stream`. Operators can halt a running
 execution from the dashboard. If the SSE connection fails (backend
-unreachable, 4xx/5xx, network partition), the reader logs and returns
-— the wrapped agent keeps running with local budgets still enforced
+unreachable, 4xx/5xx, network partition), the reader logs and returns. The wrapped agent keeps running with local budgets still enforced
 client-side. Mesedi never decides to halt on its own; operator intent
 or your own budget rules are the only triggers. `MesediHalt` carries an
 internal Symbol marker so `wrap()` detects it even if user code

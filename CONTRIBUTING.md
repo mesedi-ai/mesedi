@@ -20,7 +20,7 @@ that isn't `semantic_loop`, `token_waste`, `cost_velocity`,
 `context_overflow`, `coordination_deadlock`, `cascading_failure`,
 `provider_incident`, `infrastructure_throttled`, `hitl_timeout`,
 `hitl_rejection_spike`, `validator_failures`, `drift`, or a loop
-variant — I want to hear it.
+variant: I want to hear it.
 
 Open an issue describing what happened, what it looked like in your
 logs, and how you eventually noticed. Even a rough description is
@@ -33,8 +33,8 @@ If you can construct an input that should fire a detector and
 doesn't, that's a real bug even though nothing crashed. It is the
 product failing at its advertised job.
 
-For detector misses with security implications — a prompt injection
-or credential leak that slips past — please use the private channel
+For detector misses with security implications, a prompt injection
+or credential leak that slips past, please use the private channel
 in [SECURITY.md](SECURITY.md) rather than a public issue.
 
 ## Bug reports
@@ -75,13 +75,13 @@ honest reasons:
 3. **Two stores, one behaviour.** The backend carries separate
    hand-written SQL for Postgres (hosted) and SQLite (self-hosted).
    A change applied to one and not the other is invisible to tests
-   that only exercise the other — that exact mistake caused a
+   that only exercise the other: that exact mistake caused a
    production outage here once. Any change touching storage needs
    both paths and tests for both, which is easy to miss without
    context I haven't written down yet.
 
 This will loosen. Ask me again after 1.0, or open an issue and make
-the case — if something obviously belongs in Mesedi and you want to
+the case: if something obviously belongs in Mesedi and you want to
 build it, I'd rather find a way to say yes than lose you.
 
 ## Running things locally
@@ -124,14 +124,14 @@ environment. CI skips those for the same reason. Run the plain
 the tokens.
 
 CI runs all three on every push. A PR that reddens CI won't be
-merged, but a failing test is a conversation, not a rejection — say
+merged, but a failing test is a conversation, not a rejection: say
 so in the PR and I'll help.
 
 ## Style
 
 No linter config to fight with. Match the surrounding code. Comments
 in this codebase tend to explain *why* rather than *what*, often
-including the incident that motivated the code — that convention is
+including the incident that motivated the code. That convention is
 deliberate and worth continuing, because the reasoning is what
 survives.
 
