@@ -117,14 +117,26 @@ func TestReadyReturns503WhenDatabaseIsUnreachable(t *testing.T) {
 func TestReadyDoesNotLeakDriverErrorDetail(t *testing.T) {
 	t.Parallel()
 
-	secret := "postgres://mesedi_owner:hunter2@ep-crimson-queen-71444943.us-east-1.aws.neon.tech"
+	// FABRICATED ON PURPOSE. Every value below is invented.
+	//
+	// The first version of this test used the real Neon endpoint hostname and
+	// the real database username, so that the fixture would "look realistic".
+	// This repository is public. GitHub secret scanning raised it the same day
+	// (alert #5, 2026-08-28). The password in it was always fake, but the
+	// endpoint and the username were not, and publishing those turns "find
+	// their database" into "guess one password".
+	//
+	// A test asserting that a DSN never reaches the response body needs a
+	// DSN-SHAPED string. It does not need a real one, and there was no moment
+	// where using the real one made this test stronger.
+	secret := "postgres://db_user:not-a-real-password@ep-example-00000000.us-east-1.aws.neon.tech:5432/appdb"
 	st := &stubReadyStore{pingErr: errors.New("failed to connect to " + secret)}
 
 	rec := httptest.NewRecorder()
 	handleReady(st, quietLogger())(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
 
 	raw := rec.Body.String()
-	for _, leak := range []string{"hunter2", "neon.tech", "mesedi_owner", "crimson-queen"} {
+	for _, leak := range []string{"not-a-real-password", "db_user", "ep-example", "neon.tech"} {
 		if strings.Contains(raw, leak) {
 			t.Errorf("response body leaks %q to an unauthenticated caller:\n%s", leak, raw)
 		}
