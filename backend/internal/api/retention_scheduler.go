@@ -126,21 +126,64 @@ func (s *RetentionScheduler) tick(ctx context.Context) {
 			continue
 		}
 		cutoff := now.AddDate(0, 0, -p.RetentionDays)
-		deleted, derr := s.Store.DeleteExecutionsOlderThan(ctx, p.ProjectID, cutoff)
-		if derr != nil {
-			s.Logger.Warn("retention_scheduler: delete failed",
-				"project_id", p.ProjectID,
-				"retention_days", p.RetentionDays,
-				"cutoff", cutoff.Format(time.RFC3339),
-				"error", derr.Error())
-			continue
+
+		// Three separate deletes, because the data does not all hang
+		// off executions.
+		//
+		// Until 2026-08-27 this loop called only DeleteExecutionsOlderThan
+		// and trusted a comment claiming the cascade covered
+		// failure_groups and webhook_deliveries. It does not: both key
+		// on project_id, so neither was ever reachable. The observable
+		// result in production was executions and events 3 days old
+		// while failure_groups and webhook_deliveries sat at 88 days,
+		// against a documented 7-day Hobby window. Nothing reported it;
+		// it surfaced only when a backup was compared against live.
+		//
+		// Each delete is independent and a failure in one does not skip
+		// the others. Partially pruning is strictly better than
+		// abandoning the project's prune entirely, and the alternative
+		// is one unlucky table stalling the whole retention promise.
+		type pruneStep struct {
+			label string
+			run   func() (int64, error)
 		}
-		if deleted > 0 {
-			s.Logger.Info("retention_scheduler: pruned executions",
-				"project_id", p.ProjectID,
-				"retention_days", p.RetentionDays,
-				"cutoff", cutoff.Format(time.RFC3339),
-				"executions_deleted", deleted)
+		steps := []pruneStep{
+			// executions first: its cascade clears events and
+			// execution_failure_groups, so the later deletes have less
+			// to do.
+			{"executions", func() (int64, error) {
+				return s.Store.DeleteExecutionsOlderThan(ctx, p.ProjectID, cutoff)
+			}},
+			// failure_groups cascades to ai_analyses, which holds
+			// model-written analysis of the customer's failures and is
+			// the most sensitive content in the prune set.
+			{"failure_groups", func() (int64, error) {
+				return s.Store.DeleteFailureGroupsOlderThan(ctx, p.ProjectID, cutoff)
+			}},
+			{"webhook_deliveries", func() (int64, error) {
+				return s.Store.DeleteWebhookDeliveriesOlderThan(ctx, p.ProjectID, cutoff)
+			}},
+		}
+
+		for _, step := range steps {
+			deleted, derr := step.run()
+			if derr != nil {
+				s.Logger.Warn("retention_scheduler: delete failed",
+					"project_id", p.ProjectID,
+					"table", step.label,
+					"retention_days", p.RetentionDays,
+					"cutoff", cutoff.Format(time.RFC3339),
+					"error", derr.Error())
+				continue
+			}
+			if deleted > 0 {
+				s.Logger.Info("retention_scheduler: pruned",
+					"project_id", p.ProjectID,
+					"table", step.label,
+					"retention_days", p.RetentionDays,
+					"cutoff", cutoff.Format(time.RFC3339),
+					"rows_deleted", deleted)
+			}
 		}
 	}
 }

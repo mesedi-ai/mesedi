@@ -1598,6 +1598,33 @@ type Store interface {
 	// failure_groups, and webhook_deliveries owned by the same
 	// executions.
 	DeleteExecutionsOlderThan(ctx context.Context, projectID string, cutoff time.Time) (deleted int64, err error)
+	// DeleteFailureGroupsOlderThan removes failure_groups for the
+	// project whose LAST_SEEN precedes the cutoff, and returns the
+	// count removed.
+	//
+	// Retention did not cover this table until 2026-08-27. The
+	// scheduler deleted executions and relied on "FK CASCADE handles
+	// events, failure_groups, webhook_deliveries", a comment present in
+	// both store twins and wrong in two of its three claims:
+	// failure_groups has a foreign key to PROJECTS, not executions, so
+	// nothing cascaded to it. Verified against pg_constraint rather
+	// than read off the comment. Result in production: executions and
+	// events were 3 days old while failure_groups was 88 days old,
+	// against a documented 7-day Hobby window.
+	//
+	// LAST_SEEN, not first_seen, is the correct cutoff. A group first
+	// seen 80 days ago but recurring yesterday is live, and pruning it
+	// by first_seen would silently delete a customer's active alert
+	// history.
+	//
+	// ai_analyses and execution_failure_groups both cascade from
+	// failure_groups, so deleting here cleans them up too.
+	DeleteFailureGroupsOlderThan(ctx context.Context, projectID string, cutoff time.Time) (deleted int64, err error)
+	// DeleteWebhookDeliveriesOlderThan removes webhook_deliveries for
+	// the project older than the cutoff. Same 2026-08-27 gap: this
+	// table also keys on project_id rather than execution_id, so it was
+	// never reached by the executions cascade and held 88-day-old rows.
+	DeleteWebhookDeliveriesOlderThan(ctx context.Context, projectID string, cutoff time.Time) (deleted int64, err error)
 
 	// Per-project failure-class severity overrides.
 	// GetProjectClassSeverity returns the override for (projectID,

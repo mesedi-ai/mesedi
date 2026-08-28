@@ -92,8 +92,16 @@ func (s *SQLiteStore) ListProjectsForRetention(
 }
 
 // DeleteExecutionsOlderThan removes executions for projectID where
-// started_at < cutoff. The FK ON DELETE CASCADE on events,
-// failure_groups, and webhook_deliveries handles downstream rows.
+// started_at < cutoff.
+//
+// The cascade reaches events and execution_failure_groups only. This
+// comment previously also claimed failure_groups and
+// webhook_deliveries; both are declared FOREIGN KEY (project_id)
+// REFERENCES projects, so neither was ever reachable from an
+// executions delete. See migrations/002_failure_groups.sql and
+// 004_webhook_deliveries.sql. Those tables are pruned by their own
+// methods below.
+//
 // Returns the count of executions deleted (useful for logging
 // prune volume).
 func (s *SQLiteStore) DeleteExecutionsOlderThan(
@@ -107,6 +115,60 @@ func (s *SQLiteStore) DeleteExecutionsOlderThan(
 	`, projectID, cutoff.UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, fmt.Errorf("delete executions older than: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteFailureGroupsOlderThan is the SQLite twin. Written in the same
+// change as the Postgres one on purpose: these two files carry
+// separate hand-written SQL, and a retention fix applied to one engine
+// and not the other would leave self-hosted deployments quietly
+// hoarding data the docs promise to delete.
+//
+// See the interface doc in store.go for why last_seen rather than
+// first_seen, and why the comparison is textual.
+func (s *SQLiteStore) DeleteFailureGroupsOlderThan(
+	ctx context.Context,
+	projectID string,
+	cutoff time.Time,
+) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM failure_groups
+		WHERE project_id = ? AND last_seen < ?
+	`, projectID, cutoff.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("delete failure_groups older than: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteWebhookDeliveriesOlderThan is the SQLite twin.
+//
+// NOTE for self-hosters: SQLite enforces ON DELETE CASCADE only when
+// PRAGMA foreign_keys is ON. The cascade from failure_groups to
+// ai_analyses therefore depends on that pragma being set on the
+// connection, which OpenSQLite does. Flagged here because a cascade
+// that silently does not fire is exactly the failure this change
+// exists to correct.
+func (s *SQLiteStore) DeleteWebhookDeliveriesOlderThan(
+	ctx context.Context,
+	projectID string,
+	cutoff time.Time,
+) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM webhook_deliveries
+		WHERE project_id = ? AND created_at < ?
+	`, projectID, cutoff.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("delete webhook_deliveries older than: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {

@@ -85,7 +85,13 @@ func (s *PostgresStore) ListProjectsForRetention(
 }
 
 // DeleteExecutionsOlderThan removes executions older than cutoff.
-// FK CASCADE handles events, failure_groups, webhook_deliveries.
+//
+// FK CASCADE reaches events and execution_failure_groups, and NOTHING
+// ELSE. The previous version of this comment also claimed
+// failure_groups and webhook_deliveries, which was false: both key on
+// project_id, not execution_id. Confirmed by querying pg_constraint
+// for foreign keys whose confrelid is executions. Those two tables are
+// pruned by their own methods below.
 func (s *PostgresStore) DeleteExecutionsOlderThan(
 	ctx context.Context,
 	projectID string,
@@ -97,6 +103,55 @@ func (s *PostgresStore) DeleteExecutionsOlderThan(
 	`, projectID, cutoff.UTC())
 	if err != nil {
 		return 0, fmt.Errorf("delete executions older than: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteFailureGroupsOlderThan prunes failure_groups by last_seen.
+// See the interface doc in store.go for why this exists separately
+// from the executions prune and why last_seen is the right column.
+func (s *PostgresStore) DeleteFailureGroupsOlderThan(
+	ctx context.Context,
+	projectID string,
+	cutoff time.Time,
+) (int64, error) {
+	// last_seen is TEXT holding RFC3339, not a timestamp column.
+	// Comparing as TEXT rather than casting is deliberate: RFC3339 in
+	// UTC sorts lexicographically, and a cast would abort the entire
+	// DELETE if a single row ever held an unparseable value, turning
+	// one bad row into a permanently stalled retention job.
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM failure_groups
+		WHERE project_id = $1 AND last_seen < $2
+	`, projectID, cutoff.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("delete failure_groups older than: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteWebhookDeliveriesOlderThan prunes delivery records, which
+// carry the failure detail that was sent outbound and are therefore
+// customer content subject to the same retention promise.
+func (s *PostgresStore) DeleteWebhookDeliveriesOlderThan(
+	ctx context.Context,
+	projectID string,
+	cutoff time.Time,
+) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM webhook_deliveries
+		WHERE project_id = $1 AND created_at < $2
+	`, projectID, cutoff.UTC())
+	if err != nil {
+		return 0, fmt.Errorf("delete webhook_deliveries older than: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
