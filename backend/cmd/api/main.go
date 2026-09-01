@@ -33,6 +33,7 @@ package main
 
 import (
 	"context"
+	"crypto/fips140"
 	"errors"
 	"flag"
 	"fmt"
@@ -219,6 +220,21 @@ func main() {
 		"db_url", redactDSN(effectiveDSN),
 		"backend_selected", backend,
 	)
+
+	// FIPS 140-3 posture, reported by the binary rather than claimed in a
+	// document. The Dockerfile builds with GOFIPS140=certified, which links
+	// the most recent Go Cryptographic Module holding a CMVP validation
+	// certificate and enables FIPS mode by default.
+	//
+	// This line exists so the claim is falsifiable: if someone asks whether
+	// this deployment runs FIPS-validated cryptography, the answer is in the
+	// startup log, not in a slide. A locally-built binary without
+	// GOFIPS140 set will honestly report enabled=false.
+	//
+	// Only Enabled() is used here. fips140.Version() would name the exact
+	// module build, but it requires go1.26 and this module declares go1.25.
+	// Add it if and when the go directive moves.
+	logger.Info("fips 140-3 posture", "enabled", fips140.Enabled())
 
 	// ── persistence ─────────────────────────────────────────────────
 	// Dispatch by which DSN is set:

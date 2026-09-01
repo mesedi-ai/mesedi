@@ -23,7 +23,31 @@ COPY . .
 
 # Static build. -trimpath strips local paths from the binary;
 # -ldflags="-s -w" strips symbol tables to shrink the binary.
-RUN CGO_ENABLED=0 GOOS=linux go build \
+#
+# GOFIPS140=certified links the most recent Go Cryptographic Module that
+# holds an actual CMVP validation certificate, and enables FIPS 140-3
+# mode by default in the resulting binary. At the time of writing that
+# resolves to Go Cryptographic Module v1.0.0, CMVP Certificate #5247.
+#
+# Why the build-time variable rather than the GODEBUG option: Go's own
+# guidance is that "most programs should not set this option directly,
+# and should instead use GOFIPS140 at build time". The GODEBUG value
+# fips140=only exists for testing and assessment and is explicitly NOT
+# intended for production; it is documented to introduce crashes and
+# unhandled errors by design.
+#
+# Two operational notes:
+#   - FIPS mode runs known-answer self-tests at init and pairwise
+#     consistency tests on generated keys. Expect up to a 2x slowdown on
+#     some key generation paths.
+#   - FIPS 140-3 mode is unsupported on OpenBSD, Wasm, AIX and 32-bit
+#     Windows. This image is linux/amd64, so it is fine.
+#
+# The running binary reports its own status at startup via
+# crypto/fips140.Enabled(), so this is verifiable rather than asserted.
+# It does not log the module version: crypto/fips140.Version() requires
+# go1.26 and backend/go.mod declares go1.25. Worth adding when that moves.
+RUN CGO_ENABLED=0 GOOS=linux GOFIPS140=certified go build \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/mesedi-api \
