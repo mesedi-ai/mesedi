@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"crypto/fips140"
 	"encoding/json"
 	"errors"
 	"io"
@@ -240,4 +241,156 @@ func TestHealthStaysIndependentOfTheDatabase(t *testing.T) {
 	// If someone later wires a store into handleHealth, this test will
 	// not compile, which is the intended alarm. The comment is the
 	// other half of the guard: read cmd/api/ready.go before changing it.
+}
+
+// ── FIPS posture ────────────────────────────────────────────────────
+//
+// The claim these pin down is "you can verify our crypto posture
+// yourself, without credentials". Three ways that claim could be true
+// in a document and false in the binary, one test each: the field
+// could report a constant instead of the real value, it could vanish
+// on the failure paths where an evaluator is most likely to be
+// looking, or it could leak into the readiness verdict and take the
+// service down on a non-FIPS build.
+
+// A field hardcoded to true passes any test that only ever checks for
+// true. This drives both branches through the same handler.
+func TestReadyReportsBothFIPSStates(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []bool{true, false} {
+		st := &stubReadyStore{status: store.SchemaStatus{Embedded: 56, Applied: 56}}
+		probe := newReadinessProbe(st, quietLogger())
+		probe.fipsEnabled = want
+
+		got := probe.evaluate(context.Background())
+		if got.Crypto.FIPS140 != want {
+			t.Errorf("Crypto.FIPS140 = %v, want %v; the field must report the "+
+				"binary's actual posture, not a constant", got.Crypto.FIPS140, want)
+		}
+	}
+}
+
+// The real binary's value must reach the response. The two tests above
+// substitute the field, so without this one the wiring from
+// crypto/fips140.Enabled() into the probe could be missing entirely.
+func TestNewReadinessProbeReadsRealFIPSState(t *testing.T) {
+	t.Parallel()
+
+	st := &stubReadyStore{status: store.SchemaStatus{Embedded: 1, Applied: 1}}
+	probe := newReadinessProbe(st, quietLogger())
+
+	if probe.fipsEnabled != fips140.Enabled() {
+		t.Errorf("probe.fipsEnabled = %v, but crypto/fips140.Enabled() = %v; the "+
+			"probe must read the real posture at construction",
+			probe.fipsEnabled, fips140.Enabled())
+	}
+}
+
+// An evaluator polling during an incident still needs the posture. If
+// the field were set only on the success path, a 503 would make "not
+// in FIPS mode" indistinguishable from "field not implemented".
+func TestReadyReportsFIPSEvenWhenDatabaseIsDown(t *testing.T) {
+	t.Parallel()
+
+	st := &stubReadyStore{pingErr: errors.New("dial tcp 10.0.0.1:5432: i/o timeout")}
+	probe := newReadinessProbe(st, quietLogger())
+	probe.fipsEnabled = true
+
+	got := probe.evaluate(context.Background())
+	if got.OK {
+		t.Fatal("guard: expected the probe to be not-OK with the database down")
+	}
+	if !got.Crypto.FIPS140 {
+		t.Error("Crypto.FIPS140 = false on the database-unreachable path; the " +
+			"posture is a fact about the binary and must survive a 503")
+	}
+}
+
+// Same requirement on the other failure path, which returns earlier
+// still and is the one migration-056 actually produced.
+func TestReadyReportsFIPSWhenSchemaIsBehind(t *testing.T) {
+	t.Parallel()
+
+	st := &stubReadyStore{status: store.SchemaStatus{Embedded: 56, Applied: 55}}
+	probe := newReadinessProbe(st, quietLogger())
+	probe.fipsEnabled = true
+
+	got := probe.evaluate(context.Background())
+	if got.OK {
+		t.Fatal("guard: expected not-OK with the schema behind")
+	}
+	if !got.Crypto.FIPS140 {
+		t.Error("Crypto.FIPS140 = false on the schema-behind path")
+	}
+}
+
+// The load-bearing one. FIPS mode is a compliance property, not a
+// readiness condition. If it ever gates OK, every developer laptop and
+// CI runner reports 503 and the endpoint stops meaning anything.
+func TestFIPSStateDoesNotAffectReadiness(t *testing.T) {
+	t.Parallel()
+
+	st := &stubReadyStore{status: store.SchemaStatus{Embedded: 56, Applied: 56}}
+	probe := newReadinessProbe(st, quietLogger())
+	probe.fipsEnabled = false
+
+	got := probe.evaluate(context.Background())
+	if !got.OK {
+		t.Errorf("ok = false on a healthy database merely because FIPS is off "+
+			"(reason %q); a non-FIPS build must still serve traffic", got.Reason)
+	}
+	if got.Reason != "" {
+		t.Errorf("reason = %q, want empty; FIPS posture is not a failure", got.Reason)
+	}
+}
+
+// The field is top-level and NOT inside `checks`, because `checks` is
+// what a strict monitor is most likely to iterate exhaustively. This
+// pins the placement, so a later refactor that "tidies" it into checks
+// has to fail a test naming the reason first.
+func TestFIPSIsReportedOutsideTheChecksMap(t *testing.T) {
+	t.Parallel()
+
+	st := &stubReadyStore{status: store.SchemaStatus{Embedded: 56, Applied: 56}}
+	res, body := doReady(t, st)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("guard: status = %d, want 200", res.StatusCode)
+	}
+	for k := range body.Checks {
+		if strings.Contains(strings.ToLower(k), "fips") {
+			t.Errorf("checks[%q] exists; FIPS posture belongs at the top level, "+
+				"because adding keys to `checks` can break a monitor that "+
+				"asserts on that map exhaustively", k)
+		}
+	}
+}
+
+// Serialisation is the actual contract. A bool with omitempty would
+// silently drop `false`, which is the exact value an evaluator most
+// needs to see.
+func TestFIPSFieldIsAlwaysSerialised(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		fips bool
+		want string
+	}{
+		{"enabled", true, `"crypto":{"fips140":true}`},
+		{"disabled", false, `"crypto":{"fips140":false}`},
+	} {
+		st := &stubReadyStore{status: store.SchemaStatus{Embedded: 56, Applied: 56}}
+		probe := newReadinessProbe(st, quietLogger())
+		probe.fipsEnabled = tc.fips
+
+		raw, err := json.Marshal(probe.evaluate(context.Background()))
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", tc.name, err)
+		}
+		if !strings.Contains(string(raw), tc.want) {
+			t.Errorf("%s: body %s does not contain %s; the field must be emitted "+
+				"even when false (no omitempty)", tc.name, raw, tc.want)
+		}
+	}
 }

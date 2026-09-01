@@ -21,11 +21,28 @@
 // free amplifier against our own database. The result is cached for a
 // few seconds, which is invisible at any sane monitor interval and
 // caps the query rate no matter who is calling.
+//
+// WHY IT REPORTS FIPS POSTURE
+// The binary is built with GOFIPS140=certified, which links the Go
+// Cryptographic Module holding CMVP Certificate #5247. Until now the
+// only evidence of that was a line in the startup log, which you can
+// read only if you already have log access — that is, only if you are
+// us. A compliance claim that just its author can confirm is worth
+// very little, so the posture is reported here, where any monitor or
+// third-party evaluator can poll it without credentials.
+//
+// The endpoint is unauthenticated, so this does publish the posture to
+// anyone. That was weighed and accepted: the leak is one boolean, and
+// this same response already carries `version`, which is a strictly
+// larger disclosure because it maps the binary to its known CVEs. A
+// false value reveals no more than the parameters of a TLS handshake
+// with the host would.
 
 package main
 
 import (
 	"context"
+	"crypto/fips140"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -56,12 +73,31 @@ type readyResponse struct {
 	// "56 embedded, 55 applied" is the single most useful line to read
 	// during an incident.
 	Migrations *readyMigrations `json:"migrations,omitempty"`
-	Time       string           `json:"time"`
+	// Crypto is a value, not a pointer, and carries no omitempty: it is
+	// present on every response including the 503s. A compliance
+	// attribute that vanishes when the database is down is worse than
+	// no attribute, because an evaluator polling during an incident
+	// cannot tell "not in FIPS mode" from "field not implemented".
+	Crypto readyCrypto `json:"crypto"`
+	Time   string      `json:"time"`
 }
 
 type readyMigrations struct {
 	Embedded int `json:"embedded"`
 	Applied  int `json:"applied"`
+}
+
+// readyCrypto is an object rather than a bare top-level boolean so the
+// module version can join it without another API-shape change. That
+// version is deliberately absent today: crypto/fips140.Version() needs
+// go1.26 and backend/go.mod declares go1.25. Add it when the go
+// directive moves, alongside the same note in the Dockerfile.
+type readyCrypto struct {
+	// FIPS140 is what crypto/fips140.Enabled() reports for THIS binary.
+	// A build without GOFIPS140=certified honestly reports false rather
+	// than omitting the field; silence would be indistinguishable from
+	// a monitor that was never updated.
+	FIPS140 bool `json:"fips140"`
 }
 
 // readinessProbe evaluates readiness and caches the verdict.
@@ -71,6 +107,13 @@ type readinessProbe struct {
 	ttl     time.Duration
 	timeout time.Duration
 	now     func() time.Time
+
+	// fipsEnabled is read once at construction because it is fixed at
+	// link time and cannot change while the process runs. Held on the
+	// struct for the same reason `now` is: it makes both values
+	// substitutable in tests, so the false branch is reachable on a
+	// machine whose own binary was built in FIPS mode.
+	fipsEnabled bool
 
 	mu       sync.Mutex
 	cached   *readyResponse
@@ -88,8 +131,9 @@ func newReadinessProbe(st store.Store, logger *slog.Logger) *readinessProbe {
 		// Shorter than Fly's 5s check timeout and far shorter than any
 		// monitor's, so a hung database returns a clean 503 rather than
 		// letting the caller time out with no answer at all.
-		timeout: 3 * time.Second,
-		now:     time.Now,
+		timeout:     3 * time.Second,
+		now:         time.Now,
+		fipsEnabled: fips140.Enabled(),
 	}
 }
 
@@ -122,7 +166,15 @@ func (p *readinessProbe) check(ctx context.Context) *readyResponse {
 		Service: serviceName,
 		Version: serviceVersion,
 		Checks:  map[string]string{},
-		Time:    time.Now().UTC().Format(time.RFC3339),
+		// Set here, above every early return, so the posture is
+		// reported on the 503 paths as well as the 200. It is a fact
+		// about the binary, not a result of the checks below, and it
+		// never contributes to res.OK: FIPS mode is a compliance
+		// property, not a readiness condition. Wiring it into OK would
+		// make every non-FIPS local and CI build report unready, and
+		// developers would learn to ignore this endpoint.
+		Crypto: readyCrypto{FIPS140: p.fipsEnabled},
+		Time:   time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if err := p.store.Ping(ctx); err != nil {
