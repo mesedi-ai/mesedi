@@ -157,42 +157,53 @@ opt-in.
 
 ```typescript
 import { configure, wrap } from "mesedi";
-import { instrumentGraph } from "mesedi/integrations/langgraph";
+import { instrumentLangGraph } from "mesedi/integrations/langgraph";
 
 configure({ apiKey: process.env.MESEDI_API_KEY! });
 
+let graph = buildMyGraph().compile();
+graph = instrumentLangGraph(graph);
+
 export const runMyGraph = wrap(async (question: string) => {
-  const graph = buildGraph();
-  instrumentGraph(graph);
-  const result = await graph.invoke({ input: question });
-  return result.output;
+  const result = await graph.invoke({ question });
+  return result.answer;
 });
 ```
 
-`instrumentGraph` attaches Mesedi telemetry to each node in the graph
-and emits `llm_call` and `tool_call` events labeled with the node name,
-so the dashboard timeline shows the graph's flow alongside per-step
-detail.
+`instrumentLangGraph` returns the same graph with its invoke methods
+patched, so re-assigning in place is the intended usage. It emits
+`llm_call` and `tool_call` events plus a `checkpoint` at every node
+entry, labeled with the node name, so the dashboard timeline shows the
+graph's flow alongside per-step detail.
 
 ### OpenAI Agents SDK
 
 ```typescript
 import { configure, wrap } from "mesedi";
-import { instrumentAgent } from "mesedi/integrations/openai_agents";
+import { MesediRunHooks } from "mesedi/integrations/openai_agents";
+import { Agent, Runner } from "@openai/agents";
 
 configure({ apiKey: process.env.MESEDI_API_KEY! });
 
 export const runMyAgent = wrap(async (question: string) => {
-  const agent = buildAgent();
-  instrumentAgent(agent);
-  return agent.run(question);
+  const result = await Runner.run(
+    triageAgent,
+    question,
+    { hooks: new MesediRunHooks() },
+  );
+  return result.finalOutput;
 });
 ```
 
-`instrumentAgent` subscribes to the OpenAI Agents SDK's lifecycle hooks
-and emits `llm_call` + `tool_call` events with the same wire format as
-the LangGraph and Vercel AI SDK adapters, so detectors see no
-difference.
+`MesediRunHooks` implements the SDK's `RunHooks` interface. It emits a
+`checkpoint` on every agent start and end, an `agent_handoff` on every
+transfer between agents, and a `tool_call` per tool invocation.
+
+It does **not** emit `llm_call` events, because the Agents SDK dispatches
+model calls through its own runner and exposes no per-call hook. The
+detectors that read `llm_call` (drift, identical-call and similar-call
+loops, cost velocity) therefore do not fire on an OpenAI-Agents-only
+deployment.
 
 ### Vercel AI SDK
 

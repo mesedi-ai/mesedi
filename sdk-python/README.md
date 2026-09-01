@@ -165,47 +165,75 @@ prompt-injection) see no difference.
 
 ### LangGraph
 
+LangGraph builds on `langchain-core`, so the LangGraph handler subclasses
+the LangChain one. Install the `langchain` extra alongside LangGraph
+itself; there is no separate `mesedi[langgraph]` extra.
+
 ```bash
-pip install mesedi[langgraph]
+pip install mesedi[langchain] langgraph
 ```
 
 ```python
 import mesedi
-from mesedi.integrations.langgraph import instrument_graph
+from mesedi.integrations.langgraph import instrument_langgraph
+
+graph = build_my_graph()              # a CompiledStateGraph
+graph = instrument_langgraph(graph)   # patched in place
 
 @mesedi.wrap
 def run_my_graph(question: str) -> str:
-    graph = build_graph()
-    instrument_graph(graph)
-    result = graph.invoke({"input": question})
-    return result["output"]
+    result = graph.invoke({"question": question})
+    return result["answer"]
 ```
 
-`instrument_graph` attaches Mesedi telemetry to each node in the graph,
-emits `llm_call` and `tool_call` events for the LLM-backed nodes, and
-labels each event with the node name so the dashboard timeline shows the
-graph's flow alongside the per-step detail.
+`instrument_langgraph` patches `invoke`, `ainvoke`, `stream` and
+`astream` to inject the handler into the callback config, without
+discarding callbacks you already pass. It returns the same graph object,
+so re-assigning in place is the intended usage. Alongside `llm_call` and
+`tool_call` it emits a `checkpoint` at every node entry, carrying the
+node name and a hash of the canonical state so `semantic_loop` can catch
+a graph revisiting the same logical state, plus an `agent_handoff` when
+the graph invokes a compiled sub-graph.
+
+Not covered yet: async streaming hooks (`astream_events`), LangGraph's
+`Checkpointer` persistence layer (Mesedi emits parallel to it rather than
+reading it), and `interrupt()`, where you bridge to
+`mesedi.pause_for_human` yourself.
 
 ### OpenAI Agents SDK
 
+The adapter implements the SDK's `RunHooks` interface. There is no Mesedi
+extra for this one; install the OpenAI Agents SDK itself.
+
 ```bash
-pip install mesedi[openai-agents]
+pip install mesedi openai-agents
 ```
 
 ```python
 import mesedi
-from mesedi.integrations.openai_agents import instrument_agent
+from agents import Runner
+from mesedi.integrations.openai_agents import MesediRunHooks
 
 @mesedi.wrap
-def run_my_agent(question: str) -> str:
-    agent = build_agent()
-    instrument_agent(agent)
-    return agent.run(question)
+async def run_my_agent(question: str) -> str:
+    result = await Runner.run(
+        triage_agent,
+        question,
+        hooks=MesediRunHooks(),
+    )
+    return result.final_output
 ```
 
-`instrument_agent` subscribes to the OpenAI Agents SDK's lifecycle hooks
-and emits `llm_call` + `tool_call` events with the same wire format as
-the LangChain and LangGraph adapters, so detectors see no difference.
+`MesediRunHooks` emits a `checkpoint` on every agent start and end, an
+`agent_handoff` on every transfer between agents, and a `tool_call` per
+tool invocation.
+
+It does **not** emit `llm_call` events: the Agents SDK dispatches model
+calls through its own runner and exposes no per-call hook. So `drift`,
+identical-call and similar-call loops, and `cost_velocity`, which all
+read `llm_call`, do not fire on an OpenAI-Agents-only deployment. For
+Anthropic-backed runs, adding `mesedi.instrument_anthropic()` restores
+that surface.
 
 ### CrewAI
 

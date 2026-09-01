@@ -63,6 +63,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      # Runs before the install because it needs nothing but the stdlib
+      # and the checked-out tree, and a broken README should fail in
+      # seconds rather than after a full dependency install. Both SDK
+      # READMEs render as the PyPI and npm package descriptions, so an
+      # import that does not exist is a customer-facing defect.
+      - name: README API check
+        run: python3 tools/check_readme_api.py
       - name: Install SDK + test deps
         working-directory: sdk-python
         run: |
