@@ -78,6 +78,30 @@ def scan(paths: list[str], pattern: re.Pattern[str], skip_tests: bool
     return blocks, findings
 
 
+def package_metadata() -> list[tuple[str, int, str]]:
+    """The one-line description each registry renders above everything else.
+
+    Added after the 0.5.4 release shipped with an em dash in it. The
+    docstring sweep and the README sweep both ran clean, and the very
+    first line of the PyPI page still read "Mesedi SDK — guardians for
+    autonomous AI agents", because that string lives in pyproject.toml
+    rather than in any doc comment. It is the single most-read string
+    the package has.
+    """
+    out: list[tuple[str, int, str]] = []
+    pyproject = os.path.join(ROOT, "sdk-python", "pyproject.toml")
+    if os.path.exists(pyproject):
+        for n, line in enumerate(open(pyproject, encoding="utf-8"), 1):
+            if line.lstrip().startswith("description") and EM_DASH in line:
+                out.append(("sdk-python/pyproject.toml", n, line.strip()[:88]))
+    pkg = os.path.join(ROOT, "sdk-typescript", "package.json")
+    if os.path.exists(pkg):
+        for n, line in enumerate(open(pkg, encoding="utf-8"), 1):
+            if '"description"' in line and EM_DASH in line:
+                out.append(("sdk-typescript/package.json", n, line.strip()[:88]))
+    return out
+
+
 def main() -> int:
     py_files = sorted(glob.glob(PY_GLOB, recursive=True))
     ts_files = sorted(glob.glob(TS_GLOB, recursive=True))
@@ -93,9 +117,10 @@ def main() -> int:
               "probably broken", file=sys.stderr)
         return 2
 
-    findings = py_hits + ts_hits
+    meta_hits = package_metadata()
+    findings = py_hits + ts_hits + meta_hits
     print(f"=== doc comment style: {py_blocks} Python docstrings, "
-          f"{ts_blocks} JSDoc blocks ===")
+          f"{ts_blocks} JSDoc blocks, 2 package descriptions ===")
     if not findings:
         print("clean: no em dashes in customer-visible doc comments.")
         return 0

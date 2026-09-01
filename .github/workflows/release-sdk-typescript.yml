@@ -25,7 +25,7 @@
 #         Repository:       mesedi
 #         Workflow file:    .github/workflows/release-sdk-typescript.yml
 #         Environment:      npm
-#   4. For the *initial* publish, the package name must already exist , 
+#   4. For the *initial* publish, the package name must already exist:
 #      either do one manual `npm publish` from a local machine first to
 #      claim `mesedi`, OR use npm's "pending publisher" flow.
 #
@@ -78,6 +78,11 @@ jobs:
             exit 1
           fi
 
+      - name: Verify SDK version declarations agree
+        # Mirrors the Python release gate. Cheap, and it means neither
+        # SDK can publish while its version files disagree.
+        run: python3 tools/check_sdk_versions.py --tag "${GITHUB_REF##*/}"
+
       - name: Install
         working-directory: sdk-typescript
         run: npm install
@@ -95,32 +100,32 @@ jobs:
         # typescript.yml, environment=npm) before accepting the
         # publish.
         #
-        # PROVENANCE TEMPORARILY DISABLED (.B.C).
+        # Provenance is ON. Sigstore rejects provenance signatures
+        # when the source repo is private, returning a 422
+        # "Unsupported GitHub Actions source repository visibility".
+        # mesedi-ai/mesedi was private at first release, so this step
+        # shipped with `--no-provenance` as an explicit opt-out (npm
+        # 11+ auto-adds provenance whenever it sees `id-token: write`
+        # plus a Trusted Publisher config, so dropping the flag alone
+        # would not have been enough).
         #
-        # Sigstore rejects provenance signatures when the source
-        # GitHub repo is private, returning a 422 "Unsupported
-        # GitHub Actions source repository visibility" error.
-        # mesedi-ai/mesedi is private until flips it public.
+        # The repo went public on 2026-08-25, so the constraint is
+        # gone and the opt-out was removed on 2026-09-01. Provenance
+        # gives npm users a verifiable link from the published tarball
+        # back to the exact commit and workflow run that built it.
         #
-        # We use `--no-provenance` because npm 11+ auto-adds
-        # provenance when it detects the `id-token: write`
-        # permission + a Trusted Publisher config, even without
-        # a `--provenance` flag on the command line. Removing the
-        # flag alone is NOT enough. `--no-provenance` is the
-        # explicit opt-out.
-        #
-        # RESTORE the moment lands: replace `--no-provenance`
-        # with `--provenance` on the run line below. Post-launch
-        # task tracked separately.
+        # If this step ever fails with a Sigstore 422, check whether
+        # the repo has been flipped back to private before changing
+        # anything else.
         working-directory: sdk-typescript
-        run: npm publish --no-provenance --access public
+        run: npm publish --provenance --access public
 
       - name: Create GitHub Release
         # Release notes come from sdk-typescript/RELEASE_NOTES.md
         # (curated per-release copy). Auto-generation is deliberately
         # OFF because commit messages between SDK releases include
-        # internal task numbers ("", "Tier 3 batch",
-        # "PL7 audit", etc.) which the no-forward-promises
+        # internal task numbers ("Tier 3 batch", "PL7 audit", etc.)
+        # which the no-forward-promises
         # policy forbids on customer-facing surfaces. Whoever cuts
         # a new SDK release updates RELEASE_NOTES.md first.
         uses: softprops/action-gh-release@v3

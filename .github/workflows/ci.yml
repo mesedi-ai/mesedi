@@ -75,6 +75,12 @@ jobs:
       # are not checked; see the script header for why.
       - name: Doc comment style
         run: python3 tools/check_doc_comment_style.py
+      # pyproject.toml and mesedi/__init__.py both declare the version.
+      # The release workflow only checks pyproject, but __init__ is what
+      # every event's sdk_version field reports at runtime, so a drift
+      # would publish telemetry claiming a version nobody released.
+      - name: SDK version consistency
+        run: python3 tools/check_sdk_versions.py
       - name: Install SDK + test deps
         working-directory: sdk-python
         run: |

@@ -72,6 +72,14 @@ jobs:
             exit 1
           fi
 
+      - name: Verify pyproject and __init__ agree
+        # pyproject.toml is not the only place the version is declared.
+        # mesedi/__init__.py carries __version__, and that is the value
+        # every published event reports as sdk_version. Publishing with
+        # the two out of step ships telemetry naming a version that was
+        # never released, and the tag check above would not notice.
+        run: python3 tools/check_sdk_versions.py --tag "${GITHUB_REF##*/}"
+
       - name: Build sdist + wheel
         working-directory: sdk-python
         run: python -m build

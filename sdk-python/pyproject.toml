@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mesedi"
 version = "0.5.4"
-description = "Mesedi SDK — guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence."
+description = "Mesedi SDK: guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
