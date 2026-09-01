@@ -7,12 +7,12 @@ outputs. Customers running HHEM against their answers can use this
 helper to report scores into Mesedi without hand-writing the
 boilerplate around :func:`mesedi.emit_eval_score`.
 
-IMPORTANT — direction note. HHEM scores have INVERTED semantics
+IMPORTANT: direction note. HHEM scores have INVERTED semantics
 compared to Ragas / Promptfoo metrics: HIGHER means MORE faithful to
 context (less hallucination). The helper passes ``higher_is_better=True``
 to the backend and the parameter is named ``faithfulness_score`` to
 mirror HHEM's documented output. Some HHEM consumers transform the
-output into a "hallucination_score" where LOWER is better — if your
+output into a "hallucination_score" where LOWER is better: if your
 pipeline does that transformation, invert your value before calling
 this helper (i.e. pass ``1 - hallucination_score``).
 

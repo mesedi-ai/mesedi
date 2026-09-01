@@ -5,7 +5,7 @@ Every provider integration (anthropic_integration, future
 openai_integration, cohere_integration, etc.) classifies its native
 exception types into ONE of the values in :data:`ErrorClass`. The
 backend reads ``error_class`` from llm_call payloads and uses the
-canonical vocabulary to cluster cross-provider signals — e.g. when
+canonical vocabulary to cluster cross-provider signals: e.g. when
 both Anthropic and OpenAI are rate-limiting at the same time, the
 ``provider_incident`` detector sees them under the same
 ``rate_limited`` bucket regardless of which exception class each SDK
@@ -36,10 +36,10 @@ from mesedi._error_classes_generated import (
 
 
 class _ErrorClassMeta(type):
-    """Backing metaclass for ErrorClass — surfaces spec-driven
+    """Backing metaclass for ErrorClass: surfaces spec-driven
     constants as class attributes. The actual values come from
     spec/error_classes.yaml via :mod:`mesedi._error_classes_generated`.
-    Adding a new class is a one-edit operation (the YAML) — no need
+    Adding a new class is a one-edit operation (the YAML): no need
     to touch errors.py.
     """
 
@@ -221,7 +221,7 @@ def classify_openai_exception(exc: BaseException) -> str:
 
       1. Look up the class name in the OpenAI exception map.
       2. If the result is RATE_LIMITED, probe the response body for
-         ``error.code == "insufficient_quota"`` — OpenAI overloads
+         ``error.code == "insufficient_quota"``: OpenAI overloads
          RateLimitError to cover both true rate-limit and billing-
          cap exhaustion. The QUOTA_EXHAUSTED bucket needs a different
          remediation (raise quota vs. back off), so the detector
@@ -345,7 +345,7 @@ def classify_gemini_exception(exc: BaseException) -> str:
 
       1. Look up class name in _GEMINI_EXCEPTION_MAP.
       2. If result is RATE_LIMITED (ResourceExhausted), probe the
-         exception message for the substring "quota" — Google
+         exception message for the substring "quota": Google
          overloads ResourceExhausted to cover both true rate-limit
          and quota-exhaust. The QUOTA_EXHAUSTED bucket needs
          different remediation (raise quota vs. back off).
@@ -417,7 +417,7 @@ def classify_ollama_exception(exc: BaseException) -> str:
          that somehow reached the instrumented path) → UNKNOWN.
 
     Falls back to UNKNOWN rather than misattributing to a specific
-    bucket — same discipline as classify_anthropic / openai / cohere /
+    bucket: same discipline as classify_anthropic / openai / cohere /
     gemini.
     """
     # Step 1: ResponseError / status-bearing exceptions.

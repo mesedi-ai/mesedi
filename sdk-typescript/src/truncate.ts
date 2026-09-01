@@ -24,13 +24,13 @@
  *
  * **Markers added on truncation:**
  *
- *   - `_truncated`                (boolean) — always `true` when this
+ *   - `_truncated`                (boolean): always `true` when this
  *                                  helper altered the payload.
- *   - `_original_payload_bytes`   (number) — serialized byte count of
+ *   - `_original_payload_bytes`   (number): serialized byte count of
  *                                  the original payload, so the
  *                                  customer can see how much got
  *                                  dropped.
- *   - `_truncated_fields`         (string[]) — names of the top-level
+ *   - `_truncated_fields`         (string[]): names of the top-level
  *                                  fields whose values got shortened.
  *
  * **Fail-open.** Any exception during truncation falls back to the

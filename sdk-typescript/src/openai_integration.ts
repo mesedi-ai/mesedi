@@ -1,5 +1,5 @@
 /**
- * OpenAI SDK monkey-patch — auto-emit llm_call events for every
+ * OpenAI SDK monkey-patch: auto-emit llm_call events for every
  * chat.completions.create() and responses.create() call inside a
  * wrap()'d execution.
  *
@@ -12,7 +12,7 @@
  *   - Response text is `choices[0].message.content` for chat
  *     completions, OR `output_text` for the Responses API.
  *   - Token names: `prompt_tokens` / `completion_tokens` for chat,
- *     `input_tokens` / `output_tokens` for Responses — both
+ *     `input_tokens` / `output_tokens` for Responses: both
  *     normalized to the canonical input_tokens/output_tokens on
  *     payload.
  *

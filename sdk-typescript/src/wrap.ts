@@ -105,7 +105,7 @@ export interface WrapOptions {
    *
    * Explicit `fromAgent` always wins. If neither is supplied while
    * inside `wrap()`, `emitAgentHandoff` throws an Error rather than
-   * silently emitting an `unknown` source agent — the topology graph
+   * silently emitting an `unknown` source agent: the topology graph
    * powers cascading_failure / coordination_deadlock clustering and
    * must not be polluted.
    */

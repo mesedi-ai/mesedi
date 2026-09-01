@@ -29,7 +29,7 @@
  *
  * `mesedi.wrap()` manages the execution boundary (started / completed /
  * crash signature). The callback handler emits the intra-execution
- * events — `llm_call` and `tool_call` — that Mesedi's detectors
+ * events, `llm_call` and `tool_call`, that Mesedi's detectors
  * consume. Splitting responsibility this way lets the customer adopt
  * Mesedi without reshaping their LangChain code: `wrap` goes around
  * the entry point, the handler gets attached at the existing
@@ -135,7 +135,7 @@ interface ToolStartContext {
  * format from `emit_llm_call` and the Anthropic patch) and one
  * `tool_call` event per tool invocation (matching the wire format
  * from `@mesedi.tool`). Both event types feed the standard Mesedi
- * detector chain — drift, identical / similar-call loops,
+ * detector chain: drift, identical / similar-call loops,
  * tool-failures, cost-velocity, prompt-injection.
  *
  * Outside a `wrap()` execution context, all emissions silently no-op

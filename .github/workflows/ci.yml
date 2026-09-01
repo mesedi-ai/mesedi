@@ -70,6 +70,11 @@ jobs:
       # import that does not exist is a customer-facing defect.
       - name: README API check
         run: python3 tools/check_readme_api.py
+      # Docstrings and JSDoc render in IDE tooltips and on the package
+      # pages, so they are customer-facing prose. Ordinary line comments
+      # are not checked; see the script header for why.
+      - name: Doc comment style
+        run: python3 tools/check_doc_comment_style.py
       - name: Install SDK + test deps
         working-directory: sdk-python
         run: |

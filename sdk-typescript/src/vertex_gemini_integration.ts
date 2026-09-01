@@ -1,12 +1,12 @@
 /**
- * Vertex AI Gemini TypeScript SDK monkey-patch — auto-emit llm_call
+ * Vertex AI Gemini TypeScript SDK monkey-patch: auto-emit llm_call
  * events for every GenerativeModel.generateContent() call inside a
  * wrap()'d execution against the Vertex AI surface
  * (@google-cloud/vertexai package).
  *
  * Same provider tag ("gemini") and same canonical error_class map
  * as instrumentGemini. Customers running both surfaces call both
- * instrumentGemini() and instrumentVertexGemini() — each patches a
+ * instrumentGemini() and instrumentVertexGemini(): each patches a
  * different package's class. Provider_incident detection sees one
  * signal regardless of which surface was hit.
  *

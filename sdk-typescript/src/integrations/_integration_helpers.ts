@@ -2,7 +2,7 @@
  * Shared helpers for framework-adapter integration tests
  * (mastra.integration.test.ts, langchain.integration.test.ts).
  *
- * Design mirrors backend/test/integration/conftest.py — same wire
+ * Design mirrors backend/test/integration/conftest.py: same wire
  * protocol against the real Mesedi backend, same fresh-per-session
  * project mint, same `awaitFailureGroup` polling contract.
  *
@@ -20,14 +20,14 @@
  *   if (!INTEGRATION_ENABLED) return test.skip(...)
  *
  * Set `RUN_INTEGRATION_TESTS=1` to opt in. Default `npm test` skips
- * everything in this file — unit tests stay fast.
+ * everything in this file: unit tests stay fast.
  */
 export const INTEGRATION_ENABLED =
   process.env["RUN_INTEGRATION_TESTS"] === "1";
 
 /**
  * Secondary gate for tests that make real LLM calls (Anthropic).
- * These add real cost — ~$0.01-$0.20 per test depending on payload
+ * These add real cost: ~$0.01-$0.20 per test depending on payload
  * size. Set `ANTHROPIC_API_KEY` in env to unlock. Absent → skip with
  * a clear reason.
  */
@@ -122,7 +122,7 @@ export interface AwaitFailureGroupOptions {
   signaturePrefix?: string;
   /**  accept any one of a list of alternative (failure_class,
    * signaturePrefix?) pairs in addition to the primary match. Useful
-   * when a signal has multiple valid backend clustering shapes — e.g.
+   * when a signal has multiple valid backend clustering shapes: e.g.
    * near-duplicate LLM calls fire as EITHER `loops/similar_call_*` OR
    * `drift/lexical_drift_*` depending on detector sensitivity. Both
    * are correct product signals; the test succeeds if ANY of the

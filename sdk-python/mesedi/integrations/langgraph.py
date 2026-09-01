@@ -207,9 +207,9 @@ class MesediLangGraphHandler(MesediCallbackHandler):
         """LangGraph attaches the node name via metadata or tags.
 
         Conventions across versions:
-          - ``metadata['langgraph_node']`` — newest versions
-          - ``tags`` includes ``langgraph:node:<name>`` — older
-          - ``metadata['node']`` — some fork variants
+          - ``metadata['langgraph_node']``: newest versions
+          - ``tags`` includes ``langgraph:node:<name>``: older
+          - ``metadata['node']``: some fork variants
 
         Returns the node name as a string or None if this chain
         entry is not a LangGraph node (e.g. an LCEL chain inside a

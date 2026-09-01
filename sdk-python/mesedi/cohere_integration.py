@@ -1,5 +1,5 @@
 """
-Cohere SDK monkey-patch — auto-emit llm_call events for every chat
+Cohere SDK monkey-patch: auto-emit llm_call events for every chat
 call (sync ``Client.chat`` v1 + ``ClientV2.chat`` v5+) inside a
 ``@mesedi.wrap`` execution.
 
@@ -21,11 +21,12 @@ Async coverage:
     wrappers: same canonical error_class mapping, same retry_after
     extraction, same _maybe_emit_throttling_event auto-emit.
 
-Still out of scope (filed under follow-ups):
-
-  - Streaming responses (``chat_stream``) — patched in .
-  - RAG endpoints (``rerank``, ``embed``) — provider_incident is
-    most valuable on chat surfaces
+  - Streaming responses (``chat_stream``) are patched on all four
+    client classes, sync and async, v1 and v2. Chunks pass through
+    unchanged while the wrapper accumulates response text and token
+    counts; the llm_call event ships at stream end.
+  - RAG endpoints (``rerank`` and ``embed``) are patched on all four
+    client classes.
 
 Dependency injection: ``instrument_cohere()`` accepts optional
 ``client_v1_class`` + ``client_v2_class`` parameters so this code
@@ -182,7 +183,7 @@ def instrument_cohere(
 
 
 def _patch_v1(cls: Type[Any]) -> None:
-    """Wrap cls.chat — v1 ``message=...``/``chat_history=...`` shape.
+    """Wrap cls.chat: v1 ``message=...``/``chat_history=...`` shape.
 
     Safely no-ops when the class does not expose .chat (test fakes,
     customer subclasses that only do embeddings, etc.). Mirrors the
@@ -271,7 +272,7 @@ def _patch_v1(cls: Type[Any]) -> None:
 
 
 def _patch_v2(cls: Type[Any]) -> None:
-    """Wrap cls.chat — v2 ``messages=[...]`` shape (OpenAI-style).
+    """Wrap cls.chat: v2 ``messages=[...]`` shape (OpenAI-style).
 
     Same hasattr guard as _patch_v1.
     """
@@ -352,7 +353,7 @@ def _patch_v2(cls: Type[Any]) -> None:
 
 
 def _patch_async_v1(cls: Type[Any]) -> None:
-    """Async twin of _patch_v1 — wraps AsyncClient.chat.
+    """Async twin of _patch_v1: wraps AsyncClient.chat.
 
     Same hasattr guard as the sync twin.
     """
@@ -433,7 +434,7 @@ def _patch_async_v1(cls: Type[Any]) -> None:
 
 
 def _patch_async_v2(cls: Type[Any]) -> None:
-    """Async twin of _patch_v2 — wraps AsyncClientV2.chat.
+    """Async twin of _patch_v2: wraps AsyncClientV2.chat.
 
     Same hasattr guard as the sync twin.
     """
@@ -693,7 +694,7 @@ _stream_patched_classes: set = set()
 
 
 def _patch_v1_stream(cls: Type[Any]) -> None:
-    """Patch Cohere v1 Client.chat_stream — sync streaming generator."""
+    """Patch Cohere v1 Client.chat_stream: sync streaming generator."""
     if cls in _stream_patched_classes:
         return
     original_stream = getattr(cls, "chat_stream", None)
@@ -746,7 +747,7 @@ def _patch_v1_stream(cls: Type[Any]) -> None:
 
 
 def _patch_v2_stream(cls: Type[Any]) -> None:
-    """Patch Cohere v2 ClientV2.chat_stream — sync streaming generator."""
+    """Patch Cohere v2 ClientV2.chat_stream: sync streaming generator."""
     if cls in _stream_patched_classes:
         return
     original_stream = getattr(cls, "chat_stream", None)
@@ -796,7 +797,7 @@ def _patch_v2_stream(cls: Type[Any]) -> None:
 
 
 def _patch_async_v1_stream(cls: Type[Any]) -> None:
-    """Patch Cohere v1 AsyncClient.chat_stream — async streaming generator."""
+    """Patch Cohere v1 AsyncClient.chat_stream: async streaming generator."""
     if cls in _stream_patched_classes:
         return
     original_stream = getattr(cls, "chat_stream", None)
@@ -849,7 +850,7 @@ def _patch_async_v1_stream(cls: Type[Any]) -> None:
 
 
 def _patch_async_v2_stream(cls: Type[Any]) -> None:
-    """Patch Cohere v2 AsyncClientV2.chat_stream — async streaming generator."""
+    """Patch Cohere v2 AsyncClientV2.chat_stream: async streaming generator."""
     if cls in _stream_patched_classes:
         return
     original_stream = getattr(cls, "chat_stream", None)
@@ -1143,7 +1144,7 @@ def _patch_embed_sync(cls: Type[Any]) -> None:
     Safely no-ops on a Cohere client class that does not expose
     .embed (older versions, customer subclasses that don't use
     embeddings, test fakes). Mirrors the chat_stream patcher's
-    hasattr guard — instrument_cohere() must never crash because
+    hasattr guard: instrument_cohere() must never crash because
     the customer's client class lacks a surface they don't use.
     """
     if cls in _embed_patched_classes:
@@ -1220,7 +1221,7 @@ def _patch_embed_sync(cls: Type[Any]) -> None:
 
 
 def _patch_embed_async(cls: Type[Any]) -> None:
-    """Async twin of _patch_embed_sync — AsyncClient[V2].embed.
+    """Async twin of _patch_embed_sync: AsyncClient[V2].embed.
 
     Same hasattr guard as the sync twin.
     """
@@ -1318,7 +1319,7 @@ def _extract_rerank_input(kwargs: Dict[str, Any]) -> str:
 
 
 def _extract_rerank_response_tokens(response: Any) -> int:
-    """Cohere rerank does not bill tokens — it bills search_units.
+    """Cohere rerank does not bill tokens: it bills search_units.
     Return 0 so cost computation routes through rerank-specific
     pricing when that lands (separate wave)."""
     return 0
@@ -1409,7 +1410,7 @@ def _patch_rerank_sync(cls: Type[Any]) -> None:
 
 
 def _patch_rerank_async(cls: Type[Any]) -> None:
-    """Async twin of _patch_rerank_sync — AsyncClient[V2].rerank.
+    """Async twin of _patch_rerank_sync: AsyncClient[V2].rerank.
 
     Same hasattr guard as the sync twin.
     """

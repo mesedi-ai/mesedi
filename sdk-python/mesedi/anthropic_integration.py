@@ -28,7 +28,7 @@ Async coverage:
 
   - ``AsyncAnthropic.messages.create`` (async client) is also patched
     by ``instrument_anthropic()``. The async wrapper mirrors the sync
-    one — same captured fields, same canonical error classification,
+    one: same captured fields, same canonical error classification,
     same throttling auto-emit. Customers using ``AsyncAnthropic`` get
     full provider_incident + infrastructure_throttled coverage.
 
@@ -39,7 +39,7 @@ Streaming coverage:
     delegates iteration to the original stream while injecting an
     llm_call event emission at stream close (via the inner manager's
     ``get_final_message()`` helper). Customer's iteration protocol
-    preserved — ``with client.messages.stream(...) as stream: for
+    preserved: ``with client.messages.stream(...) as stream: for
     event in stream:`` works unchanged. Mid-stream exceptions are
     captured via ``exc_val`` on __exit__/__aexit__.
 
@@ -283,7 +283,7 @@ def _instrument_sync_anthropic(messages_class: Optional[Type[Any]]) -> bool:
 
 
 def _instrument_async_anthropic(async_messages_class: Optional[Type[Any]]) -> bool:
-    """Patch AsyncAnthropic.messages.create — .
+    """Patch AsyncAnthropic.messages.create for async clients.
 
     Mirrors the sync wrapper's event-emit logic line-for-line; the
     only differences are (a) ``await`` on the underlying call and (b)
@@ -419,7 +419,7 @@ _stream_patched_classes: set = set()
 
 
 def _patch_anthropic_sync_stream(messages_class: Optional[Type[Any]]) -> bool:
-    """Patch Messages.stream() — sync streaming context manager."""
+    """Patch Messages.stream(): sync streaming context manager."""
     if messages_class is None:
         try:
             from anthropic.resources.messages import Messages as _Messages
@@ -487,7 +487,7 @@ def _patch_anthropic_sync_stream(messages_class: Optional[Type[Any]]) -> bool:
 
 
 def _patch_anthropic_async_stream(async_messages_class: Optional[Type[Any]]) -> bool:
-    """Patch AsyncMessages.stream() — async streaming context manager."""
+    """Patch AsyncMessages.stream(): async streaming context manager."""
     if async_messages_class is None:
         try:
             from anthropic.resources.messages import AsyncMessages as _AsyncMessages
@@ -573,7 +573,7 @@ class _AnthropicStreamManagerWrapper:
       - If the customer drops the stream early (exits before
         consuming all chunks), __exit__ still fires; get_final_message
         returns what was buffered (empty response_text + 0 tokens is
-        acceptable — that's an accurate reflection of what the call
+        acceptable: that's an accurate reflection of what the call
         delivered).
     """
 

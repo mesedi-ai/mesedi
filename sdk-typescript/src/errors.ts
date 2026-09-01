@@ -5,7 +5,7 @@
  * openai_integration, cohere_integration, etc.) classifies its
  * native exception types into ONE of the values in ErrorClass. The
  * backend reads `error_class` from llm_call payloads and uses the
- * canonical vocabulary to cluster cross-provider signals — e.g.
+ * canonical vocabulary to cluster cross-provider signals: e.g.
  * when both Anthropic and OpenAI are rate-limiting at the same
  * time, the `provider_incident` detector sees them under the same
  * `rate_limited` bucket regardless of which exception class each
@@ -52,7 +52,7 @@ export const PROVIDER_SIDE_ERROR_CLASSES: ReadonlySet<ErrorClassValue> =
 /**
  * Mapping from Anthropic exception class names (string, not the
  * class object) to canonical ErrorClass values. Keyed by name to
- * avoid taking a hard runtime dependency on @anthropic-ai/sdk —
+ * avoid taking a hard runtime dependency on @anthropic-ai/sdk: 
  * the mesedi SDK works even if the anthropic package is not
  * installed, and the mapping stays correct because exception class
  * names are stable across anthropic SDK versions.
@@ -122,7 +122,7 @@ export function classifyAnthropicException(err: unknown): ErrorClassValue {
  * mapping is stable regardless of which casing the runtime presents.
  *
  * RateLimitError is overloaded by OpenAI to cover both true rate
- * limiting AND insufficient_quota — classifyOpenAIException probes
+ * limiting AND insufficient_quota: classifyOpenAIException probes
  * the body to distinguish, returning QUOTA_EXHAUSTED for the latter.
  */
 const OPENAI_EXCEPTION_MAP: Record<string, ErrorClassValue> = {
@@ -150,7 +150,7 @@ const OPENAI_EXCEPTION_MAP: Record<string, ErrorClassValue> = {
  * Two-step classification:
  *   1. Look up class name in OPENAI_EXCEPTION_MAP.
  *   2. If result is RATE_LIMITED, probe the body for
- *      `error.code === "insufficient_quota"` — OpenAI overloads
+ *      `error.code === "insufficient_quota"`: OpenAI overloads
  *      RateLimitError to cover both true rate limit and billing-
  *      cap exhaustion. The QUOTA_EXHAUSTED bucket needs different
  *      remediation (raise quota vs. back off), so the detector
@@ -233,7 +233,7 @@ const GEMINI_EXCEPTION_MAP: Record<string, ErrorClassValue> = {
  * Two-step classification:
  *   1. Look up class name in GEMINI_EXCEPTION_MAP.
  *   2. If result is RATE_LIMITED (ResourceExhausted), probe the
- *      exception message for substring "quota" — Google overloads
+ *      exception message for substring "quota": Google overloads
  *      ResourceExhausted to cover both true rate-limit and
  *      quota-exhaust.
  *
@@ -259,7 +259,7 @@ export function classifyGeminiException(err: unknown): ErrorClassValue {
  * QUOTA_EXHAUSTED are absent from this map by design.
  *
  * ResponseError (Ollama-native HTTP error) carries .status_code and
- * is bucketed by HTTP-code range inside classifyOllamaException —
+ * is bucketed by HTTP-code range inside classifyOllamaException: 
  * NOT mapped here because the class name alone doesn't carry the
  * 4xx-vs-5xx distinction the detectors require. */
 const OLLAMA_EXCEPTION_MAP: Record<string, ErrorClassValue> = {
@@ -354,7 +354,7 @@ export function classifyByProvider(
 /**
  * Variant of `classifyByProvider` that dispatches on an exception
  * class NAME (string) rather than an Error object. Mastra's
- * SpanErrorInfo carries `.name` as a bare string — the underlying
+ * SpanErrorInfo carries `.name` as a bare string: the underlying
  * Error object is not preserved through the exporter chain. This
  * shim wraps the name in a synthetic Error so the same class-name
  * lookup path in the per-provider classifiers works unchanged.

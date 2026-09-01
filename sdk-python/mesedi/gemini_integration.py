@@ -1,5 +1,5 @@
 """
-Google Gemini SDK monkey-patch — auto-emit llm_call events for every
+Google Gemini SDK monkey-patch: auto-emit llm_call events for every
 ``GenerativeModel.generate_content`` call inside a ``@mesedi.wrap``
 execution.
 
@@ -15,7 +15,7 @@ What gets captured:
   - ``system_prompt``, ``GenerativeModel.system_instruction`` (or a
     role:system-equivalent in the contents list), truncated
   - ``user_message``, the last role=user entry in the contents
-    list — Gemini accepts either a string OR a list of message
+    list: Gemini accepts either a string OR a list of message
     dicts/Parts; both shapes are handled.
   - ``response_text``, ``response.text`` (the canonical accessor)
   - ``input_tokens`` / ``output_tokens``, from
@@ -24,12 +24,22 @@ What gets captured:
   - ``status``, ``error_class``, ``http_status``, ``retry_after_seconds``
     on failure paths
 
+Also covered:
+
+  - Async clients. ``GenerativeModel.generate_content_async`` is
+    patched by the same ``instrument_gemini()`` call.
+  - Streaming via ``stream=True``. A chunk-aggregating iterator
+    wrapper passes chunks through to the caller unchanged and emits
+    the llm_call event at stream end.
+  - The Vertex AI surface (``vertexai.generative_models``) is a
+    different package with a different exception hierarchy, so it
+    lives in its own module: call
+    ``mesedi.instrument_vertex_gemini()`` for that one.
+
 Out of scope (filed as follow-ups):
 
-  - Async clients (``GenerativeModel.generate_content_async``)
-  - Streaming (``stream=True`` / ``generate_content_stream``)
-  - Vertex AI surface (``vertexai.generative_models.GenerativeModel``)
-    — different package, different exception hierarchy
+  - ``generate_content_stream`` as a distinct method. Streaming
+    through ``stream=True`` on ``generate_content`` is covered.
   - Chat sessions (``model.start_chat()``)
 
 Dependency injection: ``instrument_gemini()`` accepts an optional
@@ -217,7 +227,7 @@ def _patch_gemini_sync(model_class: Type[Any]) -> bool:
 
 
 def _patch_gemini_async(model_class: Type[Any]) -> bool:
-    """Patch GenerativeModel.generate_content_async — .
+    """Patch GenerativeModel.generate_content_async.
 
     Mirrors _patch_gemini_sync exactly except for `async def` +
     `await`. Best-effort: if the installed google-generativeai
@@ -662,7 +672,7 @@ def _extract_embed_content_input(content: Any) -> str:
 
 def _extract_embed_response_tokens(response: Any) -> int:
     """Gemini embed_content returns dict-like {'embedding': [...]}
-    without usage metadata. Token count not available — return 0."""
+    without usage metadata. Token count not available: return 0."""
     return 0
 
 

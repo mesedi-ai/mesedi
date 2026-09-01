@@ -1,5 +1,5 @@
 /**
- * Google Gemini TypeScript SDK monkey-patch — auto-emit llm_call
+ * Google Gemini TypeScript SDK monkey-patch: auto-emit llm_call
  * events for every GenerativeModel.generateContent() call inside a
  * wrap()'d execution.
  *

@@ -1,5 +1,5 @@
 /**
- * Cohere TypeScript SDK monkey-patch — auto-emit llm_call events
+ * Cohere TypeScript SDK monkey-patch: auto-emit llm_call events
  * for every chat call inside a wrap()'d execution.
  *
  * Mirrors instrumentAnthropic / instrumentOpenAI in fail-open

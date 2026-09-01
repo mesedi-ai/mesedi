@@ -732,10 +732,10 @@ def emit_agent_handoff(
 
     Common values for ``handoff_kind``:
 
-    * ``"delegate"`` — one-shot, expects a return value
-    * ``"spawn"`` — fire-and-forget background sub-agent
-    * ``"transfer"`` — control transferred (no return)
-    * ``"consult"`` — short Q&A, return text only
+    * ``"delegate"``: one-shot, expects a return value
+    * ``"spawn"``: fire-and-forget background sub-agent
+    * ``"transfer"``: control transferred (no return)
+    * ``"consult"``: short Q&A, return text only
 
     ``child_execution_id`` is optional at emit-time. If the SDK has
     already opened the nested ``@wrap`` for the target agent, pass
@@ -751,7 +751,7 @@ def emit_agent_handoff(
          ``@mesedi.wrap(agent_name=...)`` decoration is used.
       3. If neither is supplied while inside ``@wrap``, this function
          raises ``ValueError`` rather than silently emitting an
-         ``unknown`` source agent — polluting the topology graph
+         ``unknown`` source agent: polluting the topology graph
          would degrade ``cascading_failure`` / ``coordination_deadlock``
          clustering at scale.
 

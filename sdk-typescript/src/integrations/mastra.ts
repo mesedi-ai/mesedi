@@ -16,7 +16,7 @@
  *     configure({ apiKey: process.env.MESEDI_API_KEY });
  *
  *     // Then wire the exporter into Mastra. Mastra 1.x requires the
- *     // `configs` shape below — the `exporters: {...}` root shape from
+ *     // `configs` shape below: the `exporters: {...}` root shape from
  *     // pre-1.x is silently ignored and no spans reach the exporter.
  *     const mastra = new Mastra({
  *       observability: new Observability({
@@ -38,7 +38,7 @@
  * observability integration is to implement an Observability exporter
  * that consumes those spans. Unlike the other Mesedi integrations
  * (LangGraph, OpenAI Agents, Vercel AI SDK), the customer does NOT
- * need to wrap their entry function with `mesedi.wrap()` — Mastra's
+ * need to wrap their entry function with `mesedi.wrap()`: Mastra's
  * AGENT_RUN / WORKFLOW_RUN root span is the execution boundary. The
  * exporter opens a Mesedi execution on root-span-start and closes it
  * on root-span-end. All descendant spans on the same trace flow into
@@ -54,7 +54,7 @@
  *   - Other span types (RAG_*, MEMORY_OPERATION, WORKSPACE_ACTION,
  *     SCORER_*, MAPPING, PROCESSOR_RUN, MODEL_STEP / MODEL_INFERENCE /
  *     MODEL_CHUNK) are silently ignored in v1. MODEL_GENERATION is
- *     the aggregating span for a full model call — the finer-grained
+ *     the aggregating span for a full model call: the finer-grained
  *     step / inference / chunk spans are noise for Mesedi's detectors
  *     and are already rolled up by Mastra.
  *
@@ -125,7 +125,7 @@ const MAX_USER_MSG = 8192;
 
 /**
  * Configuration accepted by `new MesediExporter(...)`. Kept tiny on
- * purpose — the SDK's `configure()` already owns apiKey / baseUrl /
+ * purpose: the SDK's `configure()` already owns apiKey / baseUrl /
  * shipper knobs globally; passing them per-exporter would produce two
  * shippers if the customer ever instantiates two Mastra apps in the
  * same process.

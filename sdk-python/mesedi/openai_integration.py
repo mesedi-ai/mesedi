@@ -1,10 +1,10 @@
 """
-OpenAI SDK monkey-patch — auto-emit llm_call events for every
+OpenAI SDK monkey-patch: auto-emit llm_call events for every
 ``Completions.create`` and ``Responses.create`` call inside a
 ``@mesedi.wrap`` execution.
 
 Activation is **opt-in**: call ``mesedi.instrument_openai()`` once at
-process startup. Mirrors ``mesedi.instrument_anthropic()`` — same
+process startup. Mirrors ``mesedi.instrument_anthropic()``: same
 fail-open semantics, same canonical error vocabulary, same idempotency
 guarantee.
 
@@ -23,14 +23,14 @@ What gets captured per call:
   - ``response_text``, ``choices[0].message.content`` for chat
     completions OR ``output_text`` for the Responses API, truncated
     to 1000 chars
-  - ``input_tokens`` / ``output_tokens``, from ``response.usage`` —
+  - ``input_tokens`` / ``output_tokens``, from ``response.usage``: 
     OpenAI names these ``prompt_tokens`` / ``completion_tokens``;
     we translate to the canonical names the backend expects
   - ``duration_ms``, wall-clock time of the API call
   - ``status``, "ok" if the call returned, "failed" if it raised
   - ``exception_type`` / ``exception_message``, on failure
   - ``error_class``, canonical 8-class vocabulary (see
-    :mod:`mesedi.errors`) — classify_openai_exception handles the
+    :mod:`mesedi.errors`): classify_openai_exception handles the
     OpenAI quirk that RateLimitError covers BOTH true rate-limiting
     AND insufficient_quota; the body is probed to distinguish them
   - ``http_status``, on failure when the exception exposes it
@@ -39,22 +39,20 @@ What gets captured per call:
 
 What this module patches:
 
-  - ``openai.resources.chat.completions.Completions.create`` —
+  - ``openai.resources.chat.completions.Completions.create``: 
     the dominant chat-completions surface
-  - ``openai.resources.responses.Responses.create`` — the newer
+  - ``openai.resources.responses.Responses.create``: the newer
     Responses API surface (added in openai>=1.40)
 
-Out of scope (filed as follow-ups):
-
-  - Async clients (``AsyncOpenAI``). Same gap exists for
-    ``instrument_anthropic``; a coordinated async-support sweep
-    closes both at once.
-  - Streaming responses (``stream=True``). Both Anthropic and
-    OpenAI streaming need a separate observer that drains chunks
-    without buffering the whole response in memory.
-  - Image generation, audio (Whisper STT + TTS). Filed as follow-up
-    sub-waves of ; same surface-discriminator pattern as
-    embeddings, separate patch sites per endpoint.
+  - The async twins of both surfaces on ``AsyncOpenAI``
+  - ``Embeddings.create``, sync and async
+  - Image generation, and audio: speech (TTS), transcriptions
+    (Whisper STT) and translations, each sync and async
+  - Streaming (``stream=True``) on the chat and responses surfaces.
+    A chunk-aggregating iterator wrapper passes every chunk through
+    to the caller unchanged while accumulating response text and
+    token counts; the llm_call event ships at stream end rather than
+    buffering the whole response in memory.
 
 Patching is idempotent per class object.
 
@@ -799,7 +797,7 @@ def _build_failure_event(
     surface: str = "chat",
 ) -> Event:
     """Construct the shared failure-path llm_call event from an OpenAI
-    exception. Same shape as anthropic_integration's failure payload —
+    exception. Same shape as anthropic_integration's failure payload: 
     backend detectors fingerprint on the canonical fields, not on
     per-provider quirks.
 
@@ -807,7 +805,7 @@ def _build_failure_event(
     which OpenAI API was called: "chat" (chat completions + Responses
     API), "embeddings", "image", "audio_stt" (transcribe + translate),
     "audio_tts" (speech), or future values. Backend provider_incident
-    detector ignores ``surface`` — a provider outage clusters across
+    detector ignores ``surface``: a provider outage clusters across
     surfaces. Per-surface analytics consume the field separately.
     """
     failure_payload: Dict[str, Any] = {
@@ -958,7 +956,7 @@ def _extract_responses_response_fields(response: Any) -> Tuple[str, int, int]:
     fall back to assembling from output blocks if absent.
 
     Token field names on the Responses API are ``input_tokens`` /
-    ``output_tokens`` — already canonical, no translation needed.
+    ``output_tokens``: already canonical, no translation needed.
     """
     response_text = ""
     input_tokens = 0
@@ -1014,7 +1012,7 @@ class _OpenAIStreamIteratorWrapper:
     + fire the throttling auto-emit (mid-stream API errors).
 
     `accumulate_chunk` is provided per-surface (chat completions vs
-    Responses API) so this one wrapper class covers both — chat
+    Responses API) so this one wrapper class covers both: chat
     chunks have `.choices[0].delta.content` + late `.usage`;
     Responses events carry text on different paths.
     """
@@ -1265,7 +1263,7 @@ def _extract_embeddings_input(input_field: Any) -> str:
 
 def _extract_embeddings_response_tokens(response: Any) -> int:
     """Pull prompt_tokens from an OpenAI CreateEmbeddingResponse.
-    Embeddings have NO output tokens — return only the input count."""
+    Embeddings have NO output tokens: return only the input count."""
     try:
         usage = getattr(response, "usage", None)
         if usage is not None:
@@ -1365,7 +1363,7 @@ def _patch_embeddings(cls: Type[Any]) -> None:
 
 
 def _patch_async_embeddings(cls: Type[Any]) -> None:
-    """Async twin of _patch_embeddings — AsyncEmbeddings.create."""
+    """Async twin of _patch_embeddings: AsyncEmbeddings.create."""
     if cls in _patched_classes:
         return
 

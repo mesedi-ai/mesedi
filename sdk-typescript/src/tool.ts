@@ -31,7 +31,7 @@ const MAX_EXC_MSG = 500;
  * The SDK uses this as a generous upper bound; the backend applies
  * its OWN per-project cap (default 8 KB) at fingerprint time so
  * customers tune storage / fingerprint policy from the dashboard
- * without an SDK redeploy (see , migration 042).
+ * without an SDK redeploy (see migration 042).
  *
  * Raised from the v0.5.0 hardcoded 2048 to 16384 (16 KB) so the
  * SDK no longer aggressively truncates returns that the backend

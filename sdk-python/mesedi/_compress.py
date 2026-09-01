@@ -17,7 +17,7 @@ unavailable or throws.
 ``Content-Encoding: zstd`` and transparently decompresses before the
 handler reads the body. Backends without that middleware ()
 will see the compressed body as opaque bytes and reject it as
-malformed JSON — which is why this SDK version (v0.3.0) requires a
+malformed JSON, which is why this SDK version (v0.3.0) requires a
 backend that speaks compression. The companion backend commit shipped
 first; you only see this module if you upgraded to a SDK release that
 ships after.

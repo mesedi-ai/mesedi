@@ -25,15 +25,15 @@ truncated; customers with that shape can flatten on their side.
 
 **Markers added on truncation:**
 
-  - ``_truncated``               (bool) — always True when this helper
+  - ``_truncated``               (bool): always True when this helper
                                   altered the payload. Downstream
                                   readers (dashboard, alerts) key on
                                   this to render a "truncated" chip.
-  - ``_original_payload_bytes``  (int) — serialized byte count of the
+  - ``_original_payload_bytes``  (int): serialized byte count of the
                                   original payload before truncation.
                                   Lets the customer see how much got
                                   dropped.
-  - ``_truncated_fields``        (list[str]) — names of the top-level
+  - ``_truncated_fields``        (list[str]): names of the top-level
                                   fields whose values got shortened.
                                   Helps debugging without forcing the
                                   reader to diff against the original.

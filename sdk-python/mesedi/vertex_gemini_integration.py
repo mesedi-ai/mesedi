@@ -1,5 +1,5 @@
 """
-Vertex AI Gemini SDK monkey-patch — auto-emit llm_call events for
+Vertex AI Gemini SDK monkey-patch: auto-emit llm_call events for
 every ``GenerativeModel.generate_content`` (sync) and
 ``generate_content_async`` (async) call inside a ``@mesedi.wrap``
 execution against the Vertex AI surface.
@@ -8,11 +8,11 @@ Enterprise Google customers use ``vertexai`` rather than
 ``google-generativeai`` because Vertex provides GCP-native auth
 (service accounts, IAM), regional control, and the Enterprise-tier
 SLA. The two SDKs ship different packages, different auth models,
-and slightly different request/response shapes — so this lives in
+and slightly different request/response shapes: so this lives in
 its own integration with its own entry point.
 
 Same provider tag (``provider="gemini"``) and same canonical
-error_class map as ``instrument_gemini`` — a real Google outage
+error_class map as ``instrument_gemini``: a real Google outage
 clusters into ONE provider_incident regardless of which Google
 surface the customer was using. Customers running both surfaces
 call ``instrument_gemini()`` and ``instrument_vertex_gemini()``;
@@ -21,7 +21,7 @@ each is idempotent and patches a different class.
 Out of scope (filed as future follow-ups):
 
   - Streaming responses (``generate_content`` with ``stream=True``)
-  - Embed surface — Vertex offers ``TextEmbeddingModel.get_embeddings``
+  - Embed surface: Vertex offers ``TextEmbeddingModel.get_embeddings``
     on a separate class hierarchy; tracked as future follow-up.
 
 Dependency injection: ``instrument_vertex_gemini()`` accepts an
@@ -189,7 +189,7 @@ def _patch_vertex_gemini_sync(model_class: Type[Any]) -> bool:
 
 
 def _patch_vertex_gemini_async(model_class: Type[Any]) -> bool:
-    """Async twin — vertexai GenerativeModel.generate_content_async."""
+    """Async twin: vertexai GenerativeModel.generate_content_async."""
     if not hasattr(model_class, "generate_content_async"):
         return False
 
@@ -302,7 +302,7 @@ def _resolve_system_instruction(self: Any) -> str:
 def _extract_response_fields(response: Any) -> tuple:
     """Vertex response exposes ``text`` (string) and ``usage_metadata``
     with ``prompt_token_count`` + ``candidates_token_count``. Both
-    accesses are defensive — unexpected shapes degrade to empty/zero."""
+    accesses are defensive: unexpected shapes degrade to empty/zero."""
     response_text = ""
     input_tokens = 0
     output_tokens = 0

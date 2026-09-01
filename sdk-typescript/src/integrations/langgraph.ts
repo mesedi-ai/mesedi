@@ -39,9 +39,9 @@
  * Out of scope for v1:
  *
  *   - Streaming hooks (`graph.streamEvents`). Covered in a follow-up.
- *   - LangGraph's persistence (checkpointer) — Mesedi emits
+ *   - LangGraph's persistence (checkpointer): Mesedi emits
  *     telemetry parallel to it without touching the stored state.
- *   - LangGraph `interrupt()` auto-bridging — use the existing HITL
+ *   - LangGraph `interrupt()` auto-bridging: use the existing HITL
  *     helpers (`pauseForHuman`, `requestHumanIntervention`) for now.
  */
 

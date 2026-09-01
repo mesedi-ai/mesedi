@@ -1,16 +1,16 @@
 /**
- * Ollama SDK monkey-patch — auto-emit llm_call events for every
+ * Ollama SDK monkey-patch: auto-emit llm_call events for every
  * `Ollama.chat()` call inside a wrap()'d execution.
  *
  * Mirrors instrumentOpenAI / instrumentAnthropic shape (same
  * fail-open semantics, same payload contract, same idempotency
  * guarantee), with Ollama-shape adjustments:
  *
- *   - Token field names: prompt_eval_count / eval_count — translated
+ *   - Token field names: prompt_eval_count / eval_count: translated
  *     to canonical input_tokens / output_tokens on payload.
  *   - Response text is `response.message.content` (not `choices[0]...`).
  *   - No API-key auth; customers point at localhost or a remote
- *     Ollama host. No throttling auto-emit in this sub-wave — for a
+ *     Ollama host. No throttling auto-emit in this sub-wave: for a
  *     local runtime there is no upstream rate-limit signal worth
  *     surfacing.
  *
@@ -50,13 +50,13 @@ const MAX_EXC_MSG = 500;
 
 /** Stable lowercase provider identifier shipped on every llm_call
  * event. Backend's provider_incident detector clusters cross-tenant
- * signals on (provider, error_class) — though for local runtimes the
+ * signals on (provider, error_class), though for local runtimes the
  * cross-tenant signal is necessarily quiet. */
 const PROVIDER = "ollama";
 
 const _patched = new WeakSet<object>();
 
-/** — one-time guard for streaming calls. The
+/**: one-time guard for streaming calls. The
  * chunk-aggregating wrapper for streaming responses ships in a
  * follow-up sub-wave; until then, calls with stream: true emit NO
  * llm_call event AND log a single console.info so customers
@@ -516,7 +516,7 @@ export const _testing = {
    * full wrap() + chat() integration scaffold. Not part of the
    * public API. */
   maybeWarnStreamingUnsupported,
-  /** — exposed for unit tests of the streaming chunk-
+  /**: exposed for unit tests of the streaming chunk-
    * aggregation logic. Not part of the public API. */
   accumulateChunk,
 };

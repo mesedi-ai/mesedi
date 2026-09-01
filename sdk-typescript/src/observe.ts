@@ -190,7 +190,7 @@ export type InfrastructureReason =
   | (string & {});
 
 /**
- * Canonical error_class values that signal per-tenant throttling — used
+ * Canonical error_class values that signal per-tenant throttling: used
  * by the instrument_* modules to decide whether to auto-emit an
  * infrastructure_event alongside their failed llm_call event so the
  * infrastructure_throttled detector picks up the pattern. Deliberately
@@ -516,7 +516,7 @@ export interface AgentHandoffOptions {
 /**
  * Object-form options for the new {@link emitAgentHandoff} overload
  * (). Use this when calling inside a `wrap()` whose
- * `agentName` option supplies the source agent — the `fromAgent`
+ * `agentName` option supplies the source agent: the `fromAgent`
  * field becomes optional and falls back to the wrapped execution's
  * agent name.
  */
@@ -548,7 +548,7 @@ export interface EmitAgentHandoffArgs extends AgentHandoffOptions {
  *      `wrap({ agentName: ... }, fn)` is used.
  *   3. If neither is supplied while inside `wrap()`, this function
  *      throws Error rather than silently emitting an `unknown` source
- *      agent — polluting the topology graph would degrade
+ *      agent: polluting the topology graph would degrade
  *      cascading_failure / coordination_deadlock clustering at scale.
  *
  * Outside `wrap()` / `runInExecutionContext`: no-op (matches the

@@ -87,7 +87,7 @@ def _structured_return_value(result: Any) -> Any:
     structural fingerprint (sorted keys + value types) from this
     field. The original v0.5.0 implementation used
     ``json.dumps(default=str)`` which collapsed every non-JSON-native
-    value to a plain string — so ``{"created_at": datetime}`` and
+    value to a plain string: so ``{"created_at": datetime}`` and
     ``{"created_at": "regular string"}`` produced an IDENTICAL
     fingerprint, masking real schema drift between the two shapes
 .

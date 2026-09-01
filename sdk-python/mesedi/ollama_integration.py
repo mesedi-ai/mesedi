@@ -1,11 +1,11 @@
 """
-Ollama SDK monkey-patch — auto-emit llm_call events for every
+Ollama SDK monkey-patch: auto-emit llm_call events for every
 ``Client.chat`` and ``AsyncClient.chat`` call inside a
 ``@mesedi.wrap`` execution.
 
 Activation is **opt-in**: call ``mesedi.instrument_ollama()`` once at
 process startup. Mirrors the OpenAI, Anthropic, Cohere, and Gemini
-integrations — same fail-open semantics, same payload shape, same
+integrations: same fail-open semantics, same payload shape, same
 idempotency guarantee.
 
 Why a dedicated integration when Ollama exposes an OpenAI-compatible
@@ -19,7 +19,7 @@ What gets captured per call:
 
   - ``provider`` = ``"ollama"`` (stable, lowercase identifier; the
     backend's provider_incident detector clusters cross-tenant
-    signals by (provider, error_class) — though for local runtimes
+    signals by (provider, error_class), though for local runtimes
     the cross-tenant signal is necessarily quiet)
   - ``model`` (e.g. "llama3.1:8b", "qwen2.5-coder:32b", "deepseek-r1")
   - ``system_prompt``, the FIRST ``role="system"`` message content,
@@ -29,7 +29,7 @@ What gets captured per call:
   - ``response_text``, ``response["message"]["content"]``,
     truncated to 1000 chars
   - ``input_tokens`` / ``output_tokens``, from Ollama's
-    ``prompt_eval_count`` / ``eval_count`` fields — we translate to
+    ``prompt_eval_count`` / ``eval_count`` fields: we translate to
     the canonical names the backend expects
   - ``duration_ms``, wall-clock time of the API call
   - ``status``, "ok" if the call returned, "failed" if it raised
@@ -40,13 +40,13 @@ What gets captured per call:
 
 What this module patches:
 
-  - ``ollama.Client.chat`` — the sync chat-completions surface
-  - ``ollama.AsyncClient.chat`` — the async chat-completions surface
+  - ``ollama.Client.chat``: the sync chat-completions surface
+  - ``ollama.AsyncClient.chat``: the async chat-completions surface
 
 Out of scope (filed as follow-ups in the Ollama arc):
 
   - Streaming responses (``stream=True``): observed via the
-    chunk-aggregating wrapper shipped in . _OllamaStream-
+    chunk-aggregating wrapper. _OllamaStream-
     IteratorWrapper (sync) and _OllamaAsyncStreamIteratorWrapper
     (async) drain the inner generator chunk-by-chunk, pass each
     chunk through to the customer unchanged, and accumulate
@@ -68,7 +68,7 @@ testable without installing the actual ``ollama`` package. Production
 callers leave both as ``None`` and let the function auto-locate the
 real classes.
 
-Cost model: Ollama is local — no per-token cost against any commercial
+Cost model: Ollama is local: no per-token cost against any commercial
 provider table. The pricing registry in ships ``ollama`` at
 $0/token, which is the honest answer. Customers who care about hardware
 amortization can set a per-tenant override.
