@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"mesedi/backend/internal/anthropic"
+	"mesedi/backend/internal/attest"
 	"mesedi/backend/internal/detectors"
 	"mesedi/backend/internal/dlp"
 	"mesedi/backend/internal/events"
@@ -240,6 +241,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Phase 3b, read-side execution surface for the dashboard.
 	mux.HandleFunc("GET /executions", h.HandleListExecutions)
 	mux.HandleFunc("GET /executions/{id}", h.HandleGetExecution)
+	mux.HandleFunc("GET /executions/{id}/digest", h.HandleGetExecutionDigest)
 	// multi-agent topology graph.
 	mux.HandleFunc("GET /executions/{id}/topology", h.HandleGetExecutionTopology)
 	mux.HandleFunc("GET /stats", h.HandleStats)
@@ -3246,6 +3248,108 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 	if failureGroup != nil {
 		resp["failure_group"] = failureGroup
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandleGetExecutionDigest returns the canonical Merkle digest of one
+// execution's event record, plus an inclusion proof when a leaf index
+// is supplied via ?leaf=N.
+//
+// READ THE PACKAGE COMMENT ON internal/attest BEFORE DOCUMENTING THIS
+// AS EVIDENCE. A digest Mesedi computes over a record Mesedi stores
+// proves nothing to anyone who does not already trust Mesedi. This
+// endpoint exists because it is the half we are entitled to compute:
+// a canonical, reproducible summary a customer can recompute for
+// themselves from the events we also return elsewhere. It becomes
+// evidence only once the root is anchored somewhere outside our
+// control, which is a separate service and a separate wave.
+//
+// Computed on read rather than stored. The digest is a pure function
+// of the events, so persisting it would store a derivable value AND
+// create a second thing that can drift from the record it summarises.
+//
+// RATE LIMIT TIER: standard authenticated read, same tier as
+// GET /executions/{id}. No dedicated throttle and none warranted —
+// this endpoint issues no more work than the execution-detail read it
+// sits beside (one execution lookup, one event list), adds no external
+// call, and returns a bounded response. If a customer can afford to
+// hammer the detail page they can afford to hammer this, and the
+// answer to both is the same project-scoped limit.
+//
+// Revisit the moment the Verdifax anchor lands: THAT path costs money
+// per submission to a public transparency log, and a per-project cap
+// belongs on it rather than here.
+func (h *Handlers) HandleGetExecutionDigest(w http.ResponseWriter, r *http.Request) {
+	executionID := r.PathValue("id")
+	if executionID == "" {
+		writeError(w, http.StatusBadRequest, "execution_id path parameter required")
+		return
+	}
+	authProjectID, ok := ProjectIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no project context")
+		return
+	}
+
+	exec, err := h.Store.GetExecution(r.Context(), executionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "execution not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Same not-found-on-cross-project response as HandleGetExecution.
+	// Deliberately not 403: telling a caller an execution exists in
+	// somebody else's project is itself a disclosure.
+	if exec.ProjectID != authProjectID {
+		writeError(w, http.StatusNotFound, "execution not found")
+		return
+	}
+
+	evts, err := h.Store.ListEventsForExecution(r.Context(), executionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list events failed: "+err.Error())
+		return
+	}
+
+	digest, err := attest.Compute(executionID, evts)
+	if err != nil {
+		if errors.Is(err, attest.ErrNoEvents) {
+			// 404 rather than an empty digest. An execution with no
+			// events has no record to summarise, and returning the
+			// empty-tree root would let "we have nothing" masquerade
+			// as "here is the record".
+			writeError(w, http.StatusNotFound, "execution has no events to digest")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "digest failed: "+err.Error())
+		return
+	}
+
+	resp := map[string]any{
+		"ok":     true,
+		"digest": digest,
+	}
+
+	// Optional inclusion proof for a single leaf. Present so a
+	// customer can show a third party that ONE event was in the
+	// record without disclosing the rest of the execution.
+	if leafParam := r.URL.Query().Get("leaf"); leafParam != "" {
+		idx, convErr := strconv.Atoi(leafParam)
+		if convErr != nil {
+			writeError(w, http.StatusBadRequest, "leaf must be an integer index")
+			return
+		}
+		proof, proofErr := attest.Prove(digest, idx)
+		if proofErr != nil {
+			writeError(w, http.StatusBadRequest, proofErr.Error())
+			return
+		}
+		resp["inclusion_proof"] = proof
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

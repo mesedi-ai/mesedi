@@ -644,6 +644,7 @@ func main() {
 	mux.Handle("GET /executions", privateHandler)
 	mux.Handle("GET /executions/{id}", privateHandler)
 	// multi-agent topology graph (auth-required).
+	mux.Handle("GET /executions/{id}/digest", privateHandler)
 	mux.Handle("GET /executions/{id}/topology", privateHandler)
 	mux.Handle("GET /stats", privateHandler)
 	// Phase 3a, failure_group read surface (auth-required).
