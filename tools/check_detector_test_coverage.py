@@ -79,6 +79,7 @@ CANONICAL_DETECTORS: List[str] = [
     "provider_incident",
     "hitl_timeout",
     "hitl_rejection_spike",
+    "record_integrity",
 ]
 
 

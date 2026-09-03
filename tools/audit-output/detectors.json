@@ -1,6 +1,6 @@
 {
   "generated_by": "tools/audit_detectors.py",
-  "detector_count": 20,
+  "detector_count": 21,
   "blocking_failures": 0,
   "reports": [
     {
@@ -1115,6 +1115,62 @@
           "name": "docs_page",
           "status": "PASS",
           "detail": "Docs page present at dashboard/app/docs/observability/hitl_rejection_spike/page.tsx."
+        },
+        {
+          "name": "logic_correctness",
+          "status": "NEEDS_REVIEW",
+          "detail": "LLM-judge skipped (--no-llm flag set)."
+        }
+      ]
+    },
+    {
+      "detector": "record_integrity",
+      "blocking_failures": [],
+      "checkpoints": [
+        {
+          "name": "sdk_helpers",
+          "status": "N/A",
+          "detail": "Detector fires automatically from wrap() observations; no explicit SDK helper required."
+        },
+        {
+          "name": "backend_logic",
+          "status": "PASS",
+          "detail": "All 1 source + test file(s) present."
+        },
+        {
+          "name": "project_config",
+          "status": "N/A",
+          "detail": "Detector is correctness-only; no tunable thresholds."
+        },
+        {
+          "name": "telemetry",
+          "status": "N/A",
+          "detail": "Detector has no configurable thresholds; no fallback telemetry needed."
+        },
+        {
+          "name": "vocabulary_sot",
+          "status": "PASS",
+          "detail": "FailureClass constant for 'record_integrity' declared in store.go."
+        },
+        {
+          "name": "drift_tests",
+          "status": "N/A",
+          "detail": "Detector has no provider/library lookup table that benefits from a drift test."
+        },
+        {
+          "name": "integration_test",
+          "status": "PASS",
+          "detail": "Integration test function present."
+        },
+        {
+          "name": "dashboard",
+          "status": "PASS",
+          "detail": "failureClass helper at dashboard/app/app/failure-groups/page.tsx registers 'record_integrity'."
+        },
+        {
+          "name": "docs_page",
+          "status": "PASS",
+          "detail": "Docs page present at dashboard/app/docs/observability/record_integrity/page.tsx."
         },
         {
           "name": "logic_correctness",

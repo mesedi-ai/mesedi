@@ -164,6 +164,7 @@ var patterns = []pattern{
 	// ── Tier 4 HITL (-) ───────────────────────────
 	{"hitl_timeout", "", "hitl_timeout/_default.md"},
 	{"hitl_rejection_spike", "", "hitl_rejection_spike/_default.md"},
+	{"record_integrity", "", "record_integrity/_default.md"},
 
 	// ── crashes ────────────────────────────────────────────────
 	// Catch-all generic crashes playbook. Earlier versions

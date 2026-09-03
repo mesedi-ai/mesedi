@@ -1597,6 +1597,51 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else {
+			// record_integrity detector. Runs FIRST inside this block,
+			// before cost computation and every other event-driven
+			// pass, and the ordering is the point: everything below
+			// derives a number from this event list. If the list has a
+			// hole in it, the operator should be told that before they
+			// are handed totals computed from it.
+			//
+			// Reads only Event.Sequence. No clock, no payload, no
+			// provider lookup — so it cannot be skewed by a customer
+			// running agents across several machines, and it works on
+			// telemetry already being collected by every SDK version.
+			//
+			// Best-effort like its neighbours: a grouping failure is
+			// logged and the PATCH still succeeds. An integrity check
+			// that could fail a customer's execution close would be a
+			// worse availability problem than the one it reports.
+			if len(evts) > 0 {
+				seqs := make([]int, 0, len(evts))
+				for _, e := range evts {
+					if e == nil {
+						continue
+					}
+					seqs = append(seqs, e.Sequence)
+				}
+				for _, sig := range detectors.DetectRecordIntegrityAllMatches(seqs) {
+					isNew, gErr := h.Store.GroupRecordIntegrity(r.Context(), executionID, authProjectID, sig)
+					if gErr != nil {
+						h.Logger.Warn("record-integrity grouping failed (continuing)",
+							"execution_id", executionID,
+							"signature", sig,
+							"error", gErr.Error(),
+						)
+						continue
+					}
+					h.Logger.Info("record integrity signal",
+						"execution_id", executionID,
+						"signature", sig,
+						"event_count", len(seqs),
+						"missing", detectors.MissingSequences(seqs),
+						"duplicated", detectors.DuplicatedSequences(seqs),
+					)
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassRecordIntegrity, sig, isNew, gErr)
+				}
+			}
+
 			// Sub-slice 12: cost computation. — backend is now
 			// the source of truth for known models. The SDK-shipped
 			// per-event estimated_cost_usd is fallback only for models
@@ -5204,6 +5249,7 @@ var validFailureClasses = map[string]struct{}{
 	store.FailureClassProviderIncident:     {},
 	store.FailureClassHITLTimeout:          {},
 	store.FailureClassHITLRejectionSpike:   {},
+	store.FailureClassRecordIntegrity:      {},
 }
 
 // HandleListWebhooks returns the calling project's webhooks. The

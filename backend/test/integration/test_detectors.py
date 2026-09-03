@@ -1963,3 +1963,149 @@ def test_allowlist_suppresses_matching_tool_failure(
             headers={"Authorization": f"Bearer {backend.api_key}"},
             timeout=5.0,
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# record_integrity
+# ──────────────────────────────────────────────────────────────────────
+
+def _post_execution_with_sequences(backend: Backend, sequences: list[int]) -> str:
+    """Create an execution, write checkpoint events carrying exactly
+    the supplied sequence numbers, then close it.
+
+    Every other test in this file drives the SDK, because every other
+    detector fires on something the agent did. This one cannot, and
+    the reason is worth stating: the SDK is the component that keeps
+    sequence numbers dense. Asking it to emit a gap would mean either
+    breaking it or adding a test-only hole in it.
+
+    So the test writes to POST /events directly — which is also how
+    the condition actually arises in production. A gap does not mean
+    the SDK misbehaved; it means an event the SDK sent never landed,
+    or landed twice. Writing the events by hand reproduces the state
+    the backend would be left in, which is the state the detector has
+    to reason about.
+    """
+    import uuid
+
+    execution_id = f"exec-{uuid.uuid4().hex[:12]}"
+
+    create_resp = requests.post(
+        f"{backend.base_url}/executions",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"execution_id": execution_id, "status": "started"},
+        timeout=5.0,
+    )
+    assert create_resp.status_code in (200, 201), (
+        f"create execution: status={create_resp.status_code} "
+        f"body={create_resp.text}"
+    )
+
+    batch = [
+        {
+            "event_id": f"evt-{uuid.uuid4().hex[:12]}",
+            "execution_id": execution_id,
+            "event_type": "checkpoint",
+            "sequence": seq,
+            "payload": {"note": f"seeded sequence {seq}"},
+        }
+        for seq in sequences
+    ]
+    events_resp = requests.post(
+        f"{backend.base_url}/events",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json=batch,
+        timeout=5.0,
+    )
+    assert events_resp.status_code in (200, 201, 202), (
+        f"ingest events: status={events_resp.status_code} "
+        f"body={events_resp.text}"
+    )
+
+    # The detector runs on the terminal PATCH, not on ingest — it is a
+    # statement about a finished record, and a record still being
+    # written is expected to have holes at its leading edge.
+    patch_resp = requests.patch(
+        f"{backend.base_url}/executions/{execution_id}",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        json={"status": "completed"},
+        timeout=5.0,
+    )
+    assert patch_resp.status_code == 200, (
+        f"close execution: status={patch_resp.status_code} "
+        f"body={patch_resp.text}"
+    )
+    return execution_id
+
+
+def test_record_integrity_sequence_gap(backend: Backend):
+    """Events 1, 2 and 5 land; 3 and 4 never do.
+
+    Assertion:
+        failure_group with class=record_integrity and signature
+        'record_integrity:sequence_gap'.
+    """
+    _post_execution_with_sequences(backend, [1, 2, 5])
+
+    group = await_failure_group(
+        backend,
+        failure_class="record_integrity",
+        signature_prefix="record_integrity:sequence_gap",
+    )
+    assert group["signature"] == "record_integrity:sequence_gap", (
+        f"unexpected signature: {group['signature']}"
+    )
+
+
+def test_record_integrity_duplicate_sequence(backend: Backend):
+    """Two events both claim sequence 2 — a retry that landed after
+    the original had already been written.
+
+    The span 1..3 is densely covered by the distinct values {1,2,3},
+    so the gap signature must NOT fire here. That negative half is the
+    point of the test: it pins that the two conditions are evaluated
+    independently rather than one implying the other.
+    """
+    _post_execution_with_sequences(backend, [1, 2, 2, 3])
+
+    group = await_failure_group(
+        backend,
+        failure_class="record_integrity",
+        signature_prefix="record_integrity:duplicate_sequence",
+    )
+    assert group["signature"] == "record_integrity:duplicate_sequence", (
+        f"unexpected signature: {group['signature']}"
+    )
+
+
+def test_record_integrity_stays_quiet_on_a_dense_record(backend: Backend):
+    """A complete record must produce no record_integrity group.
+
+    Guards the failure mode that would make this detector worthless:
+    firing on healthy executions.
+
+    Scoped to THIS execution via its own failure_group_id rather than
+    by scanning /failure-groups for an absence. The project-wide list
+    legitimately contains record_integrity groups created by the two
+    tests above, so "no such group exists" would be false for reasons
+    that have nothing to do with this execution — and an assertion
+    that is wrong for the wrong reason is worse than none.
+    """
+    execution_id = _post_execution_with_sequences(backend, [1, 2, 3, 4])
+
+    exec_resp = requests.get(
+        f"{backend.base_url}/executions/{execution_id}",
+        headers={"Authorization": f"Bearer {backend.api_key}"},
+        timeout=5.0,
+    )
+    assert exec_resp.status_code == 200, (
+        f"get execution: status={exec_resp.status_code} "
+        f"body={exec_resp.text}"
+    )
+    body = exec_resp.json()
+    execution = body.get("execution", body)
+    assert not execution.get("failure_group_id"), (
+        "a dense record (sequences 1,2,3,4) was clustered into a "
+        f"failure_group: {execution.get('failure_group_id')}. The "
+        "detector fired on a healthy execution."
+    )

@@ -3521,6 +3521,17 @@ func (s *SQLiteStore) GroupHITLTimeout(ctx context.Context, executionID, project
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassHITLTimeout, signature)
 }
 
+// GroupRecordIntegrity upserts a failure_group with
+// failure_class=record_integrity. Thin wrapper over the shared
+// grouping path, identical in shape to every other Group* method —
+// this detector needs no special persistence, only a distinct class.
+func (s *SQLiteStore) GroupRecordIntegrity(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassRecordIntegrity, signature)
+}
+
 // CountHITLOutcomesInWindow aggregates human_intervention
 // verdicts across the project's recent executions. Counts are
 // over distinct executions: an execution with multiple human

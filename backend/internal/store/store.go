@@ -625,6 +625,27 @@ const (
 	//      Signal that the agent's output is close but consistently
 	//      requires correction.
 	FailureClassHITLRejectionSpike = "hitl_rejection_spike"
+	// FailureClassRecordIntegrity groups executions whose own event
+	// record is internally inconsistent. Every other class in this
+	// list describes something the AGENT did; this one describes
+	// something wrong with the EVIDENCE of what the agent did.
+	//
+	// Two firing variants, distinguished by signature:
+	//   "record_integrity:sequence_gap"        - the event stream is
+	//      missing at least one sequence number between its lowest
+	//      and highest observed value. Events were produced that this
+	//      record does not contain.
+	//   "record_integrity:duplicate_sequence"  - two or more events
+	//      claim the same sequence number, so one position in the
+	//      record was written more than once.
+	//
+	// It reports incompleteness, NOT tampering. A gap is far more
+	// often a dropped request or an SDK killed mid-flush than anyone
+	// deleting anything, and the detector documentation says so
+	// plainly — an integrity signal that overclaims gets ignored.
+	// Proving a record was not altered after the fact requires it to
+	// have been signed when written, which this service does not do.
+	FailureClassRecordIntegrity = "record_integrity"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same
@@ -1989,6 +2010,17 @@ type Store interface {
 	// failure_class=hitl_rejection_spike and the detector-supplied
 	// signature.
 	GroupHITLRejectionSpike(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// GroupRecordIntegrity upserts a failure_group with
+	// failure_class=record_integrity and the detector-supplied
+	// signature ("record_integrity:sequence_gap" or
+	// "record_integrity:duplicate_sequence").
+	//
+	// Note the self-referential quality of this one: the execution
+	// being grouped is the same execution whose record is incomplete.
+	// That is intentional — the group points at the run you would go
+	// look at — but it does mean the group's own event counts are
+	// drawn from the record it is telling you not to fully trust.
+	GroupRecordIntegrity(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// GetExecutionTopology returns the full ancestor + descendant
 	// tree for the given execution within the calling project. The
 	// returned slice is ordered by depth ASC then started_at ASC so

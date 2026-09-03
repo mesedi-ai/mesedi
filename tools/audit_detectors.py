@@ -112,6 +112,7 @@ CANONICAL_DETECTORS: List[str] = [
     "provider_incident",
     "hitl_timeout",
     "hitl_rejection_spike",
+    "record_integrity",
 ]
 
 
@@ -337,6 +338,20 @@ DETECTOR_REGISTRY: Dict[str, DetectorMeta] = {
         config_mechanism="validator_registry",
         docs_slug="observability/hitl_rejection_spike",
         signature_prefix="hitl_rejection_spike:",
+    ),
+    # Record integrity. Correctness-only: the two shipped signals are
+    # pure integer analysis on Event.Sequence, so there is nothing to
+    # tune and no threshold that would make sense per project. The
+    # clock-dependent signals that WOULD need a per-project skew
+    # tolerance (timestamp_regression, event_outside_window) were
+    # deliberately cut from this wave precisely so that no config
+    # surface had to ship with the first version.
+    "record_integrity": DetectorMeta(
+        sdk_helpers=None,
+        backend_files=["record_integrity.go"],
+        config_mechanism="none",
+        docs_slug="observability/record_integrity",
+        signature_prefix="record_integrity:",
     ),
 }
 

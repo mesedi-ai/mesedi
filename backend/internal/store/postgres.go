@@ -2758,6 +2758,15 @@ func (s *PostgresStore) GroupHITLTimeout(ctx context.Context, executionID, proje
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassHITLTimeout, signature)
 }
 
+// GroupRecordIntegrity is the Postgres twin of the SQLite method of
+// the same name.
+func (s *PostgresStore) GroupRecordIntegrity(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassRecordIntegrity, signature)
+}
+
 // CountHITLOutcomesInWindow is the Postgres twin of the SQLite
 // method of the same name.
 func (s *PostgresStore) CountHITLOutcomesInWindow(
