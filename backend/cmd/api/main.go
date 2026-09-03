@@ -473,88 +473,14 @@ func main() {
 		api.NewAuthChain(logger, st, handlers.Abuse)(privateMux),
 	)
 
-	// Abuse-detection background worker. Reads unresolved
-	// signals every few minutes, sends the 24h-warning email, then
-	// auto-suspends the project 24h later if still unresolved. Uses
-	// context.Background() so the worker runs for the life of the
-	// process; the OS kills it on SIGTERM along with the HTTP server.
-	api.StartAbuseWorker(context.Background(), st, mailer, logger, cfg.DashboardURL)
-
-	// failure_class aggregate worker. Runs once on startup +
-	// every 24h, refreshing the current-month row so mid-month
-	// account closures don't lose data.
-	api.StartFailureClassAggregateWorker(context.Background(), st, logger)
-
-	// Tenant budget-ceiling scheduler. Walks every
-	// tenant_budget_ceilings row every 5 minutes, evaluates MTD burn
-	// against the configured ceiling, and (on first crossing within
-	// the calendar month) fires email + webhook notifications and
-	// (when BreachAction == "halt") halts every active execution
-	// under the tenant. Same context.Background() lifetime as the
-	// abuse worker.
-	budgetCeilingScheduler := &api.BudgetCeilingScheduler{
-		Store:        st,
-		Logger:       logger,
-		HaltSubs:     handlers.HaltSubs,
-		Mailer:       mailer,
-		WebhookHTTP:  &http.Client{Timeout: 10 * time.Second},
-		DashboardURL: cfg.DashboardURL,
-	}
-	budgetCeilingScheduler.Start(context.Background())
-
-	// Data retention scheduler. Daily tick walks every project
-	// with retention_days set and prunes executions outside the
-	// window. Indefinite-retention projects are excluded at the
-	// query level (ListProjectsForRetention). Same context lifetime
-	// as the abuse + budget-ceiling workers.
-	retentionScheduler := &api.RetentionScheduler{
-		Store:  st,
-		Logger: logger,
-	}
-	retentionScheduler.Start(context.Background())
-
-	// Closed-project audit_events retention scheduler. Daily
-	// tick prunes audit rows whose project_deleted_at is older than
-	// the 7-year SOC 2 / financial-services retention window. Only
-	// closed-project rows (project_deleted_at IS NOT NULL) are
-	// eligible; live-project audit history is untouched. The default
-	// retention window comes from api.DefaultAuditEventsRetention;
-	// override here for stricter (e.g. EU-only) deploys.
-	auditEventsRetentionScheduler := &api.AuditEventsRetentionScheduler{
-		Store:  st,
-		Logger: logger,
-	}
-	auditEventsRetentionScheduler.Start(context.Background())
-
-	// request_log retention scheduler. Daily tick prunes rows
-	// older than 90 days from the request_log table. Keeps the
-	// forensic-attribution window long enough for typical compromise
-	// investigations without letting the table balloon Neon storage.
-	requestLogRetentionScheduler := &api.RequestLogRetentionScheduler{
-		Store:  st,
-		Logger: logger,
-	}
-	requestLogRetentionScheduler.Start(context.Background())
-
-	// Hobby billing scheduler (). Daily tick walks every
-	// Hobby-tier project whose billing period has rolled over, attempts
-	// the off-session overage charge against the saved Stripe payment
-	// method, and advances the period bounds on success. Retries every
-	// 48 hours on failed charges; auto-detaches the saved card after
-	// 5 consecutive failures. Also bootstraps NULL period bounds on
-	// existing Hobby projects on first sight. No-op when Stripe is not
-	// configured (CE / local dev).
-	hobbyBillingScheduler := &api.HobbyBillingScheduler{
-		Store:        st,
-		Stripe:       handlers.Stripe,
-		Mailer:       mailer,
-		DashboardURL: cfg.DashboardURL,
-		Logger:       logger,
-	}
-	hobbyBillingScheduler.Start(context.Background())
-	// #366 admin trigger endpoint reaches back to the scheduler
-	// via handlers.HobbyBillingScheduler.
-	handlers.HobbyBillingScheduler = hobbyBillingScheduler
+	// Every long-running worker this process owns lives in
+	// background_workers.go. context.Background() so they run for the
+	// life of the process; the OS kills them on SIGTERM along with the
+	// HTTP server. See that file for the full inventory and for why a
+	// real shutdown context is not threaded through yet.
+	startBackgroundWorkers(
+		context.Background(), st, handlers, mailer, cfg.DashboardURL, logger,
+	)
 
 	// Public POST /signup bypasses the bearer-token auth chain (visitors
 	// have no key yet) but still needs CORS so the marketing site at
