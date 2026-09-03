@@ -1,0 +1,251 @@
+package api
+
+// VerdifaxAnchorer submits a checkpoint hash to Verdifax, which writes
+// it to a public transparency log and returns where it landed.
+//
+// This is the last link in the chain, and it is a thin one on purpose.
+// Verdifax receives a hash and nothing else: no payloads, no execution
+// ids, not even a project id. It cannot interpret what the checkpoint
+// covers, which is correct, because it is not supposed to. Its receipt
+// says one thing — this exact digest existed at this time and has not
+// changed since — and the independence in that claim comes from
+// Sigstore's log, not from Verdifax.
+//
+// TWO RESPONSE CHECKS ARE THE POINT OF THIS FILE
+//
+//  1. The returned digest must equal the digest sent. A misconfigured
+//     or hostile endpoint returning a receipt for a DIFFERENT digest
+//     would otherwise be recorded as ours, and the chain would name a
+//     log entry attesting to something else entirely. Nothing later
+//     would catch it: every hash in the chain would still verify
+//     against itself.
+//
+//  2. The returned provenance must be same-legal-entity-submitted.
+//     Verdifax, LLC does business as Mesedi — one Delaware LLC — so a
+//     receipt claiming a third party submitted this is false. If
+//     Verdifax says otherwise, the API key is misclassified, and every
+//     receipt it produces asserts an independent party that does not
+//     exist. Refusing here turns that misconfiguration into a loud
+//     failure at the first anchor instead of a quiet falsehood in
+//     every receipt afterwards.
+//
+// NO INTERNAL RETRY. The scheduler already retries on the next tick,
+// and every accepted submission in rekor mode costs real money, so
+// retrying here would multiply the bill for one interval. A lost
+// response produces a duplicate submission next tick, which Verdifax
+// deliberately permits: its digest index is non-unique because the same
+// digest anchored twice is two distinct events at two distinct times.
+// Duplicates are visible in the log rather than corrupting.
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"mesedi/backend/internal/attest"
+)
+
+const (
+	// VerdifaxUserAgent identifies this client in Verdifax's logs.
+	VerdifaxUserAgent = "Mesedi-CheckpointAnchor/1"
+
+	// verdifaxAnchorTimeout bounds a single submission. An unbounded
+	// call from the scheduler would stall the worker indefinitely, and a
+	// stalled scheduler stops closing intervals — the failure the whole
+	// chain exists to prevent. Generous because a real Sigstore write
+	// is not fast, but finite.
+	verdifaxAnchorTimeout = 30 * time.Second
+
+	// verdifaxMaxResponseBytes caps what we will read back. A receipt is
+	// small; anything large is a misconfigured endpoint, and reading it
+	// unbounded into a scheduler's memory is how one bad response takes
+	// down the worker.
+	verdifaxMaxResponseBytes = 64 << 10
+
+	// expectedProvenance is what a Mesedi submission must come back as.
+	// See the header: anything else means the key is misclassified.
+	//
+	// Duplicated as a literal rather than imported from
+	// verdifax-orchestrator's store package. That module is private and
+	// Mesedi does not depend on it; importing it to share one string
+	// would couple the two products' build graphs for no benefit. The
+	// cost is that this literal must track store.ProvenanceSameLegal
+	// EntitySubmitted, and the mitigation is that a drift fails LOUDLY
+	// at the first anchor rather than silently — which is the direction
+	// you want a mismatch to fail in.
+	expectedProvenance = "same-legal-entity-submitted"
+
+	// verdifaxKeyHeader is Verdifax's auth header, matching
+	// auth.HeaderName in verdifax-orchestrator.
+	verdifaxKeyHeader = "X-Verdifax-Key"
+)
+
+// VerdifaxAnchorer implements CheckpointAnchorer over HTTP.
+type VerdifaxAnchorer struct {
+	// BaseURL of the Verdifax orchestrator, e.g. https://api.verdifax.com
+	BaseURL string
+
+	// APIKey authenticates to Verdifax. SECRET: never logged, never
+	// placed in an error message. Errors from this file quote status
+	// codes and digests, never headers.
+	APIKey string
+
+	// HTTPClient is injected so tests do not reach the network. Nil
+	// gets a client with an explicit timeout.
+	HTTPClient *http.Client
+
+	Logger *slog.Logger
+}
+
+// NewVerdifaxAnchorer builds an anchorer, or returns nil when it is not
+// configured.
+//
+// Returning nil rather than a half-configured client is deliberate: the
+// scheduler treats a nil anchorer as "stall visibly at genesis", which
+// is the correct behaviour for a deployment with no transparency log.
+// A client that exists but cannot authenticate would instead fail on
+// every interval forever, which looks like an outage rather than like a
+// deployment that was never given credentials.
+func NewVerdifaxAnchorer(baseURL, apiKey string, logger *slog.Logger) *VerdifaxAnchorer {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	apiKey = strings.TrimSpace(apiKey)
+	if baseURL == "" || apiKey == "" {
+		return nil
+	}
+	return &VerdifaxAnchorer{
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+		Logger:  logger,
+	}
+}
+
+type verdifaxAttestRequest struct {
+	Digest     string `json:"digest"`
+	Algorithm  string `json:"algorithm"`
+	SubjectRef string `json:"subject_ref,omitempty"`
+	LeafCount  int    `json:"leaf_count,omitempty"`
+}
+
+type verdifaxAttestResponse struct {
+	OK            bool   `json:"ok"`
+	AttestationID int64  `json:"attestation_id"`
+	Digest        string `json:"digest"`
+	LedgerBackend string `json:"ledger_backend"`
+	LogEntryID    string `json:"log_entry_id"`
+	Provenance    string `json:"provenance"`
+	Error         string `json:"error"`
+}
+
+func (a *VerdifaxAnchorer) client() *http.Client {
+	if a.HTTPClient != nil {
+		return a.HTTPClient
+	}
+	return &http.Client{Timeout: verdifaxAnchorTimeout}
+}
+
+// AnchorCheckpoint submits cp.Hash and returns where it landed.
+func (a *VerdifaxAnchorer) AnchorCheckpoint(
+	ctx context.Context, cp attest.Checkpoint,
+) (string, string, error) {
+	// The digest sent is the CHECKPOINT hash — the value the whole chain
+	// is built on. Verdifax validates it as 64 lowercase hex, which
+	// CheckpointHash always produces.
+	body, err := json.Marshal(verdifaxAttestRequest{
+		Digest:    cp.Hash,
+		Algorithm: cp.Format,
+		// Opaque to Verdifax by design. Enough for an operator to
+		// correlate a log entry back to an interval, and nothing more:
+		// no project ids, no counts that would leak activity volume to
+		// whoever can read the log.
+		SubjectRef: fmt.Sprintf("checkpoint/%d/%s",
+			cp.Seq, cp.IntervalStart.UTC().Format(time.RFC3339)),
+		LeafCount: cp.TenantLeafCount,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("verdifax anchor: marshal request: %w", err)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, verdifaxAnchorTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
+		a.BaseURL+"/attest", bytes.NewReader(body))
+	if err != nil {
+		return "", "", fmt.Errorf("verdifax anchor: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", VerdifaxUserAgent)
+	// X-Verdifax-Key, NOT Authorization: Bearer. Verified against
+	// auth.HeaderName in verdifax-orchestrator rather than assumed; the
+	// Bearer guess would have returned 401 on every single anchor.
+	req.Header.Set(verdifaxKeyHeader, a.APIKey)
+
+	resp, err := a.client().Do(req)
+	if err != nil {
+		// Deliberately does not wrap the URL with credentials or echo
+		// any header. Transport errors are noisy enough already.
+		return "", "", fmt.Errorf("verdifax anchor: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, verdifaxMaxResponseBytes))
+	if err != nil {
+		return "", "", fmt.Errorf("verdifax anchor: read response: %w", err)
+	}
+
+	var out verdifaxAttestResponse
+	if jsonErr := json.Unmarshal(raw, &out); jsonErr != nil {
+		// Status first: a 502 from a proxy returns HTML, and reporting
+		// "invalid JSON" for that sends whoever reads the log looking in
+		// entirely the wrong place.
+		return "", "", fmt.Errorf(
+			"verdifax anchor: HTTP %d with an unparseable body (%d bytes)",
+			resp.StatusCode, len(raw))
+	}
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		msg := out.Error
+		if msg == "" {
+			msg = "no error message in response"
+		}
+		return "", "", fmt.Errorf("verdifax anchor: HTTP %d: %s", resp.StatusCode, msg)
+	}
+
+	// CHECK 1. The receipt must be for the digest we sent.
+	if out.Digest != cp.Hash {
+		return "", "", fmt.Errorf(
+			"verdifax anchor: receipt is for digest %s but checkpoint %d hashes to "+
+				"%s; recording it would make the chain name a log entry that "+
+				"attests to something else",
+			out.Digest, cp.Seq, cp.Hash)
+	}
+
+	// CHECK 2. The receipt must not claim an independent submitter.
+	if out.Provenance != expectedProvenance {
+		return "", "", fmt.Errorf(
+			"verdifax anchor: receipt claims provenance %q, want %q. Mesedi and "+
+				"Verdifax are the same legal entity, so this key is misclassified "+
+				"and its receipts assert an independent party that does not exist. "+
+				"Fix with POST /admin/keys/{id}/submitter-class",
+			out.Provenance, expectedProvenance)
+	}
+
+	if out.LogEntryID == "" {
+		return "", "", fmt.Errorf(
+			"verdifax anchor: checkpoint %d accepted but no log entry id returned; "+
+				"an anchor with nothing to point at cannot be verified", cp.Seq)
+	}
+
+	a.Logger.Info("verdifax_anchorer: checkpoint anchored",
+		"seq", cp.Seq,
+		"attestation_id", out.AttestationID,
+		"log_entry_id", out.LogEntryID,
+		"ledger_backend", out.LedgerBackend,
+	)
+	return out.LogEntryID, out.LedgerBackend, nil
+}
