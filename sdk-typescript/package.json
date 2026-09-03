@@ -103,8 +103,9 @@
     "vitest": "^4.1.9"
   },
   "//overrides": "Pins patched versions of dev-only transitive deps flagged by Dependabot. All are pulled in by the framework-adapter devDependencies (@mastra/@langchain/@ai-sdk) and NONE ship in the published package (files = dist + README, dependencies = none), so this is Security-tab hygiene, not a runtime fix. Each pin is the first-patched version within the same major, so the adapters stay compatible.",
+  "//overrides-staleness": "EXACT pins do not float. A pin that fixed yesterday's advisory HOLDS DOWN the fix for tomorrow's, and Dependabot cannot open a PR against a version this file is forcing, so the alert just sits there with no automated path to close it. fast-uri went 3.1.5 -> 3.1.6 on 2026-09-03 for exactly that reason. Re-read this whole block whenever a Dependabot alert names a package listed here: the alert is the signal that a pin has gone stale.",
   "overrides": {
-    "fast-uri": "3.1.5",
+    "fast-uri": "3.1.6",
     "ip-address": "10.3.1",
     "js-yaml": "3.15.1",
     "nanoid": "3.3.18",
