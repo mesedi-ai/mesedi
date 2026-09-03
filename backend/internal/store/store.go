@@ -2292,6 +2292,32 @@ type Store interface {
 	// suspended ones.
 	IsProjectSuspended(ctx context.Context, projectID string) (bool, string, error)
 
+	// ── Checkpoint chain: execution sealing (migration 057) ──────────
+	//
+	// Sealing fixes, permanently, which hourly checkpoint an execution
+	// belongs to. Neither started_at nor ended_at can do this job:
+	// started_at would anchor digests over still-running executions, so
+	// the root would change afterwards and read as tampering; ended_at
+	// is mutable, so a later correction would move an already-anchored
+	// execution between intervals. See migration 057 for the full
+	// argument.
+
+	// SealExecutions stamps sealed_at on executions that have ended and
+	// settled, or that never ended and have timed out. Idempotent:
+	// already-sealed rows are excluded, because interval membership must
+	// be recorded once and never recomputed.
+	SealExecutions(ctx context.Context, now time.Time, settle, timeout time.Duration) (int64, error)
+
+	// CountSealedByProject returns per-project counts for [from, to).
+	// Half-open, so an execution sealed exactly on an hour boundary
+	// belongs to one interval rather than two.
+	CountSealedByProject(ctx context.Context, from, to time.Time) (map[string]int, error)
+
+	// ListSealedExecutionIDs returns one project's sealed execution ids
+	// for [from, to) in the exact order their leaves must be hashed.
+	// Ordering is part of the contract: the Merkle root depends on it.
+	ListSealedExecutionIDs(ctx context.Context, projectID string, from, to time.Time) ([]string, error)
+
 	// Lifecycle.
 	Close() error
 	Ping(ctx context.Context) error
