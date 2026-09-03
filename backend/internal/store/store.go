@@ -11,6 +11,7 @@ import (
 	"context"
 	"time"
 
+	"mesedi/backend/internal/attest"
 	"mesedi/backend/internal/events"
 )
 
@@ -2317,6 +2318,41 @@ type Store interface {
 	// for [from, to) in the exact order their leaves must be hashed.
 	// Ordering is part of the contract: the Merkle root depends on it.
 	ListSealedExecutionIDs(ctx context.Context, projectID string, from, to time.Time) ([]string, error)
+
+	// ── Checkpoint chain: persistence (migration 058) ────────────────
+	//
+	// These take and return attest.Checkpoint / attest.TenantLeaf
+	// directly rather than store-local copies. Those structs are
+	// HASH-COMMITTED: a parallel copy would drift, and a field that
+	// exists on one and not the other silently changes what a stored
+	// checkpoint recomputes to.
+
+	// InsertCheckpoint writes a checkpoint and its leaves atomically.
+	// Half of a checkpoint reads as corruption to a verifier rather
+	// than as a crash. Refuses to overwrite an existing sequence.
+	InsertCheckpoint(ctx context.Context, cp attest.Checkpoint, leaves []attest.TenantLeaf) error
+
+	// LatestCheckpoint returns the chain head, or (nil, nil) before
+	// genesis — an empty chain is a legitimate state, not an error.
+	LatestCheckpoint(ctx context.Context) (*attest.Checkpoint, error)
+
+	// GetCheckpoint returns one checkpoint by sequence, or (nil, nil).
+	GetCheckpoint(ctx context.Context, seq uint64) (*attest.Checkpoint, error)
+
+	// GetCheckpointLeaves returns an interval's leaves IN HASHED ORDER.
+	// The root depends on that order; SELECT row order does not.
+	GetCheckpointLeaves(ctx context.Context, seq uint64) ([]attest.TenantLeaf, error)
+
+	// LatestTenantLeaf returns a project's most recent leaf, or
+	// (nil, nil) if it has never appeared. Supplies the next leaf's
+	// PrevLeafHash and running total.
+	LatestTenantLeaf(ctx context.Context, projectID string) (*attest.TenantLeaf, error)
+
+	// MarkCheckpointAnchored records where a checkpoint reached the
+	// transparency log. That entry id becomes the NEXT checkpoint's
+	// PrevLogEntryID, which is what ties the chain to a log Mesedi does
+	// not control.
+	MarkCheckpointAnchored(ctx context.Context, seq uint64, logEntryID, ledgerBackend string, anchoredAt time.Time) error
 
 	// Lifecycle.
 	Close() error
