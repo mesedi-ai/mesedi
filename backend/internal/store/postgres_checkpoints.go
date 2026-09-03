@@ -254,6 +254,40 @@ func (s *PostgresStore) LatestTenantLeaf(
 	return &l, nil
 }
 
+// GetCheckpointAnchor reports where a checkpoint reached the log.
+// Anchored=false for a built-but-unsubmitted checkpoint, which is a
+// resumable state rather than an error; ErrNotFound if the checkpoint
+// does not exist, because that is a different question.
+//
+// Scans anchored_at into sql.NullTime rather than a string: pgx returns
+// TIMESTAMPTZ as a real time.Time. The SQLite twin cannot do this. See
+// that file's header.
+func (s *PostgresStore) GetCheckpointAnchor(
+	ctx context.Context, seq uint64,
+) (CheckpointAnchor, error) {
+	var (
+		a          CheckpointAnchor
+		anchoredAt sql.NullTime
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT anchored_at, log_entry_id, ledger_backend
+		  FROM checkpoints WHERE seq = $1
+	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CheckpointAnchor{}, ErrNotFound
+	}
+	if err != nil {
+		return CheckpointAnchor{}, fmt.Errorf("get checkpoint %d anchor: %w", seq, err)
+	}
+	if anchoredAt.Valid {
+		a.AnchoredAt = anchoredAt.Time.UTC()
+	}
+	// Driven by the log entry id, not the timestamp: an anchor with no
+	// entry to point at cannot be verified, so it is not an anchor.
+	a.Anchored = a.LogEntryID != ""
+	return a, nil
+}
+
 // MarkCheckpointAnchored records where a checkpoint reached the
 // transparency log. Refuses to overwrite an existing anchor: two log
 // entries for one checkpoint is evidence, and keeping only the second

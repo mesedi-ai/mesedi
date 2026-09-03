@@ -837,6 +837,26 @@ type TenantCostRow struct {
 	TotalTokensOut int64   `json:"total_tokens_out"`
 }
 
+// CheckpointAnchor is where a checkpoint reached the transparency log.
+//
+// Anchored is false before submission succeeds, and that state is
+// legitimate rather than an error: a checkpoint exists before it is
+// anchored, and the gap between building one and getting an entry back
+// is exactly where a crash can land. The design's answer is to anchor
+// late rather than abandon the interval, so "built but not yet
+// anchored" has to be a resumable state the scheduler can observe.
+//
+// Kept OUT of attest.Checkpoint deliberately. These fields are not
+// hash-committed: they are learned after the checkpoint is sealed. A
+// checkpoint whose hash depended on where it was anchored could not be
+// built before it was anchored, which is the wrong way round.
+type CheckpointAnchor struct {
+	Anchored      bool
+	LogEntryID    string
+	LedgerBackend string
+	AnchoredAt    time.Time
+}
+
 // Store is the abstract persistence interface. Phase 1.5 minimal surface;
 // will grow as later phases add read-side queries (list executions,
 // failure groups, aggregations, etc.).
@@ -2353,6 +2373,20 @@ type Store interface {
 	// PrevLogEntryID, which is what ties the chain to a log Mesedi does
 	// not control.
 	MarkCheckpointAnchored(ctx context.Context, seq uint64, logEntryID, ledgerBackend string, anchoredAt time.Time) error
+
+	// GetCheckpointAnchor reports where a checkpoint reached the log,
+	// or Anchored=false if it has not yet.
+	//
+	// Separate from the checkpoint itself because anchor state is NOT
+	// hash-committed: it is learned after the checkpoint is built and
+	// sealed. Putting these fields on attest.Checkpoint would change
+	// what every checkpoint hashes to, and a checkpoint whose hash
+	// depended on where it was anchored could not be built before it
+	// was anchored — which is the wrong way round.
+	//
+	// The scheduler needs this because checkpoint N+1 names N's OWN log
+	// entry, and without it the chain cannot be extended.
+	GetCheckpointAnchor(ctx context.Context, seq uint64) (CheckpointAnchor, error)
 
 	// Lifecycle.
 	Close() error

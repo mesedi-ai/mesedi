@@ -32,6 +32,7 @@
 package attest
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -209,6 +210,47 @@ func canonicalTime(t time.Time) string {
 func alignedTo(t time.Time, d time.Duration) bool {
 	u := t.UTC()
 	return u.Truncate(d).Equal(u)
+}
+
+// RootOverExecutionDigests builds one project's interval root from the
+// digest roots of its executions, in the order given.
+//
+// ORDER IS THE CALLER'S RESPONSIBILITY AND IT IS PART OF THE RESULT.
+// This does not sort. The caller supplies executions in the order the
+// store returned them (sealed_at, then execution_id), and that order is
+// what the anchored root commits to. Sorting here would silently
+// disagree with whatever order a verifier reconstructs from the store,
+// and the mismatch would surface as tampering.
+//
+// Each input is a hex Merkle root produced by Compute. They are treated
+// as ALREADY-HASHED leaves — Compute's output is a root, not raw data,
+// so hashing it again would build a tree a verifier could not reproduce
+// from the same inputs.
+//
+// Refuses an empty input rather than returning the empty-tree root.
+// That value is a real 64-hex digest and would be indistinguishable
+// from a genuine root over data that went missing, which is exactly the
+// confusion the empty-interval sentinel exists to avoid.
+func RootOverExecutionDigests(hexRoots []string) (string, error) {
+	if len(hexRoots) == 0 {
+		return "", errors.New(
+			"attest: no execution digests; an empty interval root must be the " +
+				"empty-string sentinel, not the root of an empty tree")
+	}
+	level := make([][]byte, 0, len(hexRoots))
+	for i, h := range hexRoots {
+		raw, err := hex.DecodeString(h)
+		if err != nil {
+			return "", fmt.Errorf("attest: execution digest %d is not hex: %w", i, err)
+		}
+		if len(raw) != sha256.Size {
+			return "", fmt.Errorf(
+				"attest: execution digest %d is %d bytes, want %d",
+				i, len(raw), sha256.Size)
+		}
+		level = append(level, raw)
+	}
+	return hex.EncodeToString(rootFromLeafHashes(level)), nil
 }
 
 // TenantLeafHash returns one leaf's hash, hex.

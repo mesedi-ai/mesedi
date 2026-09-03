@@ -326,6 +326,42 @@ func (s *SQLiteStore) LatestTenantLeaf(
 	return &l, nil
 }
 
+// GetCheckpointAnchor reports where a checkpoint reached the log.
+//
+// Anchored=false for a checkpoint that exists but has not been
+// submitted yet, which is a resumable state rather than an error. A
+// checkpoint that does not exist at all returns ErrNotFound, because
+// asking about the anchor of something that was never built is a
+// different question with a different answer.
+func (s *SQLiteStore) GetCheckpointAnchor(
+	ctx context.Context, seq uint64,
+) (CheckpointAnchor, error) {
+	var (
+		a          CheckpointAnchor
+		anchoredAt sql.NullString
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT anchored_at, log_entry_id, ledger_backend
+		  FROM checkpoints WHERE seq = ?
+	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CheckpointAnchor{}, ErrNotFound
+	}
+	if err != nil {
+		return CheckpointAnchor{}, fmt.Errorf("get checkpoint %d anchor: %w", seq, err)
+	}
+	if anchoredAt.Valid && anchoredAt.String != "" {
+		// Not parsed strictly: anchored_at is operational metadata, not
+		// part of any hash, so a malformed value here cannot change what
+		// a checkpoint verifies to. Anchored is driven by the log entry
+		// id being present rather than by the timestamp parsing, so a
+		// bad timestamp degrades the display and not the chain.
+		a.AnchoredAt = parseFlexTime(anchoredAt.String)
+	}
+	a.Anchored = a.LogEntryID != ""
+	return a, nil
+}
+
 // MarkCheckpointAnchored records where a checkpoint reached the
 // transparency log.
 //

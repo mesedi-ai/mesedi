@@ -146,6 +146,109 @@ func TestCheckpointHash_MatchesIndependentImplementation(t *testing.T) {
 	}
 }
 
+// ── RootOverExecutionDigests ─────────────────────────────────────────
+
+// Golden values from an independent Python implementation of RFC 6962
+// node hashing, not from running this code and recording its output.
+func TestRootOverExecutionDigests_MatchesIndependentImplementation(t *testing.T) {
+	a := strings.Repeat("aa", 32)
+	b := strings.Repeat("bb", 32)
+	c := strings.Repeat("cc", 32)
+
+	got, err := RootOverExecutionDigests([]string{a, b})
+	if err != nil {
+		t.Fatalf("two leaves: %v", err)
+	}
+	const wantAB = "2f65cc0c7abfdb0c535cb7f942d65ae1fb04c9a3ad3ea5a62057aa8ac934a93a"
+	if got != wantAB {
+		t.Errorf("root over [a,b] = %s, want %s", got, wantAB)
+	}
+
+	got3, err := RootOverExecutionDigests([]string{a, b, c})
+	if err != nil {
+		t.Fatalf("three leaves: %v", err)
+	}
+	const wantABC = "9633b0ce0937fab8c998ffa595193755199f36aa16faab36fc024c80a50531e7"
+	if got3 != wantABC {
+		t.Errorf("root over [a,b,c] = %s, want %s (odd-leaf promotion)", got3, wantABC)
+	}
+
+	// One execution: the root IS that execution's digest. Pinned because
+	// it is the case where a tree does no work, and a future change that
+	// wrapped it in an extra hash would break every single-execution
+	// interval already anchored.
+	got1, err := RootOverExecutionDigests([]string{a})
+	if err != nil {
+		t.Fatalf("one leaf: %v", err)
+	}
+	if got1 != a {
+		t.Errorf("root over a single digest = %s, want the digest itself %s", got1, a)
+	}
+}
+
+// ORDER IS PART OF THE RESULT. The function must not sort: the caller
+// supplies executions in the store's order, and that order is what the
+// anchored root commits to.
+func TestRootOverExecutionDigests_OrderChangesTheRoot(t *testing.T) {
+	a := strings.Repeat("aa", 32)
+	b := strings.Repeat("bb", 32)
+
+	ab, err := RootOverExecutionDigests([]string{a, b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ba, err := RootOverExecutionDigests([]string{b, a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ab == ba {
+		t.Error("reordering the executions did not change the root; either the " +
+			"function is sorting, which would disagree with the store's order, or " +
+			"order is not being committed to at all")
+	}
+}
+
+// An empty input must REFUSE, not return the empty-tree root. That
+// value is a real 64-hex digest and would be indistinguishable from a
+// genuine root over data that went missing — the exact confusion the
+// empty-interval sentinel exists to avoid.
+func TestRootOverExecutionDigests_RefusesEmptyRatherThanReturningTheEmptyTreeRoot(t *testing.T) {
+	got, err := RootOverExecutionDigests(nil)
+	if err == nil {
+		t.Fatalf("empty input returned %q instead of refusing", got)
+	}
+	if got == emptyTreeRootHex {
+		t.Errorf("returned the empty-TREE root, which would look like a real root " +
+			"over vanished executions")
+	}
+	if got != "" {
+		t.Errorf("a refusal must not also return a value, got %q", got)
+	}
+}
+
+const emptyTreeRootHex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+func TestRootOverExecutionDigests_RejectsMalformedDigests(t *testing.T) {
+	good := strings.Repeat("aa", 32)
+	cases := []struct {
+		name  string
+		input []string
+	}{
+		{"not hex", []string{strings.Repeat("zz", 32)}},
+		{"too short", []string{strings.Repeat("aa", 31)}},
+		{"too long", []string{strings.Repeat("aa", 33)}},
+		{"one bad among good", []string{good, "nope", good}},
+		{"empty string element", []string{good, ""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, err := RootOverExecutionDigests(tc.input); err == nil {
+				t.Errorf("accepted a malformed digest and produced %s", got)
+			}
+		})
+	}
+}
+
 // ── the security property ────────────────────────────────────────────
 
 func TestVerifyChain_HappyPath(t *testing.T) {
