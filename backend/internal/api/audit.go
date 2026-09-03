@@ -77,14 +77,14 @@ const (
 	// one. The Privacy Policy states we keep an audit log of
 	// administrative actions including project closure. Founder-side
 	// project deletion was not audited, so that claim was not true.
-	AuditAdminProjectDelete       = "admin.project_delete"
-	AuditAdminFailureGroupsReset  = "admin.failure_groups_reset"
-	AuditAdminAPIKeyRevoke        = "admin.api_key_revoke"
-	AuditAdminPeriodCounterReset  = "admin.period_counter_reset"
-	AuditAllowlistDelete          = "allowlist.delete"
-	AuditClassSeverityDelete      = "class_severity.delete"
-	AuditDetectorThresholdDelete  = "detector_threshold.delete"
-	AuditPatternDelete            = "pattern.delete"
+	AuditAdminProjectDelete      = "admin.project_delete"
+	AuditAdminFailureGroupsReset = "admin.failure_groups_reset"
+	AuditAdminAPIKeyRevoke       = "admin.api_key_revoke"
+	AuditAdminPeriodCounterReset = "admin.period_counter_reset"
+	AuditAllowlistDelete         = "allowlist.delete"
+	AuditClassSeverityDelete     = "class_severity.delete"
+	AuditDetectorThresholdDelete = "detector_threshold.delete"
+	AuditPatternDelete           = "pattern.delete"
 )
 
 // AuditActorPlatformAdmin is the synthetic actor_email written by

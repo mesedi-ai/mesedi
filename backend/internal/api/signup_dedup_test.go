@@ -118,7 +118,7 @@ func TestSignupDedup_DeletedAccountFreesEmail(t *testing.T) {
 	// CreateProject with a canned error so the handler stops right after
 	// the guard; reaching CreateProject proves the guard passed.
 	s := &stubSignupStore{
-		existingProject:  nil,                                    // deleted -> ErrNotFound
+		existingProject:  nil,                                       // deleted -> ErrNotFound
 		verified:         map[string]bool{"gone@example.com": true}, // stale ledger row
 		createProjectErr: errors.New("stub: stop after guard"),
 	}

@@ -470,7 +470,7 @@ func TestEventHumanKind(t *testing.T) {
 		// "delivery", not "test delivery": the adapters own the word
 		// "test" via Payload.Test. See eventHumanKind's comment.
 		"failure_group.test": "delivery",
-		"unrecognized":           "unrecognized",
+		"unrecognized":       "unrecognized",
 	}
 	for input, want := range cases {
 		if got := eventHumanKind(input); got != want {

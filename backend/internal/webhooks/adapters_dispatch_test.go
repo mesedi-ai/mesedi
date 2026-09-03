@@ -544,4 +544,3 @@ func keysOf(m map[string]any) []string {
 // http.RoundTripper interface. Guards against a future signature
 // change silently downgrading us to no-op interception.
 var _ http.RoundTripper = (*captureTransport)(nil)
-
