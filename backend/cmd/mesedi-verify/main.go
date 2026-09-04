@@ -226,19 +226,25 @@ func main() {
 					"retained, which cannot be repaired retroactively.",
 				unverifiable))
 		}
-		// Replace the library's standing caveat: it is written for the
-		// offline case and would now understate what was done.
+		// Replace the library's standing caveat, which is written for the
+		// offline case, with one that describes what THIS run actually
+		// did.
+		//
+		// The replacement must be driven by the counts, and it was not.
+		// An earlier version substituted "Each checkpoint hash was
+		// confirmed PRESENT in the public log" whenever the run was
+		// online, regardless of whether a single entry had been resolved
+		// — so a run in which nothing could be checked printed a claim of
+		// verification directly above a RESULT line saying the opposite.
+		// A false claim of verification inside the section whose entire
+		// job is to prevent overclaiming is the worst place in the report
+		// for one, and it survived because the substitution was written
+		// at a moment when every run happened to resolve everything.
+		verified := len(rep.LogEntries) - len(failed) - len(unverifiable)
 		rep.Structural.Unverified = replacePrefix(
 			rep.Structural.Unverified,
 			"Transparency log entries were NOT resolved",
-			"Each checkpoint hash was confirmed PRESENT in the public log at the "+
-				"index it claims. What was not additionally checked is the log's own "+
-				"signed tree head. That further step would guard against Sigstore "+
-				"itself being dishonest; it is not what protects you from Mesedi. For "+
-				"a hash to be found here at all, Mesedi must genuinely have published "+
-				"it to an append-only log it does not control. If Sigstore is "+
-				"dishonest, this system's guarantee is gone by design, and that "+
-				"premise is stated up front rather than papered over.")
+			logResolutionCaveat(verified, len(rep.LogEntries)))
 	}
 
 	if *asJSON {
@@ -271,6 +277,52 @@ func writePDF(path string, rep report) error {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// logResolutionCaveat states what an online run actually established.
+//
+// Split out and given its own tests because it is the sentence most
+// likely to be read as the report's headline claim, and because getting
+// it wrong produces a falsehood rather than an omission. It must never
+// assert that entries were confirmed when none were.
+//
+// The tree-head paragraph is appended only when at least one entry was
+// genuinely resolved. Explaining what "was not ADDITIONALLY checked"
+// after checking nothing invites the reader to infer a baseline that
+// does not exist.
+func logResolutionCaveat(verified, total int) string {
+	const treeHead = " What was not additionally checked is the log's own signed tree " +
+		"head. That further step would guard against Sigstore itself being dishonest; " +
+		"it is not what protects you from Mesedi. For a hash to be found there at all, " +
+		"Mesedi must genuinely have published it to an append-only log it does not " +
+		"control. If Sigstore is dishonest, this system's guarantee is gone by design, " +
+		"and that premise is stated up front rather than papered over."
+
+	switch {
+	case total == 0:
+		return "The transparency log was contacted, but this export contains no " +
+			"checkpoints to resolve against it."
+
+	case verified == 0:
+		return fmt.Sprintf(
+			"The transparency log was contacted, but NONE of the %d checkpoints in "+
+				"this export could be confirmed present in it. This report therefore "+
+				"rests entirely on the export's internal consistency, which an export "+
+				"built to be self-consistent would also satisfy. Treat it as a "+
+				"structural check, not as evidence.", total)
+
+	case verified < total:
+		return fmt.Sprintf(
+			"%d of %d checkpoints were confirmed PRESENT in the public log at the "+
+				"index each claims. The remaining %d were not, and are listed above "+
+				"with the reason for each.%s",
+			verified, total, total-verified, treeHead)
+
+	default:
+		return fmt.Sprintf(
+			"All %d checkpoint leaves were confirmed PRESENT in the public log at the "+
+				"index each claims.%s", total, treeHead)
+	}
 }
 
 func readExport(path string) ([]byte, error) {
