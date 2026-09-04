@@ -136,8 +136,20 @@ func TestCheckpointHash_MatchesIndependentImplementation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCheckpoint: %v", err)
 	}
+	// Both values are computed by an independent Python implementation of
+	// the spec, not copied from this code's output — a golden taken from
+	// the thing it checks only asserts that the code equals itself.
+	//
+	// wantRoot is UNCHANGED across the v1 -> v2 bump, and that is the
+	// expected result rather than a coincidence: TenantLeafHash commits to
+	// no timestamps, so the precision fix cannot reach it. If this value
+	// ever moves in the same commit as a checkpoint-hash change, something
+	// broader than intended has been altered.
 	const wantRoot = "7de6e244efe10184c5bde3eaccfafd72d83aad0c405696ee0f47d1b4819ab1ac"
-	const wantHash = "b4f78e06bf18917b7453e094e791d9bcb5f892bcbf3332f0cd5b732c8840bf5d"
+	// wantHash changed with the v1 -> v2 bump. Note the test inputs use a
+	// whole-second Now, so the timestamp truncation is a no-op here; the
+	// ONLY reason this value moved is the format field in the preimage.
+	const wantHash = "de5cb8e4d69bf71af0adb1ecb05f395953e0c28e6eee266d9af03416275356de"
 	if c.MerkleRoot != wantRoot {
 		t.Errorf("single-leaf root = %s, want %s", c.MerkleRoot, wantRoot)
 	}
@@ -635,11 +647,28 @@ func TestVerifyChain_InputValidation(t *testing.T) {
 		t.Error("non-positive interval should be refused")
 	}
 
+	// This case previously used "mesedi.checkpoint.v2" as its example of an
+	// unrecognised format, and then v2 shipped and the test silently began
+	// asserting that a VALID checkpoint is rejected. Use a value that is
+	// deliberately not on the version ladder, so the next real bump cannot
+	// turn this negative case into a false one.
 	badFormat := good
-	badFormat.Format = "mesedi.checkpoint.v2"
+	badFormat.Format = "mesedi.checkpoint.not-a-real-version"
 	badFormat.Hash = CheckpointHash(badFormat)
 	if err := VerifyChain([]Checkpoint{badFormat}, testInterval); !errors.Is(err, ErrChainFormat) {
 		t.Errorf("want ErrChainFormat, got %v", err)
+	}
+
+	// v1 specifically: rejected, and for a reason the caller can act on.
+	// Kept next to the generic case so the two cannot drift apart.
+	oldFormat := good
+	oldFormat.Format = CheckpointFormatV1
+	oldFormat.Hash = CheckpointHash(oldFormat)
+	err := VerifyChain([]Checkpoint{oldFormat}, testInterval)
+	if !errors.Is(err, ErrChainFormat) {
+		t.Errorf("v1: want ErrChainFormat, got %v", err)
+	} else if !strings.Contains(err.Error(), "cannot be verified") {
+		t.Errorf("v1 rejection should say why it is unverifiable, got: %v", err)
 	}
 
 	zeroSeq := good

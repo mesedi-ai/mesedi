@@ -40,15 +40,54 @@ import (
 	"time"
 )
 
-// CheckpointFormatV1 identifies this construction. Any change to the
+// CheckpointFormat identifies this construction. Any change to the
 // preimage or the tree shape REQUIRES a new identifier: a verifier
 // applying v1 rules to a v2 checkpoint would compute a different hash
 // and report tampering that never happened.
-const CheckpointFormatV1 = "mesedi.checkpoint.v1"
+//
+// v1 -> v2 on 2026-09-04. canonicalTime now truncates to
+// storagePrecision, which changes the preimage of every checkpoint
+// carrying a sub-microsecond timestamp. See storagePrecision for why.
+//
+// v1 is deliberately NOT accepted by VerifyChain. It is not a matter of
+// dropping support for something that worked: a v1 checkpoint written to
+// Postgres could never be re-verified even when brand new, because the
+// hash committed to nanoseconds the database did not keep. Exactly one v1
+// checkpoint was ever produced, on 2026-09-04. It was an empty genesis
+// checkpoint, it is unverifiable by construction, and it was abandoned
+// rather than migrated. Its Rekor entry (2711966358) remains in the public
+// log as an orphan, which is the honest outcome: the log is append-only,
+// and pretending the entry was not made would be the one thing this
+// system exists to prevent.
+const (
+	CheckpointFormatV1 = "mesedi.checkpoint.v1"
+	CheckpointFormatV2 = "mesedi.checkpoint.v2"
+
+	// CheckpointFormatCurrent is what BuildCheckpoint stamps and what
+	// VerifyChain requires. Named separately from the versioned constants
+	// so a future bump changes one line and every reference follows.
+	CheckpointFormatCurrent = CheckpointFormatV2
+)
 
 // Domain-separation tags. Two different structures must never produce
 // the same preimage, or a tenant leaf could be presented as a
 // checkpoint.
+//
+// DO NOT "FIX" THE v1 IN THESE STRINGS TO MATCH CheckpointFormatV2.
+//
+// They look stale next to a v2 format constant and they are not. These
+// tags separate STRUCTURES, not versions: their job is that a tenant leaf
+// can never be mistaken for a checkpoint. Versioning is carried by the
+// "format" field inside the checkpoint preimage, which is what actually
+// changed in the v1 -> v2 bump.
+//
+// Editing either string silently changes every hash this package produces.
+// Existing checkpoints would then fail read-back verification and the
+// system would report tampering that never happened — which is precisely
+// the incident that caused the v2 bump in the first place. The tenant-leaf
+// tag is doubly load-bearing: TenantLeafHash commits to no timestamps, so
+// leaf hashes are byte-identical across v1 and v2, and they should stay
+// that way.
 const (
 	checkpointDomain = "mesedi.checkpoint.v1"
 	tenantLeafDomain = "mesedi.checkpoint.tenant-leaf.v1"
@@ -189,11 +228,40 @@ func appendCanonicalField(buf []byte, label, value string) []byte {
 	return buf
 }
 
+// storagePrecision is the coarsest precision any supported backend keeps,
+// and therefore the only precision a hash may commit to.
+//
+// Postgres TIMESTAMPTZ stores microseconds. Go's time.Now() carries
+// nanoseconds. SQLite keeps whatever string it is handed. So a hash taken
+// over a nanosecond timestamp and then stored in Postgres can never be
+// recomputed from what comes back: the database silently drops the last
+// three digits, the recomputed hash differs, and the read path reports
+// that the row was altered.
+//
+// That is not hypothetical. It happened on the first checkpoint this chain
+// ever wrote, on 2026-09-04, in production. The checkpoint was built,
+// stored, anchored to Rekor, and then failed its own read-back
+// verification seconds later with "the row has been altered since it was
+// written". Nothing had altered it. In a system whose entire purpose is
+// detecting alteration, a false alteration alarm is the worst defect
+// available: it is indistinguishable from the real thing, and it trains
+// whoever sees it to disbelieve the alarm that matters.
+//
+// Truncating here rather than at the call sites is deliberate. This is the
+// single point every hashed timestamp passes through, so a future field
+// carrying a nanosecond time cannot reintroduce the bug by forgetting.
+const storagePrecision = time.Microsecond
+
 // canonicalTime is the one time encoding used everywhere here: RFC 3339
-// nanosecond UTC, matching CanonicalLeaf. Normalised to UTC so the same
-// instant expressed in two zones produces one preimage.
+// UTC, truncated to storagePrecision. Normalised to UTC so the same
+// instant expressed in two zones produces one preimage, and truncated so
+// the preimage survives a round trip through either backend.
+//
+// The format string still prints nine fractional digits. The final three
+// are always zero after truncation; they are kept so the encoding stays
+// fixed-width and byte-comparable against CanonicalLeaf.
 func canonicalTime(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000000000Z")
+	return t.UTC().Truncate(storagePrecision).Format("2006-01-02T15:04:05.000000000Z")
 }
 
 // alignedTo reports whether t sits exactly on a d-sized grid boundary.
@@ -447,16 +515,21 @@ func BuildCheckpoint(p CheckpointParams) (Checkpoint, error) {
 	}
 
 	c := Checkpoint{
-		Format:              CheckpointFormatV1,
-		Seq:                 seq,
-		PrevCheckpointHash:  prevHash,
-		PrevLogEntryID:      p.PrevLogEntryID,
-		IntervalStart:       p.IntervalStart.UTC(),
-		IntervalEnd:         p.IntervalEnd.UTC(),
-		TenantLeafCount:     len(p.Leaves),
-		MerkleRoot:          root,
-		CumulativeCount:     baseline + added,
-		CreatedAtUnattested: now.UTC(),
+		Format:             CheckpointFormatCurrent,
+		Seq:                seq,
+		PrevCheckpointHash: prevHash,
+		PrevLogEntryID:     p.PrevLogEntryID,
+		IntervalStart:      p.IntervalStart.UTC(),
+		IntervalEnd:        p.IntervalEnd.UTC(),
+		TenantLeafCount:    len(p.Leaves),
+		MerkleRoot:         root,
+		CumulativeCount:    baseline + added,
+		// Truncated at construction as well as inside canonicalTime, so
+		// the value STORED is the value HASHED. Truncating only in the
+		// hash would leave the database holding a timestamp the hash does
+		// not commit to, which reads as a discrepancy to anyone comparing
+		// the row against the preimage by hand.
+		CreatedAtUnattested: now.UTC().Truncate(storagePrecision),
 	}
 	c.Hash = CheckpointHash(c)
 	return c, nil
@@ -484,9 +557,20 @@ func VerifyChain(cps []Checkpoint, interval time.Duration) error {
 	}
 
 	for i, c := range cps {
-		if c.Format != CheckpointFormatV1 {
+		if c.Format != CheckpointFormatCurrent {
+			// v1 gets its own message. "want v2, got v1" invites the
+			// reader to go looking for a v1 verifier that could be
+			// written; there isn't one worth writing, and saying so here
+			// saves someone the afternoon.
+			if c.Format == CheckpointFormatV1 {
+				return fmt.Errorf("%w: checkpoint %d is format %q, which cannot be verified "+
+					"at all: v1 hashed timestamps to nanoseconds that Postgres does not store, "+
+					"so a v1 checkpoint fails its own read-back even when untampered. "+
+					"Exactly one was ever written and it was abandoned, not migrated",
+					ErrChainFormat, c.Seq, c.Format)
+			}
 			return fmt.Errorf("%w: checkpoint %d has format %q, want %q",
-				ErrChainFormat, c.Seq, c.Format, CheckpointFormatV1)
+				ErrChainFormat, c.Seq, c.Format, CheckpointFormatCurrent)
 		}
 		// Seq starts at 1. Rejected explicitly because a Seq of 0 would
 		// otherwise slip past the genesis checks below, which only fire
