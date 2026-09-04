@@ -50,6 +50,35 @@ jobs:
       - name: go vet
         working-directory: backend
         run: go vet ./...
+      # gofmt, because nothing else was running it.
+      #
+      # foundation-audit's B7 check declines to verify import grouping and
+      # formatting on the stated grounds that both are "delegated to
+      # language-native formatters (gofmt / isort / Prettier)", and tells
+      # the reader to wire those up. Nobody had. This job ran go build,
+      # go vet and go test and never gofmt, so the delegation pointed at a
+      # job no automation performed — a check that correctly declines to
+      # do something, and nobody else doing it.
+      #
+      # Found on 2026-09-04 because internal/webhooks/dispatcher.go had
+      # been sitting unformatted through a green CI, noticed only because
+      # gofmt was being run by hand on the side.
+      #
+      # Scoped to ./cmd and ./internal rather than ./... on purpose: a
+      # repo-wide gate can be satisfied by reformatting generated or
+      # vendored code, which turns a real failure into a diff nobody reads.
+      # gofmt -l prints offending files and exits 0 either way, so the
+      # emptiness test is what actually fails the build.
+      - name: gofmt
+        working-directory: backend
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            echo "Run: gofmt -w <file>"
+            exit 1
+          fi
       - name: go test
         working-directory: backend
         run: go test ./...
