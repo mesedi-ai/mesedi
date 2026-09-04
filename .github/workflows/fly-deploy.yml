@@ -89,6 +89,54 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Deploy to Fly
         working-directory: ./backend
-        run: flyctl deploy --remote-only
+        run: flyctl deploy --remote-only --build-arg BUILD_GIT_SHA=${{ github.sha }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # A GREEN DEPLOY IS NOT EVIDENCE THAT THE RIGHT CODE IS RUNNING.
+      #
+      # Two separate incidents on 2026-09-04 had this shape: a workflow
+      # reporting success while production served something else. In one,
+      # an expired Fly token produced two weeks of successful-looking runs
+      # that deployed nothing. In the other, the binary deployed fine but
+      # its provenance stamp had silently stopped applying. Both were found
+      # by a human reading a health endpoint by hand.
+      #
+      # So the deploy is not finished until the running service is asked
+      # what it is and gives the right answer.
+      #
+      # Scope honestly: this catches a wrong or stale binary in production.
+      # It does NOT catch a correct binary making a wrong claim — the two
+      # subtlest bugs that day were found by reading code, and no amount of
+      # health polling would have surfaced either.
+      - name: Verify production is serving THIS commit
+        run: |
+          set -euo pipefail
+
+          # Rolling deploys drain the old machine, so poll rather than
+          # assume the new one is already answering.
+          for attempt in $(seq 1 10); do
+            LIVE_SHA="$(curl -fsS --max-time 10 https://api.mesedi.ai/health \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin).get("git_sha",""))' \
+              || echo "")"
+
+            if [[ "$LIVE_SHA" == "${{ github.sha }}" ]]; then
+              echo "Production is serving ${LIVE_SHA}."
+              echo "- Verified live SHA: \`${LIVE_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            echo "attempt ${attempt}/10: live SHA is '${LIVE_SHA:-<unreachable>}', want ${{ github.sha }}"
+            sleep 15
+          done
+
+          # Three diagnoses, because the remedies differ and a bare
+          # "verification failed" sends someone looking in the wrong place.
+          if [[ -z "${LIVE_SHA:-}" ]]; then
+            echo "::error::/health did not answer. The deploy reported success but the service is unreachable or not returning JSON."
+          elif [[ "${LIVE_SHA}" == "unknown" ]]; then
+            echo "::error::Production reports git_sha 'unknown'. The binary built but the ldflags stamp did not apply. See backend/cmd/api/health_stamp_test.go."
+          else
+            echo "::error::Production is serving ${LIVE_SHA}, not ${{ github.sha }}. The deploy reported success without replacing the running binary. Check whether FLY_API_TOKEN is still valid — an expired token has produced this exact green-but-did-nothing failure before."
+          fi
+          exit 1

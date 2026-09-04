@@ -47,9 +47,27 @@ COPY . .
 # crypto/fips140.Enabled(), so this is verifiable rather than asserted.
 # It does not log the module version: crypto/fips140.Version() requires
 # go1.26 and backend/go.mod declares go1.25. Worth adding when that moves.
+# BUILD_GIT_SHA is stamped into the binary and reported by GET /health, so
+# CI can ask the running service which commit it is and fail the deploy when
+# the answer is wrong. Without it, a deploy that silently did nothing looks
+# identical to one that worked — which is how Verdifax served a stale binary
+# for two weeks behind green checkmarks.
+#
+# Defaults to "unknown" rather than being required. A local `docker build`
+# with no --build-arg is a dev build and should say so honestly; only CI
+# claims to be a specific commit.
+ARG BUILD_GIT_SHA=unknown
+
+# The -X target is `main.buildGitSHA` because cmd/api is package main.
+# Deliberately NOT a path into an internal package: `go build` silently
+# ignores an -X flag whose symbol does not resolve — no warning, exit 0 —
+# and a package-qualified path breaks invisibly the day the module is
+# renamed. That happened in verdifax-orchestrator on 2026-09-04 and cost
+# eleven commits of falsely-stamped artifacts before anyone noticed.
+# cmd/api/health_stamp_test.go pins this target to what main.go declares.
 RUN CGO_ENABLED=0 GOOS=linux GOFIPS140=certified go build \
     -trimpath \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X 'main.buildGitSHA=${BUILD_GIT_SHA}'" \
     -o /out/mesedi-api \
     ./cmd/api
 

@@ -63,6 +63,22 @@ const (
 	serviceVersion = "0.0.1"
 )
 
+// buildGitSHA is overwritten at link time by the Dockerfile:
+//
+//	-ldflags "-X 'main.buildGitSHA=<sha>'"
+//
+// Reported by GET /health so CI can ask the running service which commit
+// it is, and fail the deploy when the answer is not the commit it just
+// pushed. serviceVersion above cannot do that job: it is a hand-edited
+// constant that has read 0.0.1 through every deploy this year, so it
+// distinguishes nothing.
+//
+// The default is "unknown", not a fabricated value. A dev build genuinely
+// does not know its commit, and saying so is the honest answer — the
+// deploy check treats "unknown" as a distinct failure from a stale SHA,
+// because the two have different causes and different fixes.
+var buildGitSHA = "unknown"
+
 type runtimeConfig struct {
 	Port          int
 	LogLevel      string
@@ -861,9 +877,10 @@ func handleHealth(logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"ok":true,"service":%q,"version":%q,"time":%q}`,
+		fmt.Fprintf(w, `{"ok":true,"service":%q,"version":%q,"git_sha":%q,"time":%q}`,
 			serviceName,
 			serviceVersion,
+			buildGitSHA,
 			time.Now().UTC().Format(time.RFC3339),
 		)
 	}
