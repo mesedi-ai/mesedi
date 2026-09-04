@@ -654,6 +654,11 @@ func main() {
 	mux.Handle("DELETE /me/class-severities/{class}", privateHandler)
 	// per-project data retention configuration.
 	mux.Handle("GET /me/retention", privateHandler)
+
+	// Registering a route in RegisterRoutes is only half the wiring: the
+	// outer mux forwards each path explicitly, and a route missing here
+	// 404s in production while every handler test passes.
+	mux.Handle("GET /me/chain/export", privateHandler)
 	mux.Handle("PUT /me/retention", privateHandler)
 	// per-project provider_incident detector threshold.
 	mux.Handle("GET /me/provider-incident-config", privateHandler)

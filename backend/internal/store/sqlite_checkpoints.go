@@ -172,7 +172,11 @@ func (s *SQLiteStore) GetCheckpoint(ctx context.Context, seq uint64) (*attest.Ch
 	return cp, nil
 }
 
-func scanCheckpointRow(row *sql.Row) (*attest.Checkpoint, error) {
+// Takes rowScanner rather than *sql.Row so the range read below can reuse
+// it against *sql.Rows. A second scanner would be a second place for the
+// stored-hash recomputation at the bottom to be forgotten, and that check
+// is the one that caught a real production defect on 2026-09-04.
+func scanCheckpointRow(row rowScanner) (*attest.Checkpoint, error) {
 	var (
 		cp                           attest.Checkpoint
 		seq, cumulative              int64

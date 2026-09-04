@@ -2363,6 +2363,24 @@ type Store interface {
 	// The root depends on that order; SELECT row order does not.
 	GetCheckpointLeaves(ctx context.Context, seq uint64) ([]attest.TenantLeaf, error)
 
+	// ListCheckpointRange returns checkpoints fromSeq..toSeq inclusive
+	// with their anchors, in sequence order. Refuses a range wider than
+	// MaxCheckpointRange rather than truncating: a shortened export
+	// cannot be told apart from a chain with a hole in it.
+	//
+	// Exists so assembling an export is a fixed number of round trips
+	// rather than two per checkpoint.
+	ListCheckpointRange(ctx context.Context, fromSeq, toSeq uint64) ([]AnchoredCheckpoint, error)
+
+	// ListCheckpointLeavesRange returns every tenant leaf in the range,
+	// keyed by checkpoint sequence and IN HASHED ORDER within each.
+	//
+	// Returns all tenants' leaves, not one project's, because building an
+	// inclusion proof needs the whole level. Safe only because this is a
+	// server-side read: what leaves the building is the proof, which is
+	// a handful of opaque sibling hashes, never this map.
+	ListCheckpointLeavesRange(ctx context.Context, fromSeq, toSeq uint64) (map[uint64][]attest.TenantLeaf, error)
+
 	// LatestTenantLeaf returns a project's most recent leaf, or
 	// (nil, nil) if it has never appeared. Supplies the next leaf's
 	// PrevLeafHash and running total.

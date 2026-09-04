@@ -307,6 +307,22 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// tool_failures, validator_failures). Detector hot-path check
 	// wired in Allowlist.b; dashboard editor lands in Allowlist.c.
 	mux.HandleFunc("GET /me/allowlist/{detector}", h.HandleListAllowlist)
+
+	// The auditor's export. Under /me/ because the project comes from the
+	// API key and there is deliberately nowhere to name a different one.
+	//
+	// RateLimit posture: the shared per-project limiter on this private
+	// chain, plus two hard caps in the handler — MaxCheckpointRange and
+	// MaxExportExecutions — both of which refuse rather than truncate.
+	// This is the most expensive read the API serves, so it is bounded by
+	// cost rather than by call count.
+	//
+	// Available to every tier, deliberately. An agency's ability to verify
+	// records it is legally required to retain must not depend on what it
+	// pays us. Tighten the caps if the work becomes a problem; do not gate
+	// who is allowed to check their own evidence. Full reasoning in
+	// chain_export.go.
+	mux.HandleFunc("GET /me/chain/export", h.HandleChainExport)
 	mux.HandleFunc("POST /me/allowlist/{detector}", h.HandleCreateAllowlist)
 	mux.HandleFunc("PATCH /me/allowlist/{detector}/{allowlist_id}", h.HandleUpdateAllowlist)
 	mux.HandleFunc("DELETE /me/allowlist/{detector}/{allowlist_id}", h.HandleDeleteAllowlist)
