@@ -209,16 +209,42 @@ type InclusionProof struct {
 // proof from a previously published digest without re-reading the
 // record — which is exactly the position a verifier is in.
 func Prove(d Digest, index int) (InclusionProof, error) {
-	if index < 0 || index >= len(d.Leaves) {
-		return InclusionProof{}, fmt.Errorf(
-			"attest: leaf index %d out of range for tree of %d",
-			index, len(d.Leaves))
+	path, err := provePath(d.Leaves, index)
+	if err != nil {
+		return InclusionProof{}, err
 	}
-	level := make([][]byte, 0, len(d.Leaves))
-	for _, h := range d.Leaves {
+	return InclusionProof{
+		LeafIndex: index,
+		LeafHash:  d.Leaves[index],
+		TreeSize:  len(d.Leaves),
+		Root:      d.Root,
+		Path:      path,
+		Algorithm: AlgorithmV1,
+	}, nil
+}
+
+// provePath is the sibling-path walk, over any ordered list of leaf
+// hashes. Extracted from Prove so the interval tree over tenant leaves
+// can reuse it instead of carrying a second copy.
+//
+// A second copy is exactly what this avoids. The odd-node promotion rule
+// below is the single most common Merkle implementation bug, and it was
+// got wrong once already in this file — see the long note on
+// VerifyInclusion about leaf 2 of 3 and leaf 4 of 5. Duplicating this
+// loop for the tenant tree would have been duplicating that bug's hiding
+// place, and the two copies would drift the first time either was
+// touched.
+func provePath(leafHex []string, index int) ([]string, error) {
+	if index < 0 || index >= len(leafHex) {
+		return nil, fmt.Errorf(
+			"attest: leaf index %d out of range for tree of %d",
+			index, len(leafHex))
+	}
+	level := make([][]byte, 0, len(leafHex))
+	for _, h := range leafHex {
 		raw, err := hex.DecodeString(h)
 		if err != nil {
-			return InclusionProof{}, fmt.Errorf("attest: malformed leaf hash: %w", err)
+			return nil, fmt.Errorf("attest: malformed leaf hash: %w", err)
 		}
 		level = append(level, raw)
 	}
@@ -247,15 +273,7 @@ func Prove(d Digest, index int) (InclusionProof, error) {
 		idx /= 2
 		level = next
 	}
-
-	return InclusionProof{
-		LeafIndex: index,
-		LeafHash:  d.Leaves[index],
-		TreeSize:  len(d.Leaves),
-		Root:      d.Root,
-		Path:      path,
-		Algorithm: AlgorithmV1,
-	}, nil
+	return path, nil
 }
 
 // VerifyInclusion recomputes the root from a leaf and its path.
