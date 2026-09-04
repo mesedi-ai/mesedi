@@ -77,22 +77,47 @@ type pdfDoc struct {
 // clock, no filesystem, no network, so its tests assert on content
 // rather than on pixels.
 func buildPDFDoc(rep report, exportSHA string) pdfDoc {
+	// Three verdicts, matching the terminal report. A checkpoint nobody
+	// can check is not a checkpoint that failed, and a document that
+	// printed FAILED over an unverifiable chain would accuse Mesedi of
+	// something it is not known to have done — a falsehood in the
+	// opposite direction from the one this tool exists to prevent.
+	var failed, unchecked int
+	for _, e := range rep.LogEntries {
+		switch {
+		case e.failed():
+			failed++
+		case e.unverifiable():
+			unchecked++
+		}
+	}
+	realFailure := failed > 0 || !rep.Structural.OK
+
 	d := pdfDoc{
-		Failed:   !rep.OK,
+		Failed:   realFailure,
 		Verdict:  "VERIFIED",
 		FooterID: fmt.Sprintf("mesedi-verify %s  |  export %s", rep.Verifier, shorten(exportSHA)),
 	}
-	if !rep.OK {
+	switch {
+	case realFailure:
 		d.Verdict = "FAILED"
+	case unchecked > 0:
+		d.Verdict = "INCOMPLETE"
 	}
 
 	// The note beside the verdict is where the honest limits of a PASS
 	// get stated, not in a footnote. "Intact" and "correct" are different
 	// claims and the difference is the whole product.
 	switch {
-	case !rep.OK:
+	case realFailure:
 		d.VerdictNote = "One or more checks did not pass. The findings are listed below. " +
 			"Do not treat this record as reliable evidence until each failure is explained."
+	case unchecked > 0:
+		d.VerdictNote = fmt.Sprintf("The record is internally consistent, but %d "+
+			"checkpoint(s) could not be checked against the public log at all. Nothing "+
+			"in this report says those records are wrong; nothing in it says they are "+
+			"right either. This is not a verified chain and must not be presented as "+
+			"one.", unchecked)
 	case rep.Online:
 		d.VerdictNote = "The record is internally consistent and every checkpoint was found " +
 			"in the public transparency log at the position it claims. This says the record " +
@@ -139,7 +164,7 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 				label += " @ " + e.LogIndex
 			}
 			logs.Rows = append(logs.Rows, pdfRow{
-				Mark: mark(e.OK), Label: label, Detail: e.Detail,
+				Mark: statusMark(e.Status), Label: label, Detail: e.Detail,
 			})
 		}
 		d.Sections = append(d.Sections, logs)

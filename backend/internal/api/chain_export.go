@@ -84,6 +84,13 @@ func (h *Handlers) buildChainExport(
 			Checkpoint: cp,
 			LogEntryID: ac.Anchor.LogEntryID,
 			AnchoredAt: ac.Anchor.AnchoredAt,
+
+			// Both carried verbatim, including when empty. An anchor with
+			// no preimage cannot be checked against the log, and the
+			// auditor has to be told that rather than left to infer it
+			// from a mismatch that looks like tampering.
+			LedgerBackend: ac.Anchor.LedgerBackend,
+			LeafPreimage:  ac.Anchor.LeafPreimage,
 		}
 
 		all := leavesBySeq[cp.Seq]

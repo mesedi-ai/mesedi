@@ -50,14 +50,43 @@ import (
 // which is the entire reason it is worth anchoring to.
 const DefaultRekorURL = "https://rekor.sigstore.dev"
 
+// Three outcomes, not two.
+//
+// A checkpoint that cannot be checked is not a checkpoint that failed,
+// and a verifier with only pass/fail is forced to lie about one of them.
+// Reporting an uncheckable anchor as tampering accuses Mesedi of
+// something it is not known to have done; reporting it as a pass tells
+// the reader a check happened that did not. Both are falsehoods, in
+// opposite directions, and the honest answer needs its own word.
+const (
+	// StatusVerified: the log holds this checkpoint's leaf at the index
+	// it claims, and the leaf commits to this checkpoint's hash.
+	StatusVerified = "verified"
+
+	// StatusFailed: the log disagrees with the export. A finding.
+	StatusFailed = "failed"
+
+	// StatusUnverifiable: the export does not carry what is needed to
+	// check this entry, or no public-log claim was made for it. NOT a
+	// finding against the record — an absence of evidence either way.
+	StatusUnverifiable = "unverifiable"
+)
+
 // LogEntryCheck is the outcome of resolving one checkpoint.
 type LogEntryCheck struct {
-	Seq        uint64
-	LogIndex   string
-	OK         bool
-	Detail     string
+	Seq      uint64
+	LogIndex string
+	Status   string
+	Detail   string
+
+	// Integrated is when the log says it incorporated the entry. Zero
+	// unless the entry was actually retrieved.
 	Integrated time.Time
 }
+
+func (c LogEntryCheck) verified() bool     { return c.Status == StatusVerified }
+func (c LogEntryCheck) failed() bool       { return c.Status == StatusFailed }
+func (c LogEntryCheck) unverifiable() bool { return c.Status == StatusUnverifiable }
 
 type rekorClient struct {
 	baseURL string

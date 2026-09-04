@@ -18,6 +18,13 @@ import (
 // test, because the useful question there is "does it produce a valid
 // file without panicking on awkward input", and that is answerable.
 
+func logStatus(ok bool) string {
+	if ok {
+		return StatusVerified
+	}
+	return StatusFailed
+}
+
 func sampleReport(ok, online bool) report {
 	return report{
 		Format:       attest.ChainExportFormatV1,
@@ -40,7 +47,8 @@ func sampleReport(ok, online bool) report {
 			},
 		},
 		LogEntries: []LogEntryCheck{
-			{Seq: 1, LogIndex: "10000001", OK: ok, Detail: "present in the public log"},
+			{Seq: 1, LogIndex: "10000001", Status: logStatus(ok),
+				Detail: "present in the public log"},
 		},
 	}
 }
@@ -52,6 +60,54 @@ func TestPDFVerdictFollowsTheResult(t *testing.T) {
 	d := buildPDFDoc(sampleReport(false, true), "deadbeef")
 	if d.Verdict != "FAILED" || !d.Failed {
 		t.Errorf("a failing report rendered verdict %q (failed=%v)", d.Verdict, d.Failed)
+	}
+}
+
+// A chain nobody could check must render INCOMPLETE, never FAILED.
+//
+// This is the document an auditor keeps, so getting it wrong here is
+// worse than getting it wrong in a terminal: a PDF saying FAILED over a
+// record that is merely uncheckable accuses Mesedi in writing of
+// something it is not known to have done. Every checkpoint anchored
+// before 2026-09-04 is permanently in this state, so this is not a
+// hypothetical path.
+func TestPDFRendersAnUncheckableChainAsIncompleteNotFailed(t *testing.T) {
+	rep := sampleReport(true, true)
+	rep.OK = false // the roll-up refuses to call an unchecked chain OK
+	rep.LogEntries = []LogEntryCheck{{
+		Seq: 1, LogIndex: "10000001", Status: StatusUnverifiable,
+		Detail: "no leaf preimage; cannot be tied to its log entry",
+	}}
+
+	d := buildPDFDoc(rep, "deadbeef")
+	if d.Verdict == "FAILED" || d.Failed {
+		t.Fatal("a chain that merely could not be checked was rendered as FAILED, " +
+			"which accuses the record in writing of tampering it is not known to have done")
+	}
+	if d.Verdict != "INCOMPLETE" {
+		t.Errorf("verdict = %q, want INCOMPLETE", d.Verdict)
+	}
+	for _, want := range []string{"could not be checked", "not a verified chain"} {
+		if !strings.Contains(d.VerdictNote, want) {
+			t.Errorf("the note should contain %q, got: %s", want, d.VerdictNote)
+		}
+	}
+}
+
+// A real failure must still win over an unchecked one. An export with
+// both a tampered checkpoint and an uncheckable one is FAILED, because
+// the finding is the thing that matters.
+func TestPDFRealFailureOutranksIncomplete(t *testing.T) {
+	rep := sampleReport(true, true)
+	rep.OK = false
+	rep.LogEntries = []LogEntryCheck{
+		{Seq: 1, Status: StatusUnverifiable, Detail: "cannot be checked"},
+		{Seq: 2, Status: StatusFailed, Detail: "the published record and the record you were given are not the same"},
+	}
+
+	if d := buildPDFDoc(rep, "deadbeef"); d.Verdict != "FAILED" || !d.Failed {
+		t.Errorf("an export containing a real failure rendered %q; a finding must "+
+			"outrank an unchecked entry", d.Verdict)
 	}
 }
 

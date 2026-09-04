@@ -18,8 +18,12 @@
 //
 // EXIT CODES
 //
-//	0  Every check that was run passed.
-//	1  One or more checks failed.
+//	0  Every check passed and every checkpoint was actually checked.
+//	1  Either a check failed, or a checkpoint could not be checked at
+//	   all. Both are non-zero on purpose: a pipeline gating on exit 0
+//	   must not go green for a chain nobody was able to verify. The
+//	   report distinguishes the two in words; the exit code does not,
+//	   because "do not rely on this" is the same instruction either way.
 //	2  The export could not be read or parsed, or a requested report
 //	   could not be written. Separate from 1 on purpose: "we could not
 //	   run the check" and "the check failed" must not look alike.
@@ -196,10 +200,31 @@ func main() {
 				"--offline for a result that does not depend on trusting Mesedi.")
 	} else {
 		rep.LogEntries = resolveLogEntries(export, *rekorURL)
+
+		// A failed entry is a finding. An unverifiable one is not — but
+		// it still means this report does not establish what it set out
+		// to, so neither may leave rep.OK true. Exit 0 on a chain nobody
+		// can check would be the single most misleading thing this tool
+		// could do.
+		var failed, unverifiable []uint64
 		for _, e := range rep.LogEntries {
-			if !e.OK {
+			switch {
+			case e.failed():
+				failed = append(failed, e.Seq)
+				rep.OK = false
+			case e.unverifiable():
+				unverifiable = append(unverifiable, e.Seq)
 				rep.OK = false
 			}
+		}
+		if len(unverifiable) > 0 {
+			rep.Structural.Unverified = append(rep.Structural.Unverified, fmt.Sprintf(
+				"Checkpoints %v could NOT be checked against the public log. That is "+
+					"not a finding against the record — nothing here says they are "+
+					"wrong — but nothing here says they are right either. The usual "+
+					"cause is a checkpoint anchored before the leaf preimage was "+
+					"retained, which cannot be repaired retroactively.",
+				unverifiable))
 		}
 		// Replace the library's standing caveat: it is written for the
 		// offline case and would now understate what was done.
@@ -267,44 +292,111 @@ func readExport(path string) ([]byte, error) {
 // Continues past failures rather than stopping at the first. An auditor
 // needs to know whether one checkpoint is missing from the log or all of
 // them; those are very different findings and stopping early hides which.
+// resolveLogEntries asks the log about every checkpoint.
+//
+// # WHAT IS ACTUALLY COMPARED, AND WHY IT IS NOT THE CHECKPOINT HASH
+//
+// The transparency log does not record the checkpoint hash. It records
+// sha256 of a canonical leaf built by the anchoring service, and the
+// checkpoint hash is one field inside that leaf. An earlier version of
+// this function compared the log's value against Checkpoint.Hash
+// directly and reported a mismatch on every checkpoint in production —
+// correctly, in the sense that the two are never equal, and uselessly,
+// in the sense that it could not distinguish that from real tampering.
+//
+// So the export now carries the leaf preimage, and the check is:
+//
+//	sha256(leaf_preimage) == what the log records at the claimed index
+//	AND the checkpoint's own hash appears inside leaf_preimage
+//
+// Both halves are needed. The first alone proves the export knows a
+// string the log committed to; the second is what ties that string to
+// THIS checkpoint. Neither requires trusting Mesedi.
+//
+// The preimage is searched, never parsed: its fields are joined without
+// length prefixing, so it cannot be split back into parts unambiguously.
 func resolveLogEntries(export attest.ChainExport, rekorURL string) []LogEntryCheck {
 	client := newRekorClient(rekorURL)
 	ctx := context.Background()
 
 	out := make([]LogEntryCheck, 0, len(export.Intervals))
 	for _, iv := range export.Intervals {
-		seq := iv.Checkpoint.Seq
-		if iv.LogEntryID == "" {
-			out = append(out, LogEntryCheck{
-				Seq: seq, OK: false,
-				Detail: "the export names no log entry for this checkpoint, so it was never published",
-			})
-			continue
-		}
-
-		got, integrated, err := client.lookup(ctx, iv.LogEntryID)
-		if err != nil {
-			out = append(out, LogEntryCheck{
-				Seq: seq, LogIndex: iv.LogEntryID, OK: false, Detail: err.Error(),
-			})
-			continue
-		}
-		if !strings.EqualFold(got, iv.Checkpoint.Hash) {
-			out = append(out, LogEntryCheck{
-				Seq: seq, LogIndex: iv.LogEntryID, OK: false, Integrated: integrated,
-				Detail: fmt.Sprintf(
-					"the log entry records %s but this checkpoint hashes to %s. The "+
-						"published record and the record you were given are not the same",
-					shorten(got), shorten(iv.Checkpoint.Hash)),
-			})
-			continue
-		}
-		out = append(out, LogEntryCheck{
-			Seq: seq, LogIndex: iv.LogEntryID, OK: true, Integrated: integrated,
-			Detail: "this checkpoint's hash is present in the public log at the index it claims",
-		})
+		out = append(out, resolveOne(ctx, client, iv))
 	}
 	return out
+}
+
+func resolveOne(
+	ctx context.Context, client *rekorClient, iv attest.ExportedInterval,
+) LogEntryCheck {
+	seq := iv.Checkpoint.Seq
+	check := LogEntryCheck{Seq: seq, LogIndex: iv.LogEntryID}
+
+	if iv.LogEntryID == "" {
+		check.Status = StatusFailed
+		check.Detail = "the export names no log entry for this checkpoint, so it was never published"
+		return check
+	}
+
+	// A mock-ledger anchor makes no public-log claim at all. Looking it
+	// up would fail, and reporting that failure would accuse the record
+	// of something untrue. Refuse to check it, and say why.
+	if iv.LedgerBackend != "" && iv.LedgerBackend != "rekor" {
+		check.Status = StatusUnverifiable
+		check.Detail = fmt.Sprintf(
+			"anchored to the %q ledger, not a public transparency log. Nothing was "+
+				"published for this interval, so there is nothing to check against. "+
+				"This is not a finding about the record",
+			iv.LedgerBackend)
+		return check
+	}
+
+	// No preimage, no path from this checkpoint to that log entry. The
+	// entry may well be genuine; it simply cannot be tied to anything.
+	if iv.LeafPreimage == "" {
+		check.Status = StatusUnverifiable
+		check.Detail = "the export carries no leaf preimage for this checkpoint, so its " +
+			"log entry cannot be tied back to it. Checkpoints anchored before " +
+			"2026-09-04 are permanently in this state and cannot be repaired. " +
+			"This is NOT evidence of tampering"
+		return check
+	}
+
+	// The leaf must commit to this checkpoint. Checked before the network
+	// call: if the preimage does not mention this checkpoint, whatever
+	// the log holds is irrelevant to it.
+	if !strings.Contains(iv.LeafPreimage, iv.Checkpoint.Hash) {
+		check.Status = StatusFailed
+		check.Detail = fmt.Sprintf(
+			"the leaf that was anchored does not contain this checkpoint's hash (%s), "+
+				"so the log entry describes a different record",
+			shorten(iv.Checkpoint.Hash))
+		return check
+	}
+
+	recorded, integrated, err := client.lookup(ctx, iv.LogEntryID)
+	if err != nil {
+		check.Status = StatusFailed
+		check.Detail = err.Error()
+		return check
+	}
+	check.Integrated = integrated
+
+	sum := sha256.Sum256([]byte(iv.LeafPreimage))
+	computed := hex.EncodeToString(sum[:])
+	if !strings.EqualFold(recorded, computed) {
+		check.Status = StatusFailed
+		check.Detail = fmt.Sprintf(
+			"the log entry records %s but this checkpoint's leaf hashes to %s. The "+
+				"published record and the record you were given are not the same",
+			shorten(recorded), shorten(computed))
+		return check
+	}
+
+	check.Status = StatusVerified
+	check.Detail = "the leaf committing to this checkpoint is present in the public log " +
+		"at the index it claims"
+	return check
 }
 
 func printReport(w io.Writer, rep report) {
@@ -327,7 +419,8 @@ func printReport(w io.Writer, rep report) {
 			if e.LogIndex != "" {
 				label += " @ " + e.LogIndex
 			}
-			fmt.Fprintf(w, "  %s %-34s %s\n", mark(e.OK), label, e.Detail)
+			fmt.Fprintf(w, "  %s %-34s %s\n", statusMark(e.Status), label,
+				wrap(e.Detail, 74, strings.Repeat(" ", 42)))
 		}
 	}
 
@@ -340,11 +433,30 @@ func printReport(w io.Writer, rep report) {
 	}
 
 	fmt.Fprintln(w)
-	if rep.OK {
+
+	// Three verdicts, because "we found a problem" and "we could not
+	// look" must never print the same sentence.
+	var failed, unchecked int
+	for _, e := range rep.LogEntries {
+		switch {
+		case e.failed():
+			failed++
+		case e.unverifiable():
+			unchecked++
+		}
+	}
+
+	switch {
+	case failed > 0 || !rep.Structural.OK:
+		fmt.Fprintln(w, "RESULT: FAILED. See the lines marked FAIL above.")
+	case unchecked > 0:
+		fmt.Fprintf(w, "RESULT: INCOMPLETE. %d checkpoint(s) could not be checked "+
+			"against the public log.\n", unchecked)
+		fmt.Fprintln(w, "Nothing here says the record is wrong. Nothing here says it is right")
+		fmt.Fprintln(w, "either. Do not present this as a verified chain.")
+	default:
 		fmt.Fprintln(w, "RESULT: every check that ran passed.")
 		fmt.Fprintln(w, "The record is intact. That is not the same as the AI having been correct.")
-	} else {
-		fmt.Fprintln(w, "RESULT: FAILED. See the lines marked FAIL above.")
 	}
 }
 
@@ -353,6 +465,21 @@ func mark(ok bool) string {
 		return "[ ok ]"
 	}
 	return "[FAIL]"
+}
+
+// statusMark renders the three log-entry outcomes. "unverifiable" gets
+// its own marker rather than borrowing [FAIL], because a reader
+// skimming the left column is exactly the reader who would otherwise
+// carry away "Mesedi failed" from a checkpoint nobody can check.
+func statusMark(status string) string {
+	switch status {
+	case StatusVerified:
+		return "[ ok ]"
+	case StatusUnverifiable:
+		return "[ ?? ]"
+	default:
+		return "[FAIL]"
+	}
 }
 
 func shorten(h string) string {

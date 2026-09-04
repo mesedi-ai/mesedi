@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -156,34 +158,148 @@ func TestRekorLookupRejectsANonIndexEntryID(t *testing.T) {
 	}
 }
 
+// leafFor builds a canonical leaf preimage the way Verdifax does, with
+// the checkpoint hash in the digest position, and returns it alongside
+// the sha256 the log would record for it.
+//
+// The verifier hashes the preimage rather than comparing the checkpoint
+// hash directly, because the log never records the checkpoint hash — it
+// records sha256 of a leaf containing it. Building the fixture the same
+// way the producer does is what keeps these tests honest.
+func leafFor(cpHash string) (preimage, logValue string) {
+	preimage = "verdifax.ledger.input.v2.attest:1:checkpoint/1/t." + cpHash + ".bind.7"
+	sum := sha256.Sum256([]byte(preimage))
+	return preimage, hex.EncodeToString(sum[:])
+}
+
+func anchored(seq uint64, cpHash, entryID string) attest.ExportedInterval {
+	preimage, _ := leafFor(cpHash)
+	return attest.ExportedInterval{
+		Checkpoint:    attest.Checkpoint{Seq: seq, Hash: cpHash},
+		LogEntryID:    entryID,
+		LedgerBackend: "rekor",
+		LeafPreimage:  preimage,
+	}
+}
+
 // The whole reason this binary contacts the log: an export whose
-// checkpoints are internally perfect but whose hashes are NOT the ones
+// checkpoints are internally perfect but whose leaves are NOT the ones
 // published must fail. This is the case a lying-but-consistent export
 // produces, and the only check that catches it.
-func TestResolveLogEntriesCatchesAHashTheLogDoesNotHave(t *testing.T) {
-	otherHash := strings.Repeat("a", 64)
+func TestResolveLogEntriesCatchesALeafTheLogDoesNotHave(t *testing.T) {
 	srv := fakeRekor(t, map[string]map[string]any{
 		"100": {
-			"body": rekorBody(t, "hashedrekord", "sha256", otherHash), "logIndex": 100,
+			// The log holds a different leaf entirely.
+			"body":     rekorBody(t, "hashedrekord", "sha256", strings.Repeat("a", 64)),
+			"logIndex": 100,
 		},
 	})
 
 	export := attest.ChainExport{
-		Intervals: []attest.ExportedInterval{{
-			Checkpoint: attest.Checkpoint{Seq: 1, Hash: testHash},
-			LogEntryID: "100",
-		}},
+		Intervals: []attest.ExportedInterval{anchored(1, testHash, "100")},
 	}
 
 	results := resolveLogEntries(export, srv.URL)
 	if len(results) != 1 {
 		t.Fatalf("want 1 result, got %d", len(results))
 	}
-	if results[0].OK {
-		t.Fatal("a checkpoint whose hash is not the one in the log was accepted")
+	if !results[0].failed() {
+		t.Fatalf("a checkpoint whose leaf is not the one in the log was not reported "+
+			"as a failure (status %q)", results[0].Status)
 	}
 	if !strings.Contains(results[0].Detail, "not the same") {
 		t.Errorf("the mismatch should be stated in plain language, got: %s", results[0].Detail)
+	}
+}
+
+// The happy path, end to end: a leaf built the way the producer builds
+// it, published under the hash the producer would publish, verifies.
+func TestResolveLogEntriesAcceptsAGenuinelyAnchoredCheckpoint(t *testing.T) {
+	_, logValue := leafFor(testHash)
+	srv := fakeRekor(t, map[string]map[string]any{
+		"7": {"body": rekorBody(t, "hashedrekord", "sha256", logValue), "logIndex": 7},
+	})
+
+	export := attest.ChainExport{
+		Intervals: []attest.ExportedInterval{anchored(1, testHash, "7")},
+	}
+	got := resolveLogEntries(export, srv.URL)[0]
+	if !got.verified() {
+		t.Fatalf("a correctly anchored checkpoint did not verify: status=%q detail=%s",
+			got.Status, got.Detail)
+	}
+}
+
+// A leaf that IS in the log but does not mention this checkpoint is a
+// failure, not a pass. Caught before the network call, because whatever
+// the log holds is irrelevant to a checkpoint the leaf never named.
+func TestResolveLogEntriesRejectsALeafForADifferentCheckpoint(t *testing.T) {
+	srv := fakeRekor(t, map[string]map[string]any{})
+
+	iv := anchored(1, testHash, "100")
+	iv.LeafPreimage, _ = leafFor(strings.Repeat("b", 64)) // somebody else's checkpoint
+
+	got := resolveLogEntries(attest.ChainExport{
+		Intervals: []attest.ExportedInterval{iv},
+	}, srv.URL)[0]
+
+	if !got.failed() {
+		t.Fatalf("a leaf that does not name this checkpoint was not a failure "+
+			"(status %q)", got.Status)
+	}
+}
+
+// THE DISTINCTION THIS WHOLE FILE TURNS ON.
+//
+// A checkpoint with no preimage cannot be checked. It must NOT be
+// reported as a failure: the record is not known to be wrong, it is
+// merely no longer checkable. Calling that tampering would be a
+// falsehood in the opposite direction from the one this tool prevents,
+// and it is the state every checkpoint anchored before 2026-09-04 is
+// permanently in.
+func TestResolveLogEntriesReportsAMissingPreimageAsUnverifiableNotFailed(t *testing.T) {
+	srv := fakeRekor(t, map[string]map[string]any{})
+
+	iv := anchored(1, testHash, "100")
+	iv.LeafPreimage = ""
+
+	got := resolveLogEntries(attest.ChainExport{
+		Intervals: []attest.ExportedInterval{iv},
+	}, srv.URL)[0]
+
+	if got.failed() {
+		t.Fatal("a checkpoint that merely cannot be checked was reported as a " +
+			"failure, which accuses the record of something it is not known to have done")
+	}
+	if !got.unverifiable() {
+		t.Fatalf("want status %q, got %q", StatusUnverifiable, got.Status)
+	}
+	if !strings.Contains(got.Detail, "NOT evidence of tampering") {
+		t.Errorf("the detail must say plainly that this is not tampering, got: %s",
+			got.Detail)
+	}
+}
+
+// A mock-ledger anchor makes no public-log claim at all. Looking up its
+// synthetic id would fail, and reporting that failure would be a finding
+// about a claim nobody made.
+func TestResolveLogEntriesReportsAMockAnchorAsUnverifiable(t *testing.T) {
+	srv := fakeRekor(t, map[string]map[string]any{})
+
+	iv := anchored(1, testHash, "rekor-859bf267c91b8645")
+	iv.LedgerBackend = "mock"
+
+	got := resolveLogEntries(attest.ChainExport{
+		Intervals: []attest.ExportedInterval{iv},
+	}, srv.URL)[0]
+
+	if !got.unverifiable() {
+		t.Fatalf("a mock-ledger anchor should be unverifiable, got %q: %s",
+			got.Status, got.Detail)
+	}
+	if !strings.Contains(got.Detail, "not a finding") {
+		t.Errorf("the detail should say this is not a finding about the record, got: %s",
+			got.Detail)
 	}
 }
 
@@ -191,30 +307,29 @@ func TestResolveLogEntriesCatchesAHashTheLogDoesNotHave(t *testing.T) {
 // "One checkpoint is missing from the log" and "none of them are in it"
 // are very different findings.
 func TestResolveLogEntriesReportsEveryCheckpoint(t *testing.T) {
+	_, logValue := leafFor(testHash)
 	srv := fakeRekor(t, map[string]map[string]any{
-		"1": {"body": rekorBody(t, "hashedrekord", "sha256", testHash), "logIndex": 1},
-		"3": {"body": rekorBody(t, "hashedrekord", "sha256", testHash), "logIndex": 3},
+		"1": {"body": rekorBody(t, "hashedrekord", "sha256", logValue), "logIndex": 1},
+		"3": {"body": rekorBody(t, "hashedrekord", "sha256", logValue), "logIndex": 3},
 	})
 
-	mk := func(seq uint64, entryID string) attest.ExportedInterval {
-		return attest.ExportedInterval{
-			Checkpoint: attest.Checkpoint{Seq: seq, Hash: testHash},
-			LogEntryID: entryID,
-		}
-	}
+	noEntry := anchored(4, testHash, "")
 	export := attest.ChainExport{Intervals: []attest.ExportedInterval{
-		mk(1, "1"), mk(2, "2"), mk(3, "3"), mk(4, ""),
+		anchored(1, testHash, "1"),
+		anchored(2, testHash, "2"), // absent from the log
+		anchored(3, testHash, "3"),
+		noEntry,
 	}}
 
 	results := resolveLogEntries(export, srv.URL)
 	if len(results) != 4 {
 		t.Fatalf("every checkpoint should be reported; got %d of 4", len(results))
 	}
-	want := []bool{true, false, true, false}
+	want := []string{StatusVerified, StatusFailed, StatusVerified, StatusFailed}
 	for i, w := range want {
-		if results[i].OK != w {
-			t.Errorf("checkpoint %d: ok=%v, want %v (%s)",
-				results[i].Seq, results[i].OK, w, results[i].Detail)
+		if results[i].Status != w {
+			t.Errorf("checkpoint %d: status=%q, want %q (%s)",
+				results[i].Seq, results[i].Status, w, results[i].Detail)
 		}
 	}
 	// The one with no entry id at all gets its own explanation.

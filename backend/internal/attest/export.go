@@ -49,6 +49,37 @@ type ExportedInterval struct {
 	LogEntryID string    `json:"log_entry_id"`
 	AnchoredAt time.Time `json:"anchored_at"`
 
+	// LedgerBackend names which ledger produced LogEntryID: "rekor" for
+	// the public transparency log, "mock" for a deterministic local
+	// stand-in used in development.
+	//
+	// Carried because a verifier that assumed every entry id was a real
+	// Rekor index would report a mock-anchored checkpoint as a FAILURE,
+	// when the truth is that no public-log claim was ever made for it.
+	// Those are different findings and the difference is the reader's to
+	// know. Mesedi's own mock ids are additionally spelled "rekor-..."
+	// today, which makes guessing from the id itself actively unsafe.
+	LedgerBackend string `json:"ledger_backend,omitempty"`
+
+	// LeafPreimage is the exact string the ledger hashed to produce the
+	// entry at LogEntryID. It is the ONLY thing that connects a
+	// checkpoint to its log entry.
+	//
+	// The log does not record the checkpoint hash. It records sha256 of a
+	// canonical leaf that contains it, so a verifier comparing the log's
+	// value against Checkpoint.Hash finds a mismatch every time and is
+	// right to. With the preimage the reader can hash it, compare against
+	// what the log holds, and confirm the checkpoint's own hash appears
+	// inside it — none of which requires trusting Mesedi.
+	//
+	// Empty on checkpoints anchored before 2026-09-04. Those are
+	// permanently unverifiable, because the nonce inside their preimages
+	// was generated in Verdifax's handler and discarded. A verifier must
+	// report them as UNVERIFIABLE and never as tampering: the record is
+	// not known to be wrong, it is merely no longer checkable, and
+	// conflating the two would be a falsehood in the opposite direction.
+	LeafPreimage string `json:"leaf_preimage,omitempty"`
+
 	// Leaf and Proof are nil when this project had no sealed executions
 	// in the interval. That is a normal, expected state and must not read
 	// as a gap: the checkpoint still exists, still anchors, and still
