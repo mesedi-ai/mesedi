@@ -12,6 +12,7 @@
 //	mesedi-verify export.json              # verify, print a human report
 //	cat export.json | mesedi-verify        # verify from stdin
 //	mesedi-verify --json export.json       # machine-readable
+//	mesedi-verify --pdf out.pdf export.json # also write a PDF report
 //	mesedi-verify --offline export.json    # skip the log; proves less
 //	mesedi-verify --rekor <url> export.json
 //
@@ -19,7 +20,9 @@
 //
 //	0  Every check that was run passed.
 //	1  One or more checks failed.
-//	2  The export could not be read or parsed.
+//	2  The export could not be read or parsed, or a requested report
+//	   could not be written. Separate from 1 on purpose: "we could not
+//	   run the check" and "the check failed" must not look alike.
 //
 // # WHY --offline PROVES LESS, AND WHY THE REPORT SAYS SO
 //
@@ -40,24 +43,84 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"mesedi/backend/internal/attest"
 )
 
-// buildVersion is set at link time. "unknown" is honest for a local build
-// and is never fabricated into something that looks like a release.
+// buildVersion is set at link time for released binaries. It is never
+// fabricated into something that looks like a release when it isn't one.
 var buildVersion = "unknown"
 
+// resolveVersion answers "which source produced this verdict?"
+//
+// The report tells the reader to rebuild this binary and reproduce the
+// result. That instruction is worthless if the document will not say what
+// to rebuild. A release sets buildVersion at link time; everything else
+// falls back to the VCS stamp Go embeds automatically when building
+// inside a checkout, which names the exact commit.
+func resolveVersion() string {
+	var rev, modified string
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				rev = s.Value
+			case "vcs.modified":
+				modified = s.Value
+			}
+		}
+	}
+	return formatVersion(buildVersion, rev, modified)
+}
+
+// formatVersion is split out so the interesting cases are testable
+// without building a binary to inspect.
+func formatVersion(stamped, rev, modified string) string {
+	if stamped != "" && stamped != "unknown" {
+		return stamped
+	}
+	if rev == "" {
+		return "unknown (built outside a source checkout)"
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if modified == "true" {
+		// Load-bearing, not pedantry. A verdict produced by a binary whose
+		// source matches no commit cannot be reproduced by anyone, which is
+		// the one thing this report asks its reader to be able to do.
+		return rev + " + UNCOMMITTED CHANGES"
+	}
+	return rev
+}
+
+// versionIsReproducible reports whether the named version identifies
+// source a reader could actually obtain.
+func versionIsReproducible(v string) bool {
+	return !strings.Contains(v, "UNCOMMITTED") &&
+		!strings.HasPrefix(v, "unknown")
+}
+
 type report struct {
-	Format      string                    `json:"format"`
-	ProjectID   string                    `json:"project_id"`
+	Format    string `json:"format"`
+	ProjectID string `json:"project_id"`
+
+	// ExportSHA256 binds this verdict to one specific file. Without it a
+	// report is a floating claim that could be presented alongside any
+	// export; with it, the reader can hash the JSON they were handed and
+	// confirm this is a report about that file and no other.
+	ExportSHA256 string `json:"export_sha256"`
+
 	GeneratedAt time.Time                 `json:"export_generated_at"`
 	VerifiedAt  time.Time                 `json:"verified_at"`
 	Verifier    string                    `json:"verifier_version"`
@@ -73,12 +136,15 @@ func main() {
 		offline = flag.Bool("offline", false,
 			"do not contact the transparency log (proves substantially less)")
 		rekorURL = flag.String("rekor", DefaultRekorURL, "transparency log base URL")
-		version  = flag.Bool("version", false, "print version and exit")
+		pdfPath  = flag.String("pdf", "",
+			"also write a PDF report to this path (for a reader who will not run a CLI)")
+		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
 
-	if *version {
-		fmt.Fprintln(os.Stdout, "mesedi-verify", buildVersion)
+	version := resolveVersion()
+	if *showVersion {
+		fmt.Fprintln(os.Stdout, "mesedi-verify", version)
 		return
 	}
 
@@ -94,16 +160,33 @@ func main() {
 		os.Exit(2)
 	}
 
+	sum := sha256.Sum256(raw)
+
 	rep := report{
-		Format:      export.Format,
-		ProjectID:   export.ProjectID,
+		Format:       export.Format,
+		ProjectID:    export.ProjectID,
+		ExportSHA256: hex.EncodeToString(sum[:]),
+
 		GeneratedAt: export.GeneratedAt,
 		VerifiedAt:  time.Now().UTC(),
-		Verifier:    buildVersion,
+		Verifier:    version,
 		Online:      !*offline,
 		Structural:  attest.VerifyChainExport(export),
 	}
 	rep.OK = rep.Structural.OK
+
+	// A limit on the REPORT rather than on the chain, and one the reader
+	// cannot discover for themselves. If the verifier's own source is not
+	// identifiable, "rebuild this and reproduce the result" is an
+	// instruction nobody can follow, and the report should say so instead
+	// of implying an auditability it does not have.
+	if !versionIsReproducible(version) {
+		rep.Structural.Unverified = append(rep.Structural.Unverified,
+			"This report was produced by a verifier build that cannot be tied to a "+
+				"published commit ("+version+"). The result above is therefore not "+
+				"independently reproducible. Use a released binary, or one built from a "+
+				"clean checkout, for anything that will be relied on.")
+	}
 
 	if *offline {
 		rep.Structural.Unverified = append(rep.Structural.Unverified,
@@ -140,9 +223,29 @@ func main() {
 		printReport(os.Stdout, rep)
 	}
 
+	// The verdict is printed before the PDF is attempted, so a failure to
+	// write the file never costs the reader the result they came for.
+	if *pdfPath != "" {
+		if err := writePDF(*pdfPath, rep); err != nil {
+			fmt.Fprintln(os.Stderr, "mesedi-verify:", err)
+			os.Exit(2)
+		}
+	}
+
 	if !rep.OK {
 		os.Exit(1)
 	}
+}
+
+func writePDF(path string, rep report) error {
+	out, err := renderPDF(buildPDFDoc(rep, rep.ExportSHA256))
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
 }
 
 func readExport(path string) ([]byte, error) {
@@ -207,6 +310,7 @@ func resolveLogEntries(export attest.ChainExport, rekorURL string) []LogEntryChe
 func printReport(w io.Writer, rep report) {
 	fmt.Fprintf(w, "Mesedi chain verification\n")
 	fmt.Fprintf(w, "  project        %s\n", rep.ProjectID)
+	fmt.Fprintf(w, "  export sha256  %s\n", rep.ExportSHA256)
 	fmt.Fprintf(w, "  export written %s\n", rep.GeneratedAt.Format(time.RFC3339))
 	fmt.Fprintf(w, "  verified       %s by mesedi-verify %s\n\n",
 		rep.VerifiedAt.Format(time.RFC3339), rep.Verifier)

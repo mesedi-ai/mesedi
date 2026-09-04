@@ -1,0 +1,209 @@
+package main
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+	"time"
+
+	"mesedi/backend/internal/attest"
+)
+
+// The PDF is tested at the content layer, not the pixel layer.
+//
+// buildPDFDoc is a pure function, so every property that actually
+// matters — that a failure says FAILED, that the caveats survive
+// verbatim, that an offline run does not claim the log was consulted —
+// can be asserted without parsing PDF bytes. renderPDF gets a smoke
+// test, because the useful question there is "does it produce a valid
+// file without panicking on awkward input", and that is answerable.
+
+func sampleReport(ok, online bool) report {
+	return report{
+		Format:       attest.ChainExportFormatV1,
+		ProjectID:    "proj-agency-a",
+		ExportSHA256: strings.Repeat("ab", 32),
+		GeneratedAt:  time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC),
+		VerifiedAt:   time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC),
+		Verifier:     "test",
+		Online:       online,
+		OK:           ok,
+		Structural: attest.ExportVerification{
+			OK: ok,
+			Checks: []attest.CheckResult{
+				{Name: "export format", OK: true, Detail: attest.ChainExportFormatV1},
+				{Name: "chain continuity", OK: ok, Detail: "3 consecutive checkpoints"},
+			},
+			Unverified: []string{
+				"Execution digests were not opened — that requires the events.",
+				"Nothing here judges whether the AI was correct.",
+			},
+		},
+		LogEntries: []LogEntryCheck{
+			{Seq: 1, LogIndex: "10000001", OK: ok, Detail: "present in the public log"},
+		},
+	}
+}
+
+func TestPDFVerdictFollowsTheResult(t *testing.T) {
+	if got := buildPDFDoc(sampleReport(true, true), "deadbeef").Verdict; got != "VERIFIED" {
+		t.Errorf("a passing report rendered verdict %q", got)
+	}
+	d := buildPDFDoc(sampleReport(false, true), "deadbeef")
+	if d.Verdict != "FAILED" || !d.Failed {
+		t.Errorf("a failing report rendered verdict %q (failed=%v)", d.Verdict, d.Failed)
+	}
+}
+
+// The caveats are the part a vendor would be tempted to soften on the way
+// into a printable document. They must arrive byte-identical.
+func TestPDFCarriesTheCaveatsVerbatim(t *testing.T) {
+	rep := sampleReport(true, true)
+	d := buildPDFDoc(rep, rep.ExportSHA256)
+
+	if len(d.Limits) != len(rep.Structural.Unverified) {
+		t.Fatalf("report stated %d limits, the PDF carries %d",
+			len(rep.Structural.Unverified), len(d.Limits))
+	}
+	for i, want := range rep.Structural.Unverified {
+		if d.Limits[i] != want {
+			t.Errorf("limit %d was reworded on its way into the PDF:\n got %q\nwant %q",
+				i, d.Limits[i], want)
+		}
+	}
+}
+
+// A passing verdict must not read as an endorsement of the AI's output.
+// This is the sentence a procurement officer will quote, so it is worth
+// an assertion rather than a hope.
+func TestPDFPassingVerdictDoesNotClaimCorrectness(t *testing.T) {
+	note := buildPDFDoc(sampleReport(true, true), "deadbeef").VerdictNote
+	if !strings.Contains(note, "does not say the AI was correct") {
+		t.Errorf("a passing verdict should distinguish intact from correct, got: %s", note)
+	}
+}
+
+// An offline run proves substantially less. If the PDF said the same
+// thing either way, the flag would be a way to get a clean-looking
+// document without doing the work that makes it evidence.
+func TestPDFOfflineRunSaysTheLogWasNotContacted(t *testing.T) {
+	d := buildPDFDoc(sampleReport(true, false), "deadbeef")
+
+	if !strings.Contains(d.VerdictNote, "NOT") {
+		t.Errorf("an offline verdict should say the log was not contacted, got: %s",
+			d.VerdictNote)
+	}
+	if !strings.Contains(d.VerdictNote, "not evidence") {
+		t.Errorf("an offline verdict should refuse the word evidence, got: %s", d.VerdictNote)
+	}
+	for _, s := range d.Sections {
+		if strings.Contains(s.Title, "TRANSPARENCY LOG") {
+			t.Error("an offline run rendered a transparency log section it never populated")
+		}
+	}
+	var found bool
+	for _, f := range d.Fields {
+		if f[0] == "Transparency log" {
+			found = true
+			if !strings.Contains(f[1], "not contacted") {
+				t.Errorf("transparency log field reads %q on an offline run", f[1])
+			}
+		}
+	}
+	if !found {
+		t.Error("the subject block does not state whether the log was consulted")
+	}
+}
+
+// Without the export hash the document is a verdict about nothing in
+// particular, and could be shown next to a different export entirely.
+func TestPDFBindsItselfToTheExportItVerified(t *testing.T) {
+	const sum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	d := buildPDFDoc(sampleReport(true, true), sum)
+
+	var inFields bool
+	for _, f := range d.Fields {
+		if f[0] == "Export SHA-256" && f[1] == sum {
+			inFields = true
+		}
+	}
+	if !inFields {
+		t.Error("the full export sha256 is not in the subject block")
+	}
+	if !strings.Contains(d.FooterID, shorten(sum)) {
+		t.Errorf("the footer does not carry the export hash, got: %s", d.FooterID)
+	}
+}
+
+// A section with no rows must explain itself. Printing an empty heading
+// invites the reader to conclude there was nothing to find, when it may
+// mean nothing was looked at.
+func TestPDFEmptySectionsExplainThemselves(t *testing.T) {
+	rep := sampleReport(true, true)
+	rep.Structural.Checks = nil
+	rep.LogEntries = nil
+
+	for _, s := range buildPDFDoc(rep, "deadbeef").Sections {
+		if len(s.Rows) != 0 {
+			continue
+		}
+		if strings.TrimSpace(s.Empty) == "" {
+			t.Errorf("section %q would print as a bare heading with no rows", s.Title)
+		}
+	}
+}
+
+func TestRenderPDFProducesAReadableFile(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rep  report
+	}{
+		{"passing online", sampleReport(true, true)},
+		{"failing online", sampleReport(false, true)},
+		{"passing offline", sampleReport(true, false)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := renderPDF(buildPDFDoc(tc.rep, tc.rep.ExportSHA256))
+			if err != nil {
+				t.Fatalf("renderPDF: %v", err)
+			}
+			if !bytes.HasPrefix(out, []byte("%PDF-")) {
+				t.Error("output is not a PDF")
+			}
+			if !bytes.Contains(out, []byte("%%EOF")) {
+				t.Error("the PDF was not closed out; it would open as corrupt")
+			}
+			if len(out) < 1000 {
+				t.Errorf("PDF is %d bytes, which is too small to contain the report", len(out))
+			}
+		})
+	}
+}
+
+// Long single-token details and empty strings are the two shapes most
+// likely to break a fixed-width layout: one cannot be wrapped, the other
+// has no lines to measure. Both come from real fields — a sha256 is a
+// 64-character unbreakable token, and a Detail can be empty.
+func TestRenderPDFSurvivesAwkwardContent(t *testing.T) {
+	rep := sampleReport(false, true)
+	rep.Structural.Checks = []attest.CheckResult{
+		{Name: "unbreakable", OK: false, Detail: strings.Repeat("f", 400)},
+		{Name: "", OK: false, Detail: ""},
+		{Name: strings.Repeat("long name ", 12), OK: true, Detail: "ok"},
+	}
+	// Enough rows to force pagination, which is where row-splitting bugs
+	// show up.
+	for i := 0; i < 60; i++ {
+		rep.Structural.Checks = append(rep.Structural.Checks, attest.CheckResult{
+			Name: "interval", OK: true, Detail: strings.Repeat("wrapping text ", 10),
+		})
+	}
+
+	out, err := renderPDF(buildPDFDoc(rep, rep.ExportSHA256))
+	if err != nil {
+		t.Fatalf("renderPDF: %v", err)
+	}
+	if !bytes.HasPrefix(out, []byte("%PDF-")) {
+		t.Fatal("output is not a PDF")
+	}
+}
