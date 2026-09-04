@@ -40,6 +40,8 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,6 +51,7 @@ import (
 	"time"
 
 	"mesedi/backend/internal/attest"
+	"mesedi/backend/internal/store"
 )
 
 const (
@@ -138,8 +141,18 @@ type verdifaxAttestResponse struct {
 	Digest        string `json:"digest"`
 	LedgerBackend string `json:"ledger_backend"`
 	LogEntryID    string `json:"log_entry_id"`
-	Provenance    string `json:"provenance"`
-	Error         string `json:"error"`
+
+	// LeafHash and LeafPreimage are what make the anchor checkable by
+	// someone who trusts neither company. The log does NOT record the
+	// digest submitted; it records sha256 of a canonical leaf that
+	// contains it. Both were being returned and discarded until
+	// 2026-09-04, which is why every checkpoint anchored before then
+	// names a log entry nobody can tie back to it.
+	LeafHash     string `json:"leaf_hash"`
+	LeafPreimage string `json:"leaf_preimage"`
+
+	Provenance string `json:"provenance"`
+	Error      string `json:"error"`
 }
 
 func (a *VerdifaxAnchorer) client() *http.Client {
@@ -152,7 +165,7 @@ func (a *VerdifaxAnchorer) client() *http.Client {
 // AnchorCheckpoint submits cp.Hash and returns where it landed.
 func (a *VerdifaxAnchorer) AnchorCheckpoint(
 	ctx context.Context, cp attest.Checkpoint,
-) (string, string, error) {
+) (store.CheckpointAnchor, error) {
 	// The digest sent is the CHECKPOINT hash — the value the whole chain
 	// is built on. Verdifax validates it as 64 lowercase hex, which
 	// CheckpointHash always produces.
@@ -168,7 +181,7 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 		LeafCount: cp.TenantLeafCount,
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("verdifax anchor: marshal request: %w", err)
+		return store.CheckpointAnchor{}, fmt.Errorf("verdifax anchor: marshal request: %w", err)
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, verdifaxAnchorTimeout)
@@ -177,7 +190,7 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
 		a.BaseURL+"/attest", bytes.NewReader(body))
 	if err != nil {
-		return "", "", fmt.Errorf("verdifax anchor: build request: %w", err)
+		return store.CheckpointAnchor{}, fmt.Errorf("verdifax anchor: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", VerdifaxUserAgent)
@@ -190,13 +203,13 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 	if err != nil {
 		// Deliberately does not wrap the URL with credentials or echo
 		// any header. Transport errors are noisy enough already.
-		return "", "", fmt.Errorf("verdifax anchor: request failed: %w", err)
+		return store.CheckpointAnchor{}, fmt.Errorf("verdifax anchor: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, verdifaxMaxResponseBytes))
 	if err != nil {
-		return "", "", fmt.Errorf("verdifax anchor: read response: %w", err)
+		return store.CheckpointAnchor{}, fmt.Errorf("verdifax anchor: read response: %w", err)
 	}
 
 	var out verdifaxAttestResponse
@@ -204,7 +217,7 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 		// Status first: a 502 from a proxy returns HTML, and reporting
 		// "invalid JSON" for that sends whoever reads the log looking in
 		// entirely the wrong place.
-		return "", "", fmt.Errorf(
+		return store.CheckpointAnchor{}, fmt.Errorf(
 			"verdifax anchor: HTTP %d with an unparseable body (%d bytes)",
 			resp.StatusCode, len(raw))
 	}
@@ -213,12 +226,12 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 		if msg == "" {
 			msg = "no error message in response"
 		}
-		return "", "", fmt.Errorf("verdifax anchor: HTTP %d: %s", resp.StatusCode, msg)
+		return store.CheckpointAnchor{}, fmt.Errorf("verdifax anchor: HTTP %d: %s", resp.StatusCode, msg)
 	}
 
 	// CHECK 1. The receipt must be for the digest we sent.
 	if out.Digest != cp.Hash {
-		return "", "", fmt.Errorf(
+		return store.CheckpointAnchor{}, fmt.Errorf(
 			"verdifax anchor: receipt is for digest %s but checkpoint %d hashes to "+
 				"%s; recording it would make the chain name a log entry that "+
 				"attests to something else",
@@ -227,7 +240,7 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 
 	// CHECK 2. The receipt must not claim an independent submitter.
 	if out.Provenance != expectedProvenance {
-		return "", "", fmt.Errorf(
+		return store.CheckpointAnchor{}, fmt.Errorf(
 			"verdifax anchor: receipt claims provenance %q, want %q. Mesedi and "+
 				"Verdifax are the same legal entity, so this key is misclassified "+
 				"and its receipts assert an independent party that does not exist. "+
@@ -236,9 +249,35 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 	}
 
 	if out.LogEntryID == "" {
-		return "", "", fmt.Errorf(
+		return store.CheckpointAnchor{}, fmt.Errorf(
 			"verdifax anchor: checkpoint %d accepted but no log entry id returned; "+
 				"an anchor with nothing to point at cannot be verified", cp.Seq)
+	}
+
+	// CHECK 3. The receipt must be checkable by someone who trusts
+	// neither company.
+	//
+	// Checks 1 and 2 both ask Verdifax to vouch for itself, which is
+	// worth exactly as much as it sounds: they catch a misconfigured
+	// endpoint, not a dishonest one. This check is different. The log
+	// does not record cp.Hash — it records sha256 of a canonical leaf
+	// containing it — so without the preimage there is no path at all
+	// from a checkpoint to its log entry, and an auditor comparing the
+	// two finds a mismatch every time and is right to.
+	//
+	// That was the state of this system until 2026-09-04. Every anchor
+	// written before that names a real Sigstore entry that nobody, this
+	// company included, can tie back to the checkpoint that produced it.
+	// The nonce inside those preimages was generated in Verdifax's
+	// handler and discarded, so they cannot be repaired.
+	//
+	// Fails closed. The scheduler treats an error here as "not anchored"
+	// and retries next tick, which stalls the chain visibly. That is the
+	// correct trade: a stalled chain is an outage someone notices today,
+	// an unverifiable anchor is a discovery someone makes years from now
+	// when the evidence is being relied on.
+	if err := checkAnchorReceiptIsVerifiable(cp, out); err != nil {
+		return store.CheckpointAnchor{}, err
 	}
 
 	a.Logger.Info("verdifax_anchorer: checkpoint anchored",
@@ -247,5 +286,54 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 		"log_entry_id", out.LogEntryID,
 		"ledger_backend", out.LedgerBackend,
 	)
-	return out.LogEntryID, out.LedgerBackend, nil
+	return store.CheckpointAnchor{
+		Anchored:      true,
+		LogEntryID:    out.LogEntryID,
+		LedgerBackend: out.LedgerBackend,
+		LeafPreimage:  out.LeafPreimage,
+	}, nil
+}
+
+// checkAnchorReceiptIsVerifiable confirms the receipt carries what a
+// third party needs to check it against the log.
+//
+// Split out so the three distinct failures can be exercised
+// individually: a receipt with no preimage, a preimage that does not
+// hash to the leaf Verdifax reported, and a preimage that does not
+// contain this checkpoint's hash. They mean different things and lead
+// whoever reads the log to different places.
+func checkAnchorReceiptIsVerifiable(
+	cp attest.Checkpoint, out verdifaxAttestResponse,
+) error {
+	if out.LeafPreimage == "" {
+		return fmt.Errorf(
+			"verdifax anchor: checkpoint %d got a receipt with no leaf preimage. "+
+				"The log records a hash of a string that was not returned, so this "+
+				"anchor could never be checked by an auditor. Refusing to record it",
+			cp.Seq)
+	}
+
+	// The preimage must actually produce the leaf Verdifax says it
+	// anchored. If it does not, one of the two values is wrong and
+	// recording either would be recording a fiction.
+	if out.LeafHash != "" {
+		sum := sha256.Sum256([]byte(out.LeafPreimage))
+		if got := hex.EncodeToString(sum[:]); !strings.EqualFold(got, out.LeafHash) {
+			return fmt.Errorf(
+				"verdifax anchor: checkpoint %d receipt is internally inconsistent: "+
+					"the preimage returned hashes to %s but the receipt reports leaf "+
+					"hash %s", cp.Seq, got, out.LeafHash)
+		}
+	}
+
+	// And the leaf must commit to THIS checkpoint. Searched rather than
+	// parsed: the preimage's fields are joined without length prefixing,
+	// so it cannot be split back into parts unambiguously.
+	if !strings.Contains(out.LeafPreimage, cp.Hash) {
+		return fmt.Errorf(
+			"verdifax anchor: checkpoint %d hashes to %s, which does not appear in "+
+				"the leaf that was anchored. The log entry would describe something "+
+				"other than this checkpoint", cp.Seq, cp.Hash)
+	}
+	return nil
 }

@@ -270,9 +270,9 @@ func (s *PostgresStore) GetCheckpointAnchor(
 		anchoredAt sql.NullTime
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT anchored_at, log_entry_id, ledger_backend
+		SELECT anchored_at, log_entry_id, ledger_backend, leaf_preimage
 		  FROM checkpoints WHERE seq = $1
-	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend)
+	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend, &a.LeafPreimage)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CheckpointAnchor{}, ErrNotFound
 	}
@@ -295,18 +295,21 @@ func (s *PostgresStore) GetCheckpointAnchor(
 func (s *PostgresStore) MarkCheckpointAnchored(
 	ctx context.Context,
 	seq uint64,
-	logEntryID, ledgerBackend string,
+	a CheckpointAnchor,
 	anchoredAt time.Time,
 ) error {
-	if logEntryID == "" {
+	if a.LogEntryID == "" {
 		return fmt.Errorf("mark checkpoint %d anchored: empty log entry id; "+
 			"an anchor with no entry to point at cannot be verified", seq)
 	}
+	// Not required here; see the SQLite twin for why the caller rather
+	// than the store is the right place to insist on a preimage.
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE checkpoints
-		   SET anchored_at = $1, log_entry_id = $2, ledger_backend = $3
-		 WHERE seq = $4 AND anchored_at IS NULL
-	`, anchoredAt.UTC(), logEntryID, ledgerBackend, int64(seq))
+		   SET anchored_at = $1, log_entry_id = $2, ledger_backend = $3,
+		       leaf_preimage = $4
+		 WHERE seq = $5 AND anchored_at IS NULL
+	`, anchoredAt.UTC(), a.LogEntryID, a.LedgerBackend, a.LeafPreimage, int64(seq))
 	if err != nil {
 		return fmt.Errorf("mark checkpoint %d anchored: %w", seq, err)
 	}

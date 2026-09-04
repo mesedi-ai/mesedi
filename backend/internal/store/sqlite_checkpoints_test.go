@@ -234,7 +234,10 @@ func TestChainExtendsFromWhatWasPersisted(t *testing.T) {
 	if err := s.InsertCheckpoint(ctx, cp1, []attest.TenantLeaf{l1}); err != nil {
 		t.Fatalf("insert cp1: %v", err)
 	}
-	if err := s.MarkCheckpointAnchored(ctx, cp1.Seq, "rekor-111", "mock", cpHour(1)); err != nil {
+	if err := s.MarkCheckpointAnchored(ctx, cp1.Seq, CheckpointAnchor{
+		LogEntryID: "rekor-111", LedgerBackend: "mock",
+		LeafPreimage: "verdifax.ledger.input.v2.env." + cp1.Hash + ".bind.1",
+	}, cpHour(1)); err != nil {
 		t.Fatalf("MarkCheckpointAnchored: %v", err)
 	}
 
@@ -337,17 +340,21 @@ func TestMarkCheckpointAnchoredRefusals(t *testing.T) {
 		t.Fatalf("InsertCheckpoint: %v", err)
 	}
 
-	if err := s.MarkCheckpointAnchored(ctx, cp.Seq, "", "mock", cpHour(1)); err == nil {
+	if err := s.MarkCheckpointAnchored(ctx, cp.Seq,
+		CheckpointAnchor{LogEntryID: "", LedgerBackend: "mock"}, cpHour(1)); err == nil {
 		t.Error("accepted an empty log entry id; an anchor with nothing to point " +
 			"at cannot be verified")
 	}
-	if err := s.MarkCheckpointAnchored(ctx, 999, "rekor-x", "mock", cpHour(1)); err == nil {
+	if err := s.MarkCheckpointAnchored(ctx, 999,
+		CheckpointAnchor{LogEntryID: "rekor-x", LedgerBackend: "mock"}, cpHour(1)); err == nil {
 		t.Error("marked a nonexistent checkpoint as anchored")
 	}
-	if err := s.MarkCheckpointAnchored(ctx, cp.Seq, "rekor-1", "mock", cpHour(1)); err != nil {
+	if err := s.MarkCheckpointAnchored(ctx, cp.Seq,
+		CheckpointAnchor{LogEntryID: "rekor-1", LedgerBackend: "mock"}, cpHour(1)); err != nil {
 		t.Fatalf("first anchor should succeed: %v", err)
 	}
-	if err := s.MarkCheckpointAnchored(ctx, cp.Seq, "rekor-2", "mock", cpHour(1)); err == nil {
+	if err := s.MarkCheckpointAnchored(ctx, cp.Seq,
+		CheckpointAnchor{LogEntryID: "rekor-2", LedgerBackend: "mock"}, cpHour(1)); err == nil {
 		t.Error("overwrote an existing anchor; two log entries for one checkpoint " +
 			"is evidence, and keeping only the second discards it")
 	}

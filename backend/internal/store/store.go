@@ -855,6 +855,23 @@ type CheckpointAnchor struct {
 	LogEntryID    string
 	LedgerBackend string
 	AnchoredAt    time.Time
+
+	// LeafPreimage is the exact string the ledger hashed to produce the
+	// entry at LogEntryID.
+	//
+	// It is what makes the anchor checkable. The log does NOT record the
+	// checkpoint hash; it records sha256 of a canonical leaf built from a
+	// domain tag, an envelope id, the checkpoint hash, a binding hash and
+	// a per-request nonce. A verifier hashes this string, compares the
+	// result against what the log holds, and separately confirms the
+	// checkpoint's own hash appears inside it. Without it there is no
+	// path from "this checkpoint" to "that log entry" at all.
+	//
+	// Empty on anchors recorded before 2026-09-04, and unrecoverable:
+	// Verdifax generated the nonce at request time and discarded it, so
+	// nothing can reconstruct those preimages. Empty means "this anchor
+	// cannot be verified", never "not applicable".
+	LeafPreimage string
 }
 
 // Store is the abstract persistence interface. Phase 1.5 minimal surface;
@@ -2390,7 +2407,19 @@ type Store interface {
 	// transparency log. That entry id becomes the NEXT checkpoint's
 	// PrevLogEntryID, which is what ties the chain to a log Mesedi does
 	// not control.
-	MarkCheckpointAnchored(ctx context.Context, seq uint64, logEntryID, ledgerBackend string, anchoredAt time.Time) error
+	//
+	// Takes the whole CheckpointAnchor rather than a list of scalars.
+	// The previous signature was (seq, logEntryID, ledgerBackend,
+	// anchoredAt) and adding the preimage would have made four
+	// same-typed strings in a row, which is a transposition waiting to
+	// happen — and a transposed anchor is not a compile error, it is a
+	// checkpoint that silently names the wrong log entry. Named fields
+	// also mean the inclusion proof (task #25) can be added without
+	// touching this signature again.
+	//
+	// Anchored and AnchoredAt on the argument are ignored: the store
+	// sets the timestamp and derives Anchored on read.
+	MarkCheckpointAnchored(ctx context.Context, seq uint64, a CheckpointAnchor, anchoredAt time.Time) error
 
 	// GetCheckpointAnchor reports where a checkpoint reached the log,
 	// or Anchored=false if it has not yet.

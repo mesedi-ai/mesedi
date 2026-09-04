@@ -136,13 +136,19 @@ func (f *fakeChainStore) InsertCheckpoint(_ context.Context, cp attest.Checkpoin
 	return nil
 }
 
-func (f *fakeChainStore) MarkCheckpointAnchored(_ context.Context, seq uint64, entryID, backend string, at time.Time) error {
+func (f *fakeChainStore) MarkCheckpointAnchored(
+	_ context.Context, seq uint64, in store.CheckpointAnchor, at time.Time,
+) error {
 	a := f.anchors[seq]
 	if a.Anchored {
 		return errors.New("already anchored")
 	}
 	f.anchors[seq] = store.CheckpointAnchor{
-		Anchored: true, LogEntryID: entryID, LedgerBackend: backend, AnchoredAt: at,
+		Anchored:      true,
+		LogEntryID:    in.LogEntryID,
+		LedgerBackend: in.LedgerBackend,
+		LeafPreimage:  in.LeafPreimage,
+		AnchoredAt:    at,
 	}
 	return nil
 }
@@ -155,13 +161,23 @@ type fakeAnchorer struct {
 	nextID int
 }
 
-func (a *fakeAnchorer) AnchorCheckpoint(context.Context, attest.Checkpoint) (string, string, error) {
+func (a *fakeAnchorer) AnchorCheckpoint(
+	_ context.Context, cp attest.Checkpoint,
+) (store.CheckpointAnchor, error) {
 	a.calls++
 	if a.fail != nil {
-		return "", "", a.fail
+		return store.CheckpointAnchor{}, a.fail
 	}
 	a.nextID++
-	return fmt.Sprintf("rekor-%d", a.nextID), "mock", nil
+	return store.CheckpointAnchor{
+		Anchored:      true,
+		LogEntryID:    fmt.Sprintf("rekor-%d", a.nextID),
+		LedgerBackend: "mock",
+		// Shaped like a real preimage and containing this checkpoint's
+		// hash, so the scheduler tests exercise the value that now has to
+		// survive the trip into the store rather than a placeholder.
+		LeafPreimage: "verdifax.ledger.input.v2.env." + cp.Hash + ".bind.1",
+	}, nil
 }
 
 func newCPScheduler(st store.Store, an CheckpointAnchorer, now time.Time) *CheckpointScheduler {

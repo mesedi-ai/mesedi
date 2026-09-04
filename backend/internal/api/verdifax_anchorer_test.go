@@ -20,6 +20,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -65,8 +67,32 @@ func anchorerAgainst(t *testing.T, handler http.HandlerFunc) (*VerdifaxAnchorer,
 	return a, srv.Close
 }
 
+// anchorLeafPreimage builds a receipt's leaf preimage the way Verdifax
+// does: a domain tag, an envelope id, the submitted digest, a binding
+// hash and a nonce, joined with ".". The shape matters — the anchorer
+// searches it for the checkpoint hash — so a placeholder here would
+// make every test below vacuous.
+func anchorLeafPreimage(digest string) string {
+	return "verdifax.ledger.input.v2.attest:1:checkpoint/1/t." + digest + ".bind.7"
+}
+
+func anchorLeafHash(preimage string) string {
+	sum := sha256.Sum256([]byte(preimage))
+	return hex.EncodeToString(sum[:])
+}
+
 // okReceipt writes a well-formed receipt for the given digest.
 func okReceipt(w http.ResponseWriter, digest, provenance, entryID string) {
+	preimage := anchorLeafPreimage(digest)
+	okReceiptWithLeaf(w, digest, provenance, entryID, preimage, anchorLeafHash(preimage))
+}
+
+// okReceiptWithLeaf writes a receipt with the leaf fields set
+// explicitly, so a test can produce one that is well-formed in every
+// other respect but not verifiable.
+func okReceiptWithLeaf(w http.ResponseWriter, digest, provenance, entryID,
+	leafPreimage, leafHash string,
+) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -75,6 +101,8 @@ func okReceipt(w http.ResponseWriter, digest, provenance, entryID string) {
 		"digest":         digest,
 		"ledger_backend": "mock",
 		"log_entry_id":   entryID,
+		"leaf_preimage":  leafPreimage,
+		"leaf_hash":      leafHash,
 		"provenance":     provenance,
 	})
 }
@@ -102,12 +130,19 @@ func TestAnchorer_SendsTheCheckpointHashWithTheRightHeaderAndFields(t *testing.T
 	})
 	defer done()
 
-	entryID, backend, err := a.AnchorCheckpoint(context.Background(), cp)
+	anchor, err := a.AnchorCheckpoint(context.Background(), cp)
 	if err != nil {
 		t.Fatalf("AnchorCheckpoint: %v", err)
 	}
-	if entryID != "rekor-9001" || backend != "mock" {
-		t.Errorf("got (%q, %q), want (rekor-9001, mock)", entryID, backend)
+	if anchor.LogEntryID != "rekor-9001" || anchor.LedgerBackend != "mock" {
+		t.Errorf("got (%q, %q), want (rekor-9001, mock)",
+			anchor.LogEntryID, anchor.LedgerBackend)
+	}
+	// The preimage must survive the trip. Without it the chain records a
+	// log entry nobody can tie back to the checkpoint.
+	if !strings.Contains(anchor.LeafPreimage, cp.Hash) {
+		t.Errorf("the anchor did not carry a leaf preimage containing the "+
+			"checkpoint hash, so it could not be verified: %q", anchor.LeafPreimage)
 	}
 
 	// The auth header this file originally got wrong. Verdifax reads
@@ -148,6 +183,84 @@ func TestAnchorer_SendsTheCheckpointHashWithTheRightHeaderAndFields(t *testing.T
 	}
 }
 
+// ── CHECK 3: the receipt must be checkable by a third party ──────────
+//
+// Checks 1 and 2 ask Verdifax to vouch for itself, which catches a
+// misconfigured endpoint and not a dishonest one. This one is different:
+// it is the only check whose failure means an auditor could not confirm
+// the anchor against the log. Every checkpoint anchored before it
+// existed names a real Sigstore entry that nobody — this company
+// included — can tie back to the checkpoint that produced it.
+
+func TestAnchorer_RefusesAReceiptWithNoLeafPreimage(t *testing.T) {
+	t.Parallel()
+	cp := anchorTestCheckpoint(t)
+
+	a, done := anchorerAgainst(t, func(w http.ResponseWriter, _ *http.Request) {
+		okReceiptWithLeaf(w, cp.Hash, expectedProvenance, "rekor-1", "", "")
+	})
+	defer done()
+
+	_, err := a.AnchorCheckpoint(context.Background(), cp)
+	if err == nil {
+		t.Fatal("accepted a receipt with no leaf preimage. The log records a hash " +
+			"of a string that was not returned, so this anchor could never be " +
+			"checked — which is exactly the state that shipped and went unnoticed " +
+			"until an independent verifier was pointed at production")
+	}
+	if !strings.Contains(err.Error(), "preimage") {
+		t.Errorf("the error should name what is missing: %v", err)
+	}
+}
+
+// The preimage must produce the leaf Verdifax says it anchored. If it
+// does not, one of the two values is wrong and recording either would
+// be recording a fiction.
+func TestAnchorer_RefusesAnInternallyInconsistentReceipt(t *testing.T) {
+	t.Parallel()
+	cp := anchorTestCheckpoint(t)
+
+	a, done := anchorerAgainst(t, func(w http.ResponseWriter, _ *http.Request) {
+		okReceiptWithLeaf(w, cp.Hash, expectedProvenance, "rekor-1",
+			anchorLeafPreimage(cp.Hash), strings.Repeat("ab", 32))
+	})
+	defer done()
+
+	_, err := a.AnchorCheckpoint(context.Background(), cp)
+	if err == nil {
+		t.Fatal("accepted a receipt whose preimage does not hash to the leaf it reports")
+	}
+	if !strings.Contains(err.Error(), "inconsistent") {
+		t.Errorf("the error should say the receipt contradicts itself: %v", err)
+	}
+}
+
+// The anchored leaf must commit to THIS checkpoint. A well-formed
+// receipt for somebody else's leaf is the subtlest of the three: every
+// field is valid, the hashes all agree, and the entry describes a
+// different record entirely.
+func TestAnchorer_RefusesALeafThatDoesNotContainTheCheckpointHash(t *testing.T) {
+	t.Parallel()
+	cp := anchorTestCheckpoint(t)
+	elsewhere := anchorLeafPreimage(strings.Repeat("ef", 32))
+
+	a, done := anchorerAgainst(t, func(w http.ResponseWriter, _ *http.Request) {
+		okReceiptWithLeaf(w, cp.Hash, expectedProvenance, "rekor-1",
+			elsewhere, anchorLeafHash(elsewhere))
+	})
+	defer done()
+
+	_, err := a.AnchorCheckpoint(context.Background(), cp)
+	if err == nil {
+		t.Fatal("accepted an internally consistent receipt whose leaf does not " +
+			"contain this checkpoint's hash; the log entry would describe a " +
+			"different record")
+	}
+	if !strings.Contains(err.Error(), cp.Hash) {
+		t.Errorf("the error should name the hash that is missing from the leaf: %v", err)
+	}
+}
+
 // ── the two checks this file exists for ──────────────────────────────
 
 func TestAnchorer_RefusesAReceiptForADifferentDigest(t *testing.T) {
@@ -160,7 +273,7 @@ func TestAnchorer_RefusesAReceiptForADifferentDigest(t *testing.T) {
 	})
 	defer done()
 
-	_, _, err := a.AnchorCheckpoint(context.Background(), cp)
+	_, err := a.AnchorCheckpoint(context.Background(), cp)
 	if err == nil {
 		t.Fatal("accepted a receipt for a digest we never submitted. Nothing " +
 			"downstream would catch this: the chain would name a log entry that " +
@@ -180,7 +293,7 @@ func TestAnchorer_RefusesAReceiptClaimingAThirdParty(t *testing.T) {
 	})
 	defer done()
 
-	_, _, err := a.AnchorCheckpoint(context.Background(), cp)
+	_, err := a.AnchorCheckpoint(context.Background(), cp)
 	if err == nil {
 		t.Fatal("accepted a receipt claiming an independent submitter. Mesedi and " +
 			"Verdifax are one legal entity, so that receipt is false — and it " +
@@ -244,7 +357,8 @@ func TestAnchorer_FailureModes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a, done := anchorerAgainst(t, tc.handler)
 			defer done()
-			entryID, _, err := a.AnchorCheckpoint(context.Background(), cp)
+			anchor, err := a.AnchorCheckpoint(context.Background(), cp)
+			entryID := anchor.LogEntryID
 			if err == nil {
 				t.Fatalf("expected a failure, got entry id %q", entryID)
 			}
@@ -273,7 +387,7 @@ func TestAnchorer_ErrorsNeverContainTheAPIKey(t *testing.T) {
 	defer srv.Close()
 
 	a := NewVerdifaxAnchorer(srv.URL, secret, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	_, _, err := a.AnchorCheckpoint(context.Background(), cp)
+	_, err := a.AnchorCheckpoint(context.Background(), cp)
 	if err == nil {
 		t.Fatal("expected an error")
 	}

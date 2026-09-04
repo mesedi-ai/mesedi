@@ -1,0 +1,18 @@
+-- Store the string Verdifax hashed to produce the anchored leaf.
+--
+-- Without it, the transparency log entry a checkpoint names cannot be
+-- checked by anyone. The log records sha256 of a canonical leaf built
+-- from a domain tag, an envelope id, the checkpoint hash, a binding
+-- hash and a per-request nonce — and until 2026-09-04 that nonce was
+-- generated inside Verdifax's /attest handler, used, and discarded. So
+-- the published entry was the hash of a string that existed in no
+-- record anywhere, and comparing it against the checkpoint hash fails
+-- by construction. Running mesedi-verify against production is what
+-- surfaced this: four checkpoints, four mismatches.
+--
+-- Default '' rather than a value chosen to preserve behaviour, because
+-- no true value exists for rows written before this column. Their
+-- preimages are gone and cannot be reconstructed. Empty means "this
+-- anchor cannot be verified", NOT "not applicable", and every reader
+-- must treat it that way.
+ALTER TABLE checkpoints ADD COLUMN leaf_preimage TEXT NOT NULL DEFAULT '';

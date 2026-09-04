@@ -345,9 +345,9 @@ func (s *SQLiteStore) GetCheckpointAnchor(
 		anchoredAt sql.NullString
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT anchored_at, log_entry_id, ledger_backend
+		SELECT anchored_at, log_entry_id, ledger_backend, leaf_preimage
 		  FROM checkpoints WHERE seq = ?
-	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend)
+	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend, &a.LeafPreimage)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CheckpointAnchor{}, ErrNotFound
 	}
@@ -377,18 +377,26 @@ func (s *SQLiteStore) GetCheckpointAnchor(
 func (s *SQLiteStore) MarkCheckpointAnchored(
 	ctx context.Context,
 	seq uint64,
-	logEntryID, ledgerBackend string,
+	a CheckpointAnchor,
 	anchoredAt time.Time,
 ) error {
-	if logEntryID == "" {
+	if a.LogEntryID == "" {
 		return fmt.Errorf("mark checkpoint %d anchored: empty log entry id; "+
 			"an anchor with no entry to point at cannot be verified", seq)
 	}
+	// The preimage is NOT required here, deliberately. This store must
+	// still be able to record an anchor produced by a ledger that does
+	// not supply one, and refusing would turn an unverifiable anchor
+	// into a stalled chain — strictly worse, because the chain stops
+	// while the anchor it refused was still real. The caller is the
+	// right place to insist (see VerdifaxAnchorer), and the export
+	// reports an empty preimage as unverifiable rather than hiding it.
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE checkpoints
-		   SET anchored_at = ?, log_entry_id = ?, ledger_backend = ?
+		   SET anchored_at = ?, log_entry_id = ?, ledger_backend = ?,
+		       leaf_preimage = ?
 		 WHERE seq = ? AND anchored_at IS NULL
-	`, anchoredAt.UTC(), logEntryID, ledgerBackend, int64(seq))
+	`, anchoredAt.UTC(), a.LogEntryID, a.LedgerBackend, a.LeafPreimage, int64(seq))
 	if err != nil {
 		return fmt.Errorf("mark checkpoint %d anchored: %w", seq, err)
 	}

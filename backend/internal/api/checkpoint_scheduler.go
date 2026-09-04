@@ -58,7 +58,7 @@ type CheckpointAnchorer interface {
 	// AnchorCheckpoint submits cp.Hash and returns the log entry id and
 	// backend name. An error means NOT anchored; the caller must not
 	// treat a partial result as success.
-	AnchorCheckpoint(ctx context.Context, cp attest.Checkpoint) (logEntryID, ledgerBackend string, err error)
+	AnchorCheckpoint(ctx context.Context, cp attest.Checkpoint) (store.CheckpointAnchor, error)
 }
 
 // Defaults. Interval is deliberately NOT configurable at runtime: a
@@ -441,18 +441,27 @@ func (s *CheckpointScheduler) anchor(ctx context.Context, cp attest.Checkpoint) 
 				"the next interval cannot be built until this one reaches a log")
 		return fmt.Errorf("no anchorer configured")
 	}
-	entryID, backend, err := s.Anchorer.AnchorCheckpoint(ctx, cp)
+	anchor, err := s.Anchorer.AnchorCheckpoint(ctx, cp)
 	if err != nil {
 		s.Logger.Warn("checkpoint_scheduler: anchor failed, chain stalled",
 			"seq", cp.Seq, "error", err.Error())
 		return err
 	}
-	if entryID == "" {
+	if anchor.LogEntryID == "" {
 		s.Logger.Warn("checkpoint_scheduler: anchorer returned no log entry id",
 			"seq", cp.Seq)
 		return fmt.Errorf("anchorer returned an empty log entry id for checkpoint %d", cp.Seq)
 	}
-	if err := s.Store.MarkCheckpointAnchored(ctx, cp.Seq, entryID, backend, s.now()); err != nil {
+	// Deliberately NOT rejected here when the preimage is empty. The
+	// anchorer is the party that talked to the log and is the only one
+	// positioned to judge its receipt; duplicating that judgement here
+	// would mean two places to keep in step, and an anchorer that
+	// legitimately cannot supply a preimage would stall the chain
+	// forever rather than record a weaker but real anchor. The export
+	// reports an empty preimage as unverifiable, which is where a
+	// reader needs to see it.
+	entryID, backend := anchor.LogEntryID, anchor.LedgerBackend
+	if err := s.Store.MarkCheckpointAnchored(ctx, cp.Seq, anchor, s.now()); err != nil {
 		// Anchored in the log but not recorded here. The next pass sees
 		// it as unanchored and submits again, producing a second entry.
 		// Wasteful, not incorrect: two entries for one checkpoint is
