@@ -151,8 +151,42 @@ type verdifaxAttestResponse struct {
 	LeafHash     string `json:"leaf_hash"`
 	LeafPreimage string `json:"leaf_preimage"`
 
+	// The three values that let a checkpoint be verified WITHOUT asking
+	// Sigstore anything. Present only when Verdifax anchored to a real
+	// transparency log and is new enough to return them; absent means
+	// offline verification is not available for this checkpoint, which
+	// is weaker than the preimage being absent — an anchor with a
+	// preimage and no proof is still checkable by fetching the entry.
+	//
+	// InclusionProof is kept as raw JSON and never decoded here. Mesedi
+	// has no use for its interior and every reason not to re-encode
+	// somebody else's evidence: a field Sigstore or Verdifax adds later
+	// travels through intact rather than being silently dropped by a
+	// struct that predates it.
+	InclusionProof json.RawMessage `json:"inclusion_proof"`
+	EntryBody      string          `json:"entry_body"`
+	LogID          string          `json:"log_id"`
+
 	Provenance string `json:"provenance"`
 	Error      string `json:"error"`
+}
+
+// anchorProofEnvelope is what gets stored in checkpoints.anchor_proof_json
+// and handed to mesedi-verify.
+//
+// It exists because the three parts are useless separately. The proof
+// walks a Merkle path to a root; entry_body is where the walk STARTS,
+// since the RFC 6962 leaf is sha256(0x00 || base64decode(entry_body))
+// and not the leaf hash; and log_id says whose key signed the checkpoint
+// the walk ends at. A verifier missing any one of them either cannot
+// run or runs against an assumption.
+//
+// Field names match Verdifax's response, so the envelope reads as the
+// receipt it came from rather than as a Mesedi reinterpretation of it.
+type anchorProofEnvelope struct {
+	LogID          string          `json:"log_id,omitempty"`
+	EntryBody      string          `json:"entry_body,omitempty"`
+	InclusionProof json.RawMessage `json:"inclusion_proof,omitempty"`
 }
 
 func (a *VerdifaxAnchorer) client() *http.Client {
@@ -280,18 +314,66 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 		return store.CheckpointAnchor{}, err
 	}
 
+	// The proof is NOT required, and its absence must not fail the
+	// anchor. A missing proof costs offline verification; refusing would
+	// cost the chain, because the scheduler treats an error here as "not
+	// anchored" and retries forever. Task #32 was one event-less
+	// execution stopping checkpointing for every tenant — the same shape
+	// of mistake, and not one to repeat for a degradation that leaves
+	// the anchor perfectly checkable online.
+	//
+	// So: recorded when present, logged when absent, never fatal.
+	proofJSON := buildAnchorProof(out)
+	if proofJSON == "" && out.LedgerBackend == "rekor" {
+		a.Logger.Warn("verdifax_anchorer: anchored to a real log but got no offline proof",
+			"seq", cp.Seq,
+			"log_entry_id", out.LogEntryID,
+			"has_inclusion_proof", len(out.InclusionProof) > 0,
+			"has_entry_body", out.EntryBody != "",
+			"detail", "this checkpoint can be verified only by contacting the log")
+	}
+
 	a.Logger.Info("verdifax_anchorer: checkpoint anchored",
 		"seq", cp.Seq,
 		"attestation_id", out.AttestationID,
 		"log_entry_id", out.LogEntryID,
 		"ledger_backend", out.LedgerBackend,
+		"offline_verifiable", proofJSON != "",
 	)
 	return store.CheckpointAnchor{
-		Anchored:      true,
-		LogEntryID:    out.LogEntryID,
-		LedgerBackend: out.LedgerBackend,
-		LeafPreimage:  out.LeafPreimage,
+		Anchored:        true,
+		LogEntryID:      out.LogEntryID,
+		LedgerBackend:   out.LedgerBackend,
+		LeafPreimage:    out.LeafPreimage,
+		AnchorProofJSON: proofJSON,
 	}, nil
+}
+
+// buildAnchorProof assembles the offline-verification envelope, or
+// returns "" when the receipt does not carry enough to build one.
+//
+// A partial envelope is worse than none. A proof with no entry body
+// makes the Merkle walk start from the wrong value and fail, and that
+// failure looks exactly like tampering to whoever reads the report — a
+// verifier should say "cannot be checked", not "does not match". So all
+// three parts or nothing.
+func buildAnchorProof(out verdifaxAttestResponse) string {
+	if len(out.InclusionProof) == 0 || out.EntryBody == "" || out.LogID == "" {
+		return ""
+	}
+	b, err := json.Marshal(anchorProofEnvelope{
+		LogID:          out.LogID,
+		EntryBody:      out.EntryBody,
+		InclusionProof: out.InclusionProof,
+	})
+	if err != nil {
+		// Unreachable for two strings and a json.RawMessage that was
+		// already parsed. Returning "" rather than propagating keeps the
+		// contract above: no proof is a degradation, never a failed
+		// anchor.
+		return ""
+	}
+	return string(b)
 }
 
 // checkAnchorReceiptIsVerifiable confirms the receipt carries what a

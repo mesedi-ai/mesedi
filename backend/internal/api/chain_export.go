@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,6 +11,25 @@ import (
 	"mesedi/backend/internal/attest"
 	"mesedi/backend/internal/store"
 )
+
+// rawJSONOrNil carries a stored JSON string into the export without
+// re-encoding it.
+//
+// nil, not an empty json.RawMessage: an empty RawMessage marshals to
+// nothing and produces invalid JSON in the enclosing document, whereas
+// nil combined with omitempty makes the field disappear — which is the
+// honest rendering, since absent means "no offline proof was captured".
+//
+// Malformed stored JSON is dropped rather than emitted. A verifier
+// handed a broken proof would report a verification failure, and the
+// only true statement about a proof that will not parse is that there
+// isn't one.
+func rawJSONOrNil(s string) json.RawMessage {
+	if s == "" || !json.Valid([]byte(s)) {
+		return nil
+	}
+	return json.RawMessage(s)
+}
 
 // GET /me/chain/export — the file an auditor takes away.
 //
@@ -91,6 +111,7 @@ func (h *Handlers) buildChainExport(
 			// from a mismatch that looks like tampering.
 			LedgerBackend: ac.Anchor.LedgerBackend,
 			LeafPreimage:  ac.Anchor.LeafPreimage,
+			AnchorProof:   rawJSONOrNil(ac.Anchor.AnchorProofJSON),
 		}
 
 		all := leavesBySeq[cp.Seq]

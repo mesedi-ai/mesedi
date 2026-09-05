@@ -1,0 +1,34 @@
+-- Store the Merkle inclusion proof Verdifax gets back from the
+-- transparency log, so a checkpoint can be verified WITHOUT contacting
+-- the log at all.
+--
+-- Until now the chain recorded where a checkpoint landed (log_entry_id)
+-- and what was hashed to get there (leaf_preimage, migration 059), and
+-- verification then had to go and ask Sigstore whether that entry
+-- really says what we claim. That is a live network dependency sitting
+-- in the middle of an audit, and it fails in two directions: an auditor
+-- on an air-gapped network cannot verify at all, and an entry in a log
+-- that is later retired (task #22) becomes unverifiable retroactively
+-- even though nothing about the checkpoint changed.
+--
+-- One column rather than six. The value is a JSON envelope holding the
+-- three things offline verification needs together:
+--
+--   log_id          which log signed the checkpoint the proof ends at
+--   entry_body      the log entry as the log canonicalised it; the
+--                   RFC 6962 Merkle leaf is
+--                   sha256(0x00 || base64decode(entry_body)) and is NOT
+--                   leaf_hash, which hashes the data the entry points at
+--   inclusion_proof the sibling path, tree size, root hash and the
+--                   log's signed checkpoint over that root
+--
+-- Kept as one opaque blob on purpose. These fields are Verdifax's and
+-- the log's, not Mesedi's; splitting them into typed columns would mean
+-- Mesedi re-encoding somebody else's evidence, and any field added
+-- upstream would be silently dropped on the way through instead of
+-- travelling with the proof it belongs to.
+--
+-- Default '' because for existing rows no true value exists. Empty
+-- means "this checkpoint cannot be verified offline" — it can still be
+-- verified online against log_entry_id — and never "not applicable".
+ALTER TABLE checkpoints ADD COLUMN anchor_proof_json TEXT NOT NULL DEFAULT '';

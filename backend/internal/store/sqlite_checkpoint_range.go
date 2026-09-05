@@ -125,7 +125,8 @@ func (s *SQLiteStore) listCheckpointAnchorRange(
 	ctx context.Context, fromSeq, toSeq uint64,
 ) (map[uint64]CheckpointAnchor, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT seq, anchored_at, log_entry_id, ledger_backend, leaf_preimage
+		SELECT seq, anchored_at, log_entry_id, ledger_backend, leaf_preimage,
+		       anchor_proof_json
 		  FROM checkpoints
 		 WHERE seq >= ? AND seq <= ?
 	`, int64(fromSeq), int64(toSeq))
@@ -139,16 +140,17 @@ func (s *SQLiteStore) listCheckpointAnchorRange(
 		var (
 			seq                                   int64
 			anchoredAt, logEntryID, ledgerBackend sql.NullString
-			leafPreimage                          sql.NullString
+			leafPreimage, anchorProof             sql.NullString
 		)
 		if err := rows.Scan(&seq, &anchoredAt, &logEntryID, &ledgerBackend,
-			&leafPreimage); err != nil {
+			&leafPreimage, &anchorProof); err != nil {
 			return nil, fmt.Errorf("scan checkpoint anchor: %w", err)
 		}
 		a := CheckpointAnchor{
-			LogEntryID:    logEntryID.String,
-			LedgerBackend: ledgerBackend.String,
-			LeafPreimage:  leafPreimage.String,
+			LogEntryID:      logEntryID.String,
+			LedgerBackend:   ledgerBackend.String,
+			LeafPreimage:    leafPreimage.String,
+			AnchorProofJSON: anchorProof.String,
 		}
 		if anchoredAt.Valid && anchoredAt.String != "" {
 			// parseFlexTime, not mustParseStoredTime: anchored_at is not

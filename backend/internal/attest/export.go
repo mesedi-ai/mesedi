@@ -1,6 +1,7 @@
 package attest
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -79,6 +80,30 @@ type ExportedInterval struct {
 	// not known to be wrong, it is merely no longer checkable, and
 	// conflating the two would be a falsehood in the opposite direction.
 	LeafPreimage string `json:"leaf_preimage,omitempty"`
+
+	// AnchorProof is the log's own proof that the entry at LogEntryID is
+	// committed under a root the log signed: a JSON object holding
+	// log_id, entry_body and inclusion_proof.
+	//
+	// It is what turns the sentence above — "confirming them is exactly
+	// what requires leaving the export and asking the log" — from true
+	// into false. With it, the export is self-contained: a verifier
+	// recomputes the Merkle root from the sibling path, checks the log's
+	// signature over that root against a pinned public key, and confirms
+	// log_id names the log that key belongs to. No network, which means
+	// an auditor on a closed network can verify, and a checkpoint stays
+	// verifiable even if the log itself is later retired (task #22).
+	//
+	// Raw JSON, passed through untouched from the anchoring receipt. It
+	// is the log's evidence and Verdifax's, not Mesedi's, and re-encoding
+	// it here would drop whatever either of them adds next.
+	//
+	// Empty means offline verification is not possible for this
+	// checkpoint. That is NOT the same as an empty LeafPreimage: an
+	// anchor with a preimage and no proof is still fully checkable by
+	// fetching the entry from the log. A verifier must keep the two
+	// findings apart.
+	AnchorProof json.RawMessage `json:"anchor_proof,omitempty"`
 
 	// Leaf and Proof are nil when this project had no sealed executions
 	// in the interval. That is a normal, expected state and must not read

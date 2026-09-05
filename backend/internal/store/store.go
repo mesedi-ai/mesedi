@@ -869,6 +869,23 @@ type CheckpointAnchor struct {
 	// nothing can reconstruct those preimages. Empty means "this anchor
 	// cannot be verified", never "not applicable".
 	LeafPreimage string
+
+	// AnchorProofJSON is the transparency log's own proof that the entry
+	// at LogEntryID is committed under a root the log signed. It is what
+	// makes a checkpoint verifiable WITHOUT contacting the log.
+	//
+	// A JSON envelope with three members — log_id, entry_body and
+	// inclusion_proof — carried as opaque bytes rather than parsed into
+	// typed fields, because it is Verdifax's and Sigstore's evidence
+	// passing through Mesedi, not Mesedi's own data. Re-encoding it here
+	// would silently drop anything either of them adds later.
+	//
+	// Empty means offline verification is not possible for this
+	// checkpoint. That is weaker than an empty LeafPreimage, which means
+	// no verification is possible at all: an anchor with a preimage and
+	// no proof can still be checked by fetching the entry from the log.
+	// Readers must not collapse the two into "unverified".
+	AnchorProofJSON string
 }
 
 // Store is the abstract persistence interface. Phase 1.5 minimal surface;

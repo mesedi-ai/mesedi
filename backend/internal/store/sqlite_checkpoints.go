@@ -345,9 +345,11 @@ func (s *SQLiteStore) GetCheckpointAnchor(
 		anchoredAt sql.NullString
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT anchored_at, log_entry_id, ledger_backend, leaf_preimage
+		SELECT anchored_at, log_entry_id, ledger_backend, leaf_preimage,
+		       anchor_proof_json
 		  FROM checkpoints WHERE seq = ?
-	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend, &a.LeafPreimage)
+	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend, &a.LeafPreimage,
+		&a.AnchorProofJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CheckpointAnchor{}, ErrNotFound
 	}
@@ -394,9 +396,10 @@ func (s *SQLiteStore) MarkCheckpointAnchored(
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE checkpoints
 		   SET anchored_at = ?, log_entry_id = ?, ledger_backend = ?,
-		       leaf_preimage = ?
+		       leaf_preimage = ?, anchor_proof_json = ?
 		 WHERE seq = ? AND anchored_at IS NULL
-	`, anchoredAt.UTC(), a.LogEntryID, a.LedgerBackend, a.LeafPreimage, int64(seq))
+	`, anchoredAt.UTC(), a.LogEntryID, a.LedgerBackend, a.LeafPreimage,
+		a.AnchorProofJSON, int64(seq))
 	if err != nil {
 		return fmt.Errorf("mark checkpoint %d anchored: %w", seq, err)
 	}
