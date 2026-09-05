@@ -415,12 +415,25 @@ func (s *CheckpointScheduler) projectIntervalRoot(
 		if err != nil {
 			return "", 0, fmt.Errorf("events for %s: %w", execID, err)
 		}
-		d, err := attest.Compute(execID, evts)
+		// ComputeForChain, not Compute. An execution with no events gets
+		// a distinct, domain-separated digest rather than an error.
+		//
+		// This line was the outage of 2026-09-04. Compute refuses an
+		// empty event list — correctly, so the digest endpoint can answer
+		// 404 instead of letting an empty root stand in for a record —
+		// but the chain cannot refuse. One execution created and crashed
+		// 452 microseconds later, before emitting anything, stopped
+		// checkpoint construction for EVERY tenant on every tick, and it
+		// would never have recovered, because that execution will never
+		// acquire events. Any customer could trigger it by accident.
+		//
+		// Refusing the interval is still right for a real digest failure,
+		// so that path is unchanged below. Only the empty case moved.
+		d, err := attest.ComputeForChain(execID, evts)
 		if err != nil {
-			// An execution with no events cannot be digested. Refuse the
-			// whole interval rather than silently dropping it: a leaf
-			// whose count includes an execution the root does not cover
-			// is a lie the chain would then anchor.
+			// Refuse the whole interval rather than silently dropping the
+			// execution: a leaf whose count includes an execution the
+			// root does not cover is a lie the chain would then anchor.
 			return "", 0, fmt.Errorf("digest execution %s: %w", execID, err)
 		}
 		roots = append(roots, d.Root)

@@ -94,6 +94,75 @@ type Digest struct {
 // compute a different root and report tampering that did not happen.
 const AlgorithmV1 = "mesedi-exec-merkle-v1/rfc6962-sha256"
 
+// AlgorithmNoEventsV1 identifies the digest of an execution that
+// recorded no events at all. A different construction from AlgorithmV1
+// — it is not a Merkle root over anything — so per the rule above it
+// gets its own identifier rather than pretending to be a v1 tree.
+const AlgorithmNoEventsV1 = "mesedi-exec-no-events-v1/sha256"
+
+// noEventsDomain separates the no-events construction from every other
+// hash in this package. Without it, a value computed here could collide
+// with some future construction over the same input.
+const noEventsDomain = "mesedi.execution.no-events.v1"
+
+// ComputeForChain digests an execution for inclusion in the checkpoint
+// chain, including the case where it has no events.
+//
+// # WHY THIS EXISTS SEPARATELY FROM Compute
+//
+// Compute deliberately refuses an empty event list, and that refusal is
+// correct: an empty Merkle root is a real value, and returning it would
+// let "we have no record of this run" masquerade as "here is the
+// record". The digest endpoint depends on that and answers 404.
+//
+// But the CHAIN cannot refuse. On 2026-09-04 a single execution with
+// zero events — created and crashed 452 microseconds later, before it
+// emitted anything — stopped checkpoint construction for every tenant,
+// on every tick, permanently, because that execution will never acquire
+// events. Any customer could cause it, deliberately or by having an SDK
+// die between execution creation and its first flush.
+//
+// Skipping such executions instead would be worse: the chain would stop
+// committing to their existence, and a row deleted afterwards would
+// leave no trace. That is the omission this whole mechanism exists to
+// make visible.
+//
+// So an event-less execution gets a digest that is honest about being
+// one: domain-separated, derived from the execution id, carrying
+// LeafCount 0 and its own algorithm identifier. It cannot be mistaken
+// for a root over real events, it differs per execution so two empty
+// runs do not collapse into one value, and the chain still commits to
+// the fact that the execution happened.
+func ComputeForChain(executionID string, evts []*events.Event) (Digest, error) {
+	d, err := Compute(executionID, evts)
+	if err == nil {
+		return d, nil
+	}
+	if !errors.Is(err, ErrNoEvents) {
+		return Digest{}, err
+	}
+	if executionID == "" {
+		// The whole construction is derived from the id; without one
+		// there is nothing to distinguish this from any other empty
+		// execution, and a shared root across distinct runs is exactly
+		// what the domain separation is here to prevent.
+		return Digest{}, errors.New(
+			"attest: cannot digest an event-less execution with no execution id")
+	}
+
+	// NUL between the domain and the id: execution ids are printable
+	// and never contain it, so the preimage cannot be ambiguous the way
+	// a bare concatenation could.
+	sum := sha256.Sum256([]byte(noEventsDomain + "\x00" + executionID))
+	return Digest{
+		ExecutionID: executionID,
+		Root:        hex.EncodeToString(sum[:]),
+		LeafCount:   0,
+		Leaves:      nil,
+		Algorithm:   AlgorithmNoEventsV1,
+	}, nil
+}
+
 // CanonicalLeaf returns the exact bytes hashed for one event.
 //
 // FIELD CHOICE IS THE SECURITY-RELEVANT PART OF THIS FILE. Anything

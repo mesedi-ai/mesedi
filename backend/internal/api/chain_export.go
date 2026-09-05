@@ -169,7 +169,13 @@ func (h *Handlers) exportedExecutions(
 		if err != nil {
 			return nil, fmt.Errorf("events for %s: %w", execID, err)
 		}
-		d, err := attest.Compute(execID, evts)
+		// ComputeForChain, not Compute: an execution with no events must
+		// still appear here. Compute refuses an empty event list by
+		// design, and this path used the same call as the scheduler, so
+		// the stall that stopped checkpoint construction on 2026-09-04
+		// would have reappeared in the export the moment an interval
+		// containing an event-less execution was requested.
+		d, err := attest.ComputeForChain(execID, evts)
 		if err != nil {
 			// Refuse the export rather than omit the execution. An export
 			// missing an execution the leaf's count includes is exactly
