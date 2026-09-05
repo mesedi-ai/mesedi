@@ -3,6 +3,7 @@ package attest
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -252,6 +253,88 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 	} else {
 		v.add("all checkpoints published", true,
 			"every checkpoint says where it was published")
+	}
+
+	// 2b. Publication was never skipped for an hour.
+	//
+	// Each checkpoint carries PrevLogEntryID, the public-log position of
+	// the checkpoint before it. VerifyChain only asserts that field is
+	// NON-EMPTY, which is the weakest possible reading of it: any string
+	// passes. Nothing until now compared it against the position the
+	// previous checkpoint was actually published at.
+	//
+	// That comparison is what makes "the chain cannot advance without
+	// publishing" checkable by a reader instead of a claim about our
+	// scheduler that only someone reading our source can evaluate. It is
+	// the property that separates this design from one where anchoring is
+	// a setting somebody can turn off, and it was the last major claim in
+	// the report that rested on trusting us.
+	//
+	// It bites because it COMPOSES with the transparency-log check. On its
+	// own, a fabricated chain could carry internally consistent made-up
+	// positions. But every position named here is separately proven to
+	// hold the leaf committing to that specific checkpoint. So the two
+	// together say: hour N+1 names a public-log position, that position
+	// really contains hour N, and hour N really contains hour N-1. A
+	// missing hour has nowhere to hide, because the hour after it would
+	// have to name a published position for a checkpoint that was never
+	// published.
+	//
+	// A ranged export cannot check its own first element: the checkpoint
+	// before it is outside the file. Reported rather than skipped
+	// silently, because an unchecked link presented as a checked one is
+	// the failure this whole document exists to prevent.
+	var (
+		linkedToPrev   int
+		badLinks       []string
+		firstUnchecked bool
+	)
+	for i, iv := range e.Intervals {
+		cp := iv.Checkpoint
+		if i == 0 {
+			// Genesis has no predecessor by construction, which
+			// VerifyChain already enforces. Anything else is a window
+			// start whose predecessor we do not hold.
+			if cp.Seq != 1 {
+				firstUnchecked = true
+			}
+			continue
+		}
+		prev := e.Intervals[i-1]
+		// Only adjacent checkpoints can be compared. If the sequence is
+		// broken, VerifyChain has already reported it and comparing
+		// non-adjacent entries would add a second, confusing failure.
+		if cp.Seq != prev.Checkpoint.Seq+1 {
+			continue
+		}
+		if cp.PrevLogEntryID != prev.LogEntryID {
+			badLinks = append(badLinks, fmt.Sprintf(
+				"hour %d says the hour before it was published at position %q, but hour %d "+
+					"was published at %q", cp.Seq, cp.PrevLogEntryID,
+				prev.Checkpoint.Seq, prev.LogEntryID))
+			continue
+		}
+		linkedToPrev++
+	}
+	switch {
+	case len(badLinks) > 0:
+		v.add("publication never skipped", false,
+			"%s. An hour was recorded without the hour before it being published, "+
+				"or the record of where it was published has been altered",
+			strings.Join(badLinks, "; "))
+	case linkedToPrev == 0:
+		v.add("publication never skipped", true,
+			"only one hour is covered here, so there is no earlier hour to link it to")
+	default:
+		detail := fmt.Sprintf("each of %s names the exact public-log position of the "+
+			"hour before it, and every one matched. Publishing even one hour late or not "+
+			"at all would break this",
+			plural(linkedToPrev, "hour", "hours"))
+		if firstUnchecked {
+			detail += ". The earliest hour in this file has no earlier hour here to link " +
+				"to, so that one link is not checked"
+		}
+		v.add("publication never skipped", true, "%s", detail)
 	}
 
 	// 3. This project's leaves, per interval.

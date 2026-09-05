@@ -22,6 +22,14 @@ func digestRoot(n int) string {
 // buildExport constructs a valid export whose intervals have the given
 // execution counts. A count of 0 means the project had no activity that
 // hour, which produces a checkpoint with no leaf for this project.
+// The public-log position interval i is published at. One function, so a
+// checkpoint's PrevLogEntryID and the previous interval's LogEntryID
+// cannot drift apart in the fixture the way they did for the life of
+// this file.
+func logEntryIDForInterval(i int) string {
+	return fmt.Sprintf("27124679%02d", i)
+}
+
 func buildExport(t *testing.T, counts []int) ChainExport {
 	t.Helper()
 
@@ -73,9 +81,18 @@ func buildExport(t *testing.T, counts []int) ChainExport {
 			leaf = &l
 		}
 
+		// The position the PREVIOUS interval was published at, not an
+		// unrelated plausible-looking number.
+		//
+		// This helper used to mint "27124678%02d" here while giving the
+		// interval itself "27124679%02d" below, so a checkpoint's
+		// PrevLogEntryID never matched what the previous checkpoint was
+		// actually published at. Nothing noticed, because the only
+		// assertion on the field was that it is non-empty. The fixture
+		// carried the same defect as the code it was testing.
 		prevLogEntry := ""
 		if prevCP != nil {
-			prevLogEntry = fmt.Sprintf("27124678%02d", i)
+			prevLogEntry = logEntryIDForInterval(i - 1)
 		}
 		cp, err := BuildCheckpoint(CheckpointParams{
 			Prev:           prevCP,
@@ -92,7 +109,7 @@ func buildExport(t *testing.T, counts []int) ChainExport {
 
 		iv := ExportedInterval{
 			Checkpoint: cp,
-			LogEntryID: fmt.Sprintf("27124679%02d", i),
+			LogEntryID: logEntryIDForInterval(i),
 			AnchoredAt: hour(i + 1).Add(2 * time.Minute),
 			Executions: execs,
 		}

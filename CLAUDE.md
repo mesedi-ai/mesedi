@@ -35,6 +35,22 @@ non-ASCII text to prove non-ASCII is handled, such as the unicode case in
 Also avoid: "delve", "leverage", "robust", "seamless", and opening a
 reply by restating the question.
 
+## Reporting status
+
+When asked where things stand, or when finishing a stretch of work, open
+with two blocks and nothing before them:
+
+**Where we are** followed by what shipped, in one short paragraph.
+
+**Open, ordered by what actually matters** followed by a table whose left
+column is the reason a thing matters and whose right column is the task
+numbers. Not a flat list, and not ordered by task number. Suggested
+buckets, adapted to the situation: blocking a government conversation,
+the next moat, competitive parity, engineering debt, business, spikes.
+
+Then the substance. No preamble, no recap of what the person watched
+happen.
+
 ## Commits
 
 Subject line, then at most three lines of body. Not more. Explain why,
