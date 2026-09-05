@@ -13,7 +13,7 @@
 //	cat export.json | mesedi-verify        # verify from stdin
 //	mesedi-verify --json export.json       # machine-readable
 //	mesedi-verify --pdf out.pdf export.json # also write a PDF report
-//	mesedi-verify --offline export.json    # skip the log; proves less
+//	mesedi-verify --offline export.json    # no network; see below
 //	mesedi-verify --rekor <url> export.json
 //
 // EXIT CODES
@@ -28,15 +28,31 @@
 //	   could not be written. Separate from 1 on purpose: "we could not
 //	   run the check" and "the check failed" must not look alike.
 //
-// # WHY --offline PROVES LESS, AND WHY THE REPORT SAYS SO
+// # WHAT --offline PROVES, WHICH DEPENDS ON THE EXPORT
 //
-// Offline, this checks that the export is internally consistent: the
-// chain links, the hashes recompute, the executions fold to the anchored
-// roots. All of that would also pass for an export a lying Mesedi
-// constructed carefully, because Mesedi produced every byte of it. Only
-// resolving the log entries breaks that circle. An offline run is useful
-// for a quick structural check; it is not evidence, and the report says
-// exactly that rather than leaving the reader to infer it.
+// This used to be simple: offline meant structural checks only, which a
+// lying Mesedi could satisfy because Mesedi wrote every byte, so an
+// offline run was not evidence. That is still true for a checkpoint
+// carrying nothing but a leaf preimage, and such checkpoints are
+// reported UNVERIFIABLE by name rather than passed over.
+//
+// It is no longer true for a checkpoint carrying an inclusion proof.
+// That proof is Sigstore's signature over a Merkle tree head, and
+// verifying it needs no network and no trust in Mesedi — the signature
+// either checks out against a key compiled into this binary or it does
+// not. For those checkpoints an offline run is STRONGER than a lookup:
+// a lookup asks the log what it holds today and believes the answer,
+// which trusts whoever is serving that endpoint, while a signed tree
+// head cannot be forged by them and stays valid after the log is retired.
+//
+// So the report no longer states a blanket offline caveat. It states,
+// per checkpoint, which of the two checks ran, and the summary sentence
+// is chosen from those counts rather than from the flag.
+//
+// One thing an inclusion proof does NOT establish on its own is that the
+// entry it proves has anything to do with your checkpoint. See offline.go
+// for the binding step that closes that gap, and why omitting it would
+// produce a verifier that is confidently green about somebody else's data.
 //
 // # LICENSE
 //
@@ -192,25 +208,24 @@ func main() {
 				"clean checkout, for anything that will be relied on.")
 	}
 
-	if *offline {
-		rep.Structural.Unverified = append(rep.Structural.Unverified,
-			"RUN OFFLINE. The transparency log was not contacted, so this report "+
-				"shows only that the export is internally consistent. An export "+
-				"constructed to be self-consistent would also pass. Re-run without "+
-				"--offline for a result that does not depend on trusting Mesedi.")
-	} else {
-		rep.LogEntries = resolveLogEntries(export, *rekorURL)
+	{
+		// Run for both modes. An offline run now checks every stored
+		// inclusion proof rather than skipping the anchors entirely, so
+		// the old "offline shows only internal consistency" branch would
+		// understate what happened — which is a falsehood in the safe
+		// direction, but still a falsehood in a report whose job is to
+		// say precisely what was established.
+		rep.LogEntries = resolveLogEntries(export, *rekorURL, *offline)
 
 		// A failed entry is a finding. An unverifiable one is not — but
 		// it still means this report does not establish what it set out
 		// to, so neither may leave rep.OK true. Exit 0 on a chain nobody
 		// can check would be the single most misleading thing this tool
 		// could do.
-		var failed, unverifiable []uint64
+		var unverifiable []uint64
 		for _, e := range rep.LogEntries {
 			switch {
 			case e.failed():
-				failed = append(failed, e.Seq)
 				rep.OK = false
 			case e.unverifiable():
 				unverifiable = append(unverifiable, e.Seq)
@@ -240,11 +255,20 @@ func main() {
 		// job is to prevent overclaiming is the worst place in the report
 		// for one, and it survived because the substitution was written
 		// at a moment when every run happened to resolve everything.
-		verified := len(rep.LogEntries) - len(failed) - len(unverifiable)
 		rep.Structural.Unverified = replacePrefix(
 			rep.Structural.Unverified,
 			"Transparency log entries were NOT resolved",
-			logResolutionCaveat(verified, len(rep.LogEntries)))
+			logResolutionCaveat(rep.LogEntries, *offline))
+
+		// An anchor proof that was present and unusable must not vanish.
+		// Reported separately from the verdict, because it describes what
+		// was OFFERED, and the verdict describes what was established.
+		for _, e := range rep.LogEntries {
+			if e.ProofNote != "" {
+				rep.Structural.Unverified = append(rep.Structural.Unverified,
+					fmt.Sprintf("Checkpoint %d: %s.", e.Seq, e.ProofNote))
+			}
+		}
 	}
 
 	if *asJSON {
@@ -290,7 +314,13 @@ func writePDF(path string, rep report) error {
 // genuinely resolved. Explaining what "was not ADDITIONALLY checked"
 // after checking nothing invites the reader to infer a baseline that
 // does not exist.
-func logResolutionCaveat(verified, total int) string {
+// The offline count is the reason this takes the entries rather than two
+// integers. The tree-head sentence below says what was NOT checked, and
+// for an entry settled by an inclusion proof that sentence is false —
+// checking Sigstore's signature over the tree head is exactly what
+// VerifyAnchor does. Deciding the wording from a bare verified count
+// would reprint the old falsehood in a new place.
+func logResolutionCaveat(entries []LogEntryCheck, offline bool) string {
 	const treeHead = " What was not additionally checked is the log's own signed tree " +
 		"head. That further step would guard against Sigstore itself being dishonest; " +
 		"it is not what protects you from Mesedi. For a hash to be found there at all, " +
@@ -298,10 +328,47 @@ func logResolutionCaveat(verified, total int) string {
 		"control. If Sigstore is dishonest, this system's guarantee is gone by design, " +
 		"and that premise is stated up front rather than papered over."
 
+	const treeHeadChecked = " Each was checked against Sigstore's own signed tree head, " +
+		"using a public key compiled into this verifier, so this result does not " +
+		"depend on the log being reachable or truthful at the moment you read it — " +
+		"and it will still hold if that log is ever retired."
+
+	total := len(entries)
+	var verified, offlineVerified int
+	for _, e := range entries {
+		if !e.verified() {
+			continue
+		}
+		verified++
+		if e.Method == MethodOfflineProof {
+			offlineVerified++
+		}
+	}
+
+	// How the confirmed entries were confirmed, appended to the counts
+	// sentence. Three states, because "all", "none" and "some" license
+	// three different claims and merging any two of them overstates one.
+	tail := treeHead
+	switch {
+	case offlineVerified == verified && verified > 0:
+		tail = treeHeadChecked
+	case offlineVerified > 0:
+		tail = fmt.Sprintf(" %d of those were proven with an inclusion proof carried in "+
+			"the export, which does include Sigstore's signed tree head. The rest were "+
+			"confirmed by asking the log, which does not.%s", offlineVerified, treeHead)
+	}
+
 	switch {
 	case total == 0:
-		return "The transparency log was contacted, but this export contains no " +
-			"checkpoints to resolve against it."
+		return "This export contains no checkpoints to resolve against a transparency log."
+
+	case verified == 0 && offline:
+		return fmt.Sprintf(
+			"No network was used, and NONE of the %d checkpoints in this export "+
+				"carried an inclusion proof this verifier could check. This report "+
+				"therefore rests entirely on the export's internal consistency, which "+
+				"an export built to be self-consistent would also satisfy. Treat it as "+
+				"a structural check, not as evidence. Re-run without --offline.", total)
 
 	case verified == 0:
 		return fmt.Sprintf(
@@ -316,12 +383,12 @@ func logResolutionCaveat(verified, total int) string {
 			"%d of %d checkpoints were confirmed PRESENT in the public log at the "+
 				"index each claims. The remaining %d were not, and are listed above "+
 				"with the reason for each.%s",
-			verified, total, total-verified, treeHead)
+			verified, total, total-verified, tail)
 
 	default:
 		return fmt.Sprintf(
 			"All %d checkpoint leaves were confirmed PRESENT in the public log at the "+
-				"index each claims.%s", total, treeHead)
+				"index each claims.%s", total, tail)
 	}
 }
 
@@ -367,8 +434,30 @@ func readExport(path string) ([]byte, error) {
 //
 // The preimage is searched, never parsed: its fields are joined without
 // length prefixing, so it cannot be split back into parts unambiguously.
-func resolveLogEntries(export attest.ChainExport, rekorURL string) []LogEntryCheck {
-	client := newRekorClient(rekorURL)
+//
+// # OFFLINE IS NO LONGER A WEAKER RUN, WHEN A PROOF IS PRESENT
+//
+// Every checkpoint is now attempted against its stored inclusion proof
+// first, whether or not the network is allowed. A proof settles the
+// question outright and more strongly than a lookup does — see
+// offline.go — so the lookup is a fallback for checkpoints that carry no
+// proof, which is every checkpoint anchored before 2026-09-05.
+//
+// offline=true therefore does not mean "prove less". It means "use only
+// what the export carries", and for a checkpoint with a proof that is a
+// complete result. For one without, the entry is reported UNVERIFIABLE
+// by name rather than silently omitted.
+func resolveLogEntries(
+	export attest.ChainExport, rekorURL string, offline bool,
+) []LogEntryCheck {
+	// A nil client is the signal that no lookup may happen. Passing nil
+	// rather than a flag means an accidental network call in this path
+	// panics in a test instead of quietly reaching the internet during a
+	// run the operator asked to keep local.
+	var client *rekorClient
+	if !offline {
+		client = newRekorClient(rekorURL)
+	}
 	ctx := context.Background()
 
 	out := make([]LogEntryCheck, 0, len(export.Intervals))
@@ -426,6 +515,32 @@ func resolveOne(
 		return check
 	}
 
+	// Offline first, because it is strictly stronger than the lookup
+	// below and costs nothing. The lookup asks the log what it holds
+	// today and believes the answer; the proof carries Sigstore's
+	// signature over a tree head, which whoever answers the request
+	// cannot forge.
+	off := verifyAnchorOffline(iv)
+	check.ProofNote = off.Note
+	if off.Decided {
+		check.Method = MethodOfflineProof
+		check.Status = off.Status
+		check.Detail = off.Detail
+		return check
+	}
+
+	// No usable proof and no network. Unverifiable, and named as such:
+	// an offline run that quietly reported nothing for this checkpoint
+	// would be indistinguishable from one that checked it.
+	if client == nil {
+		check.Status = StatusUnverifiable
+		check.Detail = "this run did not contact the log, and this checkpoint carries " +
+			"no usable inclusion proof, so nothing here checked it. Re-run without " +
+			"--offline. This is NOT a finding about the record"
+		return check
+	}
+
+	check.Method = MethodLogLookup
 	recorded, integrated, err := client.lookup(ctx, iv.LogEntryID)
 	if err != nil {
 		check.Status = StatusFailed

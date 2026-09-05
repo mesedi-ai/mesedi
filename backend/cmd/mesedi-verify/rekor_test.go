@@ -199,7 +199,7 @@ func TestResolveLogEntriesCatchesALeafTheLogDoesNotHave(t *testing.T) {
 		Intervals: []attest.ExportedInterval{anchored(1, testHash, "100")},
 	}
 
-	results := resolveLogEntries(export, srv.URL)
+	results := resolveLogEntries(export, srv.URL, false)
 	if len(results) != 1 {
 		t.Fatalf("want 1 result, got %d", len(results))
 	}
@@ -223,7 +223,7 @@ func TestResolveLogEntriesAcceptsAGenuinelyAnchoredCheckpoint(t *testing.T) {
 	export := attest.ChainExport{
 		Intervals: []attest.ExportedInterval{anchored(1, testHash, "7")},
 	}
-	got := resolveLogEntries(export, srv.URL)[0]
+	got := resolveLogEntries(export, srv.URL, false)[0]
 	if !got.verified() {
 		t.Fatalf("a correctly anchored checkpoint did not verify: status=%q detail=%s",
 			got.Status, got.Detail)
@@ -241,7 +241,7 @@ func TestResolveLogEntriesRejectsALeafForADifferentCheckpoint(t *testing.T) {
 
 	got := resolveLogEntries(attest.ChainExport{
 		Intervals: []attest.ExportedInterval{iv},
-	}, srv.URL)[0]
+	}, srv.URL, false)[0]
 
 	if !got.failed() {
 		t.Fatalf("a leaf that does not name this checkpoint was not a failure "+
@@ -265,7 +265,7 @@ func TestResolveLogEntriesReportsAMissingPreimageAsUnverifiableNotFailed(t *test
 
 	got := resolveLogEntries(attest.ChainExport{
 		Intervals: []attest.ExportedInterval{iv},
-	}, srv.URL)[0]
+	}, srv.URL, false)[0]
 
 	if got.failed() {
 		t.Fatal("a checkpoint that merely cannot be checked was reported as a " +
@@ -291,7 +291,7 @@ func TestResolveLogEntriesReportsAMockAnchorAsUnverifiable(t *testing.T) {
 
 	got := resolveLogEntries(attest.ChainExport{
 		Intervals: []attest.ExportedInterval{iv},
-	}, srv.URL)[0]
+	}, srv.URL, false)[0]
 
 	if !got.unverifiable() {
 		t.Fatalf("a mock-ledger anchor should be unverifiable, got %q: %s",
@@ -321,7 +321,7 @@ func TestResolveLogEntriesReportsEveryCheckpoint(t *testing.T) {
 		noEntry,
 	}}
 
-	results := resolveLogEntries(export, srv.URL)
+	results := resolveLogEntries(export, srv.URL, false)
 	if len(results) != 4 {
 		t.Fatalf("every checkpoint should be reported; got %d of 4", len(results))
 	}

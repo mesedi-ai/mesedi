@@ -82,7 +82,32 @@ type LogEntryCheck struct {
 	// Integrated is when the log says it incorporated the entry. Zero
 	// unless the entry was actually retrieved.
 	Integrated time.Time
+
+	// Method names which check produced Status. Empty when the entry was
+	// settled before either ran — a mock ledger, say, or a missing
+	// preimage.
+	Method string
+
+	// ProofNote records that an anchor proof was present but could not be
+	// used, and why. Kept separate from Detail because the outcome
+	// belongs to whichever check did decide; this says what was offered
+	// and declined. Without it an unusable proof vanishes from the
+	// report, which reads exactly like none having been offered.
+	ProofNote string
 }
+
+// How a checkpoint's anchor was checked. The two are not equally strong
+// and a reader must not have to guess which one produced a given line.
+//
+// MethodOfflineProof is the stronger. A log lookup asks the log what it
+// holds TODAY and believes the answer, so it trusts whoever is serving
+// that endpoint. An inclusion proof carries Sigstore's own signature
+// over a tree head: it cannot be forged by whoever answers the request,
+// and it remains valid after the log itself is retired (task #22).
+const (
+	MethodOfflineProof = "inclusion proof, offline"
+	MethodLogLookup    = "log lookup, network"
+)
 
 func (c LogEntryCheck) verified() bool     { return c.Status == StatusVerified }
 func (c LogEntryCheck) failed() bool       { return c.Status == StatusFailed }

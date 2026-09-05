@@ -17,6 +17,27 @@ import (
 // prevent overclaiming is the worst place in the report to have one.
 // These tests exist so it cannot come back.
 
+// entriesFor builds a slate of checks: `verified` of `total` passing,
+// of which `offlineProved` were settled by an inclusion proof rather
+// than a network lookup. The rest fail, which is enough for the counts;
+// the caveat does not distinguish failed from unverifiable.
+func entriesFor(verified, total, offlineProved int) []LogEntryCheck {
+	out := make([]LogEntryCheck, 0, total)
+	for i := 0; i < total; i++ {
+		e := LogEntryCheck{Seq: uint64(i)}
+		switch {
+		case i < offlineProved:
+			e.Status, e.Method = StatusVerified, MethodOfflineProof
+		case i < verified:
+			e.Status, e.Method = StatusVerified, MethodLogLookup
+		default:
+			e.Status = StatusFailed
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 func TestCaveatNeverClaimsVerificationThatDidNotHappen(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -55,7 +76,7 @@ func TestCaveatNeverClaimsVerificationThatDidNotHappen(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := logResolutionCaveat(tc.verified, tc.total)
+			got := logResolutionCaveat(entriesFor(tc.verified, tc.total, 0), false)
 			for _, s := range tc.mustNotContain {
 				if strings.Contains(got, s) {
 					t.Errorf("caveat claims %q when %d of %d were verified:\n%s",
@@ -85,10 +106,69 @@ func TestCaveatNeverClaimsVerificationThatDidNotHappen(t *testing.T) {
 // standing warning, and replacing a warning with nothing is how a limit
 // silently disappears from a report.
 func TestCaveatIsNeverEmpty(t *testing.T) {
-	for _, c := range [][2]int{{0, 0}, {0, 1}, {1, 1}, {1, 5}, {5, 5}} {
-		if strings.TrimSpace(logResolutionCaveat(c[0], c[1])) == "" {
-			t.Errorf("logResolutionCaveat(%d, %d) returned nothing, silently removing "+
-				"a stated limit from the report", c[0], c[1])
+	for _, c := range [][3]int{
+		{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 5, 0}, {5, 5, 0},
+		{1, 1, 1}, {5, 5, 5}, {3, 5, 2}, {5, 5, 2},
+	} {
+		for _, offline := range []bool{false, true} {
+			got := logResolutionCaveat(entriesFor(c[0], c[1], c[2]), offline)
+			if strings.TrimSpace(got) == "" {
+				t.Errorf("logResolutionCaveat(%d of %d, %d offline, offline=%v) returned "+
+					"nothing, silently removing a stated limit from the report",
+					c[0], c[1], c[2], offline)
+			}
 		}
+	}
+}
+
+// The tree-head sentence is a claim about what was NOT checked, and for
+// an entry settled by an inclusion proof it is false: verifying
+// Sigstore's signature over the tree head is exactly what that path
+// does. Printing it anyway would be the same defect as the caveat that
+// once claimed entries were confirmed when none were, only inverted —
+// understating rather than overstating, and still wrong.
+func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing.T) {
+	all := logResolutionCaveat(entriesFor(4, 4, 4), true)
+	if strings.Contains(all, "was not additionally checked") {
+		t.Errorf("every checkpoint was proven with an inclusion proof, which verifies "+
+			"the signed tree head, yet the caveat says the tree head was not "+
+			"checked:\n%s", all)
+	}
+	if !strings.Contains(all, "signed tree head") {
+		t.Errorf("the caveat does not mention that the tree head WAS checked:\n%s", all)
+	}
+	if !strings.Contains(all, "retired") {
+		t.Errorf("the caveat omits that an offline proof survives the log being "+
+			"retired, which is the practical reason it is stronger:\n%s", all)
+	}
+
+	// Mixed: the denial is correct for the lookup half and must survive,
+	// but the proven half must be named rather than folded in silently.
+	mixed := logResolutionCaveat(entriesFor(4, 4, 2), false)
+	if !strings.Contains(mixed, "was not additionally checked") {
+		t.Errorf("two entries were confirmed by lookup only, so the tree-head denial "+
+			"still applies to them and must appear:\n%s", mixed)
+	}
+	if !strings.Contains(mixed, "2 of those") {
+		t.Errorf("the caveat does not say how many were proven offline:\n%s", mixed)
+	}
+
+	// None proven offline: the original denial, unchanged.
+	none := logResolutionCaveat(entriesFor(4, 4, 0), false)
+	if !strings.Contains(none, "was not additionally checked") {
+		t.Errorf("nothing was proven offline, so the tree-head denial must stand:\n%s",
+			none)
+	}
+}
+
+// An offline run that confirmed nothing must say so, and must not
+// borrow the online wording, which asserts the log was contacted.
+func TestCaveatDoesNotClaimTheLogWasContactedOnAnOfflineRun(t *testing.T) {
+	got := logResolutionCaveat(entriesFor(0, 3, 0), true)
+	if strings.Contains(got, "log was contacted") {
+		t.Errorf("an offline run claims the transparency log was contacted:\n%s", got)
+	}
+	if !strings.Contains(got, "No network was used") {
+		t.Errorf("an offline run does not say the network was unused:\n%s", got)
 	}
 }
