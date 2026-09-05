@@ -142,15 +142,36 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 			"retired, which is the practical reason it is stronger:\n%s", all)
 	}
 
-	// Mixed: the denial is correct for the lookup half and must survive,
-	// but the proven half must be named rather than folded in silently.
+	// Mixed: the clause names which entries had the tree head checked
+	// and which did not, so the BLANKET denial must not also appear.
+	// Printing both made the caveat contradict itself one sentence after
+	// drawing the distinction.
 	mixed := logResolutionCaveat(entriesFor(4, 4, 2), false)
-	if !strings.Contains(mixed, "was not additionally checked") {
-		t.Errorf("two entries were confirmed by lookup only, so the tree-head denial "+
-			"still applies to them and must appear:\n%s", mixed)
-	}
-	if !strings.Contains(mixed, "2 of those") {
+	if !strings.Contains(mixed, "2 of those were") {
 		t.Errorf("the caveat does not say how many were proven offline:\n%s", mixed)
+	}
+	if !strings.Contains(mixed, "The rest were confirmed by asking the log, which does not") {
+		t.Errorf("the caveat does not say the lookup half lacks the tree-head "+
+			"check:\n%s", mixed)
+	}
+	if strings.Contains(mixed, "What was not additionally checked is") {
+		t.Errorf("the caveat draws the distinction and then denies it wholesale one "+
+			"sentence later:\n%s", mixed)
+	}
+	// The explanation of why the tree head matters is true either way and
+	// must survive in every branch.
+	if !strings.Contains(mixed, "guard against Sigstore itself being dishonest") {
+		t.Errorf("the caveat dropped the explanation of why the tree head "+
+			"matters:\n%s", mixed)
+	}
+
+	// Singular must read as English. "1 of those were proven" shipped.
+	one := logResolutionCaveat(entriesFor(7, 7, 1), false)
+	if strings.Contains(one, "1 of those were") {
+		t.Errorf("singular case reads \"1 of those were\":\n%s", one)
+	}
+	if !strings.Contains(one, "One of those was") {
+		t.Errorf("singular case is not phrased for one entry:\n%s", one)
 	}
 
 	// None proven offline: the original denial, unchanged.
@@ -158,6 +179,30 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 	if !strings.Contains(none, "was not additionally checked") {
 		t.Errorf("nothing was proven offline, so the tree-head denial must stand:\n%s",
 			none)
+	}
+}
+
+// "Each was checked against Sigstore's own signed tree head" was true
+// and unreadable. It landed one sentence after "The remaining 6 were
+// not", where "Each" takes the whole export as its antecedent rather
+// than the one confirmed checkpoint. A sentence that is true as written
+// and false as read is false, and this section is the worst place in the
+// report to have one.
+func TestCaveatNamesHowManyItIsTalkingAbout(t *testing.T) {
+	one := logResolutionCaveat(entriesFor(1, 7, 1), true)
+	if strings.Contains(one, "Each was checked") {
+		t.Errorf("with 1 of 7 confirmed, the caveat says \"Each was checked\" directly "+
+			"after saying six were not:\n%s", one)
+	}
+	if !strings.Contains(one, "That one was") {
+		t.Errorf("the caveat does not name its antecedent; a reader cannot tell "+
+			"whether it covers one checkpoint or all seven:\n%s", one)
+	}
+
+	many := logResolutionCaveat(entriesFor(4, 7, 4), true)
+	if !strings.Contains(many, "Those 4 were") {
+		t.Errorf("with 4 of 7 confirmed, the caveat does not say how many it "+
+			"describes:\n%s", many)
 	}
 }
 

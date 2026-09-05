@@ -155,13 +155,40 @@ func verifyAnchorOffline(iv attest.ExportedInterval) offlineResult {
 		}
 	}
 
+	// TWO DIFFERENT INDEX SPACES, AND THE REPORT MUST NOT LOOK LIKE IT
+	// CAUGHT A CONTRADICTION.
+	//
+	// The report labels this line with the export's log_entry_id, which
+	// is Rekor's GLOBAL index across every shard it has ever run. The
+	// proof's LogIndex is the position within the CURRENT shard's tree,
+	// named on the first line of the signed checkpoint. On production
+	// today those read 2725800899 and 2603896637 for the same entry — a
+	// gap of about 122 million, being the entries in earlier shards.
+	//
+	// Both are correct and they are not comparable. An auditor shown the
+	// two numbers side by side with no explanation reasonably concludes
+	// the verifier just found something wrong, so the shard is named
+	// here rather than left to be discovered.
+	//
+	// Do NOT "fix" this by asserting the two indices are equal. They
+	// never are, the check would fail on every genuine entry, and the
+	// binding that actually matters is the entry body hashing to this
+	// checkpoint's leaf — which happens above and does not depend on any
+	// index at all.
+	shard := "an unnamed tree"
+	if origin, _, found := strings.Cut(proof.Checkpoint, "\n"); found && origin != "" {
+		shard = origin
+	}
 	return offlineResult{
 		Decided: true,
 		Status:  StatusVerified,
 		Detail: fmt.Sprintf("the leaf committing to this checkpoint is proven present "+
-			"in the log at index %d, under a tree head of %d entries that Sigstore "+
-			"signed. Checked offline against a key compiled into this binary; the "+
-			"log was not contacted", proof.LogIndex, proof.TreeSize),
+			"at position %d of %s, whose %d-entry tree head Sigstore signed. That "+
+			"position counts within that tree and is deliberately NOT the global "+
+			"entry id in the heading, which counts across every Rekor shard; the two "+
+			"differ by the size of the earlier shards and are not comparable. "+
+			"Checked offline against a key compiled into this binary; the log was "+
+			"not contacted", proof.LogIndex, shard, proof.TreeSize),
 	}
 }
 

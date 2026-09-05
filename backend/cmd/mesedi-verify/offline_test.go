@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -137,6 +138,41 @@ func TestOfflineGetsPastTheBindingWhenTheEntryIsOurs(t *testing.T) {
 	if !strings.Contains(res.Detail, "does not verify") {
 		t.Errorf("expected the failure to come from proof verification, got: %s",
 			res.Detail)
+	}
+}
+
+// Rekor's global entry id and the proof's in-tree position are
+// different numbers for the same entry — on production, 2725800899 and
+// 2603896637, a gap of ~122 million being the earlier shards. The
+// report shows both. If it does not say they are different measures, an
+// auditor reads the pair as the verifier having caught something.
+//
+// Asserted on the source text rather than by running a verified case,
+// because a verified case cannot be produced without Sigstore's private
+// key. That makes this weaker than it looks, and it is still worth
+// having: the sentence is the thing being protected.
+func TestVerifiedDetailExplainsTheTwoIndexSpaces(t *testing.T) {
+	src, err := os.ReadFile("offline.go")
+	if err != nil {
+		t.Fatalf("read offline.go: %v", err)
+	}
+	s := string(src)
+	for _, want := range []string{
+		"at position %d of %s",     // in-tree position, named tree
+		"NOT the global",           // says which one it is not
+		"across every Rekor shard", // says why they differ
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the verified-case wording no longer contains %q, so the report "+
+				"prints two unequal indices for one entry with nothing to tell a "+
+				"reader they are different measures", want)
+		}
+	}
+	// The equality check that must never be added.
+	if strings.Contains(s, "proof.LogIndex != ") || strings.Contains(s, "!= proof.LogIndex") {
+		t.Error("something compares the proof's in-tree index against another index. " +
+			"They live in different spaces and are never equal; such a check would " +
+			"fail on every genuine Sigstore entry")
 	}
 }
 

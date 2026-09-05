@@ -233,12 +233,19 @@ func main() {
 			}
 		}
 		if len(unverifiable) > 0 {
+			// No cause is asserted here. This used to name one — "anchored
+			// before the leaf preimage was retained" — which was the only
+			// cause that existed when it was written and is now one of
+			// several: a mock ledger, a missing preimage, or an offline run
+			// against a checkpoint that carries no inclusion proof. Printing
+			// a confident wrong reason next to a correct verdict is how a
+			// reader stops believing the correct parts, so the reasons stay
+			// where they are individually true, per checkpoint, above.
 			rep.Structural.Unverified = append(rep.Structural.Unverified, fmt.Sprintf(
-				"Checkpoints %v could NOT be checked against the public log. That is "+
-					"not a finding against the record — nothing here says they are "+
-					"wrong — but nothing here says they are right either. The usual "+
-					"cause is a checkpoint anchored before the leaf preimage was "+
-					"retained, which cannot be repaired retroactively.",
+				"Checkpoints %v could NOT be checked. That is not a finding against "+
+					"the record — nothing here says they are wrong — but nothing here "+
+					"says they are right either. The reason differs per checkpoint and "+
+					"is given against each one in the PUBLIC TRANSPARENCY LOG section.",
 				unverifiable))
 		}
 		// Replace the library's standing caveat, which is written for the
@@ -321,17 +328,39 @@ func writePDF(path string, rep report) error {
 // VerifyAnchor does. Deciding the wording from a bare verified count
 // would reprint the old falsehood in a new place.
 func logResolutionCaveat(entries []LogEntryCheck, offline bool) string {
-	const treeHead = " What was not additionally checked is the log's own signed tree " +
-		"head. That further step would guard against Sigstore itself being dishonest; " +
-		"it is not what protects you from Mesedi. For a hash to be found there at all, " +
-		"Mesedi must genuinely have published it to an append-only log it does not " +
-		"control. If Sigstore is dishonest, this system's guarantee is gone by design, " +
-		"and that premise is stated up front rather than papered over."
+	// Split into the DENIAL and the EXPLANATION, because the two used to
+	// be one string and the mixed case then printed the denial one
+	// sentence after distinguishing which entries it did not apply to —
+	// contradicting itself on the page. Whether the tree head was checked
+	// now has exactly one statement per run, and the explanation of why
+	// it matters is appended in every case, since it is true regardless.
+	const treeHeadDenial = " What was not additionally checked is the log's own " +
+		"signed tree head."
 
-	const treeHeadChecked = " Each was checked against Sigstore's own signed tree head, " +
-		"using a public key compiled into this verifier, so this result does not " +
-		"depend on the log being reachable or truthful at the moment you read it — " +
-		"and it will still hold if that log is ever retired."
+	const whyTreeHeadMatters = " That further step would guard against Sigstore " +
+		"itself being dishonest; it is not what protects you from Mesedi. For a hash " +
+		"to be found there at all, Mesedi must genuinely have published it to an " +
+		"append-only log it does not control. If Sigstore is dishonest, this system's " +
+		"guarantee is gone by design, and that premise is stated up front rather than " +
+		"papered over."
+
+	const treeHead = treeHeadDenial + whyTreeHeadMatters
+
+	// The antecedent is stated explicitly rather than left to "Each".
+	// This sentence lands immediately after "the remaining N were not",
+	// where a bare "Each" reads as covering every checkpoint in the
+	// export rather than only the confirmed ones — true as written and
+	// wrong as read, which in this section is the same thing.
+	treeHeadChecked := func(n int) string {
+		subject := fmt.Sprintf("Those %d were", n)
+		if n == 1 {
+			subject = "That one was"
+		}
+		return fmt.Sprintf(" %s additionally checked against Sigstore's own signed "+
+			"tree head, using a public key compiled into this verifier, so that much "+
+			"does not depend on the log being reachable or truthful at the moment you "+
+			"read this — and it will still hold if that log is ever retired.", subject)
+	}
 
 	total := len(entries)
 	var verified, offlineVerified int
@@ -351,11 +380,19 @@ func logResolutionCaveat(entries []LogEntryCheck, offline bool) string {
 	tail := treeHead
 	switch {
 	case offlineVerified == verified && verified > 0:
-		tail = treeHeadChecked
+		tail = treeHeadChecked(offlineVerified)
 	case offlineVerified > 0:
-		tail = fmt.Sprintf(" %d of those were proven with an inclusion proof carried in "+
-			"the export, which does include Sigstore's signed tree head. The rest were "+
-			"confirmed by asking the log, which does not.%s", offlineVerified, treeHead)
+		subject := fmt.Sprintf("%d of those were", offlineVerified)
+		if offlineVerified == 1 {
+			subject = "One of those was"
+		}
+		// No denial here: the clause below already says which entries the
+		// tree head was and was not checked for. Appending the blanket
+		// denial as well, which is what this did, contradicts the sentence
+		// immediately before it.
+		tail = fmt.Sprintf(" %s proven with an inclusion proof carried in the export, "+
+			"which does include Sigstore's signed tree head. The rest were confirmed "+
+			"by asking the log, which does not.%s", subject, whyTreeHeadMatters)
 	}
 
 	switch {
@@ -579,7 +616,13 @@ func printReport(w io.Writer, rep report) {
 		fmt.Fprintf(w, "  %s %-34s %s\n", mark(c.OK), c.Name, c.Detail)
 	}
 
-	if rep.Online {
+	// Gated on there being results, NOT on the run having been online.
+	// It was gated on Online, and once offline runs began producing real
+	// per-checkpoint verdicts that meant the report printed a caveat
+	// saying the reasons were "listed above" while suppressing the list.
+	// Found by running against production; no test noticed, because the
+	// section's contents were what got tested and never its presence.
+	if len(rep.LogEntries) > 0 {
 		fmt.Fprintln(w, "\nPUBLIC TRANSPARENCY LOG")
 		for _, e := range rep.LogEntries {
 			label := fmt.Sprintf("checkpoint %d", e.Seq)
