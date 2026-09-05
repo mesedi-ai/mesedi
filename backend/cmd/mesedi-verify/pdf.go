@@ -93,6 +93,13 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 	}
 	realFailure := failed > 0 || !rep.Structural.OK
 
+	// Counted by METHOD, because the verdict below depends on what was
+	// established rather than on whether the network was used. Driving it
+	// from rep.Online instead is what made an offline run — including one
+	// that proved every checkpoint against Sigstore's signature — print
+	// "this run does not show the record was ever published".
+	verifiedCount, offlineCount := countVerified(rep.LogEntries)
+
 	d := pdfDoc{
 		Failed:   realFailure,
 		Verdict:  "VERIFIED",
@@ -118,19 +125,55 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 			"in this report says those records are wrong; nothing in it says they are "+
 			"right either. This is not a verified chain and must not be presented as "+
 			"one.", unchecked)
-	case rep.Online:
+	case verifiedCount > 0 && offlineCount == verifiedCount:
+		// Proven without the network. The old code reached the `default`
+		// branch here and told the reader "the transparency log was NOT
+		// contacted, so this run does not show the record was ever
+		// published. It is a structural check, not evidence." Every word
+		// of that was false for a run whose checkpoints carried inclusion
+		// proofs: they were proven present under Sigstore's own signature.
+		//
+		// Understating a real verification is not the safe direction. This
+		// note is the line a procurement officer quotes, and it was
+		// discarding the strongest claim the product can make because the
+		// verdict was driven by whether the network was used rather than
+		// by what was established.
+		d.VerdictNote = "The record is internally consistent and every checkpoint was " +
+			"proven present in the public transparency log, at the position it claims, " +
+			"under a signed tree head Sigstore itself produced. That was checked without " +
+			"contacting the log, so it does not depend on the log being reachable or " +
+			"honest when you read this. It says the record is intact. It does not say " +
+			"the AI was correct."
+	case verifiedCount > 0 && offlineCount > 0:
+		d.VerdictNote = "The record is internally consistent and every checkpoint was found " +
+			"in the public transparency log at the position it claims. Some were proven " +
+			"from inclusion proofs carried in the export, which check Sigstore's signature " +
+			"directly; the rest were confirmed by querying the log. This says the record " +
+			"is intact. It does not say the AI was correct."
+	case verifiedCount > 0:
 		d.VerdictNote = "The record is internally consistent and every checkpoint was found " +
 			"in the public transparency log at the position it claims. This says the record " +
 			"is intact. It does not say the AI was correct."
 	default:
-		d.VerdictNote = "The record is internally consistent. The transparency log was NOT " +
-			"contacted, so this run does not show the record was ever published. It is a " +
-			"structural check, not evidence."
+		d.VerdictNote = "The record is internally consistent, but nothing here was checked " +
+			"against a public transparency log, so this run does not show the record was " +
+			"ever published. It is a structural check, not evidence."
 	}
 
-	logLine := "not contacted (offline run)"
-	if rep.Online {
+	// Describes what was DONE, not which flag was passed. "not contacted"
+	// alone reads as "not checked", which is now a different thing.
+	logLine := "not consulted, and no inclusion proofs were available to check"
+	switch {
+	case verifiedCount > 0 && offlineCount == verifiedCount:
+		logLine = fmt.Sprintf("not consulted — %d of %d proven offline from inclusion proofs",
+			offlineCount, len(rep.LogEntries))
+	case verifiedCount > 0 && offlineCount > 0:
+		logLine = fmt.Sprintf("consulted — %d of %d also proven offline from inclusion proofs",
+			offlineCount, len(rep.LogEntries))
+	case verifiedCount > 0:
 		logLine = "consulted"
+	case rep.Online:
+		logLine = "consulted, but nothing could be confirmed"
 	}
 	d.Fields = [][2]string{
 		{"Project", rep.ProjectID},
@@ -153,7 +196,13 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 	}
 	d.Sections = append(d.Sections, structure)
 
-	if rep.Online {
+	// Gated on there being results, NOT on the run having used the
+	// network — the same stale condition that suppressed this section in
+	// the text report. It mattered more here: an offline run produced a
+	// PDF with no transparency-log section at all, so the copy actually
+	// handed to an auditor omitted every per-checkpoint verdict while the
+	// limitations page still referred to them.
+	if len(rep.LogEntries) > 0 {
 		logs := pdfSection{
 			Title: "PUBLIC TRANSPARENCY LOG",
 			Empty: "The export contained no checkpoints to resolve.",
@@ -165,6 +214,15 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 			}
 			logs.Rows = append(logs.Rows, pdfRow{
 				Mark: statusMark(e.Status), Label: label, Detail: e.Detail,
+			})
+		}
+		// The finding belongs with the findings. Printing it among the
+		// limitations, which is where it used to go, told the reader the
+		// report's best result was something the report did not show.
+		if rep.LogSummary != "" {
+			logs.Rows = append(logs.Rows, pdfRow{
+				Mark: statusMark(StatusVerified), Label: "summary",
+				Detail: rep.LogSummary,
 			})
 		}
 		d.Sections = append(d.Sections, logs)

@@ -76,7 +76,8 @@ func TestCaveatNeverClaimsVerificationThatDidNotHappen(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := logResolutionCaveat(entriesFor(tc.verified, tc.total, 0), false)
+			got := logConfirmation(entriesFor(tc.verified, tc.total, 0)) + " " +
+				logResolutionCaveat(entriesFor(tc.verified, tc.total, 0), false)
 			for _, s := range tc.mustNotContain {
 				if strings.Contains(got, s) {
 					t.Errorf("caveat claims %q when %d of %d were verified:\n%s",
@@ -128,7 +129,7 @@ func TestCaveatIsNeverEmpty(t *testing.T) {
 // once claimed entries were confirmed when none were, only inverted —
 // understating rather than overstating, and still wrong.
 func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing.T) {
-	all := logResolutionCaveat(entriesFor(4, 4, 4), true)
+	all := logConfirmation(entriesFor(4, 4, 4))
 	if strings.Contains(all, "was not additionally checked") {
 		t.Errorf("every checkpoint was proven with an inclusion proof, which verifies "+
 			"the signed tree head, yet the caveat says the tree head was not "+
@@ -146,7 +147,7 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 	// and which did not, so the BLANKET denial must not also appear.
 	// Printing both made the caveat contradict itself one sentence after
 	// drawing the distinction.
-	mixed := logResolutionCaveat(entriesFor(4, 4, 2), false)
+	mixed := logConfirmation(entriesFor(4, 4, 2))
 	if !strings.Contains(mixed, "2 of those were") {
 		t.Errorf("the caveat does not say how many were proven offline:\n%s", mixed)
 	}
@@ -158,15 +159,19 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 		t.Errorf("the caveat draws the distinction and then denies it wholesale one "+
 			"sentence later:\n%s", mixed)
 	}
-	// The explanation of why the tree head matters is true either way and
-	// must survive in every branch.
-	if !strings.Contains(mixed, "guard against Sigstore itself being dishonest") {
-		t.Errorf("the caveat dropped the explanation of why the tree head "+
-			"matters:\n%s", mixed)
+	// The explanation of why the tree head matters is a LIMITATION, so it
+	// belongs to the caveat rather than the confirmation. It must survive
+	// in every branch of that half.
+	for _, off := range [][3]int{{4, 4, 2}, {4, 4, 0}, {4, 4, 4}} {
+		c := logResolutionCaveat(entriesFor(off[0], off[1], off[2]), false)
+		if !strings.Contains(c, "guards against Sigstore itself being dishonest") {
+			t.Errorf("the caveat for %d/%d (%d offline) dropped the explanation of why "+
+				"the tree head matters:\n%s", off[0], off[1], off[2], c)
+		}
 	}
 
 	// Singular must read as English. "1 of those were proven" shipped.
-	one := logResolutionCaveat(entriesFor(7, 7, 1), false)
+	one := logConfirmation(entriesFor(7, 7, 1))
 	if strings.Contains(one, "1 of those were") {
 		t.Errorf("singular case reads \"1 of those were\":\n%s", one)
 	}
@@ -180,6 +185,22 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 		t.Errorf("nothing was proven offline, so the tree-head denial must stand:\n%s",
 			none)
 	}
+
+	// All proven offline: denying the tree head would be false, so the
+	// caveat states the honest NEXT limit instead — an inclusion proof
+	// binds an entry to one signed tree head and says nothing about
+	// whether the log has only ever been appended to across tree heads.
+	// Leaving no caveat at all would be worse than the old false one.
+	allOff := logResolutionCaveat(entriesFor(4, 4, 4), true)
+	if strings.Contains(allOff, "was not additionally checked") {
+		t.Errorf("the tree head WAS checked for every entry, yet the caveat still "+
+			"denies it:\n%s", allOff)
+	}
+	if !strings.Contains(allOff, "not its history") {
+		t.Errorf("with the tree head checked, the caveat must name the remaining "+
+			"limit — that one signed tree head says nothing about the log's "+
+			"history:\n%s", allOff)
+	}
 }
 
 // "Each was checked against Sigstore's own signed tree head" was true
@@ -189,7 +210,7 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 // and false as read is false, and this section is the worst place in the
 // report to have one.
 func TestCaveatNamesHowManyItIsTalkingAbout(t *testing.T) {
-	one := logResolutionCaveat(entriesFor(1, 7, 1), true)
+	one := logConfirmation(entriesFor(1, 7, 1))
 	if strings.Contains(one, "Each was checked") {
 		t.Errorf("with 1 of 7 confirmed, the caveat says \"Each was checked\" directly "+
 			"after saying six were not:\n%s", one)
@@ -199,7 +220,7 @@ func TestCaveatNamesHowManyItIsTalkingAbout(t *testing.T) {
 			"whether it covers one checkpoint or all seven:\n%s", one)
 	}
 
-	many := logResolutionCaveat(entriesFor(4, 7, 4), true)
+	many := logConfirmation(entriesFor(4, 7, 4))
 	if !strings.Contains(many, "Those 4 were") {
 		t.Errorf("with 4 of 7 confirmed, the caveat does not say how many it "+
 			"describes:\n%s", many)

@@ -147,7 +147,17 @@ type report struct {
 	Online      bool                      `json:"log_was_consulted"`
 	Structural  attest.ExportVerification `json:"structural"`
 	LogEntries  []LogEntryCheck           `json:"log_entries,omitempty"`
-	OK          bool                      `json:"ok"`
+
+	// LogSummary is what the run ESTABLISHED about the transparency log.
+	//
+	// Separate from Structural.Unverified, which carries what it did not.
+	// Both used to be one string in that list, so the report's strongest
+	// finding was printed under a heading reading WHAT THIS REPORT DOES
+	// NOT SHOW. Empty when nothing was confirmed, and rendered as nothing
+	// in that case rather than as a hedge.
+	LogSummary string `json:"log_summary,omitempty"`
+
+	OK bool `json:"ok"`
 }
 
 func main() {
@@ -262,6 +272,9 @@ func main() {
 		// job is to prevent overclaiming is the worst place in the report
 		// for one, and it survived because the substitution was written
 		// at a moment when every run happened to resolve everything.
+		// What was established goes to the results; what was not stays in
+		// the caveats. Same entries drive both, so they cannot disagree.
+		rep.LogSummary = logConfirmation(rep.LogEntries)
 		rep.Structural.Unverified = replacePrefix(
 			rep.Structural.Unverified,
 			"Transparency log entries were NOT resolved",
@@ -310,60 +323,44 @@ func writePDF(path string, rep report) error {
 	return nil
 }
 
-// logResolutionCaveat states what an online run actually established.
+// A run's verdict about the transparency log has two halves, and they
+// belong in different places on the page.
 //
-// Split out and given its own tests because it is the sentence most
-// likely to be read as the report's headline claim, and because getting
-// it wrong produces a falsehood rather than an omission. It must never
-// assert that entries were confirmed when none were.
+// WHY THEY WERE SPLIT
 //
-// The tree-head paragraph is appended only when at least one entry was
-// genuinely resolved. Explaining what "was not ADDITIONALLY checked"
-// after checking nothing invites the reader to infer a baseline that
-// does not exist.
-// The offline count is the reason this takes the entries rather than two
-// integers. The tree-head sentence below says what was NOT checked, and
-// for an entry settled by an inclusion proof that sentence is false —
-// checking Sigstore's signature over the tree head is exactly what
-// VerifyAnchor does. Deciding the wording from a bare verified count
-// would reprint the old falsehood in a new place.
-func logResolutionCaveat(entries []LogEntryCheck, offline bool) string {
-	// Split into the DENIAL and the EXPLANATION, because the two used to
-	// be one string and the mixed case then printed the denial one
-	// sentence after distinguishing which entries it did not apply to —
-	// contradicting itself on the page. Whether the tree head was checked
-	// now has exactly one statement per run, and the explanation of why
-	// it matters is appended in every case, since it is true regardless.
-	const treeHeadDenial = " What was not additionally checked is the log's own " +
-		"signed tree head."
+// Both used to be one sentence, returned by logResolutionCaveat and
+// filed under the heading WHAT THIS REPORT DOES NOT SHOW. That heading
+// is right for a limitation and wrong for a finding, and the sentence
+// contained both — so the strongest statement the verifier can make
+// ("all 4 confirmed PRESENT, and checked against Sigstore's own signed
+// tree head") was printed under a banner announcing it as something the
+// report does NOT show, beside four genuine limitations. A reader
+// counting bullets counted five gaps, one of which was the headline
+// result.
+//
+// It is the same defect as the two fixed earlier the same day: a true
+// sentence placed where its position contradicts its content. The cause
+// was mechanical rather than intentional — this text replaces the attest
+// library's standing offline warning, so it inherited that warning's
+// location regardless of what it had come to say.
+//
+// So: logConfirmation returns what WAS established, for the results.
+// logResolutionCaveat returns only what was NOT, for the caveats. The
+// counts decide both, from the same entries, so they cannot disagree.
 
-	const whyTreeHeadMatters = " That further step would guard against Sigstore " +
-		"itself being dishonest; it is not what protects you from Mesedi. For a hash " +
-		"to be found there at all, Mesedi must genuinely have published it to an " +
-		"append-only log it does not control. If Sigstore is dishonest, this system's " +
-		"guarantee is gone by design, and that premise is stated up front rather than " +
-		"papered over."
+// whyTreeHeadMatters is appended wherever the tree head is discussed. It
+// is true whether or not the tree head was checked, which is why it
+// belongs to neither half exclusively.
+const whyTreeHeadMatters = " That further step guards against Sigstore " +
+	"itself being dishonest; it is not what protects you from Mesedi. For a hash " +
+	"to be found there at all, Mesedi must genuinely have published it to an " +
+	"append-only log it does not control. If Sigstore is dishonest, this system's " +
+	"guarantee is gone by design, and that premise is stated up front rather than " +
+	"papered over."
 
-	const treeHead = treeHeadDenial + whyTreeHeadMatters
-
-	// The antecedent is stated explicitly rather than left to "Each".
-	// This sentence lands immediately after "the remaining N were not",
-	// where a bare "Each" reads as covering every checkpoint in the
-	// export rather than only the confirmed ones — true as written and
-	// wrong as read, which in this section is the same thing.
-	treeHeadChecked := func(n int) string {
-		subject := fmt.Sprintf("Those %d were", n)
-		if n == 1 {
-			subject = "That one was"
-		}
-		return fmt.Sprintf(" %s additionally checked against Sigstore's own signed "+
-			"tree head, using a public key compiled into this verifier, so that much "+
-			"does not depend on the log being reachable or truthful at the moment you "+
-			"read this — and it will still hold if that log is ever retired.", subject)
-	}
-
-	total := len(entries)
-	var verified, offlineVerified int
+// countVerified reports how many entries passed and how many of those
+// were settled by an inclusion proof rather than a network lookup.
+func countVerified(entries []LogEntryCheck) (verified, offlineVerified int) {
 	for _, e := range entries {
 		if !e.verified() {
 			continue
@@ -373,27 +370,69 @@ func logResolutionCaveat(entries []LogEntryCheck, offline bool) string {
 			offlineVerified++
 		}
 	}
+	return verified, offlineVerified
+}
 
-	// How the confirmed entries were confirmed, appended to the counts
-	// sentence. Three states, because "all", "none" and "some" license
-	// three different claims and merging any two of them overstates one.
-	tail := treeHead
+// logConfirmation states what the run ESTABLISHED about the public log.
+//
+// Returns "" when nothing was confirmed, so a run that proved nothing
+// prints no confirmation at all rather than a hedged one. The caller
+// must not substitute a placeholder for the empty string: silence is the
+// accurate rendering of "none of this was established".
+func logConfirmation(entries []LogEntryCheck) string {
+	total := len(entries)
+	verified, offlineVerified := countVerified(entries)
+	if total == 0 || verified == 0 {
+		return ""
+	}
+
+	var head string
+	if verified == total {
+		head = fmt.Sprintf("All %d checkpoint leaves were confirmed PRESENT in the "+
+			"public log at the index each claims.", total)
+	} else {
+		head = fmt.Sprintf("%d of %d checkpoints were confirmed PRESENT in the public "+
+			"log at the index each claims. The remaining %d were not; the reason for "+
+			"each is given against it above.", verified, total, total-verified)
+	}
+
 	switch {
-	case offlineVerified == verified && verified > 0:
-		tail = treeHeadChecked(offlineVerified)
-	case offlineVerified > 0:
+	case offlineVerified == 0:
+		// Confirmed by asking the log. Worth having and worth qualifying,
+		// since it trusts whoever answered.
+		return head + " Each was confirmed by querying the log, which means trusting " +
+			"the answer that endpoint gave at the moment of this run."
+
+	case offlineVerified == verified:
+		subject := fmt.Sprintf("Those %d were", verified)
+		if verified == 1 {
+			subject = "That one was"
+		}
+		return head + fmt.Sprintf(" %s additionally checked against Sigstore's own "+
+			"signed tree head, using a public key compiled into this verifier, so that "+
+			"much does not depend on the log being reachable or truthful at the moment "+
+			"you read this — and it will still hold if that log is ever retired.",
+			subject)
+
+	default:
 		subject := fmt.Sprintf("%d of those were", offlineVerified)
 		if offlineVerified == 1 {
 			subject = "One of those was"
 		}
-		// No denial here: the clause below already says which entries the
-		// tree head was and was not checked for. Appending the blanket
-		// denial as well, which is what this did, contradicts the sentence
-		// immediately before it.
-		tail = fmt.Sprintf(" %s proven with an inclusion proof carried in the export, "+
-			"which does include Sigstore's signed tree head. The rest were confirmed "+
-			"by asking the log, which does not.%s", subject, whyTreeHeadMatters)
+		return head + fmt.Sprintf(" %s proven with an inclusion proof carried in the "+
+			"export, which does include Sigstore's signed tree head. The rest were "+
+			"confirmed by asking the log, which does not.", subject)
 	}
+}
+
+// logResolutionCaveat states what the run did NOT establish.
+//
+// Never returns "": it replaces a standing warning inherited from the
+// attest library, and replacing a warning with nothing removes a stated
+// limit from the report silently.
+func logResolutionCaveat(entries []LogEntryCheck, offline bool) string {
+	total := len(entries)
+	verified, offlineVerified := countVerified(entries)
 
 	switch {
 	case total == 0:
@@ -415,17 +454,22 @@ func logResolutionCaveat(entries []LogEntryCheck, offline bool) string {
 				"built to be self-consistent would also satisfy. Treat it as a "+
 				"structural check, not as evidence.", total)
 
-	case verified < total:
-		return fmt.Sprintf(
-			"%d of %d checkpoints were confirmed PRESENT in the public log at the "+
-				"index each claims. The remaining %d were not, and are listed above "+
-				"with the reason for each.%s",
-			verified, total, total-verified, tail)
+	case offlineVerified == verified:
+		// The tree head WAS checked, so denying it would be false. The
+		// honest remaining limit is the next one out: an inclusion proof
+		// shows an entry sits under one signed tree head. It does not show
+		// the log has been append-only ACROSS tree heads, which needs
+		// consistency proofs between them and independent witnesses. That
+		// is a real gap and it is the correct thing to say here.
+		return "The log's signed tree head was checked, but not its history. An " +
+			"inclusion proof shows an entry sits under one tree head Sigstore signed; " +
+			"it does not show that log has only ever been appended to, which would " +
+			"require comparing tree heads over time against independent witnesses." +
+			whyTreeHeadMatters
 
 	default:
-		return fmt.Sprintf(
-			"All %d checkpoint leaves were confirmed PRESENT in the public log at the "+
-				"index each claims.%s", total, tail)
+		return "What was not additionally checked, for the entries confirmed by " +
+			"querying the log, is the log's own signed tree head." + whyTreeHeadMatters
 	}
 }
 
@@ -631,6 +675,12 @@ func printReport(w io.Writer, rep report) {
 			}
 			fmt.Fprintf(w, "  %s %-34s %s\n", statusMark(e.Status), label,
 				wrap(e.Detail, 74, strings.Repeat(" ", 42)))
+		}
+
+		// The finding, printed with the findings. It spent its life in the
+		// caveat list, where the heading told readers it was a limitation.
+		if rep.LogSummary != "" {
+			fmt.Fprintf(w, "\n  %s\n", wrap(rep.LogSummary, 76, "  "))
 		}
 	}
 

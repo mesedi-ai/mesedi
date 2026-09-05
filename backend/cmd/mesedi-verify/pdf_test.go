@@ -139,35 +139,89 @@ func TestPDFPassingVerdictDoesNotClaimCorrectness(t *testing.T) {
 	}
 }
 
-// An offline run proves substantially less. If the PDF said the same
-// thing either way, the flag would be a way to get a clean-looking
-// document without doing the work that makes it evidence.
-func TestPDFOfflineRunSaysTheLogWasNotContacted(t *testing.T) {
-	d := buildPDFDoc(sampleReport(true, false), "deadbeef")
+// An offline run that confirmed NOTHING proves substantially less, and
+// the PDF must say so. If it said the same thing either way, --offline
+// would be a way to get a clean-looking document without doing the work
+// that makes it evidence.
+//
+// Narrowed on 2026-09-05. This used to assert that ANY offline run
+// disclaimed the log, which was correct until offline runs began
+// checking inclusion proofs and then became actively false: a run that
+// proved every checkpoint against Sigstore's signature printed "this run
+// does not show the record was ever published. It is a structural check,
+// not evidence." Understating a real verification is not the safe
+// direction — it is the line a procurement officer quotes.
+//
+// So the disclaimer is now tied to nothing having been confirmed, which
+// is what it was always trying to express.
+func TestPDFSaysSoWhenNothingWasCheckedAgainstTheLog(t *testing.T) {
+	// No log entries at all — the state an offline run reached before it
+	// could check inclusion proofs, and still the state when a run
+	// resolves nothing. Entries marked UNVERIFIABLE are a different case
+	// and get the stronger INCOMPLETE verdict, tested separately.
+	rep := sampleReport(true, false)
+	rep.LogEntries = nil
+	d := buildPDFDoc(rep, "deadbeef")
 
-	if !strings.Contains(d.VerdictNote, "NOT") {
-		t.Errorf("an offline verdict should say the log was not contacted, got: %s",
+	if !strings.Contains(d.VerdictNote, "not evidence") {
+		t.Errorf("a run that confirmed nothing should refuse the word evidence, got: %s",
 			d.VerdictNote)
 	}
-	if !strings.Contains(d.VerdictNote, "not evidence") {
-		t.Errorf("an offline verdict should refuse the word evidence, got: %s", d.VerdictNote)
-	}
-	for _, s := range d.Sections {
-		if strings.Contains(s.Title, "TRANSPARENCY LOG") {
-			t.Error("an offline run rendered a transparency log section it never populated")
-		}
+	if !strings.Contains(d.VerdictNote, "structural check") {
+		t.Errorf("a run that confirmed nothing should name itself a structural check, got: %s",
+			d.VerdictNote)
 	}
 	var found bool
 	for _, f := range d.Fields {
 		if f[0] == "Transparency log" {
 			found = true
-			if !strings.Contains(f[1], "not contacted") {
-				t.Errorf("transparency log field reads %q on an offline run", f[1])
+			if !strings.Contains(f[1], "not consulted") {
+				t.Errorf("transparency log field reads %q when nothing was checked", f[1])
 			}
 		}
 	}
 	if !found {
 		t.Error("the subject block does not state whether the log was consulted")
+	}
+}
+
+// The inverse, and the one that was wrong in production: an offline run
+// whose checkpoints carried proofs verified them cryptographically, and
+// the document must say that rather than disclaiming it.
+func TestPDFCreditsAnOfflineRunThatProvedEveryCheckpoint(t *testing.T) {
+	rep := sampleReport(true, false) // offline
+	for i := range rep.LogEntries {
+		rep.LogEntries[i].Status = StatusVerified
+		rep.LogEntries[i].Method = MethodOfflineProof
+	}
+	d := buildPDFDoc(rep, "deadbeef")
+
+	if strings.Contains(d.VerdictNote, "not evidence") {
+		t.Errorf("every checkpoint was proven against Sigstore's signed tree head and "+
+			"the verdict still calls the run 'not evidence'. Understating a real "+
+			"verification is not the safe direction; this is the sentence a "+
+			"procurement officer quotes:\n%s", d.VerdictNote)
+	}
+	if !strings.Contains(d.VerdictNote, "proven present") {
+		t.Errorf("the verdict does not say the checkpoints were proven present:\n%s",
+			d.VerdictNote)
+	}
+	if !strings.Contains(d.VerdictNote, "without\ncontacting the log") &&
+		!strings.Contains(d.VerdictNote, "without contacting the log") {
+		t.Errorf("the verdict does not say this held without contacting the log:\n%s",
+			d.VerdictNote)
+	}
+	// And the section it used to suppress entirely on an offline run.
+	var sawLogSection bool
+	for _, s := range d.Sections {
+		if strings.Contains(s.Title, "TRANSPARENCY LOG") {
+			sawLogSection = true
+		}
+	}
+	if !sawLogSection {
+		t.Error("the PDF omitted the per-checkpoint transparency-log section on an " +
+			"offline run, so the copy handed to an auditor drops every verdict it " +
+			"is supposed to carry")
 	}
 }
 
