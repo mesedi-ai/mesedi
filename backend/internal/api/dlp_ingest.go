@@ -106,11 +106,55 @@ var scanFieldKeys = map[events.EventType][]string{
 // SaveEvents. The order is preserved: each sibling immediately
 // follows its parent.
 //
-// Sibling events get auto-generated event_ids and use the parent's
-// execution_id + a sequence number = parent.Sequence (the same
-// sequence: detectors only care about ordering within an execution,
-// and sharing the parent sequence lets the dashboard render the two
-// side-by-side. Future refinement: bump sequence on each sibling).
+// Sibling events get auto-generated event_ids and reuse the parent's
+// execution_id and sequence number, so the dashboard renders the two
+// side by side.
+//
+// "detectors only care about ordering within an execution" is what this
+// comment used to say, and it was wrong. record_integrity cares about
+// the SET of sequence values, not their order, so the shared sequence
+// read as the customer having claimed one number twice: every DLP hit
+// raised a duplicate_sequence signal against the customer's record, for
+// an event Mesedi wrote itself, at the exact moment the customer had a
+// real security finding to deal with.
+//
+// The sequence is still shared, deliberately — bumping it would collide
+// with the next real event or force renumbering the customer's own
+// values, and rewriting what the customer said is worse than sharing a
+// number. Instead the type is marked backend-minted, reserved at ingest
+// and excluded from integrity checks. See events.IsBackendMinted for
+// why both halves are needed.
+// customerSequences returns the sequence numbers the CUSTOMER claimed,
+// which is what record_integrity is entitled to draw conclusions from.
+//
+// Backend-minted events are excluded. The DLP sibling above reuses its
+// parent's sequence, so counting it meant every DLP hit produced a
+// duplicate_sequence signal against the customer's record — an
+// accusation about an event Mesedi wrote itself, delivered at the exact
+// moment the customer had a genuine security finding to deal with. The
+// two most alarming things Mesedi can say arrived together, and one of
+// them was our own bookkeeping.
+//
+// This is sound only because ingest refuses backend-minted types from
+// customers. Without that, a customer could label their own events
+// dlp_scan_result and have a real duplicate excluded from their own
+// integrity check. See events.IsBackendMinted.
+//
+// A separate function rather than a loop inline in the PATCH handler
+// because the decision it encodes — whose claim is this? — is the whole
+// substance of the fix, and it was previously buried where nothing
+// could test it.
+func customerSequences(evts []*events.Event) []int {
+	seqs := make([]int, 0, len(evts))
+	for _, e := range evts {
+		if e == nil || events.IsBackendMinted(e.EventType) {
+			continue
+		}
+		seqs = append(seqs, e.Sequence)
+	}
+	return seqs
+}
+
 func (h *Handlers) applyDLPToBatch(
 	ctx context.Context,
 	projectID string,

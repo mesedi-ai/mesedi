@@ -1632,13 +1632,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// that could fail a customer's execution close would be a
 			// worse availability problem than the one it reports.
 			if len(evts) > 0 {
-				seqs := make([]int, 0, len(evts))
-				for _, e := range evts {
-					if e == nil {
-						continue
-					}
-					seqs = append(seqs, e.Sequence)
-				}
+				seqs := customerSequences(evts)
 				for _, sig := range detectors.DetectRecordIntegrityAllMatches(seqs) {
 					isNew, gErr := h.Store.GroupRecordIntegrity(r.Context(), executionID, authProjectID, sig)
 					if gErr != nil {
@@ -3018,43 +3012,7 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 	// First pass: validate and defaulting. Reject malformed events
 	// individually so a single bad event in a batch doesn't poison the
 	// whole transaction.
-	accepted := make([]events.Event, 0, len(batch))
-	rejected := 0
-	for i := range batch {
-		evt := &batch[i]
-		if evt.EventID == "" || evt.ExecutionID == "" || evt.EventType == "" {
-			rejected++
-			h.Logger.Warn("event rejected: required field missing",
-				"event_index", i,
-				"event_id", evt.EventID,
-				"execution_id", evt.ExecutionID,
-				"event_type", evt.EventType,
-			)
-			continue
-		}
-		// per-event size cap. SDK-side truncation should keep
-		// every payload well under this floor; reaching it implies
-		// an older SDK or a custom integration that bypassed the
-		// truncation helper. We reject the individual event and
-		// continue so a single oversized event in a batch does not
-		// poison the rest of the batch.
-		if payloadOverCap(evt) {
-			rejected++
-			h.Logger.Warn("event rejected: payload exceeds cap",
-				"event_index", i,
-				"event_id", evt.EventID,
-				"execution_id", evt.ExecutionID,
-				"event_type", evt.EventType,
-				"payload_bytes", len(evt.Payload),
-				"max_bytes", MaxEventPayloadBytes,
-			)
-			continue
-		}
-		if evt.Timestamp.IsZero() {
-			evt.Timestamp = time.Now().UTC()
-		}
-		accepted = append(accepted, *evt)
-	}
+	accepted, rejected := validateIngestBatch(batch, h.Logger)
 
 	// +  scan + redact outbound LLM /
 	// tool payloads against the DLP rule registry (built-ins) plus
