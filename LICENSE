@@ -1,6 +1,12 @@
 MIT License
 
-Copyright (c) 2026 Robert J. Canario
+Copyright (c) 2026 Verdifax, LLC d/b/a Mesedi
+
+SCOPE: This MIT License covers everything in this repository EXCEPT the
+`ee/` directory. The `ee/` directory is Mesedi Enterprise Edition and is
+licensed separately and NOT under this MIT License. See `ee/LICENSE.md`.
+Where this file and `ee/LICENSE.md` would both appear to cover a file,
+`ee/LICENSE.md` governs.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
