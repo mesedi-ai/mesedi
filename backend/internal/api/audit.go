@@ -2,7 +2,7 @@ package api
 
 // Audit-log helpers used by the customer-facing admin endpoints
 // (v1). One central recordAuditEvent function so handlers
-// stay terse — they call recordAuditEvent(ctx, "api_key.create",
+// stay terse, they call recordAuditEvent(ctx, "api_key.create",
 // "api_key", keyID, meta) after their state-change succeeds.
 //
 // Best-effort posture: a failure to write the audit row logs a
@@ -33,7 +33,7 @@ const (
 	AuditBillingAccountClose     = "billing.account_closed"
 	AuditBillingPaymentMethodAdd = "billing.payment_method_added"
 	AuditBillingPaymentMethodRm  = "billing.payment_method_removed"
-	// step C — additional v1.5 capture points.
+	// step C, additional v1.5 capture points.
 	AuditProjectRename   = "project.rename"
 	AuditRetentionUpdate = "project.retention_update"
 	// Team-management actions. Recorded against the calling admin's
@@ -51,13 +51,13 @@ const (
 	// synthetic sentinel so the customer sees that a Mesedi staff
 	// member made the change without leaking which staff account.
 	AuditTierChangeByPlatformAdmin = "tier.change_by_platform_admin"
-	// — GDPR Article 17 "right to be forgotten" purge of a
+	//, GDPR Article 17 "right to be forgotten" purge of a
 	// closed project's audit history. Recorded against the _admin
 	// system project so the meta-paper-trail of the deletion
 	// survives the deletion itself. Metadata field carries
 	// rows_purged + reason.
 	AuditAuditGDPRPurge = "audit.gdpr_purge"
-	// failure-group-resolve wave — customer-initiated resolve /
+	// failure-group-resolve wave, customer-initiated resolve /
 	// unresolve actions on failure groups. Target type
 	// "failure_group", target id = group_id. Metadata empty by
 	// default; future additions (resolution reason, customer notes)
@@ -211,8 +211,8 @@ func (h *Handlers) recordAuditEventForProject(
 
 // recordSystemEventForProject is the system_events counterpart of
 // recordAuditEventForProject. Used by code paths that need
-// to record operational telemetry — config_fallback, future
-// system-actor events — without polluting the customer-visible
+// to record operational telemetry, config_fallback, future
+// system-actor events, without polluting the customer-visible
 // audit_events trail. Mirrors the best-effort posture: a write
 // failure is logged at WARN and swallowed so the calling business
 // logic (e.g., a detector firing) is not affected. Empty projectID
@@ -318,7 +318,7 @@ func (h *Handlers) HandleListAuditEvents(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnauthorized, "no project context")
 		return
 	}
-	// Tier gate — Team or Enterprise only (.F). Allowlist
+	// Tier gate, Team or Enterprise only (.F). Allowlist
 	// pattern rather than denylist so an empty / unknown tier
 	// falls to the strictest cap (refuse), matching the doctrine
 	// applied in tier_caps.go. Empty tier is a legitimate legacy

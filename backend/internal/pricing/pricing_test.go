@@ -5,7 +5,7 @@
 //   - Every model identifier present in models/registry.go is also
 //     present in pricing.priceTable (cross-package parity). Without
 //     this, context_overflow can fire on a model whose pricing we
-//     don't know — and the unknown-model fallback path would silently
+//     don't know, and the unknown-model fallback path would silently
 //     activate for the entire customer base of that model.
 //   - ComputeLLMCost math is correct at known boundaries (per the
 //     existing function's example in the doc comment).
@@ -34,7 +34,7 @@ func TestPricingTableVersion_NonEmpty(t *testing.T) {
 // TestPricingTableCoversRegistryModels enforces parity between the
 // pricing table and the model registry. Without this guardrail, a
 // model added to registry.go (so it's recognized by context_overflow)
-// could be silently missing from pricing.go — every execution using
+// could be silently missing from pricing.go, every execution using
 // that model would fall back to SDK-shipped cost without anyone
 // noticing.
 //
@@ -52,10 +52,10 @@ func TestPricingTableCoversRegistryModels(t *testing.T) {
 	for _, id := range SupportedModels() {
 		// "claude-2", "claude-2.1" are registered but historically
 		// have a context window we declared; pricing matches. Just
-		// assert IsKnown returns true for every pricing key — that
+		// assert IsKnown returns true for every pricing key, that
 		// proves pricing entries don't refer to phantom models.
 		if !models.IsKnown(id) {
-			t.Errorf("pricing table has model %q that is not in models/registry.go — registry parity broken; add the model to registry or remove from pricing", id)
+			t.Errorf("pricing table has model %q that is not in models/registry.go, registry parity broken; add the model to registry or remove from pricing", id)
 		}
 	}
 }
@@ -109,7 +109,7 @@ func TestIsKnownModel(t *testing.T) {
 		// Garbage values.
 		{"", false},
 		{"made-up-model", false},
-		// — Ollama tag-style identifiers now resolve via
+		//, Ollama tag-style identifiers now resolve via
 		// prefix match against the family entries (llama3, qwen2, etc).
 		{"llama3.2:3b", true},
 		{"qwen2.5-coder:32b", true},
@@ -172,7 +172,7 @@ func TestLastUpdated_DeprecatedAlias(t *testing.T) {
 	}
 }
 
-// TestComputeLLMCost_OllamaModelsAreZero — . Local-runtime
+// TestComputeLLMCost_OllamaModelsAreZero, . Local-runtime
 // $0 is the canonical answer for Ollama. Tag-style identifiers like
 // "llama3.1:8b" resolve via prefix match against the family entries
 // added to priceTable.
@@ -210,7 +210,7 @@ func TestComputeLLMCost_OllamaModelsAreZero(t *testing.T) {
 	}
 }
 
-// TestIsKnownModel_OllamaFamilies — paired with the cost-zero test
+// TestIsKnownModel_OllamaFamilies, paired with the cost-zero test
 // above. Asserts the family-prefix entries make IsKnownModel return
 // true for the dominant Ollama tag shapes, so the dashboard correctly
 // distinguishes "we know this model and the cost is $0" from "unknown
@@ -233,7 +233,7 @@ func TestIsKnownModel_OllamaFamilies(t *testing.T) {
 	}
 }
 
-// TestComputeLLMCostWithOverrides — . Per-project
+// TestComputeLLMCostWithOverrides, . Per-project
 // overrides win outright for exact-name matches; misses fall
 // through to the canonical priceTable (preserving prefix matching
 // and Gemini Pro tier flipping).
@@ -255,11 +255,11 @@ func TestComputeLLMCostWithOverrides(t *testing.T) {
 		outTok int
 		want   float64
 	}{
-		// Override hits — exact-name match beats everything else.
+		// Override hits, exact-name match beats everything else.
 		{"override custom model", "my-fine-tuned-llama", 1_000_000, 1_000_000, 0.50 + 1.00},
 		{"override over ollama prefix", "llama3.1:8b", 2_000_000, 1_000_000, 0.10 + 0.10},
 		{"override expensive custom", "my-custom-gpt", 100_000, 100_000, 10.0 + 20.0},
-		// Miss — falls through to canonical priceTable.
+		// Miss, falls through to canonical priceTable.
 		{"miss falls through to canonical claude", "claude-haiku-4-5", 1_000_000, 1_000_000, 1.00 + 5.00},
 		{"miss falls through to canonical ollama prefix", "qwen2.5-coder:32b", 1_000_000, 1_000_000, 0},
 		// Empty model defensive.
@@ -278,7 +278,7 @@ func TestComputeLLMCostWithOverrides(t *testing.T) {
 	}
 }
 
-// TestComputeLLMCostWithOverrides_NilMapIsSafe — defensive: a nil
+// TestComputeLLMCostWithOverrides_NilMapIsSafe, defensive: a nil
 // overrides map (the most common case in production for projects
 // that haven't configured anything) must not panic or behave
 // differently than ComputeLLMCost.
@@ -292,7 +292,7 @@ func TestComputeLLMCostWithOverrides_NilMapIsSafe(t *testing.T) {
 	}
 }
 
-// TestComputeLLMCostWithOverrides_ZeroRateOverrideWins — a
+// TestComputeLLMCostWithOverrides_ZeroRateOverrideWins, a
 // customer wanting to force $0 for a specific known model (e.g.
 // their Anthropic spend is paid by an enterprise contract and
 // they want cost_velocity to ignore it) can set both rates to 0
@@ -313,14 +313,14 @@ func TestComputeLLMCostWithOverrides_ZeroRateOverrideWins(t *testing.T) {
 	}
 }
 
-// TestPricingTableVersion_BumpedForOllama — sanity check that the
+// TestPricingTableVersion_BumpedForOllama, sanity check that the
 // version stamp was bumped when this wave landed. If the version
 // reverts to an earlier date, the priceTable Ollama entries may
 // have been reverted with it; this regression guard fires loudly.
 func TestPricingTableVersion_BumpedForOllama(t *testing.T) {
 	t.Parallel()
 	// 2026-06-25 is the ship date. A future wave bump
-	// supersedes this — the test should be edited at the same time
+	// supersedes this, the test should be edited at the same time
 	// the version stamp is, so we only assert "not older than the
 	// ship date of Ollama entries."
 	if PricingTableVersion < "2026-06-25" {
@@ -332,7 +332,7 @@ func TestPricingTableVersion_BumpedForOllama(t *testing.T) {
 // TestComputeLLMCost_GeminiProTierFlip exercises the long-context
 // pricing tier for Gemini Pro families. When a single call's
 // input_tokens exceed the 200k breakpoint, BOTH input and output get
-// billed at the over-tier rate — matching Google's documented behavior
+// billed at the over-tier rate, matching Google's documented behavior
 // where exceeding the threshold flips the entire call, not just the
 // tokens above it.
 func TestComputeLLMCost_GeminiProTierFlip(t *testing.T) {
@@ -440,7 +440,7 @@ func TestComputeLLMCost_GeminiFlashFlat(t *testing.T) {
 
 // TestComputeLLMCost_NonGeminiUnaffected verifies the tier-flip path
 // does NOT activate for any model whose TierBreakpointInputTokens is
-// zero — i.e. every Anthropic / OpenAI / Cohere / Mistral / Llama
+// zero, i.e. every Anthropic / OpenAI / Cohere / Mistral / Llama
 // entry. A 500k-token call on Claude Opus must still produce the same
 // cost the pre-Wave-0.6 code did, not double-bill.
 func TestComputeLLMCost_NonGeminiUnaffected(t *testing.T) {

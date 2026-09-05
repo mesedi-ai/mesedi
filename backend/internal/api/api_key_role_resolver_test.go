@@ -6,7 +6,7 @@
 //     and falls back to admin for pre-migration-014 rows with no
 //     user_id (mirroring the rbac.go legacy path).
 //   - resolveKeyRoles returns "unknown" ("") when the member row is
-//     missing — the key still authenticates but we can't display a
+//     missing, the key still authenticates but we can't display a
 //     role badge, and the guard MUST treat unknown as not-admin so
 //     revoking such a key doesn't accidentally satisfy the check.
 //   - wouldStrandProjectWithoutAdminKey correctly refuses only when
@@ -105,7 +105,7 @@ func TestResolveKeyRoles(t *testing.T) {
 			keys:      nil,
 			checks:    nil,
 			// resolveKeyRoles short-circuits before the tenant lookup
-			// when there are no keys — no need to burn a round trip.
+			// when there are no keys, no need to burn a round trip.
 			wantTenantCalls: 0,
 			wantMemberCalls: nil,
 		},
@@ -142,7 +142,7 @@ func TestResolveKeyRoles(t *testing.T) {
 				{"legacy", apiKeyRoleAdmin},
 			},
 			wantTenantCalls: 1,
-			// Only "u1" gets looked up — "legacy" skips the DB.
+			// Only "u1" gets looked up, "legacy" skips the DB.
 			wantMemberCalls: map[string]int{"u1": 1},
 		},
 		{
@@ -182,7 +182,7 @@ func TestResolveKeyRoles(t *testing.T) {
 				{"k4", apiKeyRoleWrite},
 			},
 			wantTenantCalls: 1,
-			// u1 counted once despite owning 3 keys — this is the
+			// u1 counted once despite owning 3 keys, this is the
 			// N-keys/1-owner caching correctness assertion.
 			wantMemberCalls: map[string]int{"u1": 1, "u2": 1},
 		},
@@ -190,14 +190,14 @@ func TestResolveKeyRoles(t *testing.T) {
 			// Migration 056: an admin can mint a scoped read/write key
 			// under their own user_id. When the per-key Role column is
 			// set, the resolver returns it verbatim WITHOUT looking up
-			// the owner's org role — that's the whole point.
+			// the owner's org role, that's the whole point.
 			name:      "explicit per-key Role overrides user-role AND skips member lookup",
 			tenantPtr: strPtr("t1"),
 			members: map[string]*store.OrganizationMember{
 				"u-admin": {UserID: "u-admin", Role: "admin"},
 			},
 			keys: []*store.APIKey{
-				// Key with explicit Role="read" owned by an admin —
+				// Key with explicit Role="read" owned by an admin ,
 				// resolver returns "read", not "admin".
 				{KeyID: "kScoped", UserID: "u-admin", Role: "read"},
 				// Same owner, no explicit role → falls through to
@@ -326,7 +326,7 @@ func TestWouldStrandProjectWithoutAdminKey(t *testing.T) {
 			name: "unknown-role target does NOT satisfy the admin check",
 			// If the target key's owner was removed from the org
 			// (unknown role), and there's only one true admin remaining,
-			// revoking the unknown key must NOT be blocked — it's not
+			// revoking the unknown key must NOT be blocked, it's not
 			// admin. The remaining true admin (kA) stays intact.
 			keys: []*store.APIKey{
 				{KeyID: "kA", UserID: "u-admin1"},

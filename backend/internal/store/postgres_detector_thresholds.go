@@ -1,6 +1,6 @@
 package store
 
-// Per-project detector threshold overrides — Postgres
+// Per-project detector threshold overrides, Postgres
 // implementation (migration 048). Twin of
 // sqlite_detector_thresholds.go: same shape, same contract, $1/$2
 // placeholders instead of ?, ON CONFLICT syntax adjusted.

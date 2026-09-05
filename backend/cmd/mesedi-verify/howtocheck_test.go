@@ -9,7 +9,7 @@ import (
 //
 // This is the part of the document that decides whether "check us, don't
 // trust us" is a real offer or a slogan. It used to end at "then run
-// mesedi-verify yourself" — which assumes the reader already has
+// mesedi-verify yourself", which assumes the reader already has
 // mesedi-verify. A recipient holds the export and the report and nothing
 // else, so the practical effect of that sentence was that they trusted
 // us, which is the single outcome this report exists to prevent.

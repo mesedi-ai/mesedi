@@ -724,7 +724,7 @@ func (h *Handlers) HandleAdminSetTier(w http.ResponseWriter, r *http.Request) {
 		"new_tier", tier,
 		"expires_days", req.ExpiresDays,
 	)
-	// step C / PL4 — surface platform-admin tier changes in the
+	// step C / PL4, surface platform-admin tier changes in the
 	// customer's own audit log so they can attribute a sudden tier
 	// flip back to a Mesedi-side action rather than silently to
 	// "someone in your org." Actor is the synthetic
@@ -747,7 +747,7 @@ func (h *Handlers) HandleAdminSetTier(w http.ResponseWriter, r *http.Request) {
 		projectID,
 		tierMeta,
 	)
-	// #392 — clamp any per-project settings that now exceed the new
+	// #392, clamp any per-project settings that now exceed the new
 	// tier's caps (retention_days today; more settings as the tier-cap
 	// surface grows). Actor is AuditActorPlatformAdmin so the audit
 	// row attributes the clamp to Mesedi staff, matching the tier
@@ -756,7 +756,7 @@ func (h *Handlers) HandleAdminSetTier(w http.ResponseWriter, r *http.Request) {
 		context.Background(), projectID, AuditActorPlatformAdmin, fromTier, tier,
 	); cerr != nil {
 		// Cascade errors are logged but do NOT roll back the tier
-		// change — the tier flip has already been persisted and
+		// change, the tier flip has already been persisted and
 		// audited above, and a partial-clamp state is preferable to
 		// an incomplete tier change.
 		h.Logger.Warn("admin: tier-change cascade failed",
@@ -1415,7 +1415,7 @@ type AdminAnthropicCreditResponse struct {
 	// TodayUnpricedModels lists model ids seen in today's usage that
 	// have no explicit entry in the rate table. Non-empty means the
 	// estimate used a fallback rate for those models and is
-	// therefore approximate — surfaced so the UI can say so rather
+	// therefore approximate, surfaced so the UI can say so rather
 	// than presenting a confidently wrong number. The usual cause is
 	// Anthropic shipping a new model.
 	TodayUnpricedModels []string `json:"today_unpriced_models,omitempty"`
@@ -1427,7 +1427,7 @@ type AdminDailySpendBucket struct {
 	USD  float64 `json:"usd"`  // total spend that day
 	// Estimated marks a bucket we priced ourselves from token counts
 	// rather than one Anthropic returned as dollars. Only ever true
-	// for the current in-progress UTC day — see the Usage Report
+	// for the current in-progress UTC day, see the Usage Report
 	// notes in internal/anthropic/admin.go. The UI must render these
 	// differently; a partial day that looks settled invites the
 	// wrong conclusion about a spend spike.
@@ -1845,14 +1845,14 @@ type AdminClosedProjectAuditResponse struct {
 //
 // Query params:
 //
-//	email      — search every closed project where actor_email = X
+//	email     , search every closed project where actor_email = X
 //	             (powers R1 account-takeover forensics: "show me
 //	              every Close action this victim's email ever fired").
-//	project_id — search every audit row for a specific closed project
+//	project_id, search every audit row for a specific closed project
 //	             (powers R2 customer-support response: "user X says
 //	              they did not close project Y; show me the close
 //	              event and who pressed it").
-//	limit      — cap rows (default 100, store-side enforced).
+//	limit     , cap rows (default 100, store-side enforced).
 //
 // At least one of email or project_id must be present; both empty
 // returns 400 (the store would also refuse, but we fail fast at the
@@ -2024,7 +2024,7 @@ func (h *Handlers) HandleAdminGDPRPurgeClosedProjectAudit(w http.ResponseWriter,
 			// Operator footgun guard: refusing prevents an irreversible
 			// purge of a paying customer's audit history. Phrased in
 			// terms of the projects table because that is what the
-			// store guard actually checks after — a project with
+			// store guard actually checks after, a project with
 			// zero audit_events yet but a row in `projects` is still
 			// active and must be closed first.
 			writeError(w, http.StatusUnprocessableEntity,

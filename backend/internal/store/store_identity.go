@@ -155,7 +155,7 @@ type IdentityStore interface {
 	MarkMagicLinkTokenUsed(ctx context.Context, tokenID string) error
 
 	// Email verification (pre-launch). IsEmailVerified is the gate
-	// the customer-facing auth middleware checks on every request — if
+	// the customer-facing auth middleware checks on every request, if
 	// it returns false the dashboard renders an "verify your email"
 	// interstitial instead of customer pages. MarkEmailVerified is
 	// called by (a) the email-link confirm handler when a raw-email
@@ -195,7 +195,7 @@ type IdentityStore interface {
 	DeleteExpiredSessions(ctx context.Context, asOf time.Time) (int, error)
 
 	// User TOTP, backup codes, pending 2FA tokens, and session
-	// passed_2fa flag — back the customer-facing two-factor
+	// passed_2fa flag, back the customer-facing two-factor
 	// authentication feature. See store/user_totp.go for the
 	// per-method contracts and migrations/038_user_totp.sql for the
 	// schema rationale. UpsertUserTOTP runs at enrollment;

@@ -13,14 +13,14 @@
 // "claude-opus-4-6"); matchers like "claude-opus-4-6-20260301" still hit
 // the row because the stable price is keyed on the family. Unknown models
 // return (0, false), cost stays $0 from this package's perspective. The
-// caller (handler) decides what to do with the (0, false) result —
+// caller (handler) decides what to do with the (0, false) result ,
 // typically falling back to the SDK-shipped per-event estimated_cost_usd.
 //
 // **Source of truth**: the backend is now authoritative for
 // known models. The handler always calls into this package at execution
 // close; SDK-shipped per-event cost is fallback for unknown models only.
 // This means new model pricing (or pricing changes) ship with a backend
-// deploy — no SDK release wait.
+// deploy, no SDK release wait.
 //
 // **Units**: prices in the table are USD per 1 million tokens, matching
 // the way every provider currently publishes them. The compute helper
@@ -49,12 +49,12 @@ const PricingTableVersion = "2026-06-25"
 // Tier-flip semantics: when TierBreakpointInputTokens is
 // > 0 AND an individual call's input_tokens > TierBreakpointInputTokens,
 // the call gets billed at the over-tier rates for BOTH input and
-// output — matching Google's documented behavior where exceeding the
+// output, matching Google's documented behavior where exceeding the
 // threshold flips the ENTIRE call to long-context pricing, not just
 // the tokens above the threshold. For models without tiered pricing
 // (every Anthropic / OpenAI / Cohere / Mistral / Llama entry, every
 // Gemini Flash variant), TierBreakpointInputTokens is left at 0 and
-// the over-tier fields are ignored — the existing flat-rate semantics
+// the over-tier fields are ignored, the existing flat-rate semantics
 // are unchanged.
 type modelPrice struct {
 	InputPer1M                float64
@@ -151,7 +151,7 @@ var priceTable = map[string]modelPrice{
 	// Groq, Fireworks, Bedrock, self-hosted, etc.). Default to $0 so
 	// the detector silently doesn't fire on Llama-only workloads.
 	// Customers with paid Llama hosting can declare actual pricing via
-	// per-tenant overrides (future work — see Decision 1c in audit).
+	// per-tenant overrides (future work, see Decision 1c in audit).
 	"llama-4-scout":    {InputPer1M: 0.00, OutputPer1M: 0.00},
 	"llama-4-maverick": {InputPer1M: 0.00, OutputPer1M: 0.00},
 	"llama-3.3-70b":    {InputPer1M: 0.00, OutputPer1M: 0.00},
@@ -168,7 +168,7 @@ var priceTable = map[string]modelPrice{
 	"mistral-nemo":       {InputPer1M: 0.15, OutputPer1M: 0.15},
 	"codestral":          {InputPer1M: 0.30, OutputPer1M: 0.90},
 
-	// ── Ollama (local runtime — ollama.com/library) ──────────────────
+	// ── Ollama (local runtime, ollama.com/library) ──────────────────
 	// Local-runtime $0 is the honest answer. Customers paying for
 	// GPU / electricity / hardware amortization have real costs, but
 	// those are not per-token costs and Mesedi should not invent a
@@ -215,7 +215,7 @@ var priceTable = map[string]modelPrice{
 //
 // ModelPriceOverride is the per-tenant override shape carried by the
 // per-project custom_model_pricing knob. Both rates
-// are USD per 1M tokens — same units as the canonical priceTable so
+// are USD per 1M tokens, same units as the canonical priceTable so
 // the override slots in without conversion. JSON tags pin the request
 // body shape exposed via the per-project detector-thresholds REST
 // surface.
@@ -226,7 +226,7 @@ type ModelPriceOverride struct {
 
 // ComputeLLMCostWithOverrides is the per-project pricing path. If
 // overrides has an exact-name match for the model, that override
-// wins outright (no tier-flip logic — overrides are bare rate
+// wins outright (no tier-flip logic, overrides are bare rate
 // declarations). Otherwise the call falls through to the existing
 // ComputeLLMCost canonical-priceTable path, which preserves prefix
 // matching + Gemini Pro tier flipping for known commercial models.
@@ -255,7 +255,7 @@ func ComputeLLMCost(model string, inputTokens, outputTokens int) float64 {
 	// over-tier rates. Matches Google's documented long-context
 	// behavior for Gemini Pro models (>200k input flips the whole
 	// call). For flat-rate models, TierBreakpointInputTokens is 0
-	// and this branch never executes — the legacy single-rate path
+	// and this branch never executes, the legacy single-rate path
 	// applies.
 	inputRate := p.InputPer1M
 	outputRate := p.OutputPer1M

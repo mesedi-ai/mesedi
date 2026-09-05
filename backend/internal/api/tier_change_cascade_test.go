@@ -11,7 +11,7 @@
 //     retention=90) writes retention_days=7, an audit row, and calls
 //     the mailer exactly once.
 //   - Downgrade with retention already under the new cap
-//     (Team→Hobby with retention=5) is a no-op — no clamp, no
+//     (Team→Hobby with retention=5) is a no-op, no clamp, no
 //     audit, no email. Prevents noisy audit entries every time
 //     someone with light retention downgrades.
 //   - Downgrade with retention=nil (indefinite) on a project going
@@ -21,7 +21,7 @@
 //     Enterprise, so a nil retention stays nil (no clamp needed).
 //     Guards against a bug where "downgrade" logic accidentally
 //     clamps a Hobby→Enterprise flip (which isn't really a
-//     downgrade at all — verified by the isTierDowngrade helper).
+//     downgrade at all, verified by the isTierDowngrade helper).
 //   - Empty fromTier: the cascade bails without any store reads.
 //     Callers that don't have the old tier handy (Stripe webhook
 //     that didn't preload the project) get a safe no-op, not an
@@ -58,7 +58,7 @@ type stubCascadeStore struct {
 	setCalls         int
 	setErr           error
 
-	// GetProject plumbing — used by the email path only.
+	// GetProject plumbing, used by the email path only.
 	projectByID map[string]*store.Project
 
 	// Audit-event captures.
@@ -356,7 +356,7 @@ func TestApplyTierChangeCascade_ClampWriteErrorPropagates(t *testing.T) {
 
 func TestApplyTierChangeCascade_AuditFailureDoesNotBlockClamp(t *testing.T) {
 	// A CreateAuditEvent failure is logged inside recordAuditEventForProject
-	// and swallowed there — the cascade must still return nil (clamp
+	// and swallowed there, the cascade must still return nil (clamp
 	// succeeded, only the paper trail is missing). Guards against a
 	// future refactor that starts propagating audit failures upward.
 	t.Parallel()

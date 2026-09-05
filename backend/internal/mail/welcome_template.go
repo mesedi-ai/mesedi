@@ -196,7 +196,7 @@ run_my_agent("hello")</pre>
 
 // welcomeVerifyHTMLBlock returns the styled HTML "verify your email"
 // card if VerifyURL is populated, otherwise an empty string. Empty
-// string renders as nothing in the table — the surrounding %s slot
+// string renders as nothing in the table, the surrounding %s slot
 // just collapses.
 func welcomeVerifyHTMLBlock(in WelcomeInput) string {
 	if in.VerifyURL == "" {

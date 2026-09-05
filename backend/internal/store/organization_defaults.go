@@ -38,7 +38,7 @@ type OrgConfigFallbackRollupTarget struct {
 }
 
 // OrgConfigFallbackRollup aggregates config-fallback events across
-// every project owned by an org. — closes the 50-project
+// every project owned by an org., closes the 50-project
 // enterprise UX where the customer would otherwise have to click
 // into 50 tiles to spot operational degradation.
 type OrgConfigFallbackRollup struct {

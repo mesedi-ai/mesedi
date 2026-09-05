@@ -18,7 +18,7 @@
 //   POST /api/email-verify/resend
 //     Body: { email }
 //     Behavior: rate-limited by email (1 per 60s). Looks up the
-//     account by email — 404 means "no account" but we DO NOT echo
+//     account by email, 404 means "no account" but we DO NOT echo
 //     that (we always 202 to avoid an email-existence oracle).
 //     Mints a new token, sends a fresh "verify your email" email.
 //     Public endpoint; no auth required.
@@ -28,7 +28,7 @@
 //     Returns { verified: bool, email: <owner_email> } so the
 //     dashboard can render its interstitial decision client-side.
 //
-// SSO + magic-link sign-ins don't use these endpoints — they call
+// SSO + magic-link sign-ins don't use these endpoints, they call
 // MarkEmailVerified directly from the relevant callback (HandleSignin)
 // with the appropriate method label.
 
@@ -103,7 +103,7 @@ func resendEmailVerifyRecordHit(email string) {
 }
 
 // MintEmailVerifyToken returns a fresh url-safe base64 token. Pure
-// function — does not touch the store. Caller persists.
+// function, does not touch the store. Caller persists.
 func MintEmailVerifyToken() (string, error) {
 	b := make([]byte, EmailVerifyTokenLen)
 	if _, err := rand.Read(b); err != nil {

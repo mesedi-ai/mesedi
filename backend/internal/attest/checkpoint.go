@@ -25,7 +25,7 @@
 // it in a demo: the chain bounds the SERVER side. It proves nothing was
 // altered or dropped after Mesedi received it. It says nothing about
 // whether the agent told the truth on the way in, and it cannot detect
-// an event that was never chained in the first place — drop it at
+// an event that was never chained in the first place, drop it at
 // ingest and the chain is internally consistent and looks complete.
 // That gap closes only with a signature from the agent's own key. See
 // design-docs/SIGNED_INGEST_DESIGN.md.
@@ -83,7 +83,7 @@ const (
 //
 // Editing either string silently changes every hash this package produces.
 // Existing checkpoints would then fail read-back verification and the
-// system would report tampering that never happened — which is precisely
+// system would report tampering that never happened, which is precisely
 // the incident that caused the v2 bump in the first place. The tenant-leaf
 // tag is doubly load-bearing: TenantLeafHash commits to no timestamps, so
 // leaf hashes are byte-identical across v1 and v2, and they should stay
@@ -183,7 +183,7 @@ type Checkpoint struct {
 
 	// MerkleRoot is the RFC 6962 root over the tenant leaf hashes, hex.
 	//
-	// EMPTY STRING for an interval with no leaves — NOT the empty-tree
+	// EMPTY STRING for an interval with no leaves, NOT the empty-tree
 	// root. rootFromLeafHashes returns SHA-256 of the empty input for an
 	// empty slice, which is a real-looking 64-hex value, and digest.go's
 	// header warns that such a value would silently stand in for "we
@@ -201,7 +201,7 @@ type Checkpoint struct {
 	CreatedAtUnattested time.Time `json:"created_at_unattested"`
 
 	// Hash is the checkpoint's own hash, hex. Stored for convenience.
-	// VerifyChain RECOMPUTES it rather than trusting it — a stored hash
+	// VerifyChain RECOMPUTES it rather than trusting it, a stored hash
 	// nobody recomputes is decoration, not a check.
 	Hash string `json:"hash"`
 }
@@ -267,7 +267,7 @@ func canonicalTime(t time.Time) string {
 // alignedTo reports whether t sits exactly on a d-sized grid boundary.
 //
 // Uses Equal rather than ==. Comparing time.Time with == compares the
-// struct — wall clock, monotonic reading, and location POINTER — so two
+// struct, wall clock, monotonic reading, and location POINTER, so two
 // values denoting the same instant can compare unequal. Equal compares
 // the instant, which is the question being asked.
 //
@@ -291,7 +291,7 @@ func alignedTo(t time.Time, d time.Duration) bool {
 // and the mismatch would surface as tampering.
 //
 // Each input is a hex Merkle root produced by Compute. They are treated
-// as ALREADY-HASHED leaves — Compute's output is a root, not raw data,
+// as ALREADY-HASHED leaves, Compute's output is a root, not raw data,
 // so hashing it again would build a tree a verifier could not reproduce
 // from the same inputs.
 //
@@ -360,8 +360,8 @@ func CheckpointHash(c Checkpoint) string {
 }
 
 // CheckpointParams is what a caller supplies to build the next
-// checkpoint. Separate from Checkpoint so the derived fields — root,
-// counts, hash — cannot be supplied by a caller and must be computed.
+// checkpoint. Separate from Checkpoint so the derived fields, root,
+// counts, hash, cannot be supplied by a caller and must be computed.
 type CheckpointParams struct {
 	// Prev is the previous checkpoint, or nil for genesis.
 	Prev *Checkpoint
@@ -379,14 +379,14 @@ type CheckpointParams struct {
 	// BuildCheckpoint could derive the length from the two timestamps
 	// and not ask. It asks because VerifyChain rejects a checkpoint
 	// whose span is not exactly the configured interval, or whose
-	// boundaries are not aligned to it — and building something that
+	// boundaries are not aligned to it, and building something that
 	// verification will later reject means anchoring it first, which
 	// costs a real transparency-log submission before the mistake
 	// surfaces. Cheaper to refuse here.
 	Interval time.Duration
 
 	// Leaves may be empty. An empty interval still produces a
-	// checkpoint — that is the heartbeat, and the reason a missing
+	// checkpoint, that is the heartbeat, and the reason a missing
 	// interval is evidence rather than ambiguity.
 	Leaves []TenantLeaf
 
@@ -436,7 +436,7 @@ func BuildCheckpoint(p CheckpointParams) (Checkpoint, error) {
 		// Building on a Prev whose stored Hash does not match its
 		// contents would anchor a link to a hash that is not actually
 		// the predecessor's, and the failure would surface later at the
-		// WRONG checkpoint — pointing an auditor at the new one instead
+		// WRONG checkpoint, pointing an auditor at the new one instead
 		// of the corrupted one.
 		if got := CheckpointHash(*p.Prev); got != p.Prev.Hash {
 			return Checkpoint{}, fmt.Errorf(
@@ -603,7 +603,7 @@ func VerifyChain(cps []Checkpoint, interval time.Duration) error {
 		}
 		// Alignment, not just duration. A chain of correctly-sized
 		// intervals that all begin at :37 past the hour cannot be
-		// checked for holes against a published schedule — and being
+		// checked for holes against a published schedule, and being
 		// checkable against a published schedule is the property the
 		// whole mechanism rests on. Checked here as well as in
 		// BuildCheckpoint because this is the function an auditor runs,
@@ -614,7 +614,7 @@ func VerifyChain(cps []Checkpoint, interval time.Duration) error {
 		}
 
 		if i == 0 {
-			// The first element of the slice need not be chain genesis —
+			// The first element of the slice need not be chain genesis ,
 			// an auditor may verify a window. Only a checkpoint claiming
 			// Seq 1 must look like genesis.
 			if c.Seq == 1 {
@@ -714,7 +714,7 @@ func VerifyIntervalLeaves(c Checkpoint, leaves []TenantLeaf) error {
 //  2. CumulativeCount advances by exactly ExecutionCount. If executions
 //     were dropped from an interval, the running total no longer
 //     reconciles with the per-interval counts, and hiding that requires
-//     rewriting every later leaf — each of which is anchored.
+//     rewriting every later leaf, each of which is anchored.
 //
 // Leaves must be in interval order, and should first be proven to be
 // the anchored ones via VerifyIntervalLeaves. Intervals in which the

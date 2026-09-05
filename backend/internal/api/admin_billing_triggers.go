@@ -15,7 +15,7 @@
 //
 // Founder-side these are also useful as a debug tool for force-
 // closing a billing period on a real customer without waiting for
-// the nightly scheduler tick — the same code path as the automated
+// the nightly scheduler tick, the same code path as the automated
 // job, just triggered on demand.
 //
 // Both endpoints are admin-authed and mutate real billing state.
@@ -173,7 +173,7 @@ func (h *Handlers) HandleAdminTriggerTeamBillingRun(w http.ResponseWriter, r *ht
 // period to naturally roll over.
 //
 // Idempotent: safe to call from any tier and any pending state. Does
-// NOT touch Stripe or the subscription — that lives on the trigger
+// NOT touch Stripe or the subscription, that lives on the trigger
 // endpoints above. Does NOT clear granted_executions since those are
 // a distinct product concern (bonus credits).
 //

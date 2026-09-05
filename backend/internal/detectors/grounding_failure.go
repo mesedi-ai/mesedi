@@ -41,7 +41,7 @@ import (
 // GroundingFailureThresholds carries the per-project tunable values
 // for this detector. MeanFloor is the global default
 // floor used for any evaluator:metric pair not present in
-// PerEvaluatorFloors. PerEvaluatorFloors (extensions wave —
+// PerEvaluatorFloors. PerEvaluatorFloors (extensions wave ,
 // closes grounding_failure.G3) is the per-(evaluator_id:metric_type)
 // override map; lookups fall back to MeanFloor when a key is absent.
 // Customers who don't tune see the historical behavior.
@@ -52,14 +52,14 @@ type GroundingFailureThresholds struct {
 
 // DefaultGroundingFailureThresholds returns the historical hardcoded
 // default. Used by legacy call sites and tests. PerEvaluatorFloors
-// defaults to nil — equivalent to an empty map; every evaluator
+// defaults to nil, equivalent to an empty map; every evaluator
 // falls back to MeanFloor.
 func DefaultGroundingFailureThresholds() GroundingFailureThresholds {
 	return GroundingFailureThresholds{MeanFloor: 0.5}
 }
 
 // effectiveFloor returns the floor for the given evaluator:metric
-// key — the per-evaluator override if present and in range, else
+// key, the per-evaluator override if present and in range, else
 // the global MeanFloor. Defensive against bad config that escaped
 // the validators registry (out-of-range values fall through to
 // MeanFloor with no panic).
@@ -186,7 +186,7 @@ func DetectGroundingFailureAllMatchesWithThresholds(
 			continue
 		}
 		mean := r.sum / float64(r.count)
-		// Per-evaluator floor lookup (extensions wave —
+		// Per-evaluator floor lookup (extensions wave ,
 		// closes grounding_failure.G3). Falls back to MeanFloor when
 		// no per-evaluator override exists for this key.
 		floor := t.effectiveFloor(key)
@@ -203,7 +203,7 @@ func DetectGroundingFailureAllMatchesWithThresholds(
 // sort elsewhere; this is just a tiny local helper for the
 // all-matches result determinism).
 func sortStringsLex(s []string) {
-	// Insertion sort — fast for tiny slices (typical N ≤ 5
+	// Insertion sort, fast for tiny slices (typical N ≤ 5
 	// evaluators per execution).
 	for i := 1; i < len(s); i++ {
 		for j := i; j > 0 && s[j-1] > s[j]; j-- {
@@ -282,7 +282,7 @@ func DetectGroundingFailureWithThresholds(
 			continue
 		}
 		mean := r.sum / float64(r.count)
-		// Per-evaluator floor lookup (extensions wave —
+		// Per-evaluator floor lookup (extensions wave ,
 		// closes grounding_failure.G3). Falls back to MeanFloor when
 		// no per-evaluator override exists for this key.
 		floor := t.effectiveFloor(key)

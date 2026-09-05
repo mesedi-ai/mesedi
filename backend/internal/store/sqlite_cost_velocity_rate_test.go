@@ -169,7 +169,7 @@ func TestCostVelocityRateSignature_BucketBoundaries(t *testing.T) {
 		ratePerMinUSD float64
 		want          string
 	}{
-		// At the global floor — should land in the first bucket.
+		// At the global floor, should land in the first bucket.
 		{0.10, "rate_$0.10+_per_min"},
 		// Just below the next bucket.
 		{0.99, "rate_$0.10+_per_min"},
@@ -185,7 +185,7 @@ func TestCostVelocityRateSignature_BucketBoundaries(t *testing.T) {
 		{99.99, "rate_$10+_per_min"},
 		{100.00, "rate_$100+_per_min"},
 		{999.99, "rate_$100+_per_min"},
-		// Top bucket — anything pathologically high lands here.
+		// Top bucket, anything pathologically high lands here.
 		{1000.00, "rate_$1000+_per_min"},
 		{10_000.00, "rate_$1000+_per_min"},
 	}

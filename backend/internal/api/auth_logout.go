@@ -1,6 +1,6 @@
 package api
 
-// POST /auth/logout — destroys the caller's session (Batch 2).
+// POST /auth/logout, destroys the caller's session (Batch 2).
 //
 // The endpoint is intentionally not behind authMiddleware: a customer
 // who has already lost their session row (expired, kicked from the

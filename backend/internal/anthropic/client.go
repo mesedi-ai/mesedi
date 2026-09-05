@@ -123,7 +123,7 @@ type Result struct {
 //	400 invalid_request_error:
 //	"`temperature` is deprecated for this model."
 //
-// This is a HARD failure, not a warning — the whole call 400s, so a
+// This is a HARD failure, not a warning, the whole call 400s, so a
 // single unsupported parameter takes the entire feature down.
 //
 // Discovered 2026-08-24, the night before launch: switching the
@@ -133,7 +133,7 @@ type Result struct {
 // pricing page advertises "a more capable model", so it would have
 // been a paying customer's first experience.
 //
-// The list is OBSERVATIONAL — it holds models we have actually seen
+// The list is OBSERVATIONAL, it holds models we have actually seen
 // reject the parameter. Default is "supported", which preserves the
 // long-standing behaviour for haiku/sonnet-4/opus-4 rather than
 // silently dropping a deliberate low-variance setting across the whole

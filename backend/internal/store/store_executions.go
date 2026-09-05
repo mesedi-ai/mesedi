@@ -140,7 +140,7 @@ type ExecutionStore interface {
 	// lower it (e.g. $0.10); batch-processing customers can raise
 	// it (e.g. $100). The handler enforces a global floor of $0.01
 	// to prevent fires-on-every-execution abuse and a ceiling of
-	// $10,000 to prevent typo / overflow. NOT tier-capped — alarm
+	// $10,000 to prevent typo / overflow. NOT tier-capped, alarm
 	// sensitivity is not a Mesedi-side cost vector (see tier_caps.go
 	// for the principle and provider_incident_min_tenants for the
 	// precedent).
@@ -155,7 +155,7 @@ type ExecutionStore interface {
 	// lookback window in minutes. Migration 044 added the columns
 	// with defaults {5.00 USD/min, 5 min}. Rate-based detection
 	// answers a different question than the absolute-magnitude
-	// detector (sustained burn vs single expensive call) — both can
+	// detector (sustained burn vs single expensive call), both can
 	// fire on the same execution. NOT tier-capped (same reasoning as
 	// the absolute threshold and provider_incident_min_tenants).
 	GetProjectCostVelocityRateConfig(ctx context.Context, projectID string) (CostVelocityRateConfig, error)
@@ -233,7 +233,7 @@ type ExecutionStore interface {
 
 	// GetProjectDetectorThreshold reads the per-project override for
 	// the given (projectID, detector, threshold_key). Returns
-	// ErrNotFound when no override row exists — the caller (B.b
+	// ErrNotFound when no override row exists, the caller (B.b
 	// hot-path resolver, or the API handler returning the "current
 	// value or default" view) falls back to the validators-registry
 	// default. Migration 048. See backend/internal/api/
@@ -272,10 +272,10 @@ type ExecutionStore interface {
 	// ListProjectAllowlist returns the customer-defined allowlist
 	// entries for the (projectID, detector) pair. Caller is
 	// responsible for validating detector ∈ {crashes,
-	// tool_failures, validator_failures} at the API edge — the
+	// tool_failures, validator_failures} at the API edge, the
 	// store accepts any string so a future fourth
 	// allowlist-supporting detector drops in with no store change.
-	// (llowlist.a — migration 049.)
+	// (llowlist.a, migration 049.)
 	ListProjectAllowlist(
 		ctx context.Context,
 		projectID, detector string,

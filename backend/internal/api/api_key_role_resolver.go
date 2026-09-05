@@ -11,7 +11,7 @@ package api
 //   1. GET /api-keys can return the effective role per key for the
 //      dashboard to render as an ADMIN / WRITE / READ badge.
 //   2. DELETE /api-keys/{id} can refuse revoking the last key whose
-//      owner has admin role — preventing a project from losing all
+//      owner has admin role, preventing a project from losing all
 //      admin authentication (the customer would still have dashboard
 //      access via session cookies, but their SDK calls that rely on
 //      admin-only endpoints would break silently).
@@ -38,7 +38,7 @@ const (
 
 // resolveKeyRoles returns a map from key_id to the current effective
 // role of each key. Errors from the org / member lookups are treated
-// as unknown-role rather than fatal — the caller may prefer to render
+// as unknown-role rather than fatal, the caller may prefer to render
 // keys with no badge instead of failing the whole listing over one
 // stale membership row. The project's tenant_id is looked up ONCE
 // even if there are many keys (batch-friendly).
@@ -52,7 +52,7 @@ func (h *Handlers) resolveKeyRoles(
 
 	tenantPtr, err := h.Store.GetProjectTenantID(ctx, projectID)
 	if err != nil || tenantPtr == nil || *tenantPtr == "" {
-		// Legacy project with no tenant_id — same fall-through as
+		// Legacy project with no tenant_id, same fall-through as
 		// resolveCallerRole. Every key gets treated as admin so the
 		// customer isn't unexpectedly downgraded in the UI.
 		for _, k := range keys {
@@ -115,7 +115,7 @@ func (h *Handlers) resolveKeyRoles(
 // role-aware slice.
 //
 // Returns false (safe to revoke) when the target key itself is NOT
-// admin — non-admin keys can be revoked freely because they don't
+// admin, non-admin keys can be revoked freely because they don't
 // affect admin-role coverage.
 func (h *Handlers) wouldStrandProjectWithoutAdminKey(
 	ctx context.Context, projectID, targetKeyID string, keys []*store.APIKey,

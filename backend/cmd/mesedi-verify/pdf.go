@@ -31,7 +31,7 @@ import (
 //     result is VERIFIED or FAILED, and the limits section is set in the
 //     same type as the results. A report that made passing look good and
 //     buried the caveats in small print at the back would be a sales
-//     document. Only the verdict WORD is coloured, and only on failure —
+//     document. Only the verdict WORD is coloured, and only on failure ,
 //     emphasis for a bad outcome is a safety convention; visual reward
 //     for a good one is persuasion.
 //
@@ -79,7 +79,7 @@ type pdfDoc struct {
 	// It used to be one sentence ending "then run mesedi-verify yourself",
 	// which assumes the reader has mesedi-verify. An auditor handed this
 	// document has the export and the report and no verifier, and no
-	// instruction for obtaining one — so in practice they cannot check
+	// instruction for obtaining one, so in practice they cannot check
 	// and end up trusting us anyway, which is the one outcome this whole
 	// report exists to prevent.
 	HowToCheck []string
@@ -94,7 +94,7 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 	// Three verdicts, matching the terminal report. A checkpoint nobody
 	// can check is not a checkpoint that failed, and a document that
 	// printed FAILED over an unverifiable chain would accuse Mesedi of
-	// something it is not known to have done — a falsehood in the
+	// something it is not known to have done, a falsehood in the
 	// opposite direction from the one this tool exists to prevent.
 	var failed, unchecked int
 	for _, e := range rep.LogEntries {
@@ -109,8 +109,8 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 
 	// Counted by METHOD, because the verdict below depends on what was
 	// established rather than on whether the network was used. Driving it
-	// from rep.Online instead is what made an offline run — including one
-	// that proved every checkpoint against Sigstore's signature — print
+	// from rep.Online instead is what made an offline run, including one
+	// that proved every checkpoint against Sigstore's signature, print
 	// "this run does not show the record was ever published".
 	verifiedCount, offlineCount := countVerified(rep.LogEntries)
 
@@ -174,20 +174,29 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 			"ever published. It is a structural check, not evidence."
 	}
 
-	// Describes what was DONE, not which flag was passed. "not contacted"
-	// alone reads as "not checked", which is now a different thing.
-	logLine := "not consulted, and no inclusion proofs were available to check"
+	// Leads with what WAS established, then how.
+	//
+	// This read "not consulted, 4 of 4 proven offline from inclusion
+	// proofs", which opens on a negative and on jargon: "not consulted"
+	// is easily read as "not checked", which is now the opposite of what
+	// happened. The reader wants the fact first and the method second.
+	// "Consulted" is also stiffer than it needs to be; the log is queried
+	// or it is not.
+	total := len(rep.LogEntries)
+	logLine := "not queried, and no inclusion proofs were available to check"
 	switch {
 	case verifiedCount > 0 && offlineCount == verifiedCount:
-		logLine = fmt.Sprintf("not consulted — %d of %d proven offline from inclusion proofs",
-			offlineCount, len(rep.LogEntries))
+		logLine = fmt.Sprintf(
+			"%d of %d checkpoints proven from inclusion proofs, without querying the log",
+			offlineCount, total)
 	case verifiedCount > 0 && offlineCount > 0:
-		logLine = fmt.Sprintf("consulted — %d of %d also proven offline from inclusion proofs",
-			offlineCount, len(rep.LogEntries))
+		logLine = fmt.Sprintf(
+			"%d of %d proven from inclusion proofs; the remainder confirmed by querying the log",
+			offlineCount, total)
 	case verifiedCount > 0:
-		logLine = "consulted"
+		logLine = fmt.Sprintf("%d of %d confirmed by querying the log", verifiedCount, total)
 	case rep.Online:
-		logLine = "consulted, but nothing could be confirmed"
+		logLine = "queried, but nothing could be confirmed"
 	}
 	d.Fields = [][2]string{
 		{"Project", rep.ProjectID},
@@ -211,7 +220,7 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 	d.Sections = append(d.Sections, structure)
 
 	// Gated on there being results, NOT on the run having used the
-	// network — the same stale condition that suppressed this section in
+	// network, the same stale condition that suppressed this section in
 	// the text report. It mattered more here: an offline run produced a
 	// PDF with no transparency-log section at all, so the copy actually
 	// handed to an auditor omitted every per-checkpoint verdict while the
@@ -259,7 +268,7 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 //
 // The old text said "then run mesedi-verify yourself" and stopped. A
 // reader holding this PDF has the export and the report and no verifier,
-// and nothing here told them where to get one — so the practical outcome
+// and nothing here told them where to get one, so the practical outcome
 // of "check us, don't trust us" was that they trusted us.
 //
 // The second instruction is the load-bearing one and it is a refusal: do
@@ -285,7 +294,7 @@ func howToCheck(verifier string) []string {
 		"   The result must equal the Export SHA-256 in the subject block above. If it",
 		"   does not, this report describes a different file and says nothing about yours.",
 		"",
-		"2. Obtain the verifier from source — NOT as a binary from Mesedi. A verdict",
+		"2. Obtain the verifier from source, NOT as a binary from Mesedi. A verdict",
 		"   produced by a program the audited party handed you is that party asserting",
 		"   again, which is what this document exists to avoid.",
 		"     git clone https://github.com/mesedi-ai/mesedi",

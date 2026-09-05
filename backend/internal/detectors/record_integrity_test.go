@@ -63,7 +63,7 @@ func TestRecordIntegrityDetectsDuplicate(t *testing.T) {
 }
 
 // The two conditions are orthogonal and a record can carry both.
-// Reporting only the first one found would hide half the problem —
+// Reporting only the first one found would hide half the problem ,
 // this is the same defect hitl_timeout.G3 fixed when its first-match
 // -wins scan suppressed the second signature.
 func TestRecordIntegrityReportsBothConditionsWhenBothPresent(t *testing.T) {
@@ -208,7 +208,7 @@ func TestWideSpanStillFiresTheGapSignature(t *testing.T) {
 	}
 }
 
-// A gap smaller than the cap must be reported in full — the cap must
+// A gap smaller than the cap must be reported in full, the cap must
 // not silently truncate ordinary results.
 func TestMissingSequencesBelowCapIsComplete(t *testing.T) {
 	got := MissingSequences([]int{1, 12})

@@ -122,7 +122,7 @@ type DetectionStore interface {
 	// checkpoint events across all executions for the project, plus
 	// the most-recent timestamp. Used by the detector-status surface
 	// to render the semantic_loop "no checkpoint data yet" empty
-	// state — count=0 + lastAt=nil means the customer has never
+	// state, count=0 + lastAt=nil means the customer has never
 	// instrumented mesedi.checkpoint() and the semantic_loop detector
 	// is therefore invisible to them. Empty-states wave (closes the
 	// backend half of semantic_loop.G2).
@@ -136,8 +136,8 @@ type DetectionStore interface {
 	// ListToolCallCountsForProject returns the per-tool count of
 	// non-failed tool_call events across all executions for the
 	// project. Used by the detector-status surface to render the
-	// tool_schema_drift "priming — N/min_history_calls observed"
-	// state per tool — tools below min_history_calls don't yet
+	// tool_schema_drift "priming, N/min_history_calls observed"
+	// state per tool, tools below min_history_calls don't yet
 	// trigger drift detection by design, but customers don't see
 	// that progress today. Empty-states wave (closes the backend
 	// half of tool_schema_drift.G2).
@@ -295,8 +295,8 @@ type DetectionStore interface {
 	//
 	// Note the self-referential quality of this one: the execution
 	// being grouped is the same execution whose record is incomplete.
-	// That is intentional — the group points at the run you would go
-	// look at — but it does mean the group's own event counts are
+	// That is intentional, the group points at the run you would go
+	// look at, but it does mean the group's own event counts are
 	// drawn from the record it is telling you not to fully trust.
 	GroupRecordIntegrity(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// GetExecutionTopology returns the full ancestor + descendant
@@ -353,7 +353,7 @@ type DetectionStore interface {
 	// recovered from a quality-check failure" pattern.
 	// Returns (validatorName, severityHint, err). severityHint is
 	// the SDK-supplied `severity` payload field on validator_result
-	// events (added validator_failures.G1) — one of {"warning",
+	// events (added validator_failures.G1), one of {"warning",
 	// "error", "critical"} or empty when the SDK is older than the
 	// fix. Empty means "no hint"; resolution falls through to class
 	// default.
@@ -375,7 +375,7 @@ type DetectionStore interface {
 	GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64) (bool, error)
 	// GroupCostVelocityRate upserts a failure_group with
 	// failure_class=cost_velocity and a RATE-bucketed signature
-	// (rate_$X+_per_min). Companion to GroupCostVelocity — same
+	// (rate_$X+_per_min). Companion to GroupCostVelocity, same
 	// failure_class, different signature so rate-based bursts cluster
 	// distinctly from per-execution magnitude on the dashboard.
 	GroupCostVelocityRate(ctx context.Context, executionID, projectID string, ratePerMinUSD float64) (bool, error)
@@ -418,15 +418,15 @@ type DetectionStore interface {
 	ListLLMUserMessagesForProjectSince(ctx context.Context, projectID string, cutoff time.Time, excludeExecutionID string, limit int) ([]string, error)
 	// ListFailureGroups returns the project's failure groups sorted by
 	// last_seen DESC (most recent first). Opts struct carries pagination
-	// (Limit + Offset), search (Q — case-insensitive substring on
+	// (Limit + Offset), search (Q, case-insensitive substring on
 	// signature + failure_class), and resolved-visibility
-	// (IncludeResolved — default false hides resolved groups from the
+	// (IncludeResolved, default false hides resolved groups from the
 	// dashboard's default view). Zero-value opts == legacy default
 	// behavior with no q + first page of 50 + resolved hidden.
 	ListFailureGroups(ctx context.Context, projectID string, opts ListFailureGroupsOpts) ([]*FailureGroup, error)
 	// ResolveFailureGroup marks a failure_group as resolved (sets
 	// resolved_at = now, resolved_by = actorUserID). Tenant-scoped via
-	// the projectID predicate — a resolve attempt against another
+	// the projectID predicate, a resolve attempt against another
 	// project's group_id returns ErrNotFound, no leak. Idempotent: a
 	// second resolve refreshes the timestamp. Audit emission lives at
 	// the handler layer (audit_events.action = "failure_group.resolved").
@@ -452,7 +452,7 @@ type DetectionStore interface {
 	// playbookSignature is the SHA-256 hex digest of the playbook
 	// content used at analysis time (migration 053,
 	// ai-analysis-staleness-tracking wave). Empty string stores as
-	// NULL — used when the playbook lookup failed and no signature
+	// NULL, used when the playbook lookup failed and no signature
 	// is available; the dashboard treats NULL as "outdated."
 	SaveFailureGroupAnalysis(
 		ctx context.Context,

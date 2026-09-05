@@ -2,11 +2,11 @@ package store
 
 // Config-fallback telemetry queries. Since
 // (migration 050) these rows live in the dedicated system_events
-// table instead of audit_events — they're operational telemetry,
+// table instead of audit_events, they're operational telemetry,
 // not customer-initiated admin actions.
 //
 // Surfaces in the dashboard so customers see when their config is
-// being silently ignored — e.g. a bad migration that drops a column
+// being silently ignored, e.g. a bad migration that drops a column
 // would otherwise be invisible to them.
 
 import (
@@ -29,7 +29,7 @@ type ConfigFallbackStats struct {
 	// DetectorThresholdsCount aggregates ALL detector-
 	// threshold fallback events (any (detector, threshold_key)
 	// pair). Per-detector breakdown is intentionally NOT exposed
-	// at the dashboard tile level — the customer-facing question
+	// at the dashboard tile level, the customer-facing question
 	// is "is my config being silently eaten?" and a single
 	// counter answers that. Per-detector telemetry lives in the
 	// audit_events table for ops to query when needed.
@@ -84,7 +84,7 @@ func (s *SQLiteStore) GetConfigFallbackStats(
 			// Per-detector breakdown stays in audit_events for ops.
 			stats.DetectorThresholdsCount += n
 		}
-		// Unknown target_id values are silently ignored — keeps
+		// Unknown target_id values are silently ignored, keeps
 		// the query forward-compatible if a future config is
 		// added without updating this aggregator.
 	}

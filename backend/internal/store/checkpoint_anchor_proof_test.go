@@ -17,8 +17,8 @@ import (
 // path and to ONE of the two read paths. GetCheckpointAnchor and
 // listCheckpointAnchorRange carry separate SQL and separate scan lists,
 // and nothing connects them. Update one, and single-checkpoint reads
-// carry the proof while range reads — which is what the chain export
-// and mesedi-verify actually use — silently return it empty. Empty is
+// carry the proof while range reads, which is what the chain export
+// and mesedi-verify actually use, silently return it empty. Empty is
 // not a loud state here: it is the honest value for every checkpoint
 // anchored before this column existed, so the loss reads as history
 // rather than as a bug, for as long as anyone cares to look.
@@ -96,7 +96,7 @@ func assertAnchorProof(t *testing.T, via string, got, want CheckpointAnchor) {
 // An anchor with no proof must persist and read back cleanly. This is
 // the state of every checkpoint anchored before migration 060 and of
 // every mock-backend anchor, and a store that rejected it would turn a
-// missing proof into a stalled chain — strictly worse, because the
+// missing proof into a stalled chain, strictly worse, because the
 // anchor it refused was real.
 func TestAnchorWithoutAProofStillPersists(t *testing.T) {
 	ctx := context.Background()

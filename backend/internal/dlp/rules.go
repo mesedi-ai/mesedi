@@ -88,11 +88,11 @@ var builtinRules = []Rule{
 		Label: "Anthropic API key",
 		// Covers both the modern project-scoped sk-ant-api03- form
 		// and the legacy sk-ant- form. Mesedi customers are the
-		// most-exposed segment for these — they instrument LLM
+		// most-exposed segment for these, they instrument LLM
 		// calls, so an Anthropic key leaking through a prompt,
 		// tool argument, or validator message reaches the same
 		// observability pipeline as the call itself. Alphabetized
-		// BEFORE openai_api_key intentionally — the OpenAI rule's
+		// BEFORE openai_api_key intentionally, the OpenAI rule's
 		// pattern `\bsk-...` would otherwise also match Anthropic
 		// keys; ordering this rule first lets mergeOverlapping
 		// keep the more-specific match.

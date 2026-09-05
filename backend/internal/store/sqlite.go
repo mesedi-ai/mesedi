@@ -1984,13 +1984,13 @@ var ErrNotFound = errors.New("not found")
 
 // ErrProjectStillActive is returned by GDPR purge paths when
 // the caller passes a project_id that still has a row in the
-// `projects` table — i.e. the project has not been closed via
+// `projects` table, i.e. the project has not been closed via
 // HandleCloseAccount + DeleteProjectCascade. The purge surface refuses
 // live projects: customer-initiated audit deletion must follow the
 // normal HandleCloseAccount flow first; admin-initiated GDPR purge is
 // for already-closed projects only. Pre-the guard counted
 // audit_events with project_deleted_at IS NULL, which silently
-// bypassed for newly-signed-up projects with no audit history — see
+// bypassed for newly-signed-up projects with no audit history, see
 // audit_events.go for the bug history. The handler maps this to
 // HTTP 422.
 var ErrProjectStillActive = errors.New("project still active; close it before GDPR purge")
@@ -2070,7 +2070,7 @@ func (s *SQLiteStore) ListExecutions(
 ) ([]*events.Execution, error) {
 	// Search filter (list-search-paginate wave): when q is non-empty,
 	// restrict to rows whose execution_id OR crash_signature contains
-	// q, case-insensitively. Parameterized query — safe against
+	// q, case-insensitively. Parameterized query, safe against
 	// injection. Empty q skips the predicate entirely so existing
 	// internal callers (admin export, savings report) keep their
 	// fast unfiltered path.
@@ -2132,7 +2132,7 @@ func (s *SQLiteStore) ListActiveExecutionsByProject(
 // group was a SECONDARY classification on them. Before migration 039
 // this query was a direct equality scan on executions.failure_group_id,
 // which silently dropped every execution whose primary detector ran
-// first and claimed the slot — that's the bug that motivated 039.
+// first and claimed the slot, that's the bug that motivated 039.
 //
 // Caller is expected to have already verified the group belongs to
 // the auth context's project; this method does not enforce project
@@ -2424,7 +2424,7 @@ func deriveGroupID(projectID, failureClass, signature string) string {
 
 // DeriveFailureGroupID is the exported form of deriveGroupID for
 // callers (api handlers) that need to compute a group_id without
-// hitting the DB — used by the validator_failures.G1 post-step
+// hitting the DB, used by the validator_failures.G1 post-step
 // that updates severity_hint on the just-created row.
 func DeriveFailureGroupID(projectID, failureClass, signature string) string {
 	h := sha256.Sum256([]byte(projectID + "|" + failureClass + "|" + signature))
@@ -2472,7 +2472,7 @@ func (s *SQLiteStore) groupExecutionInternal(
 
 	// Newness probe BEFORE the upsert so we can report isNew=true to
 	// the caller for webhook escalation. Racy under concurrent
-	// writers — both observers could see "not found" and both report
+	// writers, both observers could see "not found" and both report
 	// isNew=true. At Mesedi's current volume the worst case is
 	// duplicate webhook deliveries, not data corruption.
 	var existedBefore int
@@ -2498,8 +2498,8 @@ func (s *SQLiteStore) groupExecutionInternal(
 	//
 	// Counters get +1 here on the assumption that the link insert
 	// below WILL succeed (the common case). If the link turns out to
-	// already exist — a true idempotent retry or a concurrent
-	// writer winning the race — the decrement at the bottom of this
+	// already exist, a true idempotent retry or a concurrent
+	// writer winning the race, the decrement at the bottom of this
 	// function compensates.
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO failure_groups (
@@ -2814,7 +2814,7 @@ func (s *SQLiteStore) FindFirstFailedTool(
 // granular-sig wave: signature is now "<tool>:<exception_type>" when
 // the caller has access to exception_type from the failed tool_call
 // event; falls back to "<tool>" for backward compat. The store layer
-// is signature-agnostic — concat happens in the handler.
+// is signature-agnostic, concat happens in the handler.
 func (s *SQLiteStore) GroupToolFailure(
 	ctx context.Context,
 	executionID, projectID, signature string,
@@ -2900,7 +2900,7 @@ func (s *SQLiteStore) FindFirstDLPSignal(
 		[]string{"critical", "high"})
 }
 
-// FindFirstDLPSignalForSeverities — SQLite implementation
+// FindFirstDLPSignalForSeverities, SQLite implementation
 // (data_leakage.G5 wave). Builds the IN clause dynamically from
 // the customer's allowed-severity slice. The CASE ORDER BY is
 // constant (critical < high < medium < other) so priority remains
@@ -3523,7 +3523,7 @@ func (s *SQLiteStore) GroupHITLTimeout(ctx context.Context, executionID, project
 
 // GroupRecordIntegrity upserts a failure_group with
 // failure_class=record_integrity. Thin wrapper over the shared
-// grouping path, identical in shape to every other Group* method —
+// grouping path, identical in shape to every other Group* method ,
 // this detector needs no special persistence, only a distinct class.
 func (s *SQLiteStore) GroupRecordIntegrity(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
 	if signature == "" {
@@ -3872,7 +3872,7 @@ func CostVelocityRateSignature(ratePerMinUSD float64) string {
 // The caller (HandleUpdateExecution) is responsible for the
 // threshold check using the per-project value from
 // GetProjectCostVelocityThresholdUSD. The store layer no longer
-// enforces a threshold — the policy lives in the handler, the
+// enforces a threshold, the policy lives in the handler, the
 // storage in the store. Mirrors the time_budget pattern.
 func (s *SQLiteStore) GroupCostVelocity(
 	ctx context.Context,
@@ -3885,7 +3885,7 @@ func (s *SQLiteStore) GroupCostVelocity(
 
 // GroupCostVelocityRate upserts a failure_group with
 // failure_class=cost_velocity and a RATE-bucketed signature
-// (rate_$X+_per_min). Companion to GroupCostVelocity — same class,
+// (rate_$X+_per_min). Companion to GroupCostVelocity, same class,
 // different signature so the dashboard renders rate-based bursts as
 // a distinct cluster from per-execution magnitude. Handler is
 // responsible for the threshold check using the per-project value
@@ -4135,7 +4135,7 @@ func (s *SQLiteStore) ListFailureGroups(
 	// case-insensitively. Resolved-visibility filter
 	// (failure-group-resolve wave): when IncludeResolved is false
 	// (default), drop rows with non-NULL resolved_at. Parameterized
-	// — safe against injection. Empty opts skips both predicates so
+	//, safe against injection. Empty opts skips both predicates so
 	// internal callers stay on the unfiltered fast path.
 	args := []any{projectID}
 	whereClause := "fg.project_id = ?"
@@ -4222,7 +4222,7 @@ func (s *SQLiteStore) GetFailureGroup(
 // ResolveFailureGroup marks the group resolved (sets resolved_at +
 // resolved_by). Tenant-scoped: the WHERE clause requires both
 // group_id AND project_id, so a resolve attempt on another
-// project's group returns ErrNotFound — no leak of group_id
+// project's group returns ErrNotFound, no leak of group_id
 // existence across tenants (same pattern as GetFailureGroup).
 // Idempotent: re-resolving refreshes the timestamp.
 func (s *SQLiteStore) ResolveFailureGroup(

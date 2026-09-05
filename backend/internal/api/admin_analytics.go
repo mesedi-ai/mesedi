@@ -6,7 +6,7 @@ package api
 // calls Stripe APIs (charge.List, refund.List, subscription.List)
 // and pairs the results with local DB metadata (MRR derived from
 // projects.tier='team' count × $99). No local schema, no webhooks
-// to maintain — Stripe is the source of truth for money movement.
+// to maintain, Stripe is the source of truth for money movement.
 //
 // Trade-off accepted: page load is 1-2 seconds instead of <100ms.
 // For a founder-only page checked a few times a week, that's fine.
@@ -74,7 +74,7 @@ type AdminAnalyticsSummary struct {
 
 	// Stripe-derived metrics (this month). Nil when Stripe isn't
 	// configured or when the live call failed; the dashboard
-	// branches on presence to render "—" instead of "0".
+	// branches on presence to render "," instead of "0".
 	ThisMonthGrossUSD     *float64 `json:"this_month_gross_usd,omitempty"`
 	ThisMonthRefundsUSD   *float64 `json:"this_month_refunds_usd,omitempty"`
 	ThisMonthNetUSD       *float64 `json:"this_month_net_usd,omitempty"`

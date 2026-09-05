@@ -13,7 +13,7 @@ package events
 // "does this customer's record contradict itself?" have to run over the
 // customer's events and not over Mesedi's annotations of them. The DLP
 // sibling deliberately carries its parent's sequence number so the two
-// render side by side — which the record_integrity detector then read as
+// render side by side, which the record_integrity detector then read as
 // the customer having claimed one sequence twice. Every DLP hit produced
 // a duplicate_sequence signal, so a customer whose agent leaked a secret
 // was ALSO told their records were corrupt, by us, about an event we
@@ -24,7 +24,7 @@ package events
 // Filtering by type alone would be worse than the bug. The ingest
 // endpoint validates no event types at all, so a customer could label
 // their own events dlp_scan_result and have a genuine duplicate quietly
-// excluded from the integrity check — then hand an auditor a Mesedi
+// excluded from the integrity check, then hand an auditor a Mesedi
 // report stating the record is clean. Mesedi would be the party making
 // the false statement, which is the exact failure this product exists to
 // prevent.

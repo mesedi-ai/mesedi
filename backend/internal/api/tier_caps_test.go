@@ -1,7 +1,7 @@
 package api
 
 // Unit tests for tier-aware caps. The caps are policy
-// numbers, so the tests document them as much as they verify them —
+// numbers, so the tests document them as much as they verify them ,
 // a future change to the cap that doesn't update the test is the
 // canary that someone needs to reason about why.
 
@@ -19,7 +19,7 @@ func TestTierCapTimeBudgetMs(t *testing.T) {
 		// Legacy alias from pre-migration-019 days; normalizeTier
 		// folds it to Team.
 		{TierProLegacy, 3_600_000},
-		// Unknown / empty / lowercase variants — fall back to the
+		// Unknown / empty / lowercase variants, fall back to the
 		// strictest cap.
 		{"", 300_000},
 		{"unknown_tier", 300_000},

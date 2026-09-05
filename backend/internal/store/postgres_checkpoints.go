@@ -1,7 +1,7 @@
 package store
 
 // Checkpoint chain persistence, Postgres implementation (migration
-// 058). Twin of sqlite_checkpoints.go — read that file for the
+// 058). Twin of sqlite_checkpoints.go, read that file for the
 // reasoning behind each decision.
 //
 // ONE REAL DIALECT DIFFERENCE, NOT JUST PLACEHOLDERS
@@ -11,7 +11,7 @@ package store
 // genuine time.Time, so this file scans directly into time.Time and
 // needs no parsing step. Copying the SQLite string-parsing here would
 // fail at runtime, and copying this file's direct scan into the SQLite
-// twin would fail there — which is exactly why these are two files and
+// twin would fail there, which is exactly why these are two files and
 // not one with a dialect flag.
 //
 // Both stores MUST carry this. Shipping one and not the other is what
@@ -143,7 +143,7 @@ func scanPGCheckpointRow(row *sql.Row) (*attest.Checkpoint, error) {
 	cp.CumulativeCount = uint64(cumulative)
 	// Normalise to UTC before hashing. The hash preimage formats times
 	// as UTC, so a row returned in another zone would still hash the
-	// same — but normalising here keeps the loaded value identical to
+	// same, but normalising here keeps the loaded value identical to
 	// what was stored rather than merely hash-equivalent.
 	cp.IntervalStart = cp.IntervalStart.UTC()
 	cp.IntervalEnd = cp.IntervalEnd.UTC()
@@ -162,7 +162,7 @@ func scanPGCheckpointRow(row *sql.Row) (*attest.Checkpoint, error) {
 // were hashed. ORDER BY position: the root depends on leaf order and
 // SELECT row order is not a contract.
 //
-// CROSS-TENANT BY DESIGN — INTERNAL USE ONLY. Returns every project's
+// CROSS-TENANT BY DESIGN, INTERNAL USE ONLY. Returns every project's
 // leaf for the interval, because that is the set the root was computed
 // over and a tree cannot be rebuilt from a subset. Never hand the
 // result to a tenant-facing response: on a DoD deployment the volume of

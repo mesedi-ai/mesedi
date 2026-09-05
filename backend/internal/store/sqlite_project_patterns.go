@@ -50,7 +50,7 @@ type ProjectPattern struct {
 
 // ListProjectPatterns returns the customer-defined custom patterns
 // for the given (projectID, detector) pair, in created_at order
-// (oldest first — preserves customer-perceived row stability across
+// (oldest first, preserves customer-perceived row stability across
 // dashboard reloads).
 func (s *SQLiteStore) ListProjectPatterns(
 	ctx context.Context,

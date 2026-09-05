@@ -22,7 +22,7 @@ import (
 // no-op input.
 //
 // dropped is the count of stored patterns that failed to compile
-// (extremely rare — the API layer RE2-validates at PUT). The
+// (extremely rare, the API layer RE2-validates at PUT). The
 // caller can log the drop count for ops visibility.
 func (h *Handlers) loadCustomPatternsForDetector(
 	ctx context.Context,
@@ -45,7 +45,7 @@ func (h *Handlers) loadCustomPatternsForDetector(
 		}
 		re, compErr := regexp.Compile(r.Pattern)
 		if compErr != nil {
-			// Should be unreachable — POST/PATCH RE2-validates
+			// Should be unreachable, POST/PATCH RE2-validates
 			// before insert. Log and skip so one corrupt row
 			// doesn't kill the whole detector.
 			h.Logger.Warn("stored project_pattern failed to compile; skipping",
@@ -76,7 +76,7 @@ func (h *Handlers) incrementCustomPatternMatch(
 	}
 	if err := h.Store.IncrementPatternMatchCount(ctx, projectID, patternID, 1); err != nil {
 		// ErrNotFound here means the customer deleted the pattern
-		// between the load and the increment — race window is
+		// between the load and the increment, race window is
 		// narrow and benign; don't log noisily.
 		if !errIsNotFound(err) {
 			h.Logger.Warn("increment project_pattern match_count failed",
@@ -98,7 +98,7 @@ func errIsNotFound(err error) bool {
 
 // uniqueStrings returns the input slice with duplicate entries
 // removed, preserving the first-occurrence order. Used by the DLP
-// hot path to de-dup pattern_id increments — a single pattern
+// hot path to de-dup pattern_id increments, a single pattern
 // firing on multiple events in the same batch should bump the
 // counter once, not once per match.
 func uniqueStrings(in []string) []string {

@@ -49,7 +49,7 @@ func TestRecurrenceShouldFire_EveryEventAlwaysFires(t *testing.T) {
 }
 
 func TestRecurrenceShouldFire_ThrottledFiresOnFirstOccurrence(t *testing.T) {
-	// No row yet — store returns ErrNotFound. Dispatcher must treat
+	// No row yet, store returns ErrNotFound. Dispatcher must treat
 	// that as "window elapsed" so the customer sees the first ping.
 	st := &fakeRecurrenceReader{err: store.ErrNotFound}
 	mode := store.RecurrenceModeThrottled

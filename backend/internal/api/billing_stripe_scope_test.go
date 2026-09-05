@@ -36,13 +36,13 @@
 //
 // ENVIRONMENT REQUIRED
 //
-//   STRIPE_TEST_KEY              sk_test_... or rk_test_... — the candidate
+//   STRIPE_TEST_KEY              sk_test_... or rk_test_..., the candidate
 //                                key under test. The test passes ⇒ this
 //                                key has all the scopes Mesedi needs.
-//   STRIPE_TEST_TEAM_PRICE_ID    price_... — a test-mode price ID for the
+//   STRIPE_TEST_TEAM_PRICE_ID    price_..., a test-mode price ID for the
 //                                Cloud Team subscription tier. Create once
 //                                in Stripe Dashboard test mode and reuse.
-//   STRIPE_TEST_SUBSCRIPTION_ID  sub_... — a test-mode subscription to
+//   STRIPE_TEST_SUBSCRIPTION_ID  sub_..., a test-mode subscription to
 //                                exercise Update / Cancel against. Create
 //                                once via Stripe Dashboard (Customers →
 //                                Add subscription on a test customer) and
@@ -53,7 +53,7 @@
 //
 // HOW TO RUN
 //
-//   # Baseline (production unrestricted key analog — should ALWAYS pass):
+//   # Baseline (production unrestricted key analog, should ALWAYS pass):
 //   STRIPE_TEST_KEY=sk_test_... \
 //   STRIPE_TEST_TEAM_PRICE_ID=price_... \
 //   STRIPE_TEST_SUBSCRIPTION_ID=sub_... \
@@ -228,7 +228,7 @@ func TestStripeScopes(t *testing.T) {
 	})
 
 	t.Run("PaymentIntent", func(t *testing.T) {
-		// We don't confirm or capture, just create — that's all the
+		// We don't confirm or capture, just create, that's all the
 		// scope check needs. Mesedi's hobby_billing_scheduler creates
 		// then lets Stripe webhooks drive the rest of the lifecycle.
 		params := &stripe.PaymentIntentParams{

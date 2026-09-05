@@ -66,7 +66,7 @@ type ContextOverflowThresholds struct {
 }
 
 // DefaultContextOverflowThresholds returns the historical hardcoded
-// defaults. CustomModelWindows defaults to nil — equivalent to an
+// defaults. CustomModelWindows defaults to nil, equivalent to an
 // empty map; every model lookup falls through to the registry.
 func DefaultContextOverflowThresholds() ContextOverflowThresholds {
 	return ContextOverflowThresholds{
@@ -78,7 +78,7 @@ func DefaultContextOverflowThresholds() ContextOverflowThresholds {
 // effectiveContextWindow returns the customer's per-project override
 // for the given model_id when present and in bounds, else the static
 // registry's value. (0, false) when neither has a window for the
-// model — caller treats that as "skip detection for this model".
+// model, caller treats that as "skip detection for this model".
 // Defensive: customer-override values outside [1024, 10_000_000]
 // fall through to the registry (validators registry rejects these
 // at write time; we re-validate at read time for safety against
@@ -148,7 +148,7 @@ func DetectContextOverflowWithThresholds(
 	worstModel := ""
 	worstPct := 0.0
 	for model, tokens := range highWater {
-		// context_overflow.G3 — customer override wins over the
+		// context_overflow.G3, customer override wins over the
 		// static registry. Unknown models with no override silently
 		// skip detection (same posture as before; the override path
 		// is what unlocks coverage for Ollama / fine-tuned models).

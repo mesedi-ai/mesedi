@@ -26,7 +26,7 @@
 //     signatures keep working unchanged.
 //
 //  2. Tarjan's SCC pass for N >= 3 cycles. Runs ONLY when the
-//     fast 2-cycle scan finds no match — preserves signature
+//     fast 2-cycle scan finds no match, preserves signature
 //     stability and skips Tarjan cost on the ~90% of executions
 //     that either have no deadlock or have a 2-cycle. Tarjan runs
 //     in O(V+E); on realistic topologies (typically <100 unique
@@ -34,7 +34,7 @@
 //     size >= 3 exist, the lexicographically-smallest member-list
 //     wins (same tie-break as the 2-cycle path). Signature shape:
 //     "coordination_deadlock:<m1>:<m2>:<m3>..." with all members
-//     sorted alphabetically — same prefix as 2-cycle, so cycle
+//     sorted alphabetically, same prefix as 2-cycle, so cycle
 //     length is recoverable by counting colons.
 //
 // Why 2-cycle priority over larger cycles when both exist: in
@@ -42,7 +42,7 @@
 // means the 2-cycle is the simpler / more-actionable signal (a
 // hot loop between two specific agents inside a larger topology).
 // Demoting the 2-cycle in favor of the larger cycle would also
-// silently change alerting behavior for live customers — the
+// silently change alerting behavior for live customers, the
 // existing 2-cycle dashboard filters must keep firing on the
 // exact same executions they fire on today.
 package detectors

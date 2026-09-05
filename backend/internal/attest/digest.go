@@ -10,7 +10,7 @@
 // and calling it evidence would be circular.
 //
 // The value appears only when the digest is anchored somewhere Mesedi
-// does not control — a public transparency log. Then the claim becomes
+// does not control, a public transparency log. Then the claim becomes
 // checkable: "this exact record existed at the time that log entry was
 // integrated, and has not changed since." That anchoring is Verdifax's
 // job and is deliberately NOT in this package. What lives here is the
@@ -38,8 +38,8 @@
 // an odd node at any level promoted unchanged.
 //
 // Copying it exactly is deliberate. Two nearly-identical tree
-// implementations that disagree on one edge case — usually the odd-node
-// rule — produce roots that differ only for some inputs, which is the
+// implementations that disagree on one edge case, usually the odd-node
+// rule, produce roots that differ only for some inputs, which is the
 // worst possible failure: it works in testing and fails in production
 // on the first execution with an odd event count at the wrong level.
 // The domain-separation prefixes matter too; without them a leaf hash
@@ -59,7 +59,7 @@ import (
 // ErrNoEvents means the execution recorded nothing to digest. Returned
 // rather than a digest of the empty tree, because an empty root is a
 // real value that would silently stand in for "we have no record of
-// this run" — and those two must not look the same to a caller.
+// this run", and those two must not look the same to a caller.
 var ErrNoEvents = errors.New("attest: execution has no events to digest")
 
 // Digest is the canonical summary of one execution's event record.
@@ -78,7 +78,7 @@ type Digest struct {
 
 	// Leaves are the per-event leaf hashes in canonical order, hex.
 	// Returned so a caller can recompute the root independently rather
-	// than taking this service's word for it — which is the only way a
+	// than taking this service's word for it, which is the only way a
 	// digest from an untrusted party is worth anything.
 	Leaves []string `json:"leaves"`
 
@@ -96,7 +96,7 @@ const AlgorithmV1 = "mesedi-exec-merkle-v1/rfc6962-sha256"
 
 // AlgorithmNoEventsV1 identifies the digest of an execution that
 // recorded no events at all. A different construction from AlgorithmV1
-// — it is not a Merkle root over anything — so per the rule above it
+// , it is not a Merkle root over anything, so per the rule above it
 // gets its own identifier rather than pretending to be a v1 tree.
 const AlgorithmNoEventsV1 = "mesedi-exec-no-events-v1/sha256"
 
@@ -116,8 +116,8 @@ const noEventsDomain = "mesedi.execution.no-events.v1"
 // record". The digest endpoint depends on that and answers 404.
 //
 // But the CHAIN cannot refuse. On 2026-09-04 a single execution with
-// zero events — created and crashed 452 microseconds later, before it
-// emitted anything — stopped checkpoint construction for every tenant,
+// zero events, created and crashed 452 microseconds later, before it
+// emitted anything, stopped checkpoint construction for every tenant,
 // on every tick, permanently, because that execution will never acquire
 // events. Any customer could cause it, deliberately or by having an SDK
 // die between execution creation and its first flush.
@@ -178,7 +178,7 @@ func ComputeForChain(executionID string, evts []*events.Event) (Digest, error) {
 //   - payload digest, NOT the payload: the raw bytes are hashed rather
 //     than re-encoded. Re-serialising JSON would make the leaf depend
 //     on key ordering and whitespace, which Go's map iteration
-//     randomises — the root would differ between two calls on
+//     randomises, the root would differ between two calls on
 //     identical data. Hashing the bytes as received removes that
 //     entirely, and has the side effect that a proof can be checked
 //     without disclosing the payload.
@@ -276,7 +276,7 @@ type InclusionProof struct {
 //
 // Takes the digest rather than the events so a caller can produce a
 // proof from a previously published digest without re-reading the
-// record — which is exactly the position a verifier is in.
+// record, which is exactly the position a verifier is in.
 func Prove(d Digest, index int) (InclusionProof, error) {
 	path, err := provePath(d.Leaves, index)
 	if err != nil {
@@ -298,7 +298,7 @@ func Prove(d Digest, index int) (InclusionProof, error) {
 //
 // A second copy is exactly what this avoids. The odd-node promotion rule
 // below is the single most common Merkle implementation bug, and it was
-// got wrong once already in this file — see the long note on
+// got wrong once already in this file, see the long note on
 // VerifyInclusion about leaf 2 of 3 and leaf 4 of 5. Duplicating this
 // loop for the tenant tree would have been duplicating that bug's hiding
 // place, and the two copies would drift the first time either was
@@ -325,7 +325,7 @@ func provePath(leafHex []string, index int) ([]string, error) {
 		for i := 0; i < len(level); i += 2 {
 			if i+1 == len(level) {
 				// Odd node promoted unchanged. It has no sibling, so
-				// nothing is added to the path — the promoted node
+				// nothing is added to the path, the promoted node
 				// simply moves up a level. Getting this wrong is the
 				// single most common Merkle implementation bug.
 				next = append(next, level[i])
@@ -355,7 +355,7 @@ func provePath(leafHex []string, index int) ([]string, error) {
 // purpose. The first version of this function was hand-rolled: it
 // consumed one path entry per level and halved the index each time.
 // That is correct only for perfect trees. At a level where a node is
-// PROMOTED — an odd count, last node has no sibling — Prove emits no
+// PROMOTED, an odd count, last node has no sibling, Prove emits no
 // path entry, so a verifier that consumes one anyway desyncs its index
 // from the prover's and every promoted leaf fails.
 //
@@ -415,7 +415,7 @@ func VerifyInclusion(p InclusionProof) (bool, error) {
 		sn >>= 1
 	}
 
-	// sn must have reached 0 — anything else means the path was too
+	// sn must have reached 0, anything else means the path was too
 	// short for the declared tree size, and a short path would let a
 	// subtree root masquerade as the whole tree.
 	return sn == 0 && hex.EncodeToString(cur) == p.Root, nil

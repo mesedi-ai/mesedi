@@ -2,7 +2,7 @@ package store
 
 // Per-project cost_velocity detector threshold store methods, SQLite
 // implementation (migration 043). Sidecar file matching the
-// time_budget / provider_incident / tool_return_value layout — keeps
+// time_budget / provider_incident / tool_return_value layout, keeps
 // the main sqlite.go projects-table scans unchanged. Reads/writes
 // only the cost_velocity_threshold_usd column.
 

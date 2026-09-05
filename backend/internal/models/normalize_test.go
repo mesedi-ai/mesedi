@@ -14,7 +14,7 @@ func Test_NormalizeModelID_BedrockAnthropic(t *testing.T) {
 		{"anthropic.claude-3-5-sonnet-20240620-v1:0", "claude-3-5-sonnet"},
 		{"anthropic.claude-3-5-haiku-20241022-v1:0", "claude-3-5-haiku"},
 		{"anthropic.claude-3-opus-20240229-v1:0", "claude-3-opus"},
-		// Bedrock Cohere identifier — strips prefix + suffix.
+		// Bedrock Cohere identifier, strips prefix + suffix.
 		// (Will only register in registry once the no-suffix
 		// canonical matches an existing entry.)
 		{"cohere.command-r-plus-20240801-v1:0", "command-r-plus"},
@@ -68,7 +68,7 @@ func Test_NormalizeModelID_AzureDeploymentUnchanged(t *testing.T) {
 	// deterministic; normalization is impossible without a
 	// customer-supplied mapping. The function must leave them
 	// alone so the registry lookup correctly returns ok=false
-	// and context_overflow silently skips (correct behavior —
+	// and context_overflow silently skips (correct behavior ,
 	// G3 per-project model-window override is the right fix).
 	azures := []string{
 		"my-prod-gpt4",
@@ -161,7 +161,7 @@ func Test_Provider_CohereModelsCorrectlyTagged(t *testing.T) {
 }
 
 func Test_Provider_BedrockAnthropicResolvesProvider(t *testing.T) {
-	// Bedrock-routed Anthropic must report "anthropic" — the
+	// Bedrock-routed Anthropic must report "anthropic", the
 	// provider_incident detector keys on Provider() to cluster
 	// cross-tenant signals.
 	if got := Provider("anthropic.claude-3-5-sonnet-20240620-v1:0"); got != "anthropic" {

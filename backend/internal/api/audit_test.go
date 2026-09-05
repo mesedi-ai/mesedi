@@ -139,7 +139,7 @@ func Test_recordAuditEvent_NoProjectContext_IsNoOp(t *testing.T) {
 	h := &Handlers{Store: s, Logger: quietLogger()}
 
 	r := httptest.NewRequest(http.MethodPost, "/api-keys", nil)
-	// No project on context — helper should silently skip.
+	// No project on context, helper should silently skip.
 	h.recordAuditEvent(r, AuditAPIKeyCreate, "api_key", "key-x", nil)
 
 	if s.created != nil {
@@ -265,7 +265,7 @@ func Test_HandleListAuditEvents_HappyPath_ReturnsRows(t *testing.T) {
 // .F (closes / ): audit logs moved from Hobby-included
 // to Team-only. Hobby admins hitting /audit-log get 402 with an
 // upgrade nudge. The store's ListAuditEventsByProject must NOT be
-// called on the Hobby path — the tier gate short-circuits before it.
+// called on the Hobby path, the tier gate short-circuits before it.
 func Test_HandleListAuditEvents_Hobby_Refused402(t *testing.T) {
 	s := &stubAuditStore{projectTier: TierHobby}
 	h := &Handlers{Store: s, Logger: quietLogger()}
@@ -281,7 +281,7 @@ func Test_HandleListAuditEvents_Hobby_Refused402(t *testing.T) {
 			w.Code, w.Body.String())
 	}
 	// Store must not have been consulted for rows once the tier
-	// gate fires — otherwise a bug in the ordering would leak a
+	// gate fires, otherwise a bug in the ordering would leak a
 	// paywalled feature to Hobby with an oversized response.
 	if s.listedProjectID != "" {
 		t.Errorf("Hobby request should short-circuit before ListAuditEventsByProject; "+
@@ -294,8 +294,8 @@ func Test_HandleListAuditEvents_Hobby_Refused402(t *testing.T) {
 }
 
 // .F: empty tier string normalizes to Hobby (strictest cap,
-// safest default) via normalizeTier, so an unlabeled project — which
-// can happen for pre-tier-labeling legacy rows — is treated exactly
+// safest default) via normalizeTier, so an unlabeled project, which
+// can happen for pre-tier-labeling legacy rows, is treated exactly
 // like Hobby and refused. Belt-and-suspenders coverage for the same
 // tier check as above.
 func Test_HandleListAuditEvents_EmptyTier_TreatedAsHobby(t *testing.T) {

@@ -55,7 +55,7 @@ const (
 )
 
 // HITLRejectionSpikeThresholds carries the per-project tunable knobs
-// for this detector (extensions wave — closes G3).
+// for this detector (extensions wave, closes G3).
 // MeasurementWindowMinutes bounds the recency window over which the
 // handler aggregates HITL outcomes; default 60 (1h) matches the
 // historical hardcoded posture in handlers.go.
@@ -69,7 +69,7 @@ func DefaultHITLRejectionSpikeThresholds() HITLRejectionSpikeThresholds {
 	return HITLRejectionSpikeThresholds{MeasurementWindowMinutes: 60}
 }
 
-// EffectiveWindowMinutes returns the validated window value —
+// EffectiveWindowMinutes returns the validated window value ,
 // defensive against bad config that escaped the validators registry.
 // Reverts to default 60 on out-of-bounds values.
 func (t HITLRejectionSpikeThresholds) EffectiveWindowMinutes() int {

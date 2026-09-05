@@ -1,7 +1,7 @@
 package store
 
 // Execution sealing for the checkpoint chain, Postgres implementation
-// (migration 057). Twin of sqlite_execution_sealing.go — read that file
+// (migration 057). Twin of sqlite_execution_sealing.go, read that file
 // for the full reasoning behind each decision. Same semantics, $N
 // placeholders instead of ?.
 //

@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// These tests build a REAL chain — leaves that actually fold to their
-// roots, checkpoints that actually name their predecessors — and then
+// These tests build a REAL chain, leaves that actually fold to their
+// roots, checkpoints that actually name their predecessors, and then
 // break one thing at a time. A test that hand-writes a plausible-looking
 // export and asserts it passes proves only that the verifier is lenient.
 
@@ -306,7 +306,7 @@ func TestVerifyChainExportRefusesAnEmptyOrMalformedExport(t *testing.T) {
 // to VerifyTenantSubChain, because it cannot check the predecessor of its
 // first element. Presenting those hours as "no activity" chains perfectly.
 //
-// The requirement is not that this fails — a partial export is legitimate
+// The requirement is not that this fails, a partial export is legitimate
 // when an auditor asks for one month of a year. The requirement is that
 // the reader is TOLD, with a number, so "complete from your first
 // execution" is never confused with "starts partway through".

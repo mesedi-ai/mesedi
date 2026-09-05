@@ -7,7 +7,7 @@
 // That distinction is the whole point. Twenty detectors watch the
 // agent. None watched the evidence. An execution can be flawless and
 // still arrive with a hole in its event stream, and until now nothing
-// would say so — the dashboard would render the surviving events and
+// would say so, the dashboard would render the surviving events and
 // look clean, because a missing event and an event that never happened
 // are indistinguishable to every other detector here.
 //
@@ -39,7 +39,7 @@
 //
 // Event.Sequence arrives inside the POST /events body. That endpoint
 // is authenticated by bearer project key and NOTHING SIGNS AN INBOUND
-// EVENT — every HMAC in this backend is outbound webhook signing.
+// EVENT, every HMAC in this backend is outbound webhook signing.
 // Anyone holding a project key can post whatever sequence numbers they
 // like, so an actor wanting to conceal something does not produce a
 // gap for this detector to find. They post a dense, well-ordered
@@ -48,7 +48,7 @@
 // So the honest statement of scope is: this detects records that were
 // damaged, not records that were authored. Loss, crash and retry it
 // sees. Fabrication it cannot see, and no detector downstream of an
-// unsigned ingest boundary can — such a detector would be asking the
+// unsigned ingest boundary can, such a detector would be asking the
 // attacker's own data whether the attacker's data is trustworthy.
 //
 // What it establishes is therefore narrow and still worth having:
@@ -56,7 +56,7 @@
 // is missing or doubled. Closing the fabrication half is not a detector
 // problem. It requires events to be signed at the moment they are
 // written, by a key the emitting agent holds and the ingest path
-// verifies — a different mechanism, and a different product surface.
+// verifies, a different mechanism, and a different product surface.
 //
 // backend/test/integration/test_forged_event_stream.py demonstrates the
 // gap against a running backend rather than asserting it in prose.
@@ -74,7 +74,7 @@
 // The two signals that shipped are pure integer analysis on sequence
 // numbers. No clock touches them. They cannot be perturbed by skew,
 // NTP correction, timezone handling, or a customer's container drifting
-// — which is exactly why they are the ones that ship first.
+// , which is exactly why they are the ones that ship first.
 package detectors
 
 import "sort"
@@ -96,7 +96,7 @@ const (
 // THIS IS A MEMORY BOUND, NOT A DISPLAY PREFERENCE. Event.Sequence
 // arrives in a client-supplied payload. An execution carrying just two
 // events numbered 1 and 2000000000 has a span of two billion, and
-// enumerating it would allocate gigabytes inside a request handler —
+// enumerating it would allocate gigabytes inside a request handler ,
 // from a two-event POST. A caller-side "truncate for display" contract
 // does not help, because the allocation happens here, before any
 // caller sees it.
@@ -120,7 +120,7 @@ const MaxReportedMissing = 100
 //
 // Fewer than two events returns nil. A single event cannot be missing
 // a neighbour we know about, and zero events is an execution that
-// recorded nothing — a real condition, but not this detector's
+// recorded nothing, a real condition, but not this detector's
 // (an empty stream has no internal contradiction to find).
 func DetectRecordIntegrityAllMatches(sequences []int) []string {
 	if len(sequences) < 2 {
@@ -139,7 +139,7 @@ func DetectRecordIntegrityAllMatches(sequences []int) []string {
 	// rather than from zero or one, because this detector must not
 	// assume where a customer's SDK starts numbering. Anchoring to
 	// a constant would report a gap on every execution from any SDK
-	// that happens to start at a different base — a false positive
+	// that happens to start at a different base, a false positive
 	// caused entirely by our own assumption.
 	//
 	// The cost of that choice, stated plainly: a run whose FIRST
@@ -166,7 +166,7 @@ func DetectRecordIntegrityAllMatches(sequences []int) []string {
 
 	// Duplicate: any sequence number claimed more than once.
 	// Checked independently of the gap test because the two are
-	// orthogonal — 1,2,2,4 is both (4 is unreachable from 3 events)
+	// orthogonal, 1,2,2,4 is both (4 is unreachable from 3 events)
 	// and a customer needs to see both facts, not whichever the
 	// code happened to test first.
 	for _, n := range seen {
@@ -182,14 +182,14 @@ func DetectRecordIntegrityAllMatches(sequences []int) []string {
 // MissingSequences returns the specific sequence numbers absent from
 // the record, ascending.
 //
-// Not used for grouping — the signature stays coarse on purpose. This
+// Not used for grouping, the signature stays coarse on purpose. This
 // is for the execution detail view and for the AI analysis prompt,
 // where "events 4, 5 and 6 are missing" is the difference between an
 // operator who can go look at the right window of their logs and one
 // who has been told only that something is wrong.
 //
 // Returns nil when the record is dense. The result is HARD-CAPPED at
-// MaxReportedMissing entries — see that constant for why the cap is a
+// MaxReportedMissing entries, see that constant for why the cap is a
 // safety bound rather than a display choice. A truncated result is
 // still ascending and still begins at the first missing value, so the
 // operator is pointed at the right end of the problem.

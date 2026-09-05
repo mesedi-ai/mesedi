@@ -195,7 +195,7 @@ func hourAt(n int) time.Time { return time.Date(2026, 9, 3, n, 0, 0, 0, time.UTC
 
 // An unanchored head must BLOCK the next interval. Building past it
 // would leave a checkpoint that names a log entry which does not exist,
-// and the alternative failure — skipping the interval — is the hole
+// and the alternative failure, skipping the interval, is the hole
 // this whole mechanism exists to make impossible.
 func TestScheduler_DoesNotBuildOnAnUnanchoredHead(t *testing.T) {
 	t.Parallel()
@@ -275,7 +275,7 @@ func TestScheduler_NilAnchorerStallsRatherThanSkips(t *testing.T) {
 	}
 	if len(f.checkpoints) != 1 {
 		t.Errorf("with no anchorer configured the chain must stall at 1 checkpoint, "+
-			"got %d — an unanchored chain that keeps growing looks complete and is not",
+			"got %d, an unanchored chain that keeps growing looks complete and is not",
 			len(f.checkpoints))
 	}
 }
@@ -334,7 +334,7 @@ func TestScheduler_LeafOrderIsDeterministic(t *testing.T) {
 	}
 	for i, r := range roots {
 		if r != roots[0] {
-			t.Fatalf("run %d produced root %s but run 0 produced %s — leaf order is "+
+			t.Fatalf("run %d produced root %s but run 0 produced %s, leaf order is "+
 				"coming from map iteration, so identical data hashes differently "+
 				"between runs and the second one reads as tampering", i, r, roots[0])
 		}
@@ -413,7 +413,7 @@ func TestScheduler_CatchUpClosesIntervalsInOrderWithNoGaps(t *testing.T) {
 				"consecutive from 1 or there is a gap", i, cp.Seq)
 		}
 		if i > 0 && !cp.IntervalStart.Equal(f.checkpoints[i-1].IntervalEnd) {
-			t.Fatalf("interval %d starts at %s but %d ended at %s — the intervals "+
+			t.Fatalf("interval %d starts at %s but %d ended at %s, the intervals "+
 				"do not tile, which is a hole", cp.Seq,
 				cp.IntervalStart.Format(time.RFC3339), f.checkpoints[i-1].Seq,
 				f.checkpoints[i-1].IntervalEnd.Format(time.RFC3339))
@@ -430,7 +430,7 @@ func TestScheduler_CatchUpClosesIntervalsInOrderWithNoGaps(t *testing.T) {
 // This is design decision 3, and it is a refusal rather than a
 // limitation: a checkpoint claiming to cover a period before the
 // mechanism existed would be the single most misleading thing the
-// chain could assert, because nobody — including Mesedi — could check
+// chain could assert, because nobody, including Mesedi, could check
 // it. The chain starts on a stated date and says so.
 func TestScheduler_GenesisDoesNotBackfillHistory(t *testing.T) {
 	t.Parallel()

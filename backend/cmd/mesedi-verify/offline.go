@@ -17,7 +17,7 @@ import (
 //
 // WHAT THIS ADDS: the export becomes self-contained evidence. An auditor
 // on a closed network can verify it, and a checkpoint stays verifiable
-// even if the log it was written to is later retired (task #22) — the
+// even if the log it was written to is later retired (task #22), the
 // signature over the tree head does not expire when the server does.
 //
 // THE STEP THAT MAKES IT MEAN ANYTHING, AND THE ONE EASIEST TO OMIT
@@ -27,7 +27,7 @@ import (
 // anything to do with our checkpoint. Read rekorproof.go: when EntryBody
 // is set it computes the Merkle leaf from the body and never looks at
 // LeafHashHex at all. So a proof lifted wholesale from an unrelated
-// Rekor entry passes VerifyAnchor completely — the proof is genuine, it
+// Rekor entry passes VerifyAnchor completely, the proof is genuine, it
 // simply is not about us.
 //
 // Closing that hole takes one comparison, done here in bindEntryToLeaf:
@@ -56,7 +56,7 @@ type anchorProof struct {
 //
 // Deliberately WITHOUT json tags. Verdifax's pkg/ledger.InclusionProof
 // has no tags either, so its field names on the wire are whatever Go's
-// default marshalling produces — an accident, not a designed contract.
+// default marshalling produces, an accident, not a designed contract.
 // Leaving the tags off here means encoding/json falls back to
 // case-insensitive matching, so this keeps parsing if that struct ever
 // gains explicit lower-case tags. It would NOT survive a rename to
@@ -78,7 +78,7 @@ type wireInclusionProof struct {
 //
 // Decided=false means "this did not settle the question" and the caller
 // should fall back to asking the log. Note carries why, so a proof that
-// was present but unusable does not vanish from the report — silence
+// was present but unusable does not vanish from the report, silence
 // there would read as though no proof had been offered.
 type offlineResult struct {
 	Decided bool
@@ -162,7 +162,7 @@ func verifyAnchorOffline(iv attest.ExportedInterval) offlineResult {
 	// is Rekor's GLOBAL index across every shard it has ever run. The
 	// proof's LogIndex is the position within the CURRENT shard's tree,
 	// named on the first line of the signed checkpoint. On production
-	// today those read 2725800899 and 2603896637 for the same entry — a
+	// today those read 2725800899 and 2603896637 for the same entry, a
 	// gap of about 122 million, being the entries in earlier shards.
 	//
 	// Both are correct and they are not comparable. An auditor shown the
@@ -173,7 +173,7 @@ func verifyAnchorOffline(iv attest.ExportedInterval) offlineResult {
 	// Do NOT "fix" this by asserting the two indices are equal. They
 	// never are, the check would fail on every genuine entry, and the
 	// binding that actually matters is the entry body hashing to this
-	// checkpoint's leaf — which happens above and does not depend on any
+	// checkpoint's leaf, which happens above and does not depend on any
 	// index at all.
 	shard := "an unnamed tree"
 	if origin, _, found := strings.Cut(proof.Checkpoint, "\n"); found && origin != "" {

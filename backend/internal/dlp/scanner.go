@@ -21,7 +21,7 @@
 //     can recognize redacted content without inspecting the original
 //     event payload. The token format intentionally preserves
 //     character-level alignment with the original to the extent
-//     possible — see Redact() for the tradeoffs.
+//     possible, see Redact() for the tradeoffs.
 
 package dlp
 

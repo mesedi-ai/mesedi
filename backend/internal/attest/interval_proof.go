@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// Inclusion proofs for the INTERVAL tree — the tree whose leaves are
+// Inclusion proofs for the INTERVAL tree, the tree whose leaves are
 // tenant leaves and whose root is the checkpoint's MerkleRoot.
 //
 // Why this exists separately from Prove in digest.go: that one proves an
@@ -16,7 +16,7 @@ import (
 //
 // The privacy argument is the whole point. VerifyIntervalLeaves already
 // lets someone confirm a root, but only by handing them EVERY tenant's
-// leaf for that interval — which discloses how many customers exist and
+// leaf for that interval, which discloses how many customers exist and
 // their relative ordering. A proof discloses about log2(n) opaque sibling
 // hashes instead, so an agency can verify its own inclusion without
 // learning anything about anyone else's.
@@ -30,7 +30,7 @@ var ErrLeafNotInInterval = errors.New("attest: project has no leaf in this inter
 // ProveTenantLeaf returns the inclusion proof for one project's leaf
 // under a checkpoint's MerkleRoot.
 //
-// leaves MUST be in the order they were committed — the order the
+// leaves MUST be in the order they were committed, the order the
 // checkpoint's root was computed over, which is the stored position
 // column, sorted by project id. Any other order produces a proof against
 // a root that does not exist. This is checked, not assumed: the function
@@ -39,7 +39,7 @@ var ErrLeafNotInInterval = errors.New("attest: project has no leaf in this inter
 // order gets an error rather than a plausible-looking wrong proof.
 //
 // Keyed by projectID rather than by index deliberately. An index argument
-// invites an off-by-one that yields a VALID proof for the WRONG tenant —
+// invites an off-by-one that yields a VALID proof for the WRONG tenant ,
 // the verifier would happily confirm it, and the auditor would be looking
 // at someone else's leaf believing it was theirs.
 func ProveTenantLeaf(c Checkpoint, leaves []TenantLeaf, projectID string) (InclusionProof, error) {
@@ -99,7 +99,7 @@ func ProveTenantLeaf(c Checkpoint, leaves []TenantLeaf, projectID string) (Inclu
 // it confirms that THIS tenant's leaf, with these counts and this
 // predecessor, is in the tree. The hash is recomputed here rather than
 // read from the proof, so a proof carrying a leaf hash that does not match
-// the leaf it claims to describe is rejected — otherwise an attacker could
+// the leaf it claims to describe is rejected, otherwise an attacker could
 // pair a genuine proof with a fabricated leaf.
 func VerifyTenantLeafInclusion(c Checkpoint, leaf TenantLeaf, p InclusionProof) error {
 	want := TenantLeafHash(leaf)

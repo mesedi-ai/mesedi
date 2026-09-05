@@ -9,8 +9,8 @@ import (
 // a reader is most likely to take as the report's headline claim. An
 // earlier version substituted "Each checkpoint hash was confirmed
 // PRESENT in the public log" on every online run regardless of how many
-// entries had actually been resolved, so a run against production —
-// where nothing could be checked at all — printed a claim of
+// entries had actually been resolved, so a run against production ,
+// where nothing could be checked at all, printed a claim of
 // verification a few lines above a RESULT saying the opposite.
 //
 // A false claim of verification inside the section whose whole job is to
@@ -126,7 +126,7 @@ func TestCaveatIsNeverEmpty(t *testing.T) {
 // an entry settled by an inclusion proof it is false: verifying
 // Sigstore's signature over the tree head is exactly what that path
 // does. Printing it anyway would be the same defect as the caveat that
-// once claimed entries were confirmed when none were, only inverted —
+// once claimed entries were confirmed when none were, only inverted ,
 // understating rather than overstating, and still wrong.
 func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing.T) {
 	all := logConfirmation(entriesFor(4, 4, 4))
@@ -187,7 +187,7 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 	}
 
 	// All proven offline: denying the tree head would be false, so the
-	// caveat states the honest NEXT limit instead — an inclusion proof
+	// caveat states the honest NEXT limit instead, an inclusion proof
 	// binds an entry to one signed tree head and says nothing about
 	// whether the log has only ever been appended to across tree heads.
 	// Leaving no caveat at all would be worse than the old false one.
@@ -198,7 +198,7 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 	}
 	if !strings.Contains(allOff, "not its history") {
 		t.Errorf("with the tree head checked, the caveat must name the remaining "+
-			"limit — that one signed tree head says nothing about the log's "+
+			"limit, that one signed tree head says nothing about the log's "+
 			"history:\n%s", allOff)
 	}
 }

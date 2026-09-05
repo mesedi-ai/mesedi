@@ -21,7 +21,7 @@ package api
 //   - Team: active $99/mo subscription PLUS overage. Pending = exec
 //     overage ($0.001/unit) + AI analyses ($0.50 each above the
 //     included 200). Removal SETTLES the overage but does NOT
-//     cancel the subscription — Stripe's next invoice ($99) will
+//     cancel the subscription, Stripe's next invoice ($99) will
 //     fail to charge and enter dunning. The response includes a
 //     warning so the dashboard can flag this and offer
 //     "Downgrade to Hobby" or "Close account" as the proper
@@ -452,7 +452,7 @@ func (h *Handlers) detachCardWithReset(ctx context.Context, p *store.Project) er
 	//   - Hobby: full detach (null stripe_customer_id + clear
 	//     billing failure counters via DetachHobbyCardForBillingFailure).
 	//     There's no subscription to preserve linkage for.
-	//   - Team: MarkCardDetached only — keep stripe_customer_id
+	//   - Team: MarkCardDetached only, keep stripe_customer_id
 	//     populated so the active subscription stays addressable
 	//     and a future Setup Intent re-attach reuses the same
 	//     customer (no duplicate customer records).

@@ -15,7 +15,7 @@ import (
 // GetProjectToolReturnValueMaxBytes returns the per-project cap on
 // tool_call return_value size (bytes) that the tool_schema_drift
 // detector will fingerprint. Default after migration 042 is 8192
-// (8 KB) — matches the original SDK cap's "typical case" sizing
+// (8 KB), matches the original SDK cap's "typical case" sizing
 // without being as aggressive as the 2 KB hardcode.
 func (s *SQLiteStore) GetProjectToolReturnValueMaxBytes(
 	ctx context.Context,

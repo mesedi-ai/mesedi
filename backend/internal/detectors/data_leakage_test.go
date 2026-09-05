@@ -2,7 +2,7 @@
 // knob (Wave data_leakage.G5).
 //
 // The detector itself has no stand-alone scan function in this
-// package — the dlp/ package handles scanning. data_leakage.go
+// package, the dlp/ package handles scanning. data_leakage.go
 // exposes only the per-project severity-policy knob that decides
 // WHICH severities promote dlp_scan_result hits into failure_groups.
 // These tests pin the validation + fallback behavior so accidental
@@ -58,7 +58,7 @@ func Test_EffectiveAllowedSeverities(t *testing.T) {
 
 func Test_EffectiveAllowedSeverities_DoesNotPartialFilter(t *testing.T) {
 	// The detector explicitly does NOT drop invalid entries and keep
-	// valid ones — the customer's intent on a malformed config is
+	// valid ones, the customer's intent on a malformed config is
 	// ambiguous, and the safe failure mode is to treat the whole
 	// slice as default rather than a partial subset.
 	in := []string{"critical", "high", "FAKE"}

@@ -166,7 +166,7 @@ var windowByModel = map[string]int{
 	// Mesedi instruments Cohere via instrument_cohere; without these
 	// entries, context_overflow silently skips every Cohere
 	// execution because the model identifier isn't in the registry.
-	// Chat models only — embed-* models have 512-token windows that
+	// Chat models only, embed-* models have 512-token windows that
 	// trigger provider_incident on rejection rather than
 	// context_overflow.
 	"command-r":              128_000,
@@ -178,7 +178,7 @@ var windowByModel = map[string]int{
 
 	// ── Ollama (local runtime; ) ──────────────────────
 	// Family-prefix entries matching the priceTable. Window values
-	// are conservative upper-end-of-family defaults — many Ollama
+	// are conservative upper-end-of-family defaults, many Ollama
 	// variants ship with smaller context windows. Customers running
 	// the smaller variants override per-project via the existing
 	// custom_model_windows knob (context_overflow.G3); the dashboard

@@ -209,8 +209,8 @@ func MintSessionToken() (raw, hash string, err error) {
 // authMiddleware constructs the request-auth middleware. It accepts
 // two credential paths:
 //
-//  1. Bearer API key (SDK / curl) — Authorization: Bearer mesedi_sk_*
-//  2. Session cookie (dashboard) — Cookie: mesedi_session=<raw token>
+//  1. Bearer API key (SDK / curl), Authorization: Bearer mesedi_sk_*
+//  2. Session cookie (dashboard), Cookie: mesedi_session=<raw token>
 //
 // API key path is tried first because the SDK is the higher-volume
 // caller; the cookie path runs only when no Authorization header is
@@ -285,7 +285,7 @@ func authViaBearer(
 		return
 	}
 
-	// — gate the request behind email_verified=true on the
+	//, gate the request behind email_verified=true on the
 	// project's owner. Exempt routes are listed in
 	// emailVerifyExemptPaths. Customer-grandfathered projects (every
 	// signup before migration 032) sail through; new raw-email
@@ -375,7 +375,7 @@ func authViaSessionCookie(
 		return
 	}
 
-	// — same email-verified gate as the bearer path. The
+	//, same email-verified gate as the bearer path. The
 	// dashboard's interstitial polls /me/email-verification-status
 	// which is on the exempt list so the customer can monitor their
 	// own verified state without being gated by it.
@@ -407,7 +407,7 @@ func authViaSessionCookie(
 //
 // Auth/logout is a public endpoint (no middleware), so it doesn't
 // need to be listed here. /admin/* is exempted separately by
-// prefix inside requireEmailVerified — see the prefix check there
+// prefix inside requireEmailVerified, see the prefix check there
 // for the rationale (admin auth is not the customer email-verify
 // flow; blocking admin login on unverified customer email is a
 // category error the gate wasn't designed to enforce).
@@ -416,13 +416,13 @@ var emailVerifyExemptPaths = map[string]struct{}{
 }
 
 // emailVerifyExemptPathPrefixes lists URL prefixes that bypass the
-// email-verify gate. Currently only /admin/ — admin routes sit
+// email-verify gate. Currently only /admin/, admin routes sit
 // behind AdminAuth (a stricter, credential-based gate) and never
 // carry a customer-onboarding email that could be verified in the
 // first place. Locking an admin out of the dashboard because their
 // customer-facing email is unverified is the wrong failure mode.
 //
-// Prefix match uses strings.HasPrefix — the trailing slash matters:
+// Prefix match uses strings.HasPrefix, the trailing slash matters:
 // "/admin/" matches /admin/projects, /admin/storage, /admin/api-keys,
 // etc., but does NOT match "/administrator" or any customer route
 // that coincidentally starts with "admin".
@@ -443,7 +443,7 @@ var emailVerifyExemptPathPrefixes = []string{
 // integration suite (backend/test/integration/) can drive the SDK
 // against a freshly-signed-up project without juggling the email
 // verification token out of the SQLite DB. The bypass is
-// env-var-only — never set in production, and the gate is the
+// env-var-only, never set in production, and the gate is the
 // default for any binary started without that explicit opt-out.
 func requireEmailVerified(
 	w http.ResponseWriter, r *http.Request, s store.Store, projectID string,
@@ -461,7 +461,7 @@ func requireEmailVerified(
 	}
 	project, err := s.GetProject(r.Context(), projectID)
 	if err != nil {
-		// Fail open on transient error — a healthy request must not
+		// Fail open on transient error, a healthy request must not
 		// be blocked by a DB blip. The project-suspended check
 		// already ran above; the request is going through.
 		return true

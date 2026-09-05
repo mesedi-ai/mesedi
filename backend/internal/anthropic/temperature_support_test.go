@@ -8,7 +8,7 @@ import (
 // claude-sonnet-5 rejects `temperature` with a 400. It is the model
 // the hand-sold tiers use for AI root-cause analysis, so sending the
 // parameter takes the entire feature down for Production and
-// Enterprise customers — which is exactly what happened on
+// Enterprise customers, which is exactly what happened on
 // 2026-08-24 before this guard existed.
 func TestModelSupportsTemperature_Sonnet5Rejects(t *testing.T) {
 	t.Parallel()
@@ -45,7 +45,7 @@ func TestModelSupportsTemperature_OthersAllowIt(t *testing.T) {
 	}
 }
 
-// The guard has to actually keep the field out of the wire payload —
+// The guard has to actually keep the field out of the wire payload ,
 // asserting the helper alone would not catch a call site that ignores
 // it. `temperature` carries omitempty on a *float64, so "absent" means
 // the key is missing entirely, not present-and-zero.
@@ -85,6 +85,6 @@ func TestRequestBodyOmitsTemperatureWhenUnsupported(t *testing.T) {
 	}
 	if _, present := got["temperature"]; present {
 		t.Error("sonnet-5: temperature must be ABSENT from the wire " +
-			"payload — the API 400s on it, which 502s the analysis")
+			"payload, the API 400s on it, which 502s the analysis")
 	}
 }

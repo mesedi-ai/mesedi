@@ -372,7 +372,7 @@ func (h *Handlers) HandleSignin(w http.ResponseWriter, r *http.Request) {
 	//    happy path. The dashboard's session cookie is now the only
 	//    credential it needs. APIKey is only attached when session
 	//    minting failed so the Worker has a fallback credential to
-	//    write into legacy localStorage — this keeps any future
+	//    write into legacy localStorage, this keeps any future
 	//    dashboard version that still expects the api_key field
 	//    working until it gets upgraded. omitempty in the JSON tag
 	//    drops the field from the wire payload when empty.

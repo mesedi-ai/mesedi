@@ -5,12 +5,12 @@ package api
 // The two that carry the weight:
 //
 //   TestAnchorer_RefusesAReceiptForADifferentDigest
-//     — nothing downstream would catch this. Every hash in the chain
+//    , nothing downstream would catch this. Every hash in the chain
 //       would still verify against itself while the chain named a log
 //       entry attesting to something else entirely.
 //
 //   TestAnchorer_RefusesAReceiptClaimingAThirdParty
-//     — Mesedi and Verdifax are one Delaware LLC. A receipt saying a
+//    , Mesedi and Verdifax are one Delaware LLC. A receipt saying a
 //       third party submitted this is false, and it would be false in
 //       every receipt afterwards, quietly, until someone read the JSON.
 //
@@ -69,8 +69,8 @@ func anchorerAgainst(t *testing.T, handler http.HandlerFunc) (*VerdifaxAnchorer,
 
 // anchorLeafPreimage builds a receipt's leaf preimage the way Verdifax
 // does: a domain tag, an envelope id, the submitted digest, a binding
-// hash and a nonce, joined with ".". The shape matters — the anchorer
-// searches it for the checkpoint hash — so a placeholder here would
+// hash and a nonce, joined with ".". The shape matters, the anchorer
+// searches it for the checkpoint hash, so a placeholder here would
 // make every test below vacuous.
 func anchorLeafPreimage(digest string) string {
 	return "verdifax.ledger.input.v2.attest:1:checkpoint/1/t." + digest + ".bind.7"
@@ -189,8 +189,8 @@ func TestAnchorer_SendsTheCheckpointHashWithTheRightHeaderAndFields(t *testing.T
 // misconfigured endpoint and not a dishonest one. This one is different:
 // it is the only check whose failure means an auditor could not confirm
 // the anchor against the log. Every checkpoint anchored before it
-// existed names a real Sigstore entry that nobody — this company
-// included — can tie back to the checkpoint that produced it.
+// existed names a real Sigstore entry that nobody, this company
+// included, can tie back to the checkpoint that produced it.
 
 func TestAnchorer_RefusesAReceiptWithNoLeafPreimage(t *testing.T) {
 	t.Parallel()
@@ -205,7 +205,7 @@ func TestAnchorer_RefusesAReceiptWithNoLeafPreimage(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted a receipt with no leaf preimage. The log records a hash " +
 			"of a string that was not returned, so this anchor could never be " +
-			"checked — which is exactly the state that shipped and went unnoticed " +
+			"checked, which is exactly the state that shipped and went unnoticed " +
 			"until an independent verifier was pointed at production")
 	}
 	if !strings.Contains(err.Error(), "preimage") {
@@ -296,7 +296,7 @@ func TestAnchorer_RefusesAReceiptClaimingAThirdParty(t *testing.T) {
 	_, err := a.AnchorCheckpoint(context.Background(), cp)
 	if err == nil {
 		t.Fatal("accepted a receipt claiming an independent submitter. Mesedi and " +
-			"Verdifax are one legal entity, so that receipt is false — and it " +
+			"Verdifax are one legal entity, so that receipt is false, and it " +
 			"would be false in every receipt afterwards")
 	}
 	// The operator has to be able to act on it.
@@ -400,7 +400,7 @@ func TestAnchorer_ErrorsNeverContainTheAPIKey(t *testing.T) {
 
 // Nil rather than a half-configured client. The scheduler reads nil as
 // "stall visibly at genesis", which is right for a deployment with no
-// transparency log — whereas a client that exists but cannot
+// transparency log, whereas a client that exists but cannot
 // authenticate fails every interval forever and looks like an outage.
 func TestNewVerdifaxAnchorer_NilWhenUnconfigured(t *testing.T) {
 	t.Parallel()

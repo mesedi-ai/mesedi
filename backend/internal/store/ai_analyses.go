@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// AIAnalysis is one row in the ai_analyses table — one call to the
+// AIAnalysis is one row in the ai_analyses table, one call to the
 // Anthropic Messages API by HandleAnalyzeFailureGroup. Re-runs
 // produce additional rows so the founder accounting view shows
 // every call, including ones whose markdown was later overwritten
@@ -304,7 +304,7 @@ func scanAIAnalysesRows(rows *sql.Rows) ([]*AIAnalysis, error) {
 // startOfCurrentMonthUTCStore returns the first instant of the
 // current UTC calendar month. Duplicated here (rather than reusing
 // the api package helper) because the store layer should not
-// depend on the api package — circular import risk.
+// depend on the api package, circular import risk.
 func startOfCurrentMonthUTCStore() time.Time {
 	now := time.Now().UTC()
 	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)

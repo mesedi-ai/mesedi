@@ -57,7 +57,7 @@ func TestSQLiteFreshInstallRunsAllMigrations(t *testing.T) {
 		t.Fatalf("expected project_webhooks table; got %q", tableName)
 	}
 
-	// schema_migrations should record version 3 specifically — proves
+	// schema_migrations should record version 3 specifically, proves
 	// the new 003 file was found, applied, and recorded by the runner
 	// (and is not just a side-effect of a later migration creating the
 	// table inline).

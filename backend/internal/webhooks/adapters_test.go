@@ -158,7 +158,7 @@ func TestBuildSlackBody_RecurrenceLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSlackBody: %v", err)
 	}
-	// Header text must reflect recurrence — previously the copy said
+	// Header text must reflect recurrence, previously the copy said
 	// "First occurrence" even on recurrences.
 	if !strings.Contains(string(body), "recurred") {
 		t.Errorf("body missing 'recurred' label: %s", body)
@@ -181,7 +181,7 @@ func TestBuildSlackBody_TestPrefix(t *testing.T) {
 		t.Errorf("test delivery missing 'Mesedi test' prefix: %s", body)
 	}
 	// A Contains check alone passed while the header actually read
-	// "Mesedi test test delivery" — the prefix and the event label
+	// "Mesedi test test delivery", the prefix and the event label
 	// each contributed a "test". Pin the exact header instead.
 	assertNoDuplicatedTestWord(t, string(body))
 }
@@ -351,7 +351,7 @@ func TestBuildPagerDutyBody_TestDeliveryForcesInfoSeverity(t *testing.T) {
 	t.Parallel()
 	// Test deliveries must NEVER page the on-call engineer even if
 	// the payload's severity says "critical". Forcing info is the
-	// only defensive posture — anything else risks a real page every
+	// only defensive posture, anything else risks a real page every
 	// time a customer clicks "Test Webhook" on the dashboard.
 	p := sampleCreatedPayload()
 	p.Test = true
@@ -404,17 +404,17 @@ func TestBuildPagerDutyBody_SeverityMappingDefensive(t *testing.T) {
 func TestAdaptedBody_Routing(t *testing.T) {
 	t.Parallel()
 	p := sampleCreatedPayload()
-	// Slack path — authToken unused, pass empty
+	// Slack path, authToken unused, pass empty
 	b, ok, err := adaptedBody("https://hooks.slack.com/services/T/B/x", "", p)
 	if err != nil || !ok || len(b) == 0 {
 		t.Errorf("slack route: ok=%v err=%v len=%d", ok, err, len(b))
 	}
-	// Discord path — authToken unused, pass empty
+	// Discord path, authToken unused, pass empty
 	b, ok, err = adaptedBody("https://discord.com/api/webhooks/1/x", "", p)
 	if err != nil || !ok || len(b) == 0 {
 		t.Errorf("discord route: ok=%v err=%v len=%d", ok, err, len(b))
 	}
-	// PagerDuty path — authToken IS the routing_key and must appear in body
+	// PagerDuty path, authToken IS the routing_key and must appear in body
 	b, ok, err = adaptedBody("https://events.pagerduty.com/v2/enqueue", "rk_pd", p)
 	if err != nil || !ok || !strings.Contains(string(b), "rk_pd") {
 		t.Errorf("pagerduty route: ok=%v err=%v body-has-rk=%v",

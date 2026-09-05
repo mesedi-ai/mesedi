@@ -75,7 +75,7 @@ func (s *SQLiteStore) ListExecutionsByAPIKey(
 	// ("project_id = ?", "started_at >= ?", etc.). All user-supplied
 	// values flow through args... as parameterized placeholders, never
 	// into the concatenated SQL fragment.
-	//nolint:gosec // G202: false positive — see comment above.
+	//nolint:gosec // G202: false positive, see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT execution_id, project_id, parent_execution_id, status,
 		       started_at, ended_at, duration_ms,
@@ -146,7 +146,7 @@ func (s *PostgresStore) ListExecutionsByAPIKey(
 	// control. All user-supplied values flow through args... as
 	// parameterized placeholders, never into the concatenated SQL
 	// fragment.
-	//nolint:gosec // G202: false positive — see comment above.
+	//nolint:gosec // G202: false positive, see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT execution_id, project_id, parent_execution_id, status,
 		       started_at, ended_at, duration_ms,

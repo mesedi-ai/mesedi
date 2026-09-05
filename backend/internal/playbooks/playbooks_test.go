@@ -122,7 +122,7 @@ func Test_Signature_DifferentPlaybooks_DifferentDigests(t *testing.T) {
 		t.Skip("missing playbook content; can't compare digests")
 	}
 	if sigCrashes == sigDataLeakage {
-		t.Errorf("crashes and data_leakage produced identical digest %q — hashing logic broken", sigCrashes)
+		t.Errorf("crashes and data_leakage produced identical digest %q, hashing logic broken", sigCrashes)
 	}
 }
 
@@ -148,7 +148,7 @@ func Test_Signature_VariantsWithinClass_DifferentDigests(t *testing.T) {
 	seen := map[string]string{}
 	for prefix, sig := range sigs {
 		if existing, ok := seen[sig]; ok {
-			t.Errorf("loops variants %q and %q share digest %q — content files duplicated or hash broken", prefix, existing, sig)
+			t.Errorf("loops variants %q and %q share digest %q, content files duplicated or hash broken", prefix, existing, sig)
 		}
 		seen[sig] = prefix
 	}

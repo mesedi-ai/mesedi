@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// CountCheckpointEventsForProject — Postgres twin.
+// CountCheckpointEventsForProject, Postgres twin.
 func (s *PostgresStore) CountCheckpointEventsForProject(
 	ctx context.Context,
 	projectID string,
@@ -38,7 +38,7 @@ func (s *PostgresStore) CountCheckpointEventsForProject(
 	return count, lastAt, nil
 }
 
-// CountLLMCallsByProviderSince — Postgres twin. See SQLite version
+// CountLLMCallsByProviderSince, Postgres twin. See SQLite version
 // for semantics. .
 func (s *PostgresStore) CountLLMCallsByProviderSince(
 	ctx context.Context,
@@ -80,7 +80,7 @@ func (s *PostgresStore) CountLLMCallsByProviderSince(
 	return out, nil
 }
 
-// ListToolCallCountsForProject — Postgres twin.
+// ListToolCallCountsForProject, Postgres twin.
 func (s *PostgresStore) ListToolCallCountsForProject(
 	ctx context.Context,
 	projectID string,

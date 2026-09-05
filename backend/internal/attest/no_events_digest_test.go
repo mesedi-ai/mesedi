@@ -11,8 +11,8 @@ import (
 
 // These tests exist because of a production outage on 2026-09-04.
 //
-// A single execution with zero events — created and crashed 452
-// microseconds later, before it emitted anything — stopped checkpoint
+// A single execution with zero events, created and crashed 452
+// microseconds later, before it emitted anything, stopped checkpoint
 // construction for every tenant, on every tick, and would never have
 // recovered on its own. Compute refuses an empty event list by design,
 // and the chain treated that refusal as fatal.

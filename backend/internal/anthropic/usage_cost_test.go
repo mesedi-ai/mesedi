@@ -17,7 +17,7 @@ import (
 // happening. These tests pin the two things that make the
 // replacement trustworthy: correct pricing (including cache
 // multipliers) and correct request shape (hourly buckets grouped by
-// model — daily buckets silently exclude today, which would
+// model, daily buckets silently exclude today, which would
 // reintroduce the original bug).
 
 func approx(t *testing.T, got, want float64, what string) {
@@ -153,7 +153,7 @@ func TestGetUsageCost_PricesAndGroupsByModel(t *testing.T) {
 
 	// The dated snapshot suffix must still resolve to the haiku rate
 	// via LookupRate's prefix matching, NOT the unknown-model
-	// fallback ($2/$10) — that would silently double the number.
+	// fallback ($2/$10), that would silently double the number.
 	if len(got.UnpricedModels) != 0 {
 		t.Errorf("UnpricedModels = %v, want empty: a dated snapshot id "+
 			"should resolve by prefix, not fall back", got.UnpricedModels)

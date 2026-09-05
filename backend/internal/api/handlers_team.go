@@ -300,7 +300,7 @@ func (h *Handlers) HandleUpdateMemberRole(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "could not update role")
 		return
 	}
-	// step C — role changes alter who can manage billing, keys,
+	// step C, role changes alter who can manage billing, keys,
 	// webhooks, and team. High security value; recorded against the
 	// calling admin's project audit log.
 	h.recordAuditEvent(r, AuditTeamRoleUpdate, "member", targetUserID, map[string]any{
@@ -404,7 +404,7 @@ func (h *Handlers) HandleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		sessionsRevoked = n
 	}
 
-	// step C — removing a member is a top-tier security action
+	// step C, removing a member is a top-tier security action
 	// (revokes their dashboard access AND every API key they hold).
 	// Captured after the keys are best-effort revoked so a partial
 	// removal still leaves a row, with revoked-count in the metadata
@@ -445,7 +445,7 @@ func (h *Handlers) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// PL6 — Hobby is single-user (1 project, 1 person). Multi-seat
+	// PL6, Hobby is single-user (1 project, 1 person). Multi-seat
 	// is a Team-tier capability. We look up the calling project's
 	// tier and refuse invite creation if it is Hobby. A failed
 	// GetProject is treated as fail-open (rather than block the
@@ -544,7 +544,7 @@ func (h *Handlers) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		"email", body.Email,
 		"role", body.Role,
 		"expires_at", expiresAt.Format(time.RFC3339))
-	// step C — invite-create is the moment a new email is granted
+	// step C, invite-create is the moment a new email is granted
 	// future access at a specific role. The single most useful row in
 	// the team-management audit set. Captured after the row persists
 	// so a failed insert never produces a misleading audit entry.
@@ -583,7 +583,7 @@ func (h *Handlers) HandleRevokeInvite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not revoke invite")
 		return
 	}
-	// step C — invite-revoke kills the pending access grant. Worth
+	// step C, invite-revoke kills the pending access grant. Worth
 	// the row so the audit reader can see "invite for alice@... was
 	// revoked before she accepted." No metadata payload; the invite_id
 	// alone is enough context (the original create row holds the rest).
@@ -646,7 +646,7 @@ func (h *Handlers) HandleGetInviteByToken(w http.ResponseWriter, r *http.Request
 // user_id. After session auth, this endpoint will require an active
 // session and use the session's user_id instead of the email-as-id.
 //
-// step C — NOT audit-logged in v1.5. The audit_events table
+// step C, NOT audit-logged in v1.5. The audit_events table
 // requires project_id NOT NULL, but the accept endpoint runs with no
 // caller project context (token-only public auth, the invitee has no
 // API key yet) and a multi-project org has no canonical primary

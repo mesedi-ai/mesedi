@@ -221,7 +221,7 @@ func (s *SQLiteStore) SearchClosedProjectAuditEvents(
 	// ("project_id = ?", "action = ?", etc.). All user-supplied values
 	// flow through args... as parameterized placeholders, never into the
 	// concatenated SQL fragment.
-	//nolint:gosec // G202: false positive — see comment above.
+	//nolint:gosec // G202: false positive, see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT event_id, project_id,
 		       actor_key_id, actor_key_name, actor_email,
@@ -419,7 +419,7 @@ func (s *PostgresStore) SearchClosedProjectAuditEvents(
 	// built from fmt.Sprintf format strings under this function's control.
 	// All user-supplied values flow through args... as parameterized
 	// placeholders, never into the concatenated SQL fragment.
-	//nolint:gosec // G202: false positive — see comment above.
+	//nolint:gosec // G202: false positive, see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT event_id, project_id,
 		       actor_key_id, actor_key_name, actor_email,

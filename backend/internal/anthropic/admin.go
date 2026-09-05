@@ -11,11 +11,11 @@ package anthropic
 //   - Walks pagination via next_page until has_more is false
 //
 // NOT in scope:
-//   - Usage Report (tokens, not dollars) — Mesedi's burn-rate widget
+//   - Usage Report (tokens, not dollars), Mesedi's burn-rate widget
 //     uses dollars only
-//   - Workspace/API-key grouping — flat total is what the admin
+//   - Workspace/API-key grouping, flat total is what the admin
 //     dashboard renders
-//   - The "remaining credit balance" — Anthropic does not expose this
+//   - The "remaining credit balance", Anthropic does not expose this
 //     via the documented Admin API. Balance is tracked separately on
 //     a manual-entry surface; see store.AnthropicCreditSnapshot.
 
@@ -215,7 +215,7 @@ func (c *AdminClient) GetCostReport(
 
 // parseCostUSD normalizes the multiple cost-amount shapes Anthropic
 // has used. The current docs say "decimal strings in lowest units
-// (cents)" — i.e., "150" means $1.50. Pre-release shapes used
+// (cents)", i.e., "150" means $1.50. Pre-release shapes used
 // "cost": 1.50 as a float in dollars. We accept either and fail loud
 // if neither field carries a value.
 func parseCostUSD(amount, amountStr string, costDollars float64) (float64, error) {
@@ -259,7 +259,7 @@ func truncateForError(s string) string {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Usage Report — the only way to see TODAY's spend
+// Usage Report, the only way to see TODAY's spend
 // ─────────────────────────────────────────────────────────────────
 //
 // WHY THIS EXISTS (verified against the live API on 2026-08-25, so
@@ -298,7 +298,7 @@ type usageReportResult struct {
 	CacheReadInputTokens int `json:"cache_read_input_tokens"`
 	OutputTokens         int `json:"output_tokens"`
 	// Model is null unless group_by[]=model is requested. We always
-	// request it — without a model we cannot price the tokens, since
+	// request it, without a model we cannot price the tokens, since
 	// Sonnet and Haiku differ by 5x on input.
 	Model string `json:"model"`
 	// WorkspaceID is null unless group_by[]=workspace_id is

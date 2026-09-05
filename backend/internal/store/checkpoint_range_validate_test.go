@@ -9,7 +9,7 @@ import (
 // range at the boundary rather than letting it reach the database. That
 // makes it a shared contract between two packages, and the point of these
 // tests is that the boundary and the store can never disagree about what
-// a valid range is — there is one implementation and both call it.
+// a valid range is, there is one implementation and both call it.
 func TestValidateCheckpointRange(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -58,7 +58,7 @@ func TestValidateCheckpointRange(t *testing.T) {
 
 // The cap must refuse rather than silently shorten. A truncated export
 // cannot be told apart from an export of a chain with a hole in it, and
-// telling those two apart is the whole product — so the error must say so
+// telling those two apart is the whole product, so the error must say so
 // rather than reading as a generic limit.
 func TestValidateCheckpointRangeRefusesRatherThanImplyingTruncation(t *testing.T) {
 	err := ValidateCheckpointRange(1, MaxCheckpointRange+500)

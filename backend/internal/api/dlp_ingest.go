@@ -51,7 +51,7 @@ var scanFieldKeys = map[events.EventType][]string{
 		"response_text",
 		//  failure-path PII redaction. instrument_*
 		// modules ship `exception_message` on failed llm_call
-		// events (provider exception text — may contain API keys
+		// events (provider exception text, may contain API keys
 		// returned in the error response, request IDs with
 		// embedded customer IDs, etc.). Scanning here closes
 		// tool_failures.G1 + validator_failures.G2's parent
@@ -74,7 +74,7 @@ var scanFieldKeys = map[events.EventType][]string{
 	// (closes validator_failures.G2): scan the validator's
 	// reason / message field on failed validator_result events.
 	// Customers' validators sometimes echo the failing slice of the
-	// agent's output verbatim into the reason string — if that
+	// agent's output verbatim into the reason string, if that
 	// slice contains a secret the agent had been working with, the
 	// secret would otherwise persist raw.
 	events.EventTypeValidatorResult: {
@@ -118,7 +118,7 @@ var scanFieldKeys = map[events.EventType][]string{
 // an event Mesedi wrote itself, at the exact moment the customer had a
 // real security finding to deal with.
 //
-// The sequence is still shared, deliberately — bumping it would collide
+// The sequence is still shared, deliberately, bumping it would collide
 // with the next real event or force renumbering the customer's own
 // values, and rewriting what the customer said is worse than sharing a
 // number. Instead the type is marked backend-minted, reserved at ingest
@@ -129,7 +129,7 @@ var scanFieldKeys = map[events.EventType][]string{
 //
 // Backend-minted events are excluded. The DLP sibling above reuses its
 // parent's sequence, so counting it meant every DLP hit produced a
-// duplicate_sequence signal against the customer's record — an
+// duplicate_sequence signal against the customer's record, an
 // accusation about an event Mesedi wrote itself, delivered at the exact
 // moment the customer had a genuine security finding to deal with. The
 // two most alarming things Mesedi can say arrived together, and one of
@@ -141,7 +141,7 @@ var scanFieldKeys = map[events.EventType][]string{
 // integrity check. See events.IsBackendMinted.
 //
 // A separate function rather than a loop inline in the PATCH handler
-// because the decision it encodes — whose claim is this? — is the whole
+// because the decision it encodes, whose claim is this?, is the whole
 // substance of the fix, and it was previously buried where nothing
 // could test it.
 func customerSequences(evts []*events.Event) []int {
@@ -228,7 +228,7 @@ func (h *Handlers) applyDLPToBatch(
 				pm[key] = redacted
 				mutated = true
 				// Re-stringify the redacted value for the custom
-				// pass — custom patterns scan post-builtin-redaction
+				// pass, custom patterns scan post-builtin-redaction
 				// so they fire on residual secrets the built-ins
 				// missed without flagging the [REDACTED:rule_id]
 				// markers themselves.
@@ -237,7 +237,7 @@ func (h *Handlers) applyDLPToBatch(
 			// +  run customer's custom
 			// patterns against the same field AND redact matched
 			// bytes in place. Closes the documented data_leakage.G1
-			// gap from 2.1.b — custom rules now redact at the same
+			// gap from 2.1.b, custom rules now redact at the same
 			// trust boundary the built-in rules do (matched secret
 			// never reaches durable storage).
 			if len(customPatterns) > 0 {
@@ -269,7 +269,7 @@ func (h *Handlers) applyDLPToBatch(
 		// suppress the medium tier even for customers who explicitly
 		// opted into it via severity_policy=["critical","high","medium"].
 		// Default-config customers (["critical","high"]) see identical
-		// behavior — medium sibling events are stored but never
+		// behavior, medium sibling events are stored but never
 		// queried for promotion.
 		if len(allHits) == 0 {
 			continue
@@ -379,9 +379,9 @@ func scanAndRedactCustomDLP(
 		// Allocate the replacement buffer with an over-provisioned
 		// upper bound (len(buf) + len(token)) rather than the exact
 		// size (len(buf) - (m.end - m.start) + len(token)). The exact
-		// form is runtime-safe here — the guard above proves
+		// form is runtime-safe here, the guard above proves
 		// m.end - m.start > 0 and m.end <= len(buf), so the subtraction
-		// can't underflow — but CodeQL flags the subtraction pattern
+		// can't underflow, but CodeQL flags the subtraction pattern
 		// as a theoretical overflow risk. Over-allocating by
 		// (m.end - m.start) bytes per iteration is negligible (matches
 		// are typically 10-100 bytes: AWS keys, emails, tokens) and

@@ -9,7 +9,7 @@
 //
 // Mirrors sqlite_tool_return_stats_test.go for twin coverage, but
 // runs against a real Postgres container (via newTestPostgresStore)
-// because SQLite is permissive about TEXT-as-JSON coercion — only
+// because SQLite is permissive about TEXT-as-JSON coercion, only
 // Postgres catches the cast bug.
 
 package store
@@ -22,7 +22,7 @@ import (
 // TestPostgres_GetToolReturnValueStats_EmptyWindowReturnsZeroCounts
 // reproduces the prod 500 fingerprint: a project with zero tool_call
 // events in the 24h window. Before the ::jsonb cast was added, this
-// query never even reached the SUM stage — Postgres rejected the ->>
+// query never even reached the SUM stage, Postgres rejected the ->>
 // operator at type-check. After the cast, the query returns clean
 // zero counts.
 func TestPostgres_GetToolReturnValueStats_EmptyWindowReturnsZeroCounts(t *testing.T) {
@@ -32,7 +32,7 @@ func TestPostgres_GetToolReturnValueStats_EmptyWindowReturnsZeroCounts(t *testin
 	}
 
 	// Seed only the project row (FK target for executions). No
-	// executions, no events — this is the synthetic-customer's
+	// executions, no events, this is the synthetic-customer's
 	// normal state most of the day.
 	if _, err := st.db.ExecContext(context.Background(), `
 		INSERT INTO projects (project_id, name) VALUES ('proj-quiet', 'quiet');
@@ -63,7 +63,7 @@ func TestPostgres_GetToolReturnValueStats_EmptyWindowReturnsZeroCounts(t *testin
 // TestPostgres_GetToolReturnValueStats_CountsTruncatedAndOversized
 // seeds 6 events with mixed payload shapes and verifies the
 // aggregate counts come back correctly. This is the populated-window
-// case — guards against a future refactor breaking the WHERE/SUM
+// case, guards against a future refactor breaking the WHERE/SUM
 // arithmetic while keeping the empty-window test green by accident.
 func TestPostgres_GetToolReturnValueStats_CountsTruncatedAndOversized(t *testing.T) {
 	st := newTestPostgresStore(t)

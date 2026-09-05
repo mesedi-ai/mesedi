@@ -126,7 +126,7 @@ func Test_DetectSandboxEscape_StaticRequireDoesNotFire(t *testing.T) {
 }
 
 func Test_DetectSandboxEscape_MatchesOnReturnValue(t *testing.T) {
-	// Match in return_value (not arguments) must still fire — agent
+	// Match in return_value (not arguments) must still fire, agent
 	// could be inspecting tool output for escape signal.
 	payloads := []json.RawMessage{toolPayload("", "the system contains /etc/passwd")}
 	sig, fired := DetectSandboxEscape(payloads)
@@ -153,7 +153,7 @@ func Test_DetectSandboxEscape_MalformedPayloadSkipped(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// DetectSandboxEscapeWithCustom — built-in priority, custom fallback
+// DetectSandboxEscapeWithCustom, built-in priority, custom fallback
 // ─────────────────────────────────────────────────────────────────────
 
 func Test_DetectSandboxEscapeWithCustom_BuiltinWinsOverCustom(t *testing.T) {
@@ -208,7 +208,7 @@ func Test_DetectSandboxEscapeWithCustom_NilCustomSafe(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────
 
 func Test_DetectSandboxEscapeAllMatches_MultipleVectorsFireOnce(t *testing.T) {
-	// Single payload triggers TWO built-in patterns — both must surface
+	// Single payload triggers TWO built-in patterns, both must surface
 	// (closes G1 vs legacy first-match-wins which only returned one).
 	payloads := []json.RawMessage{toolPayload("import os; eval('hack')", "")}
 	matches := DetectSandboxEscapeAllMatchesWithCustom(payloads, nil)
@@ -237,7 +237,7 @@ func Test_DetectSandboxEscapeAllMatches_MultipleVectorsFireOnce(t *testing.T) {
 }
 
 func Test_DetectSandboxEscapeAllMatches_DedupAcrossPayloads(t *testing.T) {
-	// Same pattern matches in two payloads — dedup to ONE signature.
+	// Same pattern matches in two payloads, dedup to ONE signature.
 	payloads := []json.RawMessage{
 		toolPayload("eval(x)", ""),
 		toolPayload("eval(y)", ""),

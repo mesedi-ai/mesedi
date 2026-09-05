@@ -83,7 +83,7 @@ const (
 
 	// TierProduction is the hand-sold tier between Team and
 	// Enterprise (Cloud Production, from $1,500/mo). It behaves
-	// EXACTLY like Enterprise everywhere in the backend — same caps,
+	// EXACTLY like Enterprise everywhere in the backend, same caps,
 	// same overage exemption, same audit-log access, same premium
 	// analysis model. The only real difference is the name the
 	// customer sees, which is why it is a distinct tier rather than
@@ -95,7 +95,7 @@ const (
 	// `case TierProduction, TierEnterprise:`. The exceptions, if any
 	// ever arise, should carry a comment saying why.
 	//
-	// No migration was needed to add this — projects.tier is a plain
+	// No migration was needed to add this, projects.tier is a plain
 	// TEXT column with no CHECK constraint in either the SQLite or
 	// Postgres schema.
 	TierProduction = "production"
@@ -124,8 +124,8 @@ const (
 	// TS lib/tier-constants.ts retentionDays for the hobby tier.
 	//
 	// .F (closes / ): cut from 15 to 7 days to
-	// match PostHog free tier. Real storage cost vector — ~50%
-	// savings per Hobby project — and creates real conversion
+	// match PostHog free tier. Real storage cost vector, ~50%
+	// savings per Hobby project, and creates real conversion
 	// pressure for customers wanting longer history.
 	HobbyDefaultRetentionDays = 7
 	// TeamDefaultRetentionDays is the retention window applied at
@@ -334,7 +334,7 @@ type StripeConfig struct {
 // Configured returns true iff all three required Stripe values are
 // present. When false, billing endpoints return 503 with a clear
 // message instead of crashing on missing config. WebhookSecretTest is
-// not part of the required set — it stays optional so the live-only
+// not part of the required set, it stays optional so the live-only
 // deployment path is unchanged.
 func (c StripeConfig) Configured() bool {
 	return c.SecretKey != "" && c.WebhookSecret != "" && c.TeamPriceID != ""
@@ -385,7 +385,7 @@ func (c StripeConfig) applyKey() {
 // SecretKey (live). When livemode=false AND SecretKeyTest is set,
 // uses the test key so callbacks like charge.Get can read test-mode
 // objects. When livemode=false but SecretKeyTest is empty, falls back
-// to SecretKey — those callbacks will 401, but signature validation
+// to SecretKey, those callbacks will 401, but signature validation
 // already succeeded so the receive log line is still useful.
 //
 // Race note: stripe.Key is a package global; concurrent live + test
@@ -1272,7 +1272,7 @@ func (h *Handlers) handleCheckoutCompleted(event stripe.Event) error {
 	); err != nil {
 		return err
 	}
-	// #392 — Checkout completion is an upgrade path (Hobby→Team). The
+	// #392, Checkout completion is an upgrade path (Hobby→Team). The
 	// cascade no-ops on upgrades but we call it anyway for symmetry
 	// with the other tier-flip sites and CI-guard coverage. Actor is
 	// AuditActorBillingSystem: Checkout succeeded, no customer email
@@ -1315,12 +1315,12 @@ func (h *Handlers) handleSubscriptionUpdated(event stripe.Event) error {
 	); err != nil {
 		return err
 	}
-	// #392 — clamp per-project settings that now exceed the new tier's
+	// #392, clamp per-project settings that now exceed the new tier's
 	// caps. In practice this path only upgrades (Hobby→Team when a
 	// subscription goes Active or Trialing), so the cascade is a
 	// no-op on the current code path. Called anyway for symmetry with
 	// the other tier-change sites and to satisfy the CI drift guard
-	// in tools/check-tier-constants.sh — future refactors that make
+	// in tools/check-tier-constants.sh, future refactors that make
 	// this path capable of a downgrade will inherit the clamp for
 	// free. Actor is the project owner: subscription events are
 	// customer-initiated.
@@ -1359,7 +1359,7 @@ func (h *Handlers) handleSubscriptionDeleted(event stripe.Event) error {
 	); err != nil {
 		return err
 	}
-	// #392 — clamp per-project settings that now exceed Hobby's caps.
+	// #392, clamp per-project settings that now exceed Hobby's caps.
 	// This is the canonical downgrade path: a Team-tier project that
 	// cancels its subscription lands here, its retention_days=90 gets
 	// clamped to 7, an audit row lands, and the customer gets an email
@@ -1495,7 +1495,7 @@ func (h *Handlers) handleInvoicePaymentFailed(event stripe.Event, logger *slog.L
 // The Stripe Dispute object on the webhook contains the charge as a
 // string ID only; we fetch the Charge once to resolve the customer.
 // One additional Stripe round-trip per dispute is fine for the
-// volumes we expect — disputes are rare events.
+// volumes we expect, disputes are rare events.
 //
 // We do NOT take automated remediation here (no auto-suspend, no
 // auto-refund). Disputes need human review: the operator on the
@@ -1778,7 +1778,7 @@ func (h *Handlers) handleInvoiceUpcoming(event stripe.Event, logger *slog.Logger
 
 // computeTeamAIAnalysisOverageCostUSD counts analyses across the
 // project's tenant since CurrentPeriodStart and returns
-// (overage_cost_USD, overage_count) — the analyses ABOVE
+// (overage_cost_USD, overage_count), the analyses ABOVE
 // TeamAIAnalysisLimit, multiplied by TeamAIAnalysisOveragePriceUSD.
 //
 // Counting follows the same logic as HandleAnalyzeFailureGroup so
@@ -2060,7 +2060,7 @@ func (h *Handlers) handleSetupIntentSucceeded(event stripe.Event, logger *slog.L
 		logger.Warn("setup_intent.succeeded: mark card attached failed",
 			"project_id", p.ProjectID, "error", err.Error())
 	}
-	// step C / PL3 — card add is the security-parity counterpart
+	// step C / PL3, card add is the security-parity counterpart
 	// to billing.payment_method_removed. Webhook handlers have no
 	// caller request context (Stripe-to-server), so we use the
 	// no-request variant and populate ActorEmail from the project's
@@ -2083,7 +2083,7 @@ func (h *Handlers) handleSetupIntentSucceeded(event stripe.Event, logger *slog.L
 
 	// : For Team, if the subscription was scheduled to cancel
 	// at period end because of a prior card removal, unschedule it.
-	// The customer changed their mind and re-added a card — keep
+	// The customer changed their mind and re-added a card, keep
 	// them on Team seamlessly. Best-effort; subscription stays in
 	// cancel_at_period_end on failure but the customer has a card
 	// now so the next renewal will at least charge successfully.
@@ -2168,7 +2168,7 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 			"project is not on Cloud Team; downgrade only makes sense from Team")
 		return
 	}
-	// PL6 — Hobby is 1 project, 1 person. If the calling org has
+	// PL6, Hobby is 1 project, 1 person. If the calling org has
 	// more than one member, the downgrade would leave them in an
 	// inconsistent state (members continuing to authenticate against
 	// what is now a single-user tier). Refuse with a clear message
@@ -2252,7 +2252,7 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 			"could not update tier: "+err.Error())
 		return
 	}
-	// #392 — clamp per-project settings that now exceed Hobby's caps.
+	// #392, clamp per-project settings that now exceed Hobby's caps.
 	// Path B is the corrupted-state variant of subscription-deleted:
 	// the DB tier flipped to Hobby instantly because no Stripe
 	// subscription existed to cancel. Same downgrade semantics as

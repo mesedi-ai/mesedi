@@ -53,7 +53,7 @@ func seedProject(t *testing.T, st *SQLiteStore, projectID string) {
 
 // TestCostVelocityThreshold_DefaultValueAfterMigration verifies that
 // a project inserted without an explicit threshold gets the migration
-// default ($1.00) — the post-Wave-0 sensible value, raised from the
+// default ($1.00), the post-Wave-0 sensible value, raised from the
 // broken $0.001 v0.0.1 floor.
 func TestCostVelocityThreshold_DefaultValueAfterMigration(t *testing.T) {
 	t.Parallel()
@@ -72,7 +72,7 @@ func TestCostVelocityThreshold_DefaultValueAfterMigration(t *testing.T) {
 }
 
 // TestCostVelocityThreshold_SetGetRoundtrip exercises the write path
-// across the full valid range — floor, default, ceiling.
+// across the full valid range, floor, default, ceiling.
 func TestCostVelocityThreshold_SetGetRoundtrip(t *testing.T) {
 	t.Parallel()
 	st := openMinimalCostVelocityStore(t)
@@ -117,7 +117,7 @@ func TestCostVelocityThreshold_GetMissingProjectReturnsNotFound(t *testing.T) {
 }
 
 // TestCostVelocityThreshold_SetMissingProjectReturnsNotFound mirrors
-// the Get test for the write path — also relied on by the handler
+// the Get test for the write path, also relied on by the handler
 // (PUT against unknown project returns 404).
 func TestCostVelocityThreshold_SetMissingProjectReturnsNotFound(t *testing.T) {
 	t.Parallel()
@@ -131,7 +131,7 @@ func TestCostVelocityThreshold_SetMissingProjectReturnsNotFound(t *testing.T) {
 }
 
 // TestCostVelocityThreshold_PerProjectIsolation verifies a Set on
-// project A does not affect project B — important because the
+// project A does not affect project B, important because the
 // detector's effective threshold depends on per-execution project
 // lookup, not on any global value.
 func TestCostVelocityThreshold_PerProjectIsolation(t *testing.T) {

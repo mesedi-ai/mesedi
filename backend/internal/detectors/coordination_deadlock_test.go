@@ -39,7 +39,7 @@ func Test_CoordinationDeadlock_TwoCycle_BasicFires(t *testing.T) {
 }
 
 func Test_CoordinationDeadlock_TwoCycle_OrderInvariant(t *testing.T) {
-	// Same cycle emitted with reversed edge order — must produce
+	// Same cycle emitted with reversed edge order, must produce
 	// the same signature.
 	edges := []store.HandoffEdge{
 		edge("reviewer", "planner"),
@@ -113,7 +113,7 @@ func Test_CoordinationDeadlock_SelfLoopIgnored(t *testing.T) {
 }
 
 func Test_CoordinationDeadlock_BelowMinEdges(t *testing.T) {
-	// Single edge — cannot form a cycle.
+	// Single edge, cannot form a cycle.
 	edges := []store.HandoffEdge{
 		edge("planner", "executor"),
 	}
@@ -123,7 +123,7 @@ func Test_CoordinationDeadlock_BelowMinEdges(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Tarjan SCC fallback — closes coordination_deadlock.G1.
+// Tarjan SCC fallback, closes coordination_deadlock.G1.
 // ─────────────────────────────────────────────────────────────────
 
 func Test_CoordinationDeadlock_ThreeCycleFires(t *testing.T) {
@@ -146,7 +146,7 @@ func Test_CoordinationDeadlock_ThreeCycleFires(t *testing.T) {
 }
 
 func Test_CoordinationDeadlock_ThreeCycleOrderInvariant(t *testing.T) {
-	// Same 3-cycle with edges supplied in different order — must
+	// Same 3-cycle with edges supplied in different order, must
 	// produce identical signature.
 	edges := []store.HandoffEdge{
 		edge("executor", "planner"),
@@ -207,7 +207,7 @@ func Test_CoordinationDeadlock_MultipleDisjointSCCsLexSmallestWins(t *testing.T)
 }
 
 func Test_CoordinationDeadlock_AcyclicDoesNotFire(t *testing.T) {
-	// Long acyclic chain — Tarjan must find no SCC >= 3.
+	// Long acyclic chain, Tarjan must find no SCC >= 3.
 	edges := []store.HandoffEdge{
 		edge("a", "b"),
 		edge("b", "c"),
@@ -262,7 +262,7 @@ func Test_CoordinationDeadlock_ThreeCycleWithBranchingTail(t *testing.T) {
 		edge("planner", "researcher"),
 		edge("researcher", "executor"),
 		edge("executor", "planner"),
-		// Tail off executor — not part of any cycle
+		// Tail off executor, not part of any cycle
 		edge("executor", "tool_caller"),
 	}
 	sig, detected := DetectCoordinationDeadlock(edges)

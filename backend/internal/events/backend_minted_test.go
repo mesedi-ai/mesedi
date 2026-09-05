@@ -20,7 +20,7 @@ func TestDLPScanResultIsBackendMinted(t *testing.T) {
 
 // The far more dangerous direction. Marking a type backend-minted makes
 // ingest REJECT it, so a type customers legitimately send would stop
-// being accepted at all — a silent, total data-loss bug for that type.
+// being accepted at all, a silent, total data-loss bug for that type.
 func TestCustomerEventTypesAreNotBackendMinted(t *testing.T) {
 	customerTypes := []EventType{
 		EventTypeLLMCall, EventTypeToolCall, EventTypeCheckpoint,
@@ -54,7 +54,7 @@ func TestUnknownTypesAreTreatedAsTheCustomers(t *testing.T) {
 // The list here and the code that actually mints events must agree.
 // They live in different packages with nothing connecting them, so a
 // second backend-minted type added in api/ would silently keep being
-// counted as a customer claim — the original bug, again, for a
+// counted as a customer claim, the original bug, again, for a
 // different type.
 //
 // Reads the sibling-minting source rather than importing it, because
@@ -67,7 +67,7 @@ func TestEveryTypeMintedInTheAPIPackageIsListedHere(t *testing.T) {
 	}
 
 	// Look for `EventType:   events.EventTypeX,` inside composite
-	// literals — how the backend constructs an event it is writing.
+	// literals, how the backend constructs an event it is writing.
 	found := map[string]string{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") ||

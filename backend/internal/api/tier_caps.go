@@ -5,7 +5,7 @@ import "context"
 // Tier-aware caps for per-project configuration knobs.
 //
 // Some per-project configs map directly to cost or abuse vectors
-// (e.g. time_budget_ms — a 24h cap on a free tier means a runaway
+// (e.g. time_budget_ms, a 24h cap on a free tier means a runaway
 // agent can rack up 24h of storage+detection cost). Caps here ensure
 // each tier can only configure within an upper bound that matches
 // what their plan economics support. Hobby customers can't burn
@@ -15,7 +15,7 @@ import "context"
 // where they solve a REAL cost/abuse problem. provider_incident_
 // min_tenants is intentionally NOT tier-capped because it's an
 // architectural metric (how many tenants must hit a provider error
-// to count as cross-tenant signal), not a cost vector — Hobby
+// to count as cross-tenant signal), not a cost vector, Hobby
 // customers legitimately need to set it to 1 for their single-tenant
 // setup.
 //
@@ -37,7 +37,7 @@ import "context"
 // All caps are upper bounds; customers can always configure BELOW
 // the cap. The hardcoded default value used when a customer hasn't
 // configured anything (8192 for tool_return_value, 60_000 for
-// time_budget) stays the same across tiers — sensible defaults
+// time_budget) stays the same across tiers, sensible defaults
 // don't need tier discrimination.
 
 const (
@@ -75,7 +75,7 @@ const (
 
 // TierCapTimeBudgetMs returns the maximum time_budget_ms a customer
 // on the given tier may configure. Falls back to the Hobby cap for
-// unknown / empty tiers — the strictest cap, safest default.
+// unknown / empty tiers, the strictest cap, safest default.
 func TierCapTimeBudgetMs(tier string) int {
 	switch normalizeTier(tier) {
 	case TierProduction, TierEnterprise:
@@ -90,7 +90,7 @@ func TierCapTimeBudgetMs(tier string) int {
 // TierCapToolReturnValueBytes returns the maximum
 // tool_return_value_max_bytes a customer on the given tier may
 // configure. Falls back to the Hobby cap for unknown / empty
-// tiers — the strictest cap.
+// tiers, the strictest cap.
 func TierCapToolReturnValueBytes(tier string) int {
 	switch normalizeTier(tier) {
 	case TierProduction, TierEnterprise:
@@ -105,7 +105,7 @@ func TierCapToolReturnValueBytes(tier string) int {
 // tierCapTokenWastePrefixWindow returns the maximum
 // token_waste.prefix_window_chars a customer on the given tier may
 // configure. Larger windows mean hashing more text per event AND a
-// larger shingle set on the near-duplicate fallback — both real CPU
+// larger shingle set on the near-duplicate fallback, both real CPU
 // vectors on the detector hot path. Unknown / empty tier falls back
 // to the Hobby cap (strictest).
 func tierCapTokenWastePrefixWindow(tier string) int {
@@ -121,7 +121,7 @@ func tierCapTokenWastePrefixWindow(tier string) int {
 
 // lookupProjectTier resolves the project's tier as a normalized
 // string (TierHobby / TierTeam / TierEnterprise). Falls back to
-// TierHobby on any error — strictest cap, safest default. Used by
+// TierHobby on any error, strictest cap, safest default. Used by
 // the time_budget / tool_return_value handlers (and any future
 // tier-aware endpoint) to wire the tier_caps constants into the
 // API surface.

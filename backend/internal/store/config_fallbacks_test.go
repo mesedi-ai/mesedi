@@ -16,7 +16,7 @@ import (
 )
 
 // openMinimalFallbackStatsStore creates a SQLite store with just
-// the system_events table — the only table GetConfigFallbackStats
+// the system_events table, the only table GetConfigFallbackStats
 // reads from after migration 050. Schema matches the
 // relevant subset of migration 050.
 func openMinimalFallbackStatsStore(t *testing.T) *SQLiteStore {

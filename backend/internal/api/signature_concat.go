@@ -7,9 +7,9 @@ package api
 // Design:
 //   - Forward-only. When the qualifier is empty (legacy event /
 //     opt-out customer / SDK that pre-dates the qualifier), the
-//     signature is just the name — preserves backward-compat with
+//     signature is just the name, preserves backward-compat with
 //     historical failure_groups. When qualifier is non-empty, the
-//     signature is "<name>:<sanitized_qualifier>" — same colon-
+//     signature is "<name>:<sanitized_qualifier>", same colon-
 //     separator convention used by sandbox_escape, prompt_injection,
 //     and grounding_failure for sub-signature shapes.
 //   - Qualifier is sanitized before concat: control characters
@@ -82,7 +82,7 @@ func toolFailureSignature(toolName, exceptionType string) string {
 // validatorFailureSignature builds the failure_group signature for
 // the validator_failures detector. Returns "<name>:<category>" when
 // category is non-empty after sanitization; falls back to "<name>"
-// otherwise (backward compat — customers who don't opt in to the
+// otherwise (backward compat, customers who don't opt in to the
 // SDK's category arg keep their existing failure_group clusters).
 func validatorFailureSignature(validatorName, category string) string {
 	if validatorName == "" {

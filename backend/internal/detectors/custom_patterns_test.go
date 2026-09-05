@@ -1,6 +1,6 @@
 package detectors
 
-// Unit tests for — DetectInjectionWithCustom and
+// Unit tests for, DetectInjectionWithCustom and
 // DetectSandboxEscapeWithCustom. The legacy DetectInjection /
 // DetectSandboxEscape pure-function APIs are preserved as
 // no-custom-patterns wrappers and exercised indirectly here.

@@ -21,7 +21,7 @@ type CustomPattern struct {
 	Pattern string
 	// Severity matches the project_patterns.severity column
 	// ('low' / 'medium' / 'high'). Detectors don't currently
-	// route on severity — splits all-matches-recorded
+	// route on severity, splits all-matches-recorded
 	// per audit gap, and that's when severity routing lands.
 	Severity string
 	// Compiled is the prepared regex. The API layer's loader

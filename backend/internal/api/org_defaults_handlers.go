@@ -2,7 +2,7 @@ package api
 
 // Wave + .g endpoints. Three new GET/PUT surfaces over the
 // organization_defaults table + the org-level config-fallback
-// rollup. All three are owner-only — the auth'd user must be the
+// rollup. All three are owner-only, the auth'd user must be the
 // org's created_by_user_id. Mesedi v1's multi-seat support is too
 // thin to justify per-member role checks for what is effectively
 // an admin operation; future revisions can promote to role-based
@@ -93,7 +93,7 @@ func (h *Handlers) HandlePutOrgDefault(w http.ResponseWriter, r *http.Request) {
 				"to clear the org default, DELETE the key (not yet implemented)")
 		return
 	}
-	// Bounds check per key — matches the project-level validator
+	// Bounds check per key, matches the project-level validator
 	// upper bounds in handlers.go.
 	switch body.DefaultKey {
 	case OrgDefaultKeyTimeBudgetMs:

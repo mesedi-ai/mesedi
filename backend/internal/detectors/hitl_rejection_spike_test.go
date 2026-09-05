@@ -67,8 +67,8 @@ func Test_DetectHITLRejectionSpike_RejectedPriorityOverEdited(t *testing.T) {
 	// Both rates clear thresholds; rejected wins.
 	counts := store.HITLOutcomeCounts{
 		TotalExecutionsWithHITL: 10,
-		ExecutionsWithRejection: 4, // 40% — at threshold
-		ExecutionsWithEdit:      5, // 50% — well above edited threshold
+		ExecutionsWithRejection: 4, // 40%, at threshold
+		ExecutionsWithEdit:      5, // 50%, well above edited threshold
 	}
 	sig, detected := DetectHITLRejectionSpike(counts, 0, 0, 0)
 	if !detected {
@@ -83,7 +83,7 @@ func Test_DetectHITLRejectionSpike_BothBelowThresholds(t *testing.T) {
 	counts := store.HITLOutcomeCounts{
 		TotalExecutionsWithHITL: 10,
 		ExecutionsWithRejection: 1, // 10%
-		ExecutionsWithEdit:      2, // 20% — below 30%
+		ExecutionsWithEdit:      2, // 20%, below 30%
 	}
 	sig, detected := DetectHITLRejectionSpike(counts, 0, 0, 0)
 	if detected {

@@ -63,7 +63,7 @@ type CheckpointStore interface {
 	InsertCheckpoint(ctx context.Context, cp attest.Checkpoint, leaves []attest.TenantLeaf) error
 
 	// LatestCheckpoint returns the chain head, or (nil, nil) before
-	// genesis — an empty chain is a legitimate state, not an error.
+	// genesis, an empty chain is a legitimate state, not an error.
 	LatestCheckpoint(ctx context.Context) (*attest.Checkpoint, error)
 
 	// GetCheckpoint returns one checkpoint by sequence, or (nil, nil).
@@ -105,7 +105,7 @@ type CheckpointStore interface {
 	// The previous signature was (seq, logEntryID, ledgerBackend,
 	// anchoredAt) and adding the preimage would have made four
 	// same-typed strings in a row, which is a transposition waiting to
-	// happen — and a transposed anchor is not a compile error, it is a
+	// happen, and a transposed anchor is not a compile error, it is a
 	// checkpoint that silently names the wrong log entry. Named fields
 	// also mean the inclusion proof (task #25) can be added without
 	// touching this signature again.
@@ -122,7 +122,7 @@ type CheckpointStore interface {
 	// sealed. Putting these fields on attest.Checkpoint would change
 	// what every checkpoint hashes to, and a checkpoint whose hash
 	// depended on where it was anchored could not be built before it
-	// was anchored — which is the wrong way round.
+	// was anchored, which is the wrong way round.
 	//
 	// The scheduler needs this because checkpoint N+1 names N's OWN log
 	// entry, and without it the chain cannot be extended.

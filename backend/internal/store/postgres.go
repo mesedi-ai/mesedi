@@ -1629,14 +1629,14 @@ func (s *PostgresStore) SaveEvents(ctx context.Context, batch []events.Event) er
 // ─────────────────────────────────────────────────────────────────────────
 // Read-side executions queries (postgres-specific scan helpers because
 // started_at / ended_at are TIMESTAMPTZ in postgres, not RFC3339 text
-// like in SQLite — scanning into time.Time directly is correct here.)
+// like in SQLite, scanning into time.Time directly is correct here.)
 // ─────────────────────────────────────────────────────────────────────────
 
 func (s *PostgresStore) ListExecutions(ctx context.Context, projectID string, q string, limit, offset int) ([]*events.Execution, error) {
 	// Search filter (list-search-paginate wave): when q is non-empty,
 	// restrict to rows whose execution_id OR crash_signature ILIKE q.
 	// Postgres' ILIKE is case-insensitive by definition (vs SQLite's
-	// LOWER(col) LIKE LOWER(?)) — twin behavior, different SQL.
+	// LOWER(col) LIKE LOWER(?)), twin behavior, different SQL.
 	args := []any{projectID}
 	whereClause := "project_id = $1"
 	if q != "" {
@@ -1653,7 +1653,7 @@ func (s *PostgresStore) ListExecutions(ctx context.Context, projectID string, q 
 	// placeholders). limitPlaceholder / offsetPlaceholder are
 	// server-controlled $N tokens, never user input. All user-supplied
 	// values flow through args... as parameterized placeholders.
-	//nolint:gosec // G202: false positive — see comment above.
+	//nolint:gosec // G202: false positive, see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			execution_id, project_id, status,
@@ -2201,14 +2201,14 @@ func (s *PostgresStore) GroupInfrastructureThrottled(ctx context.Context, execut
 }
 
 // FindFirstDLPSignal is the Postgres twin of the SQLite method of
-// the same name. LEGACY — delegates to FindFirstDLPSignalForSeverities
+// the same name. LEGACY, delegates to FindFirstDLPSignalForSeverities
 // with the historical default.
 func (s *PostgresStore) FindFirstDLPSignal(ctx context.Context, executionID string) (string, error) {
 	return s.FindFirstDLPSignalForSeverities(ctx, executionID,
 		[]string{"critical", "high"})
 }
 
-// FindFirstDLPSignalForSeverities — Postgres twin (data_leakage.G5
+// FindFirstDLPSignalForSeverities, Postgres twin (data_leakage.G5
 // wave). Same shape as the sqlite version: builds the IN clause
 // dynamically from the customer's allowed-severity slice. Postgres
 // numbered placeholders ($1, $2, ...) drive the IN clause; the
@@ -2945,7 +2945,7 @@ func (s *PostgresStore) FindFirstFailedValidator(
 	return name.String, severityHint, category, nil
 }
 
-// UpdateFailureGroupSeverityHint — Postgres twin (validator_failures.G1).
+// UpdateFailureGroupSeverityHint, Postgres twin (validator_failures.G1).
 func (s *PostgresStore) UpdateFailureGroupSeverityHint(
 	ctx context.Context,
 	groupID string,
@@ -2976,7 +2976,7 @@ func (s *PostgresStore) UpdateFailureGroupSeverityHint(
 	return nil
 }
 
-// GetFailureGroupSeverityHint — Postgres twin.
+// GetFailureGroupSeverityHint, Postgres twin.
 func (s *PostgresStore) GetFailureGroupSeverityHint(
 	ctx context.Context,
 	groupID string,
@@ -3202,7 +3202,7 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 	// and offsetPlaceholder are server-controlled $N tokens, never user
 	// input. All user-supplied values flow through args... as
 	// parameterized placeholders.
-	//nolint:gosec // G202: false positive — see comment above.
+	//nolint:gosec // G202: false positive, see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			fg.group_id, fg.project_id, fg.failure_class, fg.signature,
@@ -3244,7 +3244,7 @@ func (s *PostgresStore) ListFailureGroups(ctx context.Context, projectID string,
 	return out, rows.Err()
 }
 
-// ResolveFailureGroup — Postgres twin of SQLiteStore.ResolveFailureGroup.
+// ResolveFailureGroup, Postgres twin of SQLiteStore.ResolveFailureGroup.
 // See that method's doc comment.
 func (s *PostgresStore) ResolveFailureGroup(
 	ctx context.Context,
@@ -3268,7 +3268,7 @@ func (s *PostgresStore) ResolveFailureGroup(
 	return nil
 }
 
-// UnresolveFailureGroup — Postgres twin of
+// UnresolveFailureGroup, Postgres twin of
 // SQLiteStore.UnresolveFailureGroup. See that method's doc comment.
 func (s *PostgresStore) UnresolveFailureGroup(
 	ctx context.Context,

@@ -51,7 +51,7 @@ func TestRootIsIndependentOfInputOrder(t *testing.T) {
 
 // Same data, many calls, same root. Go randomises map iteration, and
 // the leaf encoding hashes raw payload bytes precisely so no map is
-// ever walked — this test is what would catch a future change that
+// ever walked, this test is what would catch a future change that
 // re-serialises the payload instead.
 func TestRootIsStableAcrossRepeatedCalls(t *testing.T) {
 	e := sample()
@@ -125,7 +125,7 @@ func TestEveryCanonicalFieldChangesTheRoot(t *testing.T) {
 				t.Fatalf("Compute: %v", err)
 			}
 			if got.Root == originalDigest.Root {
-				t.Errorf("changing %s did not change the root — that field "+
+				t.Errorf("changing %s did not change the root, that field "+
 					"is not actually covered and can be rewritten freely",
 					field)
 			}
@@ -152,7 +152,7 @@ func TestFieldBoundariesAreUnambiguous(t *testing.T) {
 		t.Fatalf("Compute b: %v", err)
 	}
 	if da.Root == db.Root {
-		t.Error(`("ab","c") and ("a","bc") produced the same root — ` +
+		t.Error(`("ab","c") and ("a","bc") produced the same root, ` +
 			`field lengths are not being encoded`)
 	}
 }
@@ -247,7 +247,7 @@ func TestProofFailsForAWrongLeaf(t *testing.T) {
 		t.Fatalf("VerifyInclusion: %v", err)
 	}
 	if ok {
-		t.Error("a proof verified for a leaf it was not built for — " +
+		t.Error("a proof verified for a leaf it was not built for, " +
 			"VerifyInclusion is not actually checking anything")
 	}
 }
@@ -313,7 +313,7 @@ func TestPublishedLeavesFoldToThePublishedRoot(t *testing.T) {
 // writing an independent verifier has to reproduce these exact bytes.
 // Testing it only through Compute would leave the wire format itself
 // unpinned, so a change to the encoding would pass as long as the two
-// sides changed together — which is precisely the drift that makes an
+// sides changed together, which is precisely the drift that makes an
 // outside verifier stop agreeing.
 func TestCanonicalLeafIsSelfDelimiting(t *testing.T) {
 	base := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
@@ -408,7 +408,7 @@ func TestTruncatedProofIsRefused(t *testing.T) {
 		t.Fatalf("VerifyInclusion: %v", err)
 	}
 	if ok {
-		t.Error("a truncated proof verified — a subtree root passed as the tree root")
+		t.Error("a truncated proof verified, a subtree root passed as the tree root")
 	}
 }
 

@@ -145,7 +145,7 @@ func (s *auditCaptureStubStore) UpdateProjectTier(_ context.Context, _, _ string
 // GetProjectRetentionDays backs the tier-change cascade
 // (applyTierChangeCascade → clampRetentionForTier), which runs on
 // every downgrade path. Returning (nil, nil) means "retention not
-// explicitly set" — the cascade treats this as indefinite; for tiers
+// explicitly set", the cascade treats this as indefinite; for tiers
 // that don't allow indefinite (Hobby, Team) it then clamps and calls
 // SetProjectRetentionDays (stubbed separately below). Returns
 // zero-value success so the cascade path completes without touching
@@ -236,7 +236,7 @@ func (s *auditCaptureStubStore) SetProjectRetentionDays(_ context.Context, _ str
 }
 
 // newCaptureHandlers wires a Handlers instance with the stub Store
-// and a quiet logger. Mailer is intentionally left nil — every
+// and a quiet logger. Mailer is intentionally left nil, every
 // handler we exercise either does not touch the mailer or guards on
 // nil before doing so.
 func newCaptureHandlers(s *auditCaptureStubStore) *Handlers {

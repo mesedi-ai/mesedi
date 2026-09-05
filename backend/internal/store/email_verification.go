@@ -1,9 +1,9 @@
 // Email-verification storage methods (pre-launch).
 //
 // Two tables back this feature:
-//   verified_emails              — one row per email that has ever
+//   verified_emails             , one row per email that has ever
 //                                  proved ownership (any method)
-//   email_verification_tokens    — one row per outstanding token in
+//   email_verification_tokens   , one row per outstanding token in
 //                                  flight (issued during raw-email
 //                                  signup, consumed by the confirm
 //                                  endpoint)
@@ -25,7 +25,7 @@ import (
 )
 
 // EmailVerificationToken is one in-flight verification request. The
-// raw token shipped in the email is hashed at neither end — it's a
+// raw token shipped in the email is hashed at neither end, it's a
 // 32-byte url-safe random string, single-use, lives at most 24 hours.
 // (Magic-link tokens DO hash for a different reason: those are reused
 // as session tokens in the cookie store. Verification tokens are

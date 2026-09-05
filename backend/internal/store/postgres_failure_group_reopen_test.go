@@ -3,7 +3,7 @@
 // This one matters more than the SQLite version: production runs
 // Postgres (Neon). The SQLite path serves self-hosters. The two stores
 // carry SEPARATE hand-written upserts, so a fix applied to one and not
-// the other is invisible to a test that only exercises the other — the
+// the other is invisible to a test that only exercises the other, the
 // exact shape of the migration-056 outage, where a SQLite-only change
 // left production broken.
 //
@@ -65,7 +65,7 @@ func TestPostgres_FailureGroupReopensOnRecurrence(t *testing.T) {
 
 	// Resolve it, and confirm the resolve actually took. Without this
 	// assertion the reopen check below could pass for the wrong reason
-	// — the group having never been resolved at all.
+	//, the group having never been resolved at all.
 	if err := st.ResolveFailureGroup(ctx, g.GroupID, projectID, "operator@example.com"); err != nil {
 		t.Fatalf("ResolveFailureGroup: %v", err)
 	}

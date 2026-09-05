@@ -65,10 +65,10 @@ type ProjectDetectorThresholds struct {
 	// similar_call_loop consumes via DetectSimilarCallLoopWithThresholds.
 	Loops detectors.LoopsThresholds
 	// CascadingFailure bundles cascade-window + spawn-handoff
-	// treatment knobs (extensions wave — closes G2 + G3).
+	// treatment knobs (extensions wave, closes G2 + G3).
 	CascadingFailure detectors.CascadingFailureThresholds
 	// HITLRejectionSpike carries the measurement-window-minutes knob
-	// (extensions wave — closes G3). Detector itself takes
+	// (extensions wave, closes G3). Detector itself takes
 	// pre-aggregated counts; the window value flows into the
 	// handler's store-query window.
 	HITLRejectionSpike detectors.HITLRejectionSpikeThresholds
@@ -84,8 +84,8 @@ type ProjectDetectorThresholds struct {
 	// timeout modes promote to failure_groups.
 	HITLTimeout detectors.HITLTimeoutThresholds
 	// Pricing carries the per-project custom_model_pricing override
-	// (). Not really a "detector threshold" — pricing is
-	// read at execution close by ComputeLLMCostWithOverrides — but it
+	// (). Not really a "detector threshold", pricing is
+	// read at execution close by ComputeLLMCostWithOverrides, but it
 	// rides this same per-project config table because the
 	// architectural shape (model-keyed JSON map) is identical to
 	// custom_model_windows. A future cleanup wave may rename this
@@ -104,7 +104,7 @@ type PricingThresholds struct {
 }
 
 // DefaultProjectDetectorThresholds returns the all-defaults aggregate
-// — used as the fallback when the store read fails or before the
+// , used as the fallback when the store read fails or before the
 // loader has run. Every Default<Name>Thresholds() function matches
 // the detector's historical hardcoded values.
 func DefaultProjectDetectorThresholds() ProjectDetectorThresholds {
@@ -126,7 +126,7 @@ func DefaultProjectDetectorThresholds() ProjectDetectorThresholds {
 // LoadProjectDetectorThresholds bulk-reads every override row for
 // projectID across the six in-scope detectors and returns
 // the typed aggregate. The "tier" param is for parse-time tier-cap
-// re-validation — stored values were validated against the project's
+// re-validation, stored values were validated against the project's
 // tier when written, but we re-validate on read to defend against
 // tier downgrade (Hobby customer was on Team when they set the
 // override; downgraded to Hobby later; their override now exceeds
@@ -174,7 +174,7 @@ func LoadProjectDetectorThresholds(
 			spec, ok := LookupDetectorThresholdSpec(detector, row.ThresholdKey)
 			if !ok {
 				// Orphaned row (detector removed its key, or schema
-				// drift). Skip silently — don't surface a warning per
+				// drift). Skip silently, don't surface a warning per
 				// execution close.
 				continue
 			}
@@ -278,7 +278,7 @@ func applyDetectorThresholdValue(
 			}
 		}
 	case "pricing":
-		// — per-project custom_model_pricing override.
+		//, per-project custom_model_pricing override.
 		// Loaded into ProjectDetectorThresholds.Pricing.CustomModelPricing
 		// and read at execution close by ComputeLLMCostWithOverrides.
 		if key == "custom_model_pricing" {

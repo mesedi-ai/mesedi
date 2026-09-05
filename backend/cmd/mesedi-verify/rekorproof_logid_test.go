@@ -16,7 +16,7 @@ import "testing"
 // means an attacker can forge anchored entries." A wrong key does not
 // fail loudly. It produces a verifier that walks a Merkle path, checks
 // a signature against the wrong key, and reports whatever that
-// comparison happens to yield — the worst outcome this binary has,
+// comparison happens to yield, the worst outcome this binary has,
 // because it looks exactly like a working verifier.
 //
 // So the key is checked against a value SIGSTORE ITSELF PRODUCED,
@@ -42,7 +42,7 @@ const rekorProductionLogID = "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c2
 func TestEmbeddedKeyIsTheProductionRekorKey(t *testing.T) {
 	got, err := EmbeddedLogID()
 	if err != nil {
-		t.Fatalf("EmbeddedLogID: %v — the embedded key does not parse, so no "+
+		t.Fatalf("EmbeddedLogID: %v, the embedded key does not parse, so no "+
 			"offline verification is possible at all", err)
 	}
 	if got != rekorProductionLogID {
@@ -53,7 +53,7 @@ func TestEmbeddedKeyIsTheProductionRekorKey(t *testing.T) {
 				"Every offline verification this binary performs is worthless until "+
 				"this matches: signatures would be checked against the wrong key and "+
 				"the result reported as if it meant something. Do not 'fix' this by "+
-				"updating the constant below — confirm against a live entry first "+
+				"updating the constant below, confirm against a live entry first "+
 				"(see the comment on rekorProductionLogID), because if Sigstore has "+
 				"rotated its key then previously anchored records need the OLD key "+
 				"to verify and this file needs both.",

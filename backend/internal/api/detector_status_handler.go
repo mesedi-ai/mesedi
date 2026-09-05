@@ -5,10 +5,10 @@ package api
 // understand whether a detector is silently no-op'ing for their
 // project. Closes the backend half of:
 //
-//   - semantic_loop.G2 — detector invisible to customers who never
+//   - semantic_loop.G2, detector invisible to customers who never
 //     called mesedi.checkpoint(); response carries
 //     has_checkpoint_data + last_checkpoint_at.
-//   - tool_schema_drift.G2 — detector silently primes for the first
+//   - tool_schema_drift.G2, detector silently primes for the first
 //     N (default 10) calls of each tool; response carries the per-
 //     tool call_count plus the project's min_history_calls so the
 //     dashboard can render the priming progress bar.
@@ -17,7 +17,7 @@ package api
 // no-eval-scores, infrastructure_throttled no-infra-events,
 // sandbox_escape custom-patterns-dormant, etc.) can be added without
 // a new endpoint per detector. Customers hit this once per
-// dashboard-overview page load — not on any per-execution hot path.
+// dashboard-overview page load, not on any per-execution hot path.
 //
 // Auth: same Bearer-key flow as the other /me/* and /v1/* endpoints.
 // Errors fall through to a permissive empty-data response shape so
@@ -39,7 +39,7 @@ type DetectorStatusResponse struct {
 	ProjectID       string                `json:"project_id"`
 	SemanticLoop    SemanticLoopStatus    `json:"semantic_loop"`
 	ToolSchemaDrift ToolSchemaDriftStatus `json:"tool_schema_drift"`
-	// — skip-reason chips for the 3 N/A detectors when
+	//, skip-reason chips for the 3 N/A detectors when
 	// project is Ollama-only. SkipReason is empty when the detector
 	// is firing normally; populated with a customer-facing string
 	// when the detector is architecturally inapplicable.
@@ -71,7 +71,7 @@ type SemanticLoopStatus struct {
 
 // ToolSchemaDriftStatus carries the per-tool priming progress for
 // every tool the project has invoked. MinHistoryCalls is the
-// per-project threshold from the primitive — the dashboard
+// per-project threshold from the primitive, the dashboard
 // compares each tool's call_count against it to decide whether to
 // render "priming N/M observed" or "drift detection active".
 type ToolSchemaDriftStatus struct {
@@ -131,7 +131,7 @@ func (h *Handlers) HandleGetDetectorStatus(w http.ResponseWriter, r *http.Reques
 	// tool_schema_drift: per-tool call count + per-project threshold.
 	// Pull the customer's tool_schema_drift.min_history_calls override
 	// from the per-project thresholds table; fall back to the
-	// detector default if no override (or on store error — handled by
+	// detector default if no override (or on store error, handled by
 	// the loader's existing fallback path).
 	tierForReads := TierHobby
 	if proj, projErr := h.Store.GetProject(r.Context(), authProjectID); projErr == nil && proj != nil {
@@ -164,7 +164,7 @@ func (h *Handlers) HandleGetDetectorStatus(w http.ResponseWriter, r *http.Reques
 		resp.ToolSchemaDrift.Tools = api
 	}
 
-	// — derive skip-reason chips for the 3 N/A detectors
+	//, derive skip-reason chips for the 3 N/A detectors
 	// from llm_call provider mix over the last 7 days. Logic:
 	// ollama-in-use AND zero commercial providers → architecturally
 	// N/A for local runtimes. Mixed projects don't get the chip

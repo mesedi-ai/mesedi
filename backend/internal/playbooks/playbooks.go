@@ -252,7 +252,7 @@ func Load(failureClass, signature string) (string, error) {
 // legal copy edits). Triggering staleness across every cached
 // analysis on a disclaimer tweak would be aggressive in the wrong
 // direction. The disclaimer's purpose is customer-facing guidance,
-// not AI-analysis grounding — changing it doesn't materially affect
+// not AI-analysis grounding, changing it doesn't materially affect
 // what the AI would produce.
 
 // signatureByPath caches the SHA-256 of each playbook file's content
@@ -270,7 +270,7 @@ var signatureByPath = func() map[string]string {
 		seen[p.contentPath] = true
 		bytes, err := content.ReadFile("content/" + p.contentPath)
 		if err != nil {
-			// Stub registration without backing file — skip; the
+			// Stub registration without backing file, skip; the
 			// Load() caller surfaces ErrNotFound elsewhere.
 			continue
 		}
@@ -305,7 +305,7 @@ func Signature(failureClass, signature string) (string, bool) {
 // AllSignatures returns a copy of the in-memory signature map keyed
 // by failure_class. For failure classes with multiple signature
 // variants (loops, drift, prompt_injection), the returned map
-// contains one entry per variant prefix — keyed as
+// contains one entry per variant prefix, keyed as
 // "<failure_class>:<sigPrefix>" or "<failure_class>" when the
 // pattern's sigPrefix is empty.
 //

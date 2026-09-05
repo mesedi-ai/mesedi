@@ -39,7 +39,7 @@ var modelRates = map[string]ModelRate{
 	// Sonnet 5 is both NEWER and CHEAPER than sonnet-4-6 ($2/$10 vs
 	// $3/$15). Added 2026-08-20 when the premium analysis tier started
 	// using it; without this entry LookupRate fell through to
-	// UnknownModelRate, which happens to be $2/$10 as well — correct by
+	// UnknownModelRate, which happens to be $2/$10 as well, correct by
 	// coincidence, not by design.
 	"claude-sonnet-5":   {InputUSDPerMTok: 2.00, OutputUSDPerMTok: 10.00},
 	"claude-sonnet-4":   {InputUSDPerMTok: 3.00, OutputUSDPerMTok: 15.00},
@@ -91,7 +91,7 @@ func LookupRate(modelID string) ModelRate {
 // This exists because LookupRate's return value alone cannot answer the
 // question: a listed model whose price happens to equal UnknownModelRate
 // is indistinguishable from an unlisted one. claude-sonnet-5 is exactly
-// that case — it really is $2/$10, identical to the fallback — so a test
+// that case, it really is $2/$10, identical to the fallback, so a test
 // comparing rates by value reported it as missing even after it was
 // added. Callers that need "is this model actually known to us" (cost
 // reporting, drift guards) must use this, not a value comparison.
@@ -136,7 +136,7 @@ func ComputeCostUSD(modelID string, inputTokens, outputTokens int) float64 {
 // These exist because the Admin API's usage report breaks tokens
 // into uncached input, cache-creation (split by TTL) and cache-read
 // buckets. Summing them as if they were all plain input would
-// over-report reads by 10x and under-report writes — and today they
+// over-report reads by 10x and under-report writes, and today they
 // are all zero only because prompt caching is not in use yet. The
 // moment it is, a naive sum silently becomes wrong.
 const (

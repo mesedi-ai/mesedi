@@ -63,7 +63,7 @@ const (
 	minRepeats = 3
 	// shingleSize is the k for k-shingle character ngrams used by
 	// the near-duplicate fallback. k=8 is the established choice in
-	// plagiarism-detection literature — small enough to catch
+	// plagiarism-detection literature, small enough to catch
 	// structural similarity, large enough to keep the shingle set
 	// manageable and unique-ish.
 	shingleSize = 8
@@ -82,7 +82,7 @@ const (
 // timestamp AND the request-id stripped, not just the first match.
 //
 // All patterns are anchored to the start (`^`) so they only strip
-// LEADING variable material — they will not chew arbitrary
+// LEADING variable material, they will not chew arbitrary
 // substrings out of the middle of a prompt. The strip is
 // applied repeatedly until no pattern matches, so multi-layer
 // leading material (timestamp + counter + UUID, on three lines)
@@ -103,7 +103,7 @@ var variablePrefixPatterns = []*regexp.Regexp{
 	),
 	// Naked 32-hex (md5-style request IDs, doc fingerprints).
 	regexp.MustCompile(`^\s*[0-9a-fA-F]{32}[\s\-:,\]\}\)]*`),
-	// req_*, id:*, request_id=* style prefixes — strip the key + a
+	// req_*, id:*, request_id=* style prefixes, strip the key + a
 	// short identifier blob (up to 64 chars of word / hex / dash).
 	regexp.MustCompile(
 		`(?i)^\s*(?:req(?:uest)?[-_]?id|request|id|trace[-_]?id|correlation[-_]?id)` +
@@ -129,7 +129,7 @@ var variablePrefixPatterns = []*regexp.Regexp{
 // three sequential strip rounds to reach the wasteful body.
 //
 // The loop has a hard cap of 8 iterations to prevent any pathological
-// regex from spinning — even on the worst real input, all four
+// regex from spinning, even on the worst real input, all four
 // prefix shapes won't stack more than 5-6 deep.
 func stripVariablePrefixes(s string) string {
 	const maxIterations = 8
@@ -177,7 +177,7 @@ func jaccardSimilarity(a, b map[string]struct{}) float64 {
 		return 0
 	}
 	// Iterate the smaller set against the larger for the
-	// intersection — keeps the inner loop short on lopsided pairs.
+	// intersection, keeps the inner loop short on lopsided pairs.
 	small, large := a, b
 	if len(b) < len(a) {
 		small, large = b, a
@@ -239,7 +239,7 @@ func detectNearDuplicateCluster(
 		// Build the deterministic signature from the intersection
 		// of all group members' shingle sets. Empty intersection
 		// means we got here through transitive similarity rather
-		// than a true shared core — keep walking.
+		// than a true shared core, keep walking.
 		intersection := map[string]struct{}{}
 		for s := range shingles[group[0]] {
 			intersection[s] = struct{}{}
@@ -270,7 +270,7 @@ func detectNearDuplicateCluster(
 // this detector. PrefixWindowChars + MinRepeats default
 // to prefixWindowChars (2048) + minRepeats (3) for customers who
 // don't tune. PrefixWindowChars is the one tier-capped knob
-// (real CPU vector — more chars hashed + bigger shingle set).
+// (real CPU vector, more chars hashed + bigger shingle set).
 type TokenWasteThresholds struct {
 	PrefixWindowChars int
 	MinRepeats        int
@@ -288,9 +288,9 @@ func DefaultTokenWasteThresholds() TokenWasteThresholds {
 // DetectTokenWaste scans the supplied llm_call payloads in sequence
 // order and reports either:
 //
-//   - "token_waste:<hex8>" — the canonical exact-prefix signature
+//   - "token_waste:<hex8>", the canonical exact-prefix signature
 //     when a normalized prefix hash repeats minRepeats+ times.
-//   - "token_waste:near_dup:<hex8>" — the near-duplicate signature
+//   - "token_waste:near_dup:<hex8>", the near-duplicate signature
 //     when the exact path didn't fire but shingle-Jaccard found a
 //     3+ cluster at >= 0.85 similarity.
 //
@@ -383,7 +383,7 @@ func DetectTokenWasteWithThresholds(
 		return fmt.Sprintf("token_waste:%s", suffix), true
 	}
 	// Layer 3: shingle-Jaccard fallback. Only runs when the exact
-	// path found nothing — avoids dual-firing and saves CPU on the
+	// path found nothing, avoids dual-firing and saves CPU on the
 	// common case.
 	shingles := make([]map[string]struct{}, len(normalized))
 	for i, text := range normalized {

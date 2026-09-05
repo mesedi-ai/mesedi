@@ -54,7 +54,7 @@ func Test_DetectGroundingFailure_ExplicitPassFalse(t *testing.T) {
 }
 
 func Test_DetectGroundingFailure_ExplicitPassFalseEmptyEvaluatorIgnored(t *testing.T) {
-	// passed=false with empty evaluator_id is unactionable — must not fire.
+	// passed=false with empty evaluator_id is unactionable, must not fire.
 	payloads := []json.RawMessage{
 		rawScore(map[string]any{
 			"evaluator_id": "",
@@ -118,7 +118,7 @@ func Test_DetectGroundingFailure_MeanAboveFloor_NoFire(t *testing.T) {
 
 func Test_DetectGroundingFailure_HigherIsBetterFalseIgnored(t *testing.T) {
 	// Inverse metrics (e.g. hallucination_rate) need their own
-	// threshold semantics — should NOT contribute to mean-floor logic.
+	// threshold semantics, should NOT contribute to mean-floor logic.
 	payloads := []json.RawMessage{
 		rawScore(map[string]any{
 			"evaluator_id":     "hhem",
@@ -134,7 +134,7 @@ func Test_DetectGroundingFailure_HigherIsBetterFalseIgnored(t *testing.T) {
 }
 
 func Test_DetectGroundingFailure_ExplicitPriorityOverMean(t *testing.T) {
-	// One explicit failure AND one below-mean situation — explicit wins.
+	// One explicit failure AND one below-mean situation, explicit wins.
 	payloads := []json.RawMessage{
 		rawScore(map[string]any{
 			"evaluator_id":     "ragas",
@@ -163,7 +163,7 @@ func Test_DetectGroundingFailure_ExplicitPriorityOverMean(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────
 
 func Test_DetectGroundingFailureAllMatches_MultipleEvaluators(t *testing.T) {
-	// Three different evaluators failing — all-matches returns all 3
+	// Three different evaluators failing, all-matches returns all 3
 	// signatures (closes G2 vs legacy first-match-wins).
 	payloads := []json.RawMessage{
 		rawScore(map[string]any{
@@ -239,7 +239,7 @@ func Test_DetectGroundingFailureAllMatches_RespectsMaxCap(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// GroundingFailureThresholds — per-evaluator floor overrides
+// GroundingFailureThresholds, per-evaluator floor overrides
 // ─────────────────────────────────────────────────────────────────────
 
 func Test_GroundingFailureThresholds_PerEvaluatorOverride(t *testing.T) {

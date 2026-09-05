@@ -348,7 +348,7 @@ func (s *PostgresStore) ListBillingEvents(
 	// (see the "clauses" builder earlier in this function). All
 	// user-supplied values flow through args... as parameterized
 	// placeholders, never into the concatenated SQL fragment.
-	//nolint:gosec // G202: false positive — see comment above.
+	//nolint:gosec // G202: false positive, see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT event_id, project_id, stripe_customer_id,
 		       kind, severity, stripe_object_id,

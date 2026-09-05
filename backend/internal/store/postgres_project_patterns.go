@@ -3,7 +3,7 @@ package store
 // Per-project custom pattern storage for the three security
 // detectors (prompt_injection, data_leakage, sandbox_escape).
 // Postgres implementation (migration 045). Twin of
-// sqlite_project_patterns.go — same shape, same contract, just
+// sqlite_project_patterns.go, same shape, same contract, just
 // $1/$2 placeholders instead of ? and Postgres boolean handling.
 
 import (

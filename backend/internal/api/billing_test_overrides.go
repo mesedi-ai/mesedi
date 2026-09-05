@@ -5,7 +5,7 @@
 // The compile-time constants HobbyExecutionLimit (5000),
 // TeamExecutionIncluded (100000), HobbyAIAnalysisLimit (25), and
 // TeamAIAnalysisLimit (200) make overage math impossible to exercise
-// in an automated smoke test — pushing 5000+ executions through the
+// in an automated smoke test, pushing 5000+ executions through the
 // ingest hot path is too slow and pollutes the DB. This file exposes
 // runtime overrides that let staging tests replace those quotas with
 // small values (e.g. 10) so overage math + Stripe metered-billing
@@ -22,7 +22,7 @@
 // set is immediately visible in the logs.
 //
 // The tools/check-tier-constants.sh drift guard continues to assert
-// the compile-time constants match the TS TIER_CONSTANTS — the
+// the compile-time constants match the TS TIER_CONSTANTS, the
 // override is a runtime-only concept and does not affect the values
 // customers see in the dashboard or the marketing page.
 
@@ -58,7 +58,7 @@ type TestOverrides struct {
 }
 
 // InitTestOverrides installs the runtime overrides and logs which
-// (if any) are active. Idempotent for re-init in tests — each call
+// (if any) are active. Idempotent for re-init in tests, each call
 // replaces the prior values. Callers should invoke exactly once at
 // startup.
 func InitTestOverrides(t TestOverrides, logger *slog.Logger) {

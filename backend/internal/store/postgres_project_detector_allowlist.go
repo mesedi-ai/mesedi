@@ -2,7 +2,7 @@ package store
 
 // Per-project detector-allowlist storage (llowlist.a).
 // Postgres implementation (migration 049). Twin of
-// sqlite_project_detector_allowlist.go — same shape, same contract,
+// sqlite_project_detector_allowlist.go, same shape, same contract,
 // just $1/$2 placeholders instead of ? and Postgres handling.
 
 import (
@@ -185,7 +185,7 @@ func (s *PostgresStore) IncrementAllowlistMatchCount(
 	return nil
 }
 
-// GetAllowlistStats — Postgres twin of the SQLite implementation.
+// GetAllowlistStats, Postgres twin of the SQLite implementation.
 // One indexed scan filtered by project_id, GROUP BY detector. See
 // the SQLite version's docstring for the full contract.
 func (s *PostgresStore) GetAllowlistStats(

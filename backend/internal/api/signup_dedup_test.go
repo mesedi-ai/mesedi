@@ -1,6 +1,6 @@
 // Unit tests for the duplicate-account guard in HandleSignup.
 //
-// Behavior under test (Option A — one VERIFIED, STILL-EXISTING account
+// Behavior under test (Option A, one VERIFIED, STILL-EXISTING account
 // per email). A new signup is rejected with 409 only when BOTH a project
 // with that email still exists AND the email is verified. The tests pin
 // the four corners of that truth table plus the fail-closed paths:
@@ -97,14 +97,14 @@ func TestSignupDedup_VerifiedLiveAccountRejected(t *testing.T) {
 	rec := postSignup(t, s, `{"email":"dupe@example.com"}`, "203.0.113.10:5000")
 
 	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected 409 for a live verified duplicate; got %d — body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 409 for a live verified duplicate; got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if s.createProjectCalled {
 		t.Error("guard leaked: CreateProject was called for a live verified duplicate")
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
-		t.Fatalf("body not valid JSON: %v — raw=%s", err, rec.Body.String())
+		t.Fatalf("body not valid JSON: %v, raw=%s", err, rec.Body.String())
 	}
 	if msg, _ := parsed["error"].(string); !strings.Contains(msg, "already exists") {
 		t.Errorf("expected an 'already exists' message; got %q", msg)
@@ -133,7 +133,7 @@ func TestSignupDedup_DeletedAccountFreesEmail(t *testing.T) {
 }
 
 func TestSignupDedup_UnverifiedLiveAccountNotBlocked(t *testing.T) {
-	// A project exists but the email was never verified — e.g. someone
+	// A project exists but the email was never verified, e.g. someone
 	// pre-registered a stranger's address. The real owner must be able to
 	// sign up (and then verify), so the guard must NOT block.
 	s := &stubSignupStore{
@@ -172,7 +172,7 @@ func TestSignupDedup_ExistingCheckErrorFailsClosed(t *testing.T) {
 	rec := postSignup(t, s, `{"email":"x@example.com"}`, "203.0.113.14:5000")
 
 	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 when the existing-project lookup errors; got %d — body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 500 when the existing-project lookup errors; got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if s.createProjectCalled {
 		t.Error("fail-open bug: account created despite an unresolved existence check")
@@ -187,7 +187,7 @@ func TestSignupDedup_VerifiedCheckErrorFailsClosed(t *testing.T) {
 	rec := postSignup(t, s, `{"email":"x@example.com"}`, "203.0.113.15:5000")
 
 	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 when the verified lookup errors; got %d — body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 500 when the verified lookup errors; got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if s.createProjectCalled {
 		t.Error("fail-open bug: account created despite an unresolved verified check")
@@ -204,7 +204,7 @@ func TestSignupDedup_NormalizesBeforeCheck(t *testing.T) {
 	rec := postSignup(t, s, `{"email":"  DUPE@Example.com "}`, "203.0.113.16:5000")
 
 	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected 409 after normalization; got %d — body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 409 after normalization; got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if s.createProjectCalled {
 		t.Error("normalized duplicate leaked past the guard into CreateProject")

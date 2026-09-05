@@ -140,7 +140,7 @@ func Test_HandleGetExecutionDigest_ResponseIsIndependentlyVerifiable(t *testing.
 }
 
 // The boundary that matters. An execution belonging to another project
-// must look absent, not forbidden — a 403 would confirm it exists.
+// must look absent, not forbidden, a 403 would confirm it exists.
 func Test_HandleGetExecutionDigest_CrossProjectLooksAbsent(t *testing.T) {
 	h := &Handlers{Store: digestFixture("proj-owner"), Logger: quietLogger()}
 	w := digestRequest(t, digestMux(h), "/executions/exec-1/digest", "proj-attacker")
@@ -192,6 +192,6 @@ func Test_HandleGetExecutionDigest_BadLeafParamIs400(t *testing.T) {
 	}
 }
 
-// contains() is deliberately NOT redefined here — admin_ai_analyses_detail_test.go
+// contains() is deliberately NOT redefined here, admin_ai_analyses_detail_test.go
 // already declares it in this package, and a second declaration would
 // not compile.

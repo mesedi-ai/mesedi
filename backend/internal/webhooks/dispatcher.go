@@ -191,7 +191,7 @@ func Deliver(
 
 	// HMAC signature. Skipped for receivers that use their own auth
 	// scheme in the body (currently: PagerDuty via routing_key). See
-	// AdapterSkipsHMAC for the full rationale — sending an HMAC to
+	// AdapterSkipsHMAC for the full rationale, sending an HMAC to
 	// PagerDuty would leak the Secret field's value into their logs
 	// while doing nothing to authenticate the event on their end.
 	signature := ""

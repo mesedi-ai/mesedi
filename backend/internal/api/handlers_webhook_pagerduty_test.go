@@ -5,7 +5,7 @@
 // customer didn't supply an integration key (auth_token). PagerDuty
 // authenticates every inbound event via a routing_key inside the
 // request body, so a PagerDuty webhook without a routing_key would
-// silently fail delivery — Mesedi caches nothing about that, and the
+// silently fail delivery, Mesedi caches nothing about that, and the
 // customer would just see "202 accepted, no incident opened" with
 // no clue why. Failing loud at create-time prevents this.
 //
@@ -34,7 +34,7 @@ func Test_HandleCreateWebhook_PagerDutyRequiresAuthToken(t *testing.T) {
 	body := map[string]any{
 		"url":  "https://events.pagerduty.com/v2/enqueue",
 		"name": "pd-hook",
-		// auth_token intentionally omitted — this is the specific
+		// auth_token intentionally omitted, this is the specific
 		// misconfiguration we want to catch at create-time.
 	}
 	r := newJSONRequest(t, http.MethodPost, "/webhooks", projectID, actor, body)
@@ -97,7 +97,7 @@ func Test_HandleCreateWebhook_PagerDutyAcceptsValidAuthToken(t *testing.T) {
 
 	body := map[string]any{
 		"url": "https://events.pagerduty.com/v2/enqueue",
-		// 32-char alphanumeric — real PagerDuty integration key shape.
+		// 32-char alphanumeric, real PagerDuty integration key shape.
 		"auth_token": "abcdef0123456789abcdef0123456789",
 		"name":       "pd-hook",
 	}
@@ -117,8 +117,8 @@ func Test_HandleCreateWebhook_PagerDutyAcceptsValidAuthToken(t *testing.T) {
 }
 
 func Test_HandleCreateWebhook_NonPagerDutyIgnoresAuthToken(t *testing.T) {
-	// Non-PagerDuty URLs should ignore the auth_token field — even a
-	// completely empty one — and land 200. Guards against a future
+	// Non-PagerDuty URLs should ignore the auth_token field, even a
+	// completely empty one, and land 200. Guards against a future
 	// refactor that starts requiring auth_token globally.
 	const (
 		projectID = "proj-non-pd"

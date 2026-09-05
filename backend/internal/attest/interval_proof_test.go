@@ -13,7 +13,7 @@ import (
 // Tree sizes are swept 1..17 rather than spot-checked at powers of two.
 // The note on VerifyInclusion records that the first draft of the sibling
 // walk was correct for perfect trees and wrong for leaf 2 of 3, leaf 4 of
-// 5, leaves 4 and 5 of 6 — the trailing positions where a node is
+// 5, leaves 4 and 5 of 6, the trailing positions where a node is
 // promoted. Powers of two would have passed every one of those.
 
 func intervalLeaves(t *testing.T, n int) []TenantLeaf {

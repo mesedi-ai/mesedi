@@ -5,7 +5,7 @@
 // `case TierProduction, TierEnterprise:` at eight existing switch
 // sites. Miss one and Production silently falls through to the
 // `default:` branch, which in every one of those switches is the
-// HOBBY behavior — the strictest caps and the shortest retention. A
+// HOBBY behavior, the strictest caps and the shortest retention. A
 // customer paying $1,500/mo would quietly get free-tier limits with
 // no error anywhere. Asserting "Production == Enterprise" across the
 // whole surface catches a missed site immediately, and catches any
@@ -45,13 +45,13 @@ func TestProductionMatchesEnterprise_RetentionCap(t *testing.T) {
 
 func TestProductionMatchesEnterprise_ExecutionLimit(t *testing.T) {
 	t.Parallel()
-	// 0 means "no enforced included quota" — volume is negotiated.
+	// 0 means "no enforced included quota", volume is negotiated.
 	if got, want := tierExecutionLimit(TierProduction),
 		tierExecutionLimit(TierEnterprise); got != want {
 		t.Fatalf("tierExecutionLimit: production=%d enterprise=%d", got, want)
 	}
 	if tierExecutionLimit(TierProduction) == tierExecutionLimit(TierHobby) {
-		t.Fatal("production is being metered like hobby — the switch case is missing")
+		t.Fatal("production is being metered like hobby, the switch case is missing")
 	}
 }
 
@@ -65,7 +65,7 @@ func TestProductionGetsPremiumAnalysisModel(t *testing.T) {
 
 // Production has a real listed price, so unlike Enterprise its ROI
 // baseline is the actual floor of the published range rather than a
-// placeholder. It must still be non-zero — a zero cost makes the ROI
+// placeholder. It must still be non-zero, a zero cost makes the ROI
 // multiple infinite and the savings card meaningless.
 func TestProductionSubscriptionCostIsRealAndNonZero(t *testing.T) {
 	t.Parallel()

@@ -107,7 +107,7 @@ func Test_AllowlistDetectors_ExactSetExpected(t *testing.T) {
 	if got := len(allowlistDetectors); got != len(want) {
 		t.Errorf("allowlistDetectors has %d entries, want %d", got, len(want))
 	}
-	// Negative cases — detectors that should NOT be in the allow-list.
+	// Negative cases, detectors that should NOT be in the allow-list.
 	for _, d := range []string{
 		"prompt_injection", "data_leakage", "sandbox_escape",
 		"semantic_loop", "token_waste", "drift",
@@ -119,7 +119,7 @@ func Test_AllowlistDetectors_ExactSetExpected(t *testing.T) {
 }
 
 func Test_ProjectAllowlistMax_MatchesPatternConfig(t *testing.T) {
-	// Sanity: cap should match projectPatternMax — same shape +
+	// Sanity: cap should match projectPatternMax, same shape +
 	// same rationale across the two -style primitives.
 	if projectAllowlistMax != projectPatternMax {
 		t.Errorf("projectAllowlistMax (%d) != projectPatternMax (%d); "+
@@ -128,14 +128,14 @@ func Test_ProjectAllowlistMax_MatchesPatternConfig(t *testing.T) {
 }
 
 // Test_AllowlistHelperWiredFromAllDetectors is the Allowlist.d
-// regression guard for the wiring shape — if a future refactor
+// regression guard for the wiring shape, if a future refactor
 // accidentally drops the checkAllowlistAndMaybeSkip call from one
 // of the three consuming detector hot paths in handlers.go, this
 // test fires.
 //
 // We rely on a source-level count rather than a runtime probe
 // because the wiring is a hand-written call site rather than a
-// registry — there's nothing to enumerate at runtime. Reading
+// registry, there's nothing to enumerate at runtime. Reading
 // the source file at test time keeps the regression guard close
 // to the file it's protecting (same package).
 //
@@ -156,6 +156,6 @@ func Test_AllowlistHelperWiredFromAllDetectors(t *testing.T) {
 		t.Errorf("%s wired in %d places in handlers.go, want >= 3 "+
 			"(one per consuming detector: crashes, tool_failures, "+
 			"validator_failures). A wiring may have been accidentally "+
-			"dropped — see Allowlist.b.", callSite, count)
+			"dropped, see Allowlist.b.", callSite, count)
 	}
 }

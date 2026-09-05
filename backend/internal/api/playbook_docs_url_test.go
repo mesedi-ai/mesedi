@@ -18,7 +18,7 @@ func TestPlaybookDocURL_IrregularSlugs(t *testing.T) {
 	}
 }
 
-// The security section is not derivable from the class name either —
+// The security section is not derivable from the class name either ,
 // these three live under /security/, everything else under
 // /observability/.
 func TestPlaybookDocURL_SecuritySection(t *testing.T) {
@@ -64,7 +64,7 @@ func TestPlaybookDocURL_EmptyWhenUnbuildable(t *testing.T) {
 	}
 }
 
-// Handlers.DocsURL is never assigned at startup — no flag, no env var —
+// Handlers.DocsURL is never assigned at startup, no flag, no env var ,
 // so it is always "" in production. Reading it directly made every
 // playbook link silently vanish. The real source is
 // MESEDI_DASHBOARD_URL (set in fly.toml) with the app. subdomain

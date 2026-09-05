@@ -5,8 +5,8 @@ package api
 //
 // THE ONE FAILURE THIS FILE EXISTS TO PREVENT
 //
-// A missing checkpoint. Everything else in the chain — the hashes, the
-// per-tenant sub-chains, the cumulative counts — exists so that a
+// A missing checkpoint. Everything else in the chain, the hashes, the
+// per-tenant sub-chains, the cumulative counts, exists so that a
 // suppressed interval is detectable. If this worker can be induced to
 // SKIP an interval and carry on, it hands an attacker the alibi the
 // whole mechanism was built to deny.
@@ -52,7 +52,7 @@ import (
 //
 // An interface rather than a direct Verdifax call for two reasons. The
 // caller does not exist yet, and this worker must be testable without
-// spending money — every accepted submission in rekor mode is a real
+// spending money, every accepted submission in rekor mode is a real
 // Sigstore entry with a real cost.
 type CheckpointAnchorer interface {
 	// AnchorCheckpoint submits cp.Hash and returns the log entry id and
@@ -92,14 +92,14 @@ type CheckpointScheduler struct {
 	Logger *slog.Logger
 
 	// Anchorer may be nil. Nil means checkpoints are built and stored
-	// but never anchored, so the chain stalls after the first one —
+	// but never anchored, so the chain stalls after the first one ,
 	// visibly, at a known sequence. That is the correct behaviour for a
 	// deployment with no transparency log configured: it must not
 	// silently produce an unanchored chain that looks complete.
 	Anchorer CheckpointAnchorer
 
 	// TickInterval governs how often the worker wakes. Default 5
-	// minutes when zero — more often than the checkpoint interval so a
+	// minutes when zero, more often than the checkpoint interval so a
 	// missed wakeup does not delay an interval by a whole hour. Tests
 	// call tick directly and never set this.
 	TickInterval time.Duration
@@ -297,7 +297,7 @@ func (s *CheckpointScheduler) closeNextInterval(ctx context.Context, now time.Ti
 
 	// Anchor immediately. Failure is not fatal: the checkpoint is
 	// stored, and the next pass finds it unanchored and retries. That is
-	// the "anchor late, never abandon" rule — a late checkpoint is
+	// the "anchor late, never abandon" rule, a late checkpoint is
 	// checkable, a missing one is not.
 	_ = s.anchor(ctx, cp)
 	return true, nil
@@ -313,7 +313,7 @@ func (s *CheckpointScheduler) nextInterval(head *attest.Checkpoint, now time.Tim
 	var start time.Time
 	if head == nil {
 		// Genesis: the most recently completed interval. Deliberately
-		// NOT a backfill of history — a checkpoint claiming to cover a
+		// NOT a backfill of history, a checkpoint claiming to cover a
 		// period before this mechanism existed is a claim nobody can
 		// check.
 		start = now.Truncate(CheckpointInterval).Add(-CheckpointInterval)
@@ -345,7 +345,7 @@ func (s *CheckpointScheduler) buildLeaves(
 
 	// SORTED, never map order. Go randomises map iteration, so ranging
 	// over `counts` directly would order the leaves differently on every
-	// run and produce a different root for identical data — and the
+	// run and produce a different root for identical data, and the
 	// second run would look like tampering.
 	projects := make([]string, 0, len(counts))
 	for p := range counts {
@@ -419,8 +419,8 @@ func (s *CheckpointScheduler) projectIntervalRoot(
 		// a distinct, domain-separated digest rather than an error.
 		//
 		// This line was the outage of 2026-09-04. Compute refuses an
-		// empty event list — correctly, so the digest endpoint can answer
-		// 404 instead of letting an empty root stand in for a record —
+		// empty event list, correctly, so the digest endpoint can answer
+		// 404 instead of letting an empty root stand in for a record ,
 		// but the chain cannot refuse. One execution created and crashed
 		// 452 microseconds later, before emitting anything, stopped
 		// checkpoint construction for EVERY tenant on every tick, and it

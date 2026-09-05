@@ -1,13 +1,13 @@
 package store
 
 // Tool-return-value telemetry queries. Surfaces what
-// fraction of recent tool_call events are being clipped — either by
+// fraction of recent tool_call events are being clipped, either by
 // the SDK shipping a "<truncated>" sentinel, or by exceeding the
 // per-project byte cap and getting excluded from the
 // tool_schema_drift fingerprint comparison.
 //
 // The customer-facing answer the dashboard tile asks is "is my cap
-// too tight?" — a high rate means raising tool_return_value_max_bytes
+// too tight?", a high rate means raising tool_return_value_max_bytes
 // would recover more drift signal.
 
 import (
@@ -48,7 +48,7 @@ func (s *SQLiteStore) GetToolReturnValueStats(
 	//
 	// COALESCE wraps every SUM(CASE...) because SQLite returns NULL
 	// when SUM runs over zero matching rows (zero tool_call events in
-	// the window — the synthetic-customer's normal state most of the
+	// the window, the synthetic-customer's normal state most of the
 	// day). Without COALESCE, Scan into a non-pointer int errors with
 	// "converting NULL to int is unsupported" and the handler 500s.
 	// COUNT(*) is unaffected (it returns 0, not NULL).

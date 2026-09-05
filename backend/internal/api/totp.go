@@ -2,17 +2,17 @@
 //
 // The HTTP surface this file exposes:
 //
-//   - GET  /me/2fa/status              — is 2FA enabled for the calling user?
-//   - POST /me/2fa/setup-init          — generate a fresh secret + QR
-//   - POST /me/2fa/setup-verify        — confirm the customer scanned + enrolled
-//   - POST /me/2fa/disable             — wipe TOTP + backup codes after a code check
-//   - POST /me/2fa/regenerate-codes    — replace the backup-code set
-//   - POST /auth/2fa-verify            — server-to-server, completes a paused signin
+//   - GET  /me/2fa/status             , is 2FA enabled for the calling user?
+//   - POST /me/2fa/setup-init         , generate a fresh secret + QR
+//   - POST /me/2fa/setup-verify       , confirm the customer scanned + enrolled
+//   - POST /me/2fa/disable            , wipe TOTP + backup codes after a code check
+//   - POST /me/2fa/regenerate-codes   , replace the backup-code set
+//   - POST /auth/2fa-verify           , server-to-server, completes a paused signin
 //
 // All /me/2fa/* endpoints sit behind the normal cookie-auth middleware
 // (session present + project context set). The /auth/2fa-verify
 // endpoint is shared-secret server-to-server, like /signin and
-// /auth/logout — the dashboard's Worker calls it after the customer
+// /auth/logout, the dashboard's Worker calls it after the customer
 // enters their 6-digit code on the post-signin prompt page.
 //
 // Secret storage: the raw TOTP secret is only ever seen by the
@@ -156,7 +156,7 @@ func (h *Handlers) HandleTOTPStatus(w http.ResponseWriter, r *http.Request) {
 // Generating the QR server-side rather than in the dashboard keeps the
 // frontend free of a QR-library dependency (one less supply-chain
 // surface), and the otpauth URL embedded in the image is the same
-// public-by-design value the dashboard already knows — we are not
+// public-by-design value the dashboard already knows, we are not
 // leaking anything new.
 type TOTPSetupInitResponse struct {
 	SecretBase32 string `json:"secret_base32"`
@@ -166,7 +166,7 @@ type TOTPSetupInitResponse struct {
 }
 
 // HandleTOTPSetupInit generates a fresh TOTP secret for the calling
-// user and returns it. The secret is NOT persisted at this step — it
+// user and returns it. The secret is NOT persisted at this step, it
 // only becomes durable when the customer proves they scanned it by
 // sending back a matching code via setup-verify. Bouncing here means
 // the customer can re-init as many times as they want without
@@ -204,7 +204,7 @@ func (h *Handlers) HandleTOTPSetupInit(w http.ResponseWriter, r *http.Request) {
 	}
 	// Render the otpauth URL as a PNG QR code and base64-encode for
 	// data: URL embedding in the dashboard. If rendering fails we
-	// surface a 500 rather than ship a half-broken init — the
+	// surface a 500 rather than ship a half-broken init, the
 	// dashboard relies on the QR for the primary scan UX.
 	img, err := key.Image(totpQRPixelSize, totpQRPixelSize)
 	if err != nil {
@@ -237,7 +237,7 @@ type TOTPSetupVerifyRequest struct {
 }
 
 // TOTPSetupVerifyResponse hands the customer the freshly minted
-// backup codes. SHOWN ONCE — the storage layer holds only hashes.
+// backup codes. SHOWN ONCE, the storage layer holds only hashes.
 // Customer must save these somewhere outside Mesedi.
 type TOTPSetupVerifyResponse struct {
 	OK          bool     `json:"ok"`
@@ -555,7 +555,7 @@ func (h *Handlers) HandleTwoFactorVerify(w http.ResponseWriter, r *http.Request)
 	}
 	// Find the customer's active project. The signin flow already
 	// resolved the project for us when it minted the pending token
-	// but we don't carry the project_id on the token itself —
+	// but we don't carry the project_id on the token itself ,
 	// instead re-resolve here so a token cannot be used to take
 	// over a project the customer doesn't own.
 	project, perr := h.Store.GetMostRecentProjectByOwnerEmail(r.Context(), pending.UserID)

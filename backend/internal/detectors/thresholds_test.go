@@ -27,14 +27,14 @@ func Test_SemanticLoop_DefaultMatchesHardcoded(t *testing.T) {
 }
 
 func Test_SemanticLoop_LowerThresholdFiresEarlier(t *testing.T) {
-	// Two repeats of the same state — default (3) wouldn't fire;
+	// Two repeats of the same state, default (3) wouldn't fire;
 	// a threshold of 2 should.
 	payloads := []json.RawMessage{
 		json.RawMessage(`{"metadata":{"step":"A"}}`),
 		json.RawMessage(`{"metadata":{"step":"A"}}`),
 	}
 	if _, fired := DetectSemanticLoopWithThresholds(payloads, DefaultSemanticLoopThresholds()); fired {
-		t.Errorf("default threshold (3) fired on 2 repeats — unexpected")
+		t.Errorf("default threshold (3) fired on 2 repeats, unexpected")
 	}
 	custom := SemanticLoopThresholds{RevisitThreshold: 2}
 	if _, fired := DetectSemanticLoopWithThresholds(payloads, custom); !fired {
@@ -78,7 +78,7 @@ func Test_TokenWaste_CustomMinRepeatsFiresEarlier(t *testing.T) {
 	}
 	// Default min_repeats=3 does NOT fire on 2 repeats.
 	if _, fired := DetectTokenWasteWithThresholds(payloads, DefaultTokenWasteThresholds()); fired {
-		t.Errorf("default threshold fired on 2 repeats — unexpected")
+		t.Errorf("default threshold fired on 2 repeats, unexpected")
 	}
 	// Custom min_repeats=2 should fire.
 	custom := TokenWasteThresholds{PrefixWindowChars: prefixWindowChars, MinRepeats: 2}
@@ -162,7 +162,7 @@ func Test_Drift_DefaultPreservesLegacySignatures(t *testing.T) {
 	historical := []string{"baseline corpus message about widgets and gizmos"}
 	sig, _, fired := DetectLexicalDriftWithThresholds(current, historical, DefaultDriftThresholds())
 	if !fired {
-		t.Skipf("test corpus didn't trip drift (distance below 0.45); not a regression — fix the fixture if reproducible")
+		t.Skipf("test corpus didn't trip drift (distance below 0.45); not a regression, fix the fixture if reproducible")
 	}
 	// Signature must use one of the historical-shape strings, NOT
 	// some unexpected format like "lexical_drift_0.45000+".
@@ -180,7 +180,7 @@ func Test_Drift_DefaultPreservesLegacySignatures(t *testing.T) {
 
 func Test_Drift_BadOrderingFallsBackToDefaults(t *testing.T) {
 	// Out-of-order thresholds (low > high) must fall back to
-	// defaults — detector must not produce chaos.
+	// defaults, detector must not produce chaos.
 	bad := DriftThresholds{
 		LexicalLow:    0.8,
 		LexicalMedium: 0.6,
@@ -197,7 +197,7 @@ func Test_Drift_BadOrderingFallsBackToDefaults(t *testing.T) {
 	sig, _, fired := DetectLexicalDriftWithThresholds(current, historical, bad)
 	if fired {
 		// Either fires under a default shape (good), or no fire
-		// (also fine — test corpus may not trip). Anything ELSE is
+		// (also fine, test corpus may not trip). Anything ELSE is
 		// a bug.
 		ok := false
 		for _, allowed := range []string{
@@ -245,8 +245,8 @@ func Test_ContextOverflow_DefaultMatchesHardcoded(t *testing.T) {
 
 func Test_ContextOverflow_LowerHighPctFiresEarlier(t *testing.T) {
 	// 65% of a known model window. Default (warn=0.90, fail=1.0)
-	// does NOT fire. Custom (warn=0.5, fail=0.8) — both within the
-	// validators-registry [0.5, 1.0] valid range — should fire as
+	// does NOT fire. Custom (warn=0.5, fail=0.8), both within the
+	// validators-registry [0.5, 1.0] valid range, should fire as
 	// warn. claude-opus-4-6 has a 200K window; 130K input is 65%.
 	payloads := []json.RawMessage{
 		json.RawMessage(`{"model":"claude-opus-4-6","input_tokens":130000}`),
@@ -286,7 +286,7 @@ func Test_ContextOverflow_BadOrderingFallsBackToDefaults(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// loops family (loops-thresholds wave — step_count + identical_call
+// loops family (loops-thresholds wave, step_count + identical_call
 // thresholds live at the handler call site as literals, so they're
 // tested via integration; similar_call_loop has a detector-level
 // WithThresholds variant exercised here)
@@ -311,7 +311,7 @@ func Test_Loops_DefaultMatchesHardcoded(t *testing.T) {
 }
 
 func Test_Loops_SimilarCallRaisingClusterSizeStopsFiring(t *testing.T) {
-	// Three near-duplicate messages — should fire at default cluster
+	// Three near-duplicate messages, should fire at default cluster
 	// size 3 (assuming they cluster). Raising min_cluster_size to 4
 	// should stop firing on the same input.
 	msgs := []string{
@@ -320,7 +320,7 @@ func Test_Loops_SimilarCallRaisingClusterSizeStopsFiring(t *testing.T) {
 		"Please summarize the quarterly earnings report for Acme Co.",
 	}
 	if _, fired := DetectSimilarCallLoopWithThresholds(msgs, DefaultLoopsThresholds()); !fired {
-		t.Skipf("test fixture didn't cluster at default thresholds; not a regression — fix the fixture if reproducible")
+		t.Skipf("test fixture didn't cluster at default thresholds; not a regression, fix the fixture if reproducible")
 	}
 	tight := DefaultLoopsThresholds()
 	tight.SimilarCallMinClusterSize = 4
@@ -345,7 +345,7 @@ func Test_Loops_SimilarCallBadConfigFallsBackToDefaults(t *testing.T) {
 	// Distance outside [0.05, 0.50] should also fall back to default.
 	badDist := DefaultLoopsThresholds()
 	badDist.SimilarCallDistanceThreshold = 0.99
-	// 3 near-dup messages — under bad distance 0.99 EVERY pair would
+	// 3 near-dup messages, under bad distance 0.99 EVERY pair would
 	// look near-duplicate (matches always), but the fallback path
 	// uses the default 0.20 which still clusters these three.
 	clusterMsgs := []string{
@@ -359,7 +359,7 @@ func Test_Loops_SimilarCallBadConfigFallsBackToDefaults(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// grounding_failure per-evaluator floors (extensions wave —
+// grounding_failure per-evaluator floors (extensions wave ,
 // closes grounding_failure.G3)
 // ─────────────────────────────────────────────────────────────────
 
@@ -423,7 +423,7 @@ func Test_GroundingFailure_BadPerEvaluatorValueFallsBack(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// cascading_failure (extensions wave — closes G2 + G3)
+// cascading_failure (extensions wave, closes G2 + G3)
 // ─────────────────────────────────────────────────────────────────
 
 func Test_CascadingFailure_DefaultMatchesHardcoded(t *testing.T) {
@@ -437,7 +437,7 @@ func Test_CascadingFailure_DefaultMatchesHardcoded(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// hitl_rejection_spike (extensions wave — closes G3)
+// hitl_rejection_spike (extensions wave, closes G3)
 // ─────────────────────────────────────────────────────────────────
 
 func Test_HITLRejectionSpike_DefaultMatchesHardcoded(t *testing.T) {
@@ -526,12 +526,12 @@ func Test_HITLTimeout_LegacyWrapperUsesDefaults(t *testing.T) {
 	withDef := DetectHITLTimeoutAllMatchesWithThresholds(payloads,
 		DefaultHITLTimeoutThresholds())
 	if len(legacy) != len(withDef) {
-		t.Errorf("legacy length=%d vs WithThresholds default length=%d — backward compat broken",
+		t.Errorf("legacy length=%d vs WithThresholds default length=%d, backward compat broken",
 			len(legacy), len(withDef))
 	}
 	for i := range legacy {
 		if legacy[i] != withDef[i] {
-			t.Errorf("legacy[%d]=%q vs WithThresholds default[%d]=%q — backward compat broken",
+			t.Errorf("legacy[%d]=%q vs WithThresholds default[%d]=%q, backward compat broken",
 				i, legacy[i], i, withDef[i])
 		}
 	}
@@ -542,7 +542,7 @@ func Test_HITLTimeout_LegacyWrapperUsesDefaults(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────
 
 func Test_ContextOverflow_CustomWindowFiresOnUnknownModel(t *testing.T) {
-	// Model not in the static registry — without override, detector
+	// Model not in the static registry, without override, detector
 	// skips. With customer override, detector fires at 95% utilization.
 	payloads := []json.RawMessage{
 		json.RawMessage(`{"model":"ollama-llama3-70b","input_tokens":7600}`),
@@ -600,7 +600,7 @@ func Test_ContextOverflow_BadCustomWindowFallsThrough(t *testing.T) {
 		bad := DefaultContextOverflowThresholds()
 		bad.CustomModelWindows = c
 		if _, fired := DetectContextOverflowWithThresholds(payloads, bad); fired {
-			t.Errorf("bad override %v should fall through to registry (65%% util at 200K window — no fire); fired anyway", c)
+			t.Errorf("bad override %v should fall through to registry (65%% util at 200K window, no fire); fired anyway", c)
 		}
 	}
 }
@@ -674,7 +674,7 @@ func Test_HITLRejectionSpike_BadWindowFallsBackToDefault(t *testing.T) {
 }
 
 func Test_Loops_SimilarCallScanWindowCap(t *testing.T) {
-	// loops.G9 — when N > MaxSimilarCallScanWindow, only the most
+	// loops.G9, when N > MaxSimilarCallScanWindow, only the most
 	// recent MaxSimilarCallScanWindow messages are scanned. A
 	// distinctive 3-message cluster in the OLDEST messages of a
 	// 500-message session should NOT fire under the cap (those
@@ -682,7 +682,7 @@ func Test_Loops_SimilarCallScanWindowCap(t *testing.T) {
 	// in the NEWEST messages SHOULD fire.
 	//
 	// Filler messages use hex(sha256(idx)) so they're pairwise
-	// trigram-distinct — without this the filler messages would
+	// trigram-distinct, without this the filler messages would
 	// cluster among themselves and confound the test.
 	makeMessages := func(clusterAtIndex int) []string {
 		msgs := make([]string, 500)
@@ -696,12 +696,12 @@ func Test_Loops_SimilarCallScanWindowCap(t *testing.T) {
 		msgs[clusterAtIndex+2] = "Please summarize the quarterly earnings report for Acme Co."
 		return msgs
 	}
-	// Cluster at index 0 — outside the most-recent 200 window. No fire.
+	// Cluster at index 0, outside the most-recent 200 window. No fire.
 	oldCluster := makeMessages(0)
 	if _, fired := DetectSimilarCallLoopWithThresholds(oldCluster, DefaultLoopsThresholds()); fired {
 		t.Errorf("cluster in oldest 3 messages of 500-message session should be outside the scan window; should not fire")
 	}
-	// Cluster at index 497-499 — inside the most-recent 200 window. Fire.
+	// Cluster at index 497-499, inside the most-recent 200 window. Fire.
 	recentCluster := makeMessages(497)
 	if _, fired := DetectSimilarCallLoopWithThresholds(recentCluster, DefaultLoopsThresholds()); !fired {
 		t.Errorf("cluster in newest 3 messages of 500-message session should be inside the scan window; should fire")
@@ -720,11 +720,11 @@ func Test_Loops_SimilarCallLegacyWrapperUsesDefaults(t *testing.T) {
 	legacySig, legacyFired := DetectSimilarCallLoop(msgs)
 	newSig, newFired := DetectSimilarCallLoopWithThresholds(msgs, DefaultLoopsThresholds())
 	if legacyFired != newFired {
-		t.Errorf("legacy fired=%v vs WithThresholds default fired=%v — backward compat broken",
+		t.Errorf("legacy fired=%v vs WithThresholds default fired=%v, backward compat broken",
 			legacyFired, newFired)
 	}
 	if legacySig != newSig {
-		t.Errorf("legacy sig=%q vs WithThresholds default sig=%q — backward compat broken",
+		t.Errorf("legacy sig=%q vs WithThresholds default sig=%q, backward compat broken",
 			legacySig, newSig)
 	}
 }

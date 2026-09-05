@@ -57,10 +57,10 @@ func TestValidatePatternFields_InvalidRegex(t *testing.T) {
 		// Note: (a+)+b IS valid RE2; the rejection is at the
 		// "catastrophic backtracking" PCRE level. RE2 is
 		// catastrophe-free by construction. So this pattern
-		// COMPILES; we keep the assertion permissive — the test
+		// COMPILES; we keep the assertion permissive, the test
 		// documents that RE2 doesn't reject nested quantifiers
 		// the way PCRE does.
-		t.Logf("RE2 accepts (a+)+b — catastrophe-free by construction; "+
+		t.Logf("RE2 accepts (a+)+b, catastrophe-free by construction; "+
 			"validator output: %q", got)
 	}
 }
@@ -107,7 +107,7 @@ func TestNewPatternID_ShapeAndUniqueness(t *testing.T) {
 }
 
 func TestPatternConfigDetectors_AllowList(t *testing.T) {
-	// Pin the allow-list — adding or removing a detector here is
+	// Pin the allow-list, adding or removing a detector here is
 	// a product decision and the test fails the build until the
 	// reviewer reasons about the change.
 	want := []string{"prompt_injection", "data_leakage", "sandbox_escape"}

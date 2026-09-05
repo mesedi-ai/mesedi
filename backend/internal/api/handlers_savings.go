@@ -10,32 +10,32 @@ package api
 // counter to speculation is transparency: every bucket below carries
 // a human-readable assumption string that the dashboard surfaces in
 // a tooltip. Customers can disagree with the numbers and still see
-// the methodology — vs. a black-box "you saved $X" claim that gets
+// the methodology, vs. a black-box "you saved $X" claim that gets
 // dismissed as marketing.
 //
 // v1 scope: month-to-date savings on five buckets:
 //
-//   1. Loop catch — loops:* failure groups. Without Mesedi, an
+//   1. Loop catch, loops:* failure groups. Without Mesedi, an
 //      identical-call loop continues until a human notices, typically
 //      hours. We assume 1 additional hour of runaway at the loop's
 //      observed call rate.
 //
-//   2. Drift catch — drift:* failure groups. A model-mix shift
+//   2. Drift catch, drift:* failure groups. A model-mix shift
 //      (e.g., Haiku silently routed to Sonnet) costs ~5x more per
 //      token. We project 1 hour of drift at 5x cost multiplier.
 //
-//   3. First-occurrence escalation — every failure_group whose
+//   3. First-occurrence escalation, every failure_group whose
 //      webhook fired on call means the customer didn't pay for
 //      the next N occurrences. v1 assumes N=10 (conservative; a
 //      typical "fail loud and human-notice" cycle in production is
 //      tens to hundreds of occurrences).
 //
-//   4. Budget ceiling — if a tenant ceiling is configured AND
+//   4. Budget ceiling, if a tenant ceiling is configured AND
 //      breached_at is set, project remaining-month burn at current
 //      rate minus the ceiling. That's the spend the customer didn't
 //      take because Mesedi halted.
 //
-//   5. Hard-halt — v1 returns $0 with a "tracking improvement
+//   5. Hard-halt, v1 returns $0 with a "tracking improvement
 //      pending" assumption string. Currently halts aren't a discrete
 //      execution status, so the data shape doesn't support a clean
 //      query. When status='halted' lands, swap in the real
@@ -265,7 +265,7 @@ func (h *Handlers) HandleSavings(w http.ResponseWriter, r *http.Request) {
 	var firstOccurrenceUSD float64
 	var firstOccurrenceCount int
 	for _, g := range groupsThisMonth {
-		// Exclude loops and drift here — those are scored in their
+		// Exclude loops and drift here, those are scored in their
 		// own buckets above, double-counting would inflate. The
 		// escalation bucket captures crashes, time_budget, validator
 		// failures, tool failures, prompt injection, cost velocity,
@@ -317,7 +317,7 @@ func (h *Handlers) HandleSavings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ─────────────────────────────────────────────────────────────
-	// Bucket: hard halt — v1 stub
+	// Bucket: hard halt, v1 stub
 	// ─────────────────────────────────────────────────────────────
 	// Future enhancement: once status='halted' lands on executions,
 	// sum the saved = (avg_completed_cost - actual_halted_cost) ×

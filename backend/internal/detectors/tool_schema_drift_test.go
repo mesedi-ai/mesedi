@@ -2,7 +2,7 @@ package detectors
 
 // Fingerprint-stability tests for tool_schema_drift (
 // closeout). The SDK ships typed-sentinel structures via the
-// schema-preserving coercion shipped in — e.g. a datetime
+// schema-preserving coercion shipped in, e.g. a datetime
 // becomes `{"__type__":"datetime","value":"..."}`. These tests
 // pin the contract between the SDK's coercion and the backend's
 // ReturnShapeHash so a future SDK change can't silently produce
@@ -10,19 +10,19 @@ package detectors
 //
 // The tests cover three classes of guarantee:
 //
-//   1. STABILITY — the same logical shape produces the same hash
+//   1. STABILITY, the same logical shape produces the same hash
 //      across:
 //        - dict key order (sort_keys property)
 //        - value-text changes (only structure matters)
 //        - run-to-run determinism
 //
-//   2. DISTINCTNESS — shapes that DIFFER in any structural way
+//   2. DISTINCTNESS, shapes that DIFFER in any structural way
 //      produce distinct hashes:
 //        - adding/removing a key
 //        - typed-sentinel vs plain string (the property)
 //        - changing a value's type
 //
-//   3. SDK COMPATIBILITY — the typed-sentinel structures emitted
+//   3. SDK COMPATIBILITY, the typed-sentinel structures emitted
 //      by `mesedi._structured_return_value` (Python) and
 //      `structuredReturnValue` (TypeScript) hash to a deterministic
 //      shape the detector understands.
@@ -44,7 +44,7 @@ func rawJSON(t *testing.T, v any) json.RawMessage {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// STABILITY — same shape → same hash
+// STABILITY, same shape → same hash
 // ──────────────────────────────────────────────────────────────────
 
 func TestReturnShapeHash_StableAcrossKeyOrder(t *testing.T) {
@@ -78,7 +78,7 @@ func TestReturnShapeHash_DeterministicAcrossRuns(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// DISTINCTNESS — structural change → different hash
+// DISTINCTNESS, structural change → different hash
 // ──────────────────────────────────────────────────────────────────
 
 func TestReturnShapeHash_DistinctByAddedKey(t *testing.T) {
@@ -101,7 +101,7 @@ func TestReturnShapeHash_DistinctByValueType(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// SDK COMPATIBILITY — typed sentinels from
+// SDK COMPATIBILITY, typed sentinels from
 // ──────────────────────────────────────────────────────────────────
 
 func TestReturnShapeHash_TypedSentinelDistinctFromPlainString(t *testing.T) {
@@ -176,7 +176,7 @@ func TestReturnShapeHash_TypedSentinelObjectClassDistinguishesUserVsAdminUser(t 
 }
 
 // ──────────────────────────────────────────────────────────────────
-// EDGE CASES — empty input, malformed input, deeply nested
+// EDGE CASES, empty input, malformed input, deeply nested
 // ──────────────────────────────────────────────────────────────────
 
 func TestReturnShapeHash_EmptyInputReturnsEmpty(t *testing.T) {

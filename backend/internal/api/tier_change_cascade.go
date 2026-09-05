@@ -10,7 +10,7 @@ package api
 // retention until it cancels, at which point the row still says
 // retention_days=90 but the tier is now Hobby (cap 7). The nightly
 // retention scheduler then silently keeps 90 days of data for a
-// project that pays for 7 — customer looks like they're getting a
+// project that pays for 7, customer looks like they're getting a
 // free ride, and the marketing pricing card looks like it's lying.
 //
 // This helper closes that loophole by running on every tier-change
@@ -49,7 +49,7 @@ package api
 // gets added inside applyTierChangeCascade as an independent step.
 // Each step reads its own current value, compares to the destination
 // tier's cap, clamps, and logs its own audit row. Steps are
-// independent — a failure in one step doesn't block the others.
+// independent, a failure in one step doesn't block the others.
 
 import (
 	"context"
@@ -81,7 +81,7 @@ const (
 // Parameters:
 //   - fromTier: the tier the project WAS on before the flip. Callers
 //     that don't have the old tier handy (subscription webhook that
-//     didn't load the project first) can pass "" — the cascade still
+//     didn't load the project first) can pass "", the cascade still
 //     runs based on toTier's cap alone; the audit metadata will just
 //     have an empty from_tier.
 //   - toTier: the tier the project IS on now (post-flip).
@@ -93,7 +93,7 @@ const (
 // Return value: only errors from the STORAGE-LAYER clamp write
 // propagate. Audit + email failures are logged at WARN and swallowed.
 // A nil-return from an upgrade path (from lower to higher tier) is
-// also normal — that path skips the clamp entirely.
+// also normal, that path skips the clamp entirely.
 func (h *Handlers) applyTierChangeCascade(
 	ctx context.Context,
 	projectID, actorEmail, fromTier, toTier string,
@@ -113,7 +113,7 @@ func (h *Handlers) applyTierChangeCascade(
 	}
 	if !isTierDowngrade(fromNorm, toNorm) {
 		// Upgrades (Hobby→Team, Hobby→Enterprise, Team→Enterprise)
-		// never need a clamp — the destination tier's caps are always
+		// never need a clamp, the destination tier's caps are always
 		// looser. This branch also protects the empty-fromTier case:
 		// isTierDowngrade returns false when fromNorm is empty, so a
 		// caller that didn't preload the old tier gets a safe no-op
@@ -171,7 +171,7 @@ func (h *Handlers) clampRetentionForTier(
 		newForAudit = fmt.Sprintf("%d days", cap)
 		shouldClamp = true
 	default:
-		// Already at or below the cap — nothing to do.
+		// Already at or below the cap, nothing to do.
 		return nil
 	}
 	if !shouldClamp {
@@ -179,14 +179,14 @@ func (h *Handlers) clampRetentionForTier(
 	}
 
 	// Persist the clamp. This is the only operation whose failure
-	// aborts the cascade — a partial state (settings-clamp-half-
+	// aborts the cascade, a partial state (settings-clamp-half-
 	// applied) is worse than the caller retrying the whole cascade.
 	if err := h.Store.SetProjectRetentionDays(ctx, projectID, &newDays); err != nil {
 		return fmt.Errorf("write retention: %w", err)
 	}
 
 	// Best-effort audit trail. A write failure here is logged but does
-	// NOT roll back the clamp — the customer's data-retention posture
+	// NOT roll back the clamp, the customer's data-retention posture
 	// is now correct even if we didn't manage to record the reason.
 	h.recordAuditEventForProject(
 		ctx, projectID, actorEmail,
@@ -204,7 +204,7 @@ func (h *Handlers) clampRetentionForTier(
 	// Best-effort customer email. Skipped when we don't have a project
 	// owner email (the caller either didn't load the project or the
 	// row genuinely has no owner). The email is a courtesy, not a
-	// legal requirement — the audit row above is the record of truth.
+	// legal requirement, the audit row above is the record of truth.
 	h.sendTierClampEmail(ctx, projectID, oldForAudit, newForAudit, toTier)
 
 	return nil
@@ -286,7 +286,7 @@ func isTierDowngrade(fromNorm, toNorm string) bool {
 	}
 	f, to := rank(fromNorm), rank(toNorm)
 	if f == 0 {
-		// Unknown source tier — bail rather than guess.
+		// Unknown source tier, bail rather than guess.
 		return false
 	}
 	return to < f

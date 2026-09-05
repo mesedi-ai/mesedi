@@ -34,7 +34,7 @@ func TestAnalysisPrompt_IncludesPlaybookURLWhenProvided(t *testing.T) {
 			"link a URL it was never given")
 	}
 	if !strings.Contains(prompt, "Published at:") {
-		t.Error("expected a labelled 'Published at:' line — the system " +
+		t.Error("expected a labelled 'Published at:' line, the system " +
 			"prompt keys the linking instruction off that exact label")
 	}
 }
@@ -56,7 +56,7 @@ func TestAnalysisPrompt_OmitsPlaybookURLWhenEmpty(t *testing.T) {
 	}
 }
 
-// The playbook body itself must still be present either way — the link
+// The playbook body itself must still be present either way, the link
 // is an addition, not a replacement for the content the model reasons
 // from.
 func TestAnalysisPrompt_PlaybookContentPresentWithAndWithoutURL(t *testing.T) {

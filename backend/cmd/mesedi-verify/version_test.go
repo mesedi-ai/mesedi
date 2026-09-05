@@ -7,7 +7,7 @@ import (
 
 // The report instructs its reader to rebuild this binary and reproduce
 // the verdict. These tests exist because that instruction is only
-// meaningful if the document names the source — and because the case
+// meaningful if the document names the source, and because the case
 // that matters most, a build with uncommitted changes, is the one a
 // developer sees every day and would stop noticing.
 

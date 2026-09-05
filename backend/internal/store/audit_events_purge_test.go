@@ -5,13 +5,13 @@
 // project_deleted_at IS NULL and bypassed for any project that had
 // zero audit history yet, allowing a destructive purge against a live
 // customer with no API activity. The new guard checks the projects
-// table directly — if a row exists for project_id, the project is
+// table directly, if a row exists for project_id, the project is
 // still active and the purge must refuse with ErrProjectStillActive.
 //
 // These tests stand up a minimal in-memory schema (just projects +
 // audit_events) rather than running OpenSQLite's full migration
 // sequence. That keeps the test scoped to the guard's semantics and
-// also avoids tripping over a separate latent bug — — where
+// also avoids tripping over a separate latent bug, , where
 // SQLite migrations/ is missing 003_project_webhooks.sql and any
 // fresh SQLite install panics during applyMigrations.
 package store
@@ -28,7 +28,7 @@ import (
 )
 
 // openMinimalAuditPurgeStore creates a SQLite store wrapping a fresh
-// on-disk DB that contains only the projects + audit_events tables —
+// on-disk DB that contains only the projects + audit_events tables ,
 // the bare minimum PurgeAuditEventsForClosedProject reads from. Avoids
 // the broken full-migration path entirely.
 func openMinimalAuditPurgeStore(t *testing.T) *SQLiteStore {
@@ -112,7 +112,7 @@ func Test_PurgeAuditEventsForClosedProject_ClosedProjectWithZeroAudits_Succeeds(
 	ctx := context.Background()
 	st := openMinimalAuditPurgeStore(t)
 
-	// No INSERT into projects — the project has been closed
+	// No INSERT into projects, the project has been closed
 	// (DeleteProjectCascade removed the row). No audit_events either.
 	deleted, err := st.PurgeAuditEventsForClosedProject(ctx, "proj-already-closed")
 	if err != nil {
@@ -164,9 +164,9 @@ func Test_PurgeAuditEventsForClosedProject_ClosedProjectWithSnapshottedAudits_Pu
 	ctx := context.Background()
 	st := openMinimalAuditPurgeStore(t)
 
-	// Two audit_events rows with project_deleted_at populated — this
+	// Two audit_events rows with project_deleted_at populated, this
 	// is the shape SnapshotAuditEventsForClosedProject leaves behind
-	// during the close flow. NO projects row — DeleteProjectCascade
+	// during the close flow. NO projects row, DeleteProjectCascade
 	// already removed it.
 	closedAt := time.Now().UTC()
 	for _, evtID := range []string{"evt-a", "evt-b"} {

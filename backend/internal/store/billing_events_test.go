@@ -16,7 +16,7 @@
 //
 // Strategy: minimal in-memory schema (projects + billing_events
 // only) rather than the full migration sequence. Same approach
-// audit_events_purge_test.go takes — keeps tests scoped to the
+// audit_events_purge_test.go takes, keeps tests scoped to the
 // methods under test and avoids -style cross-migration coupling.
 package store
 

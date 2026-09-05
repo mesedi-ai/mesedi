@@ -23,14 +23,14 @@ import (
 //
 // That distinction is the whole point. Truncating a result set here
 // would silently drop executions or whole tenants out of the interval's
-// Merkle tree — which is precisely the omission attack the checkpoint
+// Merkle tree, which is precisely the omission attack the checkpoint
 // chain exists to make detectable. A cap that quietly returns fewer
 // rows would build a perfectly valid-looking checkpoint over an
 // incomplete set, and no verifier could ever tell. Failing the interval
 // loudly is recoverable; silently anchoring a lie is not.
 //
 // If either ceiling is ever reached in practice the answer is a shorter
-// interval or a batched tree build, decided deliberately — not a bigger
+// interval or a batched tree build, decided deliberately, not a bigger
 // number pasted in here.
 // Declared as var rather than const so tests can lower them and
 // actually exercise the refusal path. A cap that cannot be tested is a
@@ -65,7 +65,7 @@ var (
 //
 // Idempotent by construction: the WHERE clause excludes rows that
 // already carry sealed_at, so a second pass cannot move an execution
-// between intervals. That is not an optimisation — interval membership
+// between intervals. That is not an optimisation, interval membership
 // must be recorded once and never recomputed, or the chain anchors a
 // fact that can change underneath it.
 //
@@ -109,7 +109,7 @@ func (s *SQLiteStore) SealExecutions(
 //
 // Half-open on purpose. Adjacent checkpoints share a boundary instant,
 // and a closed upper bound would count an execution sealed exactly on
-// the hour in BOTH intervals — inflating one cumulative count and
+// the hour in BOTH intervals, inflating one cumulative count and
 // making the chain's arithmetic fail to reconcile against itself.
 func (s *SQLiteStore) CountSealedByProject(
 	ctx context.Context,
@@ -153,7 +153,7 @@ func (s *SQLiteStore) CountSealedByProject(
 // ListSealedExecutionIDs returns one project's execution ids sealed in
 // [from, to), in the order their leaves must be hashed.
 //
-// ORDER BY sealed_at, execution_id — and the tiebreak is not
+// ORDER BY sealed_at, execution_id, and the tiebreak is not
 // decoration. The project's Merkle root depends on leaf order, so two
 // runs that ordered ties differently would produce two different roots
 // for identical data, and the second one would look like tampering.

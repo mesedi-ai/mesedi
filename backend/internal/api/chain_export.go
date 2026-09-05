@@ -17,7 +17,7 @@ import (
 //
 // nil, not an empty json.RawMessage: an empty RawMessage marshals to
 // nothing and produces invalid JSON in the enclosing document, whereas
-// nil combined with omitempty makes the field disappear — which is the
+// nil combined with omitempty makes the field disappear, which is the
 // honest rendering, since absent means "no offline proof was captured".
 //
 // Malformed stored JSON is dropped rather than emitted. A verifier
@@ -31,7 +31,7 @@ func rawJSONOrNil(s string) json.RawMessage {
 	return json.RawMessage(s)
 }
 
-// GET /me/chain/export — the file an auditor takes away.
+// GET /me/chain/export, the file an auditor takes away.
 //
 // The governing rule, from attest/export.go: this emits DATA, not a claim.
 // Mesedi assembles it, so nothing in it may be believed on Mesedi's
@@ -124,8 +124,8 @@ func (h *Handlers) buildChainExport(
 		}
 
 		// No leaf means this project ran nothing in that hour. The
-		// checkpoint is still exported — it is part of the chain and its
-		// absence would be a gap — but with no leaf, proof or executions.
+		// checkpoint is still exported, it is part of the chain and its
+		// absence would be a gap, but with no leaf, proof or executions.
 		if mine == nil {
 			out.Intervals = append(out.Intervals, iv)
 			continue
@@ -243,7 +243,7 @@ func parseSeq(raw string) (uint64, error) {
 //
 // Deliberately NOT gated to a paid tier. An agency's ability to verify
 // the records it is legally required to retain must not depend on what it
-// pays us — that is the one thing in this product that would be indefensible
+// pays us, that is the one thing in this product that would be indefensible
 // to charge for. Revisit the limits if the work becomes a problem; do not
 // revisit who is allowed to check their own evidence.
 func (h *Handlers) HandleChainExport(w http.ResponseWriter, r *http.Request) {

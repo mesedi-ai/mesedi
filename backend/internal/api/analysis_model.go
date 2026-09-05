@@ -1,8 +1,8 @@
 // Per-tier model selection for AI root-cause analysis.
 //
 // Until 2026-08-20 the model was a hardcoded string at the call site in
-// HandleAnalyzeFailureGroup, so every tier — free Hobby through
-// hand-sold Enterprise — got identical analysis quality. That left the
+// HandleAnalyzeFailureGroup, so every tier, free Hobby through
+// hand-sold Enterprise, got identical analysis quality. That left the
 // most natural premium differentiator on the table: root-cause
 // reasoning over structured failure telemetry is exactly the workload
 // where a larger model produces visibly better output, and the cost
@@ -16,7 +16,7 @@
 //
 // Output is capped at 1024 tokens, so the worst case is bounded too.
 // A Production customer running 2,000 analyses a month on Sonnet 5
-// costs roughly $28 against $1,500 of revenue — under 2%. The included
+// costs roughly $28 against $1,500 of revenue, under 2%. The included
 // 200 analyses on Team cost about $1.40 in total. AI analysis is not a
 // cost center at this scale; it is a quality lever.
 //
@@ -37,7 +37,7 @@ const (
 	// AnalysisModelPremium is the model used for hand-sold tiers
 	// (Production, Enterprise). Stronger reasoning on multi-signal
 	// failure groups, at roughly 2x the per-analysis cost of
-	// AnalysisModelStandard — single-digit dollars per month per
+	// AnalysisModelStandard, single-digit dollars per month per
 	// customer at realistic volumes.
 	AnalysisModelPremium = "claude-sonnet-5"
 )
@@ -59,9 +59,9 @@ const (
 	// analysisMaxTokensPremium gives the premium model room to reason
 	// BEFORE it writes.
 	//
-	// Why this exists: on 2026-08-24, coordination_deadlock — the most
+	// Why this exists: on 2026-08-24, coordination_deadlock, the most
 	// reasoning-heavy class in the taxonomy, a cycle in a handoff graph
-	// across named agents — came back HTTP 200, 13 seconds, correct
+	// across named agents, came back HTTP 200, 13 seconds, correct
 	// model recorded, and completely EMPTY. Nineteen simpler classes
 	// succeeded through the identical path. The output budget was
 	// consumed before any prose was emitted, so the response carried no

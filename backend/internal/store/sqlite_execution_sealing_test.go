@@ -5,14 +5,14 @@ package store
 // The two that carry the correctness property:
 //
 //   TestSealExecutions_DoesNotSealAnExecutionStillSettling
-//     — sealing early anchors a digest over a partial event record.
+//    , sealing early anchors a digest over a partial event record.
 //       When the remaining events land the root changes, and a changed
 //       root reads as TAMPERING rather than as a race. False alarms are
 //       worse than silence: an auditor who watches the chain cry wolf
 //       stops believing it when it is right.
 //
 //   TestSealExecutions_IsIdempotent
-//     — interval membership must be recorded once and never
+//    , interval membership must be recorded once and never
 //       recomputed, or the chain anchors a fact that moves underneath
 //       it.
 //
@@ -20,7 +20,7 @@ package store
 // exemption in .git/foundation_audit.conf: no store sidecar has a
 // Postgres twin test yet, the SQLite pattern is the established style,
 // and the Postgres CI path is tracked as its own task. The Postgres
-// IMPLEMENTATION does exist (postgres_execution_sealing.go) — shipping
+// IMPLEMENTATION does exist (postgres_execution_sealing.go), shipping
 // one backend and not the other is what caused the 056 outage.
 
 import (
@@ -66,7 +66,7 @@ func sealSeedProject(t *testing.T, s *SQLiteStore, projectID string) {
 func seedExecution(t *testing.T, s *SQLiteStore, projectID, execID string,
 	startedAt time.Time, endedAt *time.Time) {
 	t.Helper()
-	// StatusStarted, not StatusRunning — the latter does not exist in
+	// StatusStarted, not StatusRunning, the latter does not exist in
 	// this codebase. The status set is StatusStarted, StatusAwaitingHuman,
 	// StatusCompleted, StatusCrashed, StatusHalted, StatusTimeout,
 	// StatusValidationFailed.
@@ -102,7 +102,7 @@ func TestSealExecutions_DoesNotSealAnExecutionStillSettling(t *testing.T) {
 	const settle = 15 * time.Minute
 	const timeout = 6 * time.Hour
 
-	// Ended one minute ago — well inside the grace period.
+	// Ended one minute ago, well inside the grace period.
 	seedExecution(t, s, "proj-a", "exec-fresh",
 		now.Add(-10*time.Minute), ptr(now.Add(-time.Minute)))
 
@@ -285,7 +285,7 @@ func TestCountSealedByProject_SeparatesProjects(t *testing.T) {
 }
 
 // The Merkle root depends on leaf order, and a single seal pass stamps
-// every row it touches with the SAME instant — so ties are routine, and
+// every row it touches with the SAME instant, so ties are routine, and
 // without the execution_id tiebreak two runs could order them
 // differently and produce two different roots for identical data. The
 // second would look like tampering.
@@ -318,7 +318,7 @@ func TestListSealedExecutionIDs_OrderIsDeterministicOnTies(t *testing.T) {
 		}
 		for i := range want {
 			if ids[i] != want[i] {
-				t.Fatalf("attempt %d: order = %v, want %v — ties on sealed_at are "+
+				t.Fatalf("attempt %d: order = %v, want %v, ties on sealed_at are "+
 					"not being broken deterministically, so the Merkle root would "+
 					"differ between runs on identical data", attempt, ids, want)
 			}
@@ -330,7 +330,7 @@ func TestListSealedExecutionIDs_OrderIsDeterministicOnTies(t *testing.T) {
 
 // The caps must REFUSE, never truncate. A short result set would build
 // a perfectly valid-looking checkpoint over an incomplete set of
-// executions, and no verifier could ever tell — which is exactly the
+// executions, and no verifier could ever tell, which is exactly the
 // omission this whole mechanism exists to expose. Loud failure is
 // recoverable; a silently truncated tree is not.
 //
@@ -359,7 +359,7 @@ func TestIntervalQueries_RefuseRatherThanTruncate(t *testing.T) {
 		ids, err := s.ListSealedExecutionIDs(ctx, "proj-a", from, to)
 		if err == nil {
 			t.Fatalf("proj-a has 2 executions with a cap of 1 but the call "+
-				"succeeded, returning %d ids — a truncated list would exclude "+
+				"succeeded, returning %d ids, a truncated list would exclude "+
 				"executions from the Merkle root invisibly", len(ids))
 		}
 		if ids != nil {
@@ -376,7 +376,7 @@ func TestIntervalQueries_RefuseRatherThanTruncate(t *testing.T) {
 		counts, err := s.CountSealedByProject(ctx, from, to)
 		if err == nil {
 			t.Fatalf("2 projects active with a cap of 1 but the call succeeded, "+
-				"returning %d entries — dropping a tenant from the tree is the "+
+				"returning %d entries, dropping a tenant from the tree is the "+
 				"omission attack", len(counts))
 		}
 		if counts != nil {

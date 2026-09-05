@@ -88,11 +88,11 @@ func Test_DetectHITLTimeout_ExplicitWinsOverSLA(t *testing.T) {
 }
 
 func Test_DetectHITLTimeout_NoSLAdeclared_NoFire(t *testing.T) {
-	// Without sla_seconds we cannot detect a breach — must not fire.
+	// Without sla_seconds we cannot detect a breach, must not fire.
 	payloads := []json.RawMessage{
 		raw(map[string]any{
 			"response_kind":    "approved",
-			"wait_duration_ms": 60_000_000, // 60s — would breach any reasonable SLA
+			"wait_duration_ms": 60_000_000, // 60s, would breach any reasonable SLA
 		}),
 	}
 	sig, detected := DetectHITLTimeout(payloads)
@@ -131,11 +131,11 @@ func Test_DetectHITLTimeout_MalformedPayloadSkipped(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// DetectHITLTimeoutAllMatches (Wave hitl_timeout.G3 — all matches)
+// DetectHITLTimeoutAllMatches (Wave hitl_timeout.G3, all matches)
 // ─────────────────────────────────────────────────────────────────────
 
 func Test_DetectHITLTimeoutAllMatches_BothFire(t *testing.T) {
-	// Different payloads triggering different modes — all-matches
+	// Different payloads triggering different modes, all-matches
 	// returns BOTH signatures (closes G3 vs legacy first-match-wins).
 	payloads := []json.RawMessage{
 		raw(map[string]any{"response_kind": "timeout"}),
@@ -170,7 +170,7 @@ func Test_DetectHITLTimeoutAllMatches_OrderingExplicitFirst(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// HITLTimeoutThresholds — FireModes per-project knob
+// HITLTimeoutThresholds, FireModes per-project knob
 // ─────────────────────────────────────────────────────────────────────
 
 func Test_HITLTimeoutThresholds_EffectiveFireModes(t *testing.T) {
@@ -200,7 +200,7 @@ func Test_HITLTimeoutThresholds_EffectiveFireModes(t *testing.T) {
 }
 
 func Test_DetectHITLTimeoutAllMatchesWithThresholds_RestrictsToExplicit(t *testing.T) {
-	// Customer who tunes FireModes to ["explicit"] only — the
+	// Customer who tunes FireModes to ["explicit"] only, the
 	// sla_exceeded payload must be suppressed at scoring time.
 	payloads := []json.RawMessage{
 		raw(map[string]any{"response_kind": "timeout"}),

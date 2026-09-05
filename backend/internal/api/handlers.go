@@ -116,7 +116,7 @@ type Handlers struct {
 	// TOTPEncryptionKey is the 32-byte AES-256-GCM key used to seal
 	// customer TOTP secrets at rest. Loaded from
 	// MESEDI_TOTP_ENCRYPTION_KEY (64 hex chars). Nil/empty disables
-	// the 2FA endpoints — they return 503 — so a local-dev deploy
+	// the 2FA endpoints, they return 503, so a local-dev deploy
 	// without the key set degrades gracefully rather than crashing.
 	// See totp_crypto.go for the encrypt/decrypt helpers.
 	TOTPEncryptionKey []byte
@@ -139,7 +139,7 @@ func New(logger *slog.Logger, s store.Store, dashboardURL string, stripeCfg Stri
 	}
 	// Compile the DLP scanner once at startup against the built-in
 	// rule baseline. A compilation failure here means a malformed
-	// built-in rule in code that should NEVER ship — it's a build
+	// built-in rule in code that should NEVER ship, it's a build
 	// bug, not a runtime config issue. Closes data_leakage.G3:
 	// previously we logged the error and continued with a nil
 	// scanner, leaving the entire data_leakage detector DARK in
@@ -195,13 +195,13 @@ func (h *Handlers) RegisterPublicRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /magic-link/verify", h.HandleMagicLinkVerify)
 
 	// Email verification. The confirm + resend endpoints are
-	// public — the recipient may not be signed in when they click
+	// public, the recipient may not be signed in when they click
 	// the verification link, and resend is keyed on the email itself.
 	// The status endpoint is bearer-gated because the dashboard reads
 	// it under the customer's existing auth.
 	mux.HandleFunc("POST /api/email-verify/confirm", h.HandleEmailVerifyConfirm)
 	mux.HandleFunc("POST /api/email-verify/resend", h.HandleEmailVerifyResend)
-	// Batch 2 — POST /auth/logout destroys the caller's session.
+	// Batch 2, POST /auth/logout destroys the caller's session.
 	// Public so a customer who has already lost their session row
 	// (expired, kicked, key revoked) can still click Sign Out
 	// without a 401. See auth_logout.go.
@@ -226,7 +226,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /project", h.HandleGetProject)
 	mux.HandleFunc("PATCH /project/name", h.HandleSetProjectName)
 	mux.HandleFunc("GET /me", h.HandleGetMe)
-	// — dashboard polls this once per layout mount to decide
+	//, dashboard polls this once per layout mount to decide
 	// whether to render the email-verification interstitial.
 	mux.HandleFunc("GET /me/email-verification-status", h.HandleEmailVerificationStatus)
 
@@ -312,8 +312,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// API key and there is deliberately nowhere to name a different one.
 	//
 	// RateLimit posture: the shared per-project limiter on this private
-	// chain, plus two hard caps in the handler — MaxCheckpointRange and
-	// MaxExportExecutions — both of which refuse rather than truncate.
+	// chain, plus two hard caps in the handler, MaxCheckpointRange and
+	// MaxExportExecutions, both of which refuse rather than truncate.
 	// This is the most expensive read the API serves, so it is bounded by
 	// cost rather than by call count.
 	//
@@ -332,7 +332,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /me/allowlist-stats", h.HandleGetAllowlistStats)
 	// per-project truncation-rate telemetry.
 	mux.HandleFunc("GET /me/tool-return-value-stats", h.HandleGetToolReturnValueStats)
-	// Empty-states wave A — detector-status surface. Generic per-
+	// Empty-states wave A, detector-status surface. Generic per-
 	// detector observability metadata the dashboard uses to render
 	// "you haven't instrumented X yet" / "drift detection priming"
 	// empty states. Closes the backend half of semantic_loop.G2 +
@@ -368,7 +368,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /failure-groups/{id}/analyze", h.HandleAnalyzeFailureGroup)
 	// failure-group-resolve wave: customer-facing resolve / unresolve
 	// actions. Both Bearer-gated, both emit audit_events. POST chosen
-	// over PATCH for browser-form compatibility — Next.js fetch from
+	// over PATCH for browser-form compatibility, Next.js fetch from
 	// the dashboard can POST without preflight CORS overhead.
 	mux.HandleFunc("POST /failure-groups/{id}/resolve", h.HandleResolveFailureGroup)
 	mux.HandleFunc("POST /failure-groups/{id}/unresolve", h.HandleUnresolveFailureGroup)
@@ -758,7 +758,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// Best-effort throughout, drift query failures log and continue
 	// rather than blocking the rest of the detection pipeline.
 
-	// — load per-project detector thresholds once per
+	//, load per-project detector thresholds once per
 	// terminal-status pipeline. Bulk-reads every override row for
 	// the 6 in-scope detectors and assembles a typed aggregate.
 	// Store errors / parse errors silently fall back to defaults
@@ -875,7 +875,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// artificially low for v0.0.1 demo visibility; iterative-refinement
 	// workflows that legitimately emit many events should tune this via
 	// the per-project detector_thresholds primitive (loops-thresholds
-	// wave — closes loops.G2).
+	// wave, closes loops.G2).
 	if isTerminalStatus(patch.Status) {
 		count, err := h.Store.CountEventsForExecution(r.Context(), executionID)
 		if err != nil {
@@ -896,7 +896,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — context_overflow and token_waste detectors.
+	//, context_overflow and token_waste detectors.
 	// Both consume the execution's llm_call events so we query
 	// them once and feed both detectors from the result. They run
 	// AFTER loops/step_count (which catch coarser patterns) and
@@ -943,7 +943,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — semantic_loop detector. Hashes the canonical
+	//, semantic_loop detector. Hashes the canonical
 	// state across all checkpoint events on the execution; if any
 	// hash recurs 3+ times the execution is clustered as
 	// semantic_loop. Catches the "agent revisits the same logical
@@ -977,7 +977,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — tool_schema_drift detector. For each tool the
+	//, tool_schema_drift detector. For each tool the
 	// execution invoked successfully, compare the LAST successful
 	// return_value's shape on this execution against the project's
 	// historical roll-up for the same tool. Fires when a previously-
@@ -1044,7 +1044,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				shapeCounts := map[string]int{}
 				for _, raw := range history {
 					if len(raw) > maxBytes {
-						// Same cap for history rows — keeps
+						// Same cap for history rows, keeps
 						// fingerprint computation symmetric so a
 						// customer raising/lowering the cap sees
 						// consistent comparisons.
@@ -1140,7 +1140,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — infrastructure_throttled detector. If any
+	//, infrastructure_throttled detector. If any
 	// infrastructure_event was recorded for this execution, classify
 	// it as infrastructure_throttled with a signature derived from
 	// (reason, provider, dimension). Distinguishes "your provider is
@@ -1173,7 +1173,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — sandbox_escape detector. Scans every tool_call
+	//, sandbox_escape detector. Scans every tool_call
 	// payload for known sandbox-escape patterns (os.system, raw
 	// sockets, /proc/self, instance-metadata endpoints, secret
 	// file paths). Runs at the security tier alongside
@@ -1220,7 +1220,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — data_leakage detector. If any dlp_scan_result
+	//, data_leakage detector. If any dlp_scan_result
 	// event for this execution recorded critical/high hits, cluster
 	// the execution under data_leakage with the matched rule_id as
 	// the signature. Runs after infrastructure_throttled so an
@@ -1230,7 +1230,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// classifier is a no-op once a higher one has claimed the
 	// execution.
 	if isTerminalStatus(patch.Status) {
-		// data_leakage.G5 — per-project severity-firing policy.
+		// data_leakage.G5, per-project severity-firing policy.
 		// EffectiveAllowedSeverities() handles defensive fallback to
 		// the historical default ["critical", "high"] on bad config.
 		allowedSeverities := detectorThresholds.DataLeakage.EffectiveAllowedSeverities()
@@ -1270,7 +1270,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// granular-sig wave: signature is "<name>:<category>" when
 			// the SDK customer supplied an optional category arg to
 			// validator_result(); falls back to bare "<name>" when
-			// category absent (backward compat — existing customers
+			// category absent (backward compat, existing customers
 			// who don't opt in see zero behavior change). Allowlist
 			// matching still happens on the BARE validator_name so
 			// the existing closure of validator_failures.G5 keeps
@@ -1295,7 +1295,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				// validator_failures.G1: persist the SDK-supplied
 				// severity hint on the freshly-created/updated row so
 				// the severity resolution chain (webhook_dispatch.go +
-				// dashboard read paths) can honor it. Best-effort —
+				// dashboard read paths) can honor it. Best-effort ,
 				// failure here doesn't suppress the failure_group itself.
 				if gErr == nil && severityHint != "" {
 					groupID := store.DeriveFailureGroupID(
@@ -1316,7 +1316,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — grounding_failure detector. Aggregates the
+	//, grounding_failure detector. Aggregates the
 	// eval_score events ingested via emit_eval_score. Fires
 	// when any external evaluator returned passed=false, or when
 	// mean score across higher_is_better evaluators fell below 0.5.
@@ -1358,7 +1358,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — cascading_failure detector. Joins this
+	//, cascading_failure detector. Joins this
 	// execution's agent_handoff events with the terminal
 	// status of each referenced child execution and fires when a
 	// handoff was followed by the child reaching a failure
@@ -1377,7 +1377,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				"error", err.Error(),
 			)
 		} else if len(handoffs) > 0 {
-			// extensions wave — cascading_failure.G2 + G3.
+			// extensions wave, cascading_failure.G2 + G3.
 			// Per-project cascade-window + spawn-handoff exclusion
 			// flow in via detectorThresholds.CascadingFailure.
 			if sig, fired := detectors.DetectCascadingFailureWithThresholds(handoffs, detectorThresholds.CascadingFailure); fired {
@@ -1394,7 +1394,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — coordination_deadlock detector. Walks the
+	//, coordination_deadlock detector. Walks the
 	// topology subtree rooted at this execution, collects every
 	// agent_handoff edge, and fires on the first 2-cycle in the
 	// agent-role graph (A→B AND B→A in the same subtree). Runs
@@ -1424,7 +1424,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — provider_incident detector. Scans this
+	//, provider_incident detector. Scans this
 	// execution's llm_call payloads for provider errors, then
 	// asks the store how many DISTINCT tenants in the same
 	// project saw the same (provider, error_class) error in the
@@ -1468,7 +1468,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				// provider_incident aggregation. They get stored
 				// on the llm_call event for observability but a
 				// rate of bad-key errors across tenants is not a
-				// provider outage — it's customer key rotation
+				// provider outage, it's customer key rotation
 				// failures. The PROVIDER_SIDE_ERROR_CLASSES set
 				// matches what the SDK ships in mesedi/errors.py
 				// and src/errors.ts.
@@ -1485,7 +1485,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			threshold, _ := h.ResolveProviderIncidentMinTenants(
 				r.Context(), authProjectID,
 			)
-			// Look back 15 minutes — long enough to span a
+			// Look back 15 minutes, long enough to span a
 			// rolling provider blip, short enough to keep the
 			// signal current. The constant is intentionally not
 			// configurable at v1; a future iteration can promote
@@ -1522,7 +1522,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// — hitl_timeout detector. Aggregates the
+	//, hitl_timeout detector. Aggregates the
 	// human_intervention events on this execution and fires
 	// when the customer's HITL SLA was breached. Two firing
 	// conditions: response_kind=="timeout" (explicit) OR
@@ -1547,7 +1547,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// conditions are present in the same execution. Legacy
 			// first-match-wins suppressed the SLA-exceeded view
 			// when an explicit timeout also fired.
-			// hitl_timeout.G4 — per-project fire-mode toggle.
+			// hitl_timeout.G4, per-project fire-mode toggle.
 			// Defaults `["explicit", "sla_exceeded"]` match historical
 			// posture; customers can mute either mode via the
 			// detector_thresholds primitive.
@@ -1565,7 +1565,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassHITLTimeout, sig, isNew, gErr)
 			}
 
-			// — hitl_rejection_spike detector. Cross-
+			//, hitl_rejection_spike detector. Cross-
 			// execution signal: if a high fraction of recent HITL
 			// runs in this project came back rejected or edited,
 			// the agent's behavior likely regressed. We only run
@@ -1575,7 +1575,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// data anyway). Default 60-minute window matches the
 			// provider_incident posture; per-project tunable via
 			// the detector_thresholds primitive (
-			// extensions wave — closes hitl_rejection_spike.G3).
+			// extensions wave, closes hitl_rejection_spike.G3).
 			windowMinutes := detectorThresholds.HITLRejectionSpike.EffectiveWindowMinutes()
 			since := time.Now().Add(-time.Duration(windowMinutes) * time.Minute)
 			counts, sErr := h.Store.CountHITLOutcomesInWindow(r.Context(), authProjectID, since)
@@ -1623,7 +1623,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// are handed totals computed from it.
 			//
 			// Reads only Event.Sequence. No clock, no payload, no
-			// provider lookup — so it cannot be skewed by a customer
+			// provider lookup, so it cannot be skewed by a customer
 			// running agents across several machines, and it works on
 			// telemetry already being collected by every SDK version.
 			//
@@ -1654,7 +1654,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				}
 			}
 
-			// Sub-slice 12: cost computation. — backend is now
+			// Sub-slice 12: cost computation., backend is now
 			// the source of truth for known models. The SDK-shipped
 			// per-event estimated_cost_usd is fallback only for models
 			// missing from pricing.priceTable. This means new model
@@ -1666,13 +1666,13 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// fallback when the walk produced no value (e.g. tool-only
 			// executions with no llm_call events). When the walk
 			// produces a value, it overrides whatever the SDK rolled
-			// up — that's the inversion.
+			// up, that's the inversion.
 			//
 			// Unknown models surface via an audit_event (one per
 			// execution, not per event) so the dashboard's existing
 			// config-fallback chip can show "Mesedi doesn't know how
-			// to price model X — using SDK fallback" tile.
-			// — pass the per-project pricing overrides
+			// to price model X, using SDK fallback" tile.
+			//, pass the per-project pricing overrides
 			// loaded earlier in this handler (line ~752) so any
 			// (detector="pricing", threshold_key="custom_model_pricing")
 			// row beats the canonical priceTable for exact-name matches.
@@ -1857,9 +1857,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// Migration 044: threshold + window are per-project. Defaults
 			// {5.00 USD/min, 5 min}. Same fallback-to-default-with-audit
 			// pattern as the absolute block above. Independent of the
-			// absolute detector — both can fire on the same execution.
+			// absolute detector, both can fire on the same execution.
 			//
-			// Aggregator reuses SumExecutionCostByProjectSince — it
+			// Aggregator reuses SumExecutionCostByProjectSince, it
 			// already exists (org-rollup endpoint), so no new store
 			// API surface and no new index requirements (the existing
 			// (project_id, started_at) covers the scan).
@@ -1933,14 +1933,14 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 			// detectors (token_waste, semantic_loop, tool_schema_drift,
 			// data_leakage, cascading_failure, prompt_injection,
 			// cost_velocity). Real customer agents that take >1s of
-			// wall-clock are normal — they should be classified by the
+			// wall-clock are normal, they should be classified by the
 			// specific failure they experienced, not by a generic
 			// "slow" bucket. Time-budget is now the second-to-last
 			// detector in the chain, falling through only when no
 			// specific detector claimed the execution.
 			//
 			// Threshold raised from 1s (v0.0.1 demo placeholder) to
-			// 60s — the production default the original placeholder
+			// 60s, the production default the original placeholder
 			// comment intended. Real "agent stuck running" alerts
 			// belong in the minute+ range, not the second range.
 			//
@@ -2038,7 +2038,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		"crash_signature", patch.CrashSignature,
 	)
 
-	// — OpenTelemetry parallel emission. After the
+	//, OpenTelemetry parallel emission. After the
 	// terminal-status write + detector chain have both committed,
 	// fire-and-forget a goroutine that translates this execution
 	// (plus its events) into an OTel trace and ships it via OTLP
@@ -2191,7 +2191,7 @@ func (h *Handlers) HandleGetFailureGroup(w http.ResponseWriter, r *http.Request)
 // normalizeResolveReason sanitizes an optional customer-supplied
 // reason on a resolve / unresolve action (failure-group-resolve-
 // context wave). Trims whitespace, strips control chars, caps at
-// 512 bytes — a sentence or two is the expected shape. SQL injection
+// 512 bytes, a sentence or two is the expected shape. SQL injection
 // is not a concern (the value lands in metadata_json via json.Marshal,
 // never in a SQL literal), but a multi-MB paste accident would bloat
 // the audit row pointlessly.
@@ -2255,7 +2255,7 @@ func buildResolveAuditMetadata(group *store.FailureGroup, reason string) map[str
 
 // parseResolveBody best-effort decodes the optional JSON body of a
 // resolve / unresolve action into a normalized reason string. A
-// missing, empty, or malformed body all return "" — the action
+// missing, empty, or malformed body all return "", the action
 // proceeds without a reason rather than failing on a bad body.
 func parseResolveBody(r *http.Request) string {
 	if r.Body == nil {
@@ -2634,7 +2634,7 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 	// Pull the events for the FIRST (most recent) sample execution so
 	// the AI can reference specific tool_call return shapes, llm_call
 	// prompts/responses, dlp_scan_result fields, and checkpoint payloads
-	// rather than just execution metadata. — this is where the
+	// rather than just execution metadata., this is where the
 	// AI's analysis becomes structurally different from the playbook:
 	// instead of "your agent might have a token_waste pattern" the AI
 	// can say "your prompts share this 1.8K-char prefix verbatim across
@@ -2665,7 +2665,7 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 	// Capture the playbook signature for staleness tracking
 	// (Wave ai-analysis-staleness-tracking). Empty string when
 	// the failure_class/signature pair has no registered playbook
-	// or its content file is absent — the dashboard treats NULL/
+	// or its content file is absent, the dashboard treats NULL/
 	// empty stored signatures as "outdated, recommend re-analyze."
 	playbookSig, _ := playbooks.Signature(group.FailureClass, group.Signature)
 
@@ -2695,7 +2695,7 @@ func (h *Handlers) HandleAnalyzeFailureGroup(w http.ResponseWriter, r *http.Requ
 	// Without this guard the handler persisted "" as the analysis and
 	// returned 200: analyzed_at set, analysis_model set, and no text.
 	// The customer clicks "Analyze with AI", waits thirteen seconds,
-	// gets a blank card — and on Hobby is billed $0.75 for it. Observed
+	// gets a blank card, and on Hobby is billed $0.75 for it. Observed
 	// on 2026-08-24 with coordination_deadlock, reproducibly.
 	//
 	// Log StopReason: "max_tokens" means the output budget was spent
@@ -2775,7 +2775,7 @@ func newAIAnalysisID() string {
 }
 
 // MaxSampleEventsInPrompt caps how many events from the first sample
-// execution we render into the AI analysis prompt. — 30 is
+// execution we render into the AI analysis prompt., 30 is
 // chosen to keep total input tokens under ~10K (~6K for events at
 // 200 tokens each + ~3K for playbook + ~500 for metadata + ~500 for
 // task instruction) while still capturing the diagnostic-relevant
@@ -2801,12 +2801,12 @@ const MaxEventPayloadCharsInPrompt = 500
 //
 //  1. The canonical Mesedi playbook for the (failure_class, signature)
 //     pair, loaded via playbooks.Load. This is the interpretation
-//     framework — what the signature means, the named causes, the
+//     framework, what the signature means, the named causes, the
 //     diagnostic surface, the recommended fixes, the per-project
 //     tuning knobs, the related-detector cross-links. Without this,
 //     the model produces generic distributed-systems advice that
 //     misses Mesedi-specific features (allowlists, thresholds,
-//     redaction-at-ingest, topology view, etc.) — see audit at
+//     redaction-at-ingest, topology view, etc.), see audit at
 //     internal-extract/ai-analyses-vs-playbooks-audit.md.
 //
 //  2. The specific failure group's metadata + sample executions.
@@ -2814,14 +2814,14 @@ const MaxEventPayloadCharsInPrompt = 500
 //  3. () Sample events from the first sample execution, with
 //     each event's payload truncated to MaxEventPayloadCharsInPrompt
 //     chars. This is where the model gets actual data to reason
-//     about — tool_call return shapes, llm_call prompts/responses,
+//     about, tool_call return shapes, llm_call prompts/responses,
 //     dlp_scan_result rule IDs + matched fields, checkpoint state.
 //
 //  4. A task instruction telling the model to APPLY the playbook to
 //     this specific failure group rather than invent generic
 //     speculation.
 //
-// If the playbook lookup fails (very rare — every shipping detector
+// If the playbook lookup fails (very rare, every shipping detector
 // class has a registered playbook), the prompt falls back to its
 // pre-playbook shape so the analysis still runs. If sampleEvents is
 // nil/empty (event-fetch failed, or execution has no events),
@@ -2843,7 +2843,7 @@ func buildFailureGroupAnalysisPrompt(
 	if playbookErr == nil && playbookContent != "" {
 		sb.WriteString("# Mesedi playbook for this failure class\n\n")
 		// Give the model the canonical URL so when it references the
-		// playbook (which it does naturally — "this matches the
+		// playbook (which it does naturally, "this matches the
 		// playbook's cause #2") it can link instead of leaving the
 		// reader to go find the doc. Omitted entirely when no URL can
 		// be built, so the model is never handed a broken link.
@@ -2890,14 +2890,14 @@ func buildFailureGroupAnalysisPrompt(
 
 	// Part 3 (): sample events from the first execution. This
 	// is the data layer that makes the AI analysis structurally
-	// different from the static playbook — the model can now point
+	// different from the static playbook, the model can now point
 	// to specific tool_call return shapes, llm_call prompt/response
 	// content, dlp_scan_result rule IDs + matched fields, etc.
 	//
 	// Cap: MaxSampleEventsInPrompt events (chronologically first).
 	// Each payload truncated to MaxEventPayloadCharsInPrompt chars
 	// with a ...[truncated] suffix. We use the raw JSON bytes from
-	// event.Payload so the model sees exactly what the SDK shipped —
+	// event.Payload so the model sees exactly what the SDK shipped ,
 	// no re-serialization, no field selection.
 	if len(sampleEvents) > 0 && len(sampleExecs) > 0 && sampleExecs[0] != nil {
 		sb.WriteString(fmt.Sprintf("\n## Sample events from execution %s\n\n",
@@ -2932,7 +2932,7 @@ func buildFailureGroupAnalysisPrompt(
 		}
 	}
 
-	// Part 4: the task instruction. Phrasing is deliberate — the
+	// Part 4: the task instruction. Phrasing is deliberate, the
 	// model is told to USE the playbook as its framework, not to
 	// invent a root cause from scratch. Two-hypothesis remediation
 	// stays the existing contract; the difference is that the
@@ -3025,7 +3025,7 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 	accepted, customMatched = h.applyDLPToBatch(r.Context(), authProjectID, accepted)
 	//  increment match_count once per matched custom
 	// pattern_id (de-dup; a single pattern firing 10 times in one
-	// batch should bump the counter once, not ten times — the
+	// batch should bump the counter once, not ten times, the
 	// dashboard "this rule is doing work" signal is more useful as
 	// "fired on N executions" than "matched N times across executions").
 	for _, pid := range uniqueStrings(customMatched) {
@@ -3243,7 +3243,7 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 // create a second thing that can drift from the record it summarises.
 //
 // RATE LIMIT TIER: standard authenticated read, same tier as
-// GET /executions/{id}. No dedicated throttle and none warranted —
+// GET /executions/{id}. No dedicated throttle and none warranted ,
 // this endpoint issues no more work than the execution-detail read it
 // sits beside (one execution lookup, one event list), adds no external
 // call, and returns a bounded response. If a customer can afford to
@@ -4010,7 +4010,7 @@ func (h *Handlers) HandleSetRetention(w http.ResponseWriter, r *http.Request) {
 		"tier", p.Tier,
 		"retention_days", days,
 		"is_indefinite", days == nil)
-	// step C — retention is a data-handling control. Customers and
+	// step C, retention is a data-handling control. Customers and
 	// auditors want to see when it changes and by whom. days is *int
 	// so we record nil as is_indefinite=true and skip retention_days.
 	retentionMeta := map[string]any{
@@ -4076,7 +4076,7 @@ func (h *Handlers) HandleGetProviderIncidentConfig(w http.ResponseWriter, r *htt
 //	{"min_tenants": 1}
 //
 // Validation: min_tenants must be >= 1. Higher values are accepted
-// without an upper cap — a 1000-tenant customer might want a
+// without an upper cap, a 1000-tenant customer might want a
 // threshold of 10 before a single provider blip pages on-call.
 func (h *Handlers) HandleSetProviderIncidentConfig(w http.ResponseWriter, r *http.Request) {
 	if !h.requireRole(w, r, "write") {
@@ -4173,7 +4173,7 @@ func (h *Handlers) HandleGetTimeBudgetConfig(w http.ResponseWriter, r *http.Requ
 //	{"threshold_ms": 30000}
 //
 // Validation: threshold_ms must be >= 1 (zero would fire on every
-// terminal execution). No upper cap — a batch-processing project
+// terminal execution). No upper cap, a batch-processing project
 // might legitimately set hours-long thresholds.
 func (h *Handlers) HandleSetTimeBudgetConfig(w http.ResponseWriter, r *http.Request) {
 	if !h.requireRole(w, r, "write") {
@@ -4207,7 +4207,7 @@ func (h *Handlers) HandleSetTimeBudgetConfig(w http.ResponseWriter, r *http.Requ
 	}
 	// Tier-aware enforcement. Today's tier-cap helper falls back to
 	// Hobby (strictest) for unknown tiers; that's the safest default
-	// — better to refuse a save and let the customer ask support than
+	//, better to refuse a save and let the customer ask support than
 	// to silently allow Enterprise budgets on a Hobby plan.
 	projectTier := h.lookupProjectTier(r.Context(), authProjectID)
 	tierCap := TierCapTimeBudgetMs(projectTier)
@@ -4354,7 +4354,7 @@ func (h *Handlers) HandleSetCostVelocityConfig(w http.ResponseWriter, r *http.Re
 //	  "supported_models":      ["claude-3-haiku", "claude-3-opus", ...]
 //	}
 //
-// No auth scope beyond project context — the pricing table is the
+// No auth scope beyond project context, the pricing table is the
 // same for every project (per Decision 5, tier-agnostic).
 func (h *Handlers) HandleGetPricingInfo(w http.ResponseWriter, r *http.Request) {
 	if _, ok := ProjectIDFromContext(r.Context()); !ok {
@@ -4377,8 +4377,8 @@ func (h *Handlers) HandleGetPricingInfo(w http.ResponseWriter, r *http.Request) 
 // tracking).
 //
 // Tier-agnostic: the playbook content is identical across projects
-// + tiers (compiled into the binary). The /me/ scope is structural —
-// keeping all customer-facing reads under one auth chain — not a
+// + tiers (compiled into the binary). The /me/ scope is structural ,
+// keeping all customer-facing reads under one auth chain, not a
 // per-project differentiator.
 //
 // Response:
@@ -4403,7 +4403,7 @@ func (h *Handlers) HandleGetPlaybookSignatures(w http.ResponseWriter, r *http.Re
 
 // HandleGetCostVelocityRateConfig returns the per-project rate
 // detector configuration (migration 044): the $/minute threshold and
-// the rolling lookback window in minutes. Defaults {5.00, 5} —
+// the rolling lookback window in minutes. Defaults {5.00, 5} ,
 // $300/hr sustained burn over a 5-minute window. Pairs with the
 // absolute threshold (HandleGetCostVelocityConfig); both detectors
 // fire independently because they answer different questions.
@@ -4452,7 +4452,7 @@ func (h *Handlers) HandleGetCostVelocityRateConfig(w http.ResponseWriter, r *htt
 //     spikes; the ceiling bounds aggregator scan size.
 //
 // NOT tier-capped: same reasoning as the absolute threshold and
-// provider_incident_min_tenants — alarm sensitivity is the customer's
+// provider_incident_min_tenants, alarm sensitivity is the customer's
 // choice, not a Mesedi-side cost vector. See tier_caps.go.
 func (h *Handlers) HandleSetCostVelocityRateConfig(w http.ResponseWriter, r *http.Request) {
 	if !h.requireRole(w, r, "write") {
@@ -4522,7 +4522,7 @@ func (h *Handlers) HandleSetCostVelocityRateConfig(w http.ResponseWriter, r *htt
 
 // HandleGetToolReturnValueConfig returns the per-project byte cap
 // on tool_call return_value payloads used by the tool_schema_drift
-// detector (migration 042 / ). Default 8192 (8 KB) — covers
+// detector (migration 042 / ). Default 8192 (8 KB), covers
 // typical tool returns while bounding pathological cases. The full
 // event payload is still stored regardless of this cap; only the
 // detector's fingerprint comparison is bounded.
@@ -4568,7 +4568,7 @@ func (h *Handlers) HandleGetToolReturnValueConfig(w http.ResponseWriter, r *http
 //	{"max_bytes": 16384}
 //
 // Validation: max_bytes must be >= 1. Server-side upper bound is
-// 1 MB (matches the existing payload cap from ) — a per-project
+// 1 MB (matches the existing payload cap from ), a per-project
 // fingerprint cap larger than the wire-format max is meaningless
 // because the SDK can't ship more than 1 MB anyway.
 func (h *Handlers) HandleSetToolReturnValueConfig(w http.ResponseWriter, r *http.Request) {
@@ -4598,7 +4598,7 @@ func (h *Handlers) HandleSetToolReturnValueConfig(w http.ResponseWriter, r *http
 	}
 	// Tier-aware enforcement (finally wired). Hobby 4KB, Team
 	// 32KB, Enterprise 1MB. Helper falls back to Hobby on unknown
-	// tier — same safe default as time_budget.
+	// tier, same safe default as time_budget.
 	projectTier := h.lookupProjectTier(r.Context(), authProjectID)
 	tierCap := TierCapToolReturnValueBytes(projectTier)
 	if body.MaxBytes > tierCap {
@@ -4664,7 +4664,7 @@ func (h *Handlers) HandleGetToolReturnValueStats(w http.ResponseWriter, r *http.
 			return
 		}
 		// Fall through with default 8192 on transient errors so
-		// the stats query doesn't fail outright — the customer
+		// the stats query doesn't fail outright, the customer
 		// just sees stats computed against the default cap rather
 		// than their configured one.
 		maxBytes = 8192
@@ -4692,7 +4692,7 @@ func (h *Handlers) HandleGetToolReturnValueStats(w http.ResponseWriter, r *http.
 // per-project config-read fallbacks. The dashboard uses
 // this to render a warning chip on each Settings tile when the
 // corresponding config has fallen back to the default in the last
-// 24 h — a signal that something operational is going wrong with
+// 24 h, a signal that something operational is going wrong with
 // the backend (transient DB blip, dropped column, etc.) and the
 // customer's tuning is being silently ignored.
 //
@@ -4939,7 +4939,7 @@ func (h *Handlers) HandleDeleteClassSeverity(w http.ResponseWriter, r *http.Requ
 // else is ignored, so changes to the payload schema (adding fields)
 // don't affect this code.
 //
-// semantics — backend is the source of truth for known models;
+// semantics, backend is the source of truth for known models;
 // SDK-shipped per-event cost is the fallback for unknown models:
 //
 //   - Known model (pricing.IsKnownModel == true): use the backend
@@ -4949,14 +4949,14 @@ func (h *Handlers) HandleDeleteClassSeverity(w http.ResponseWriter, r *http.Requ
 //
 //   - Unknown model: use the per-event payload.estimated_cost_usd as
 //     the fallback. Customer using a brand-new model the day it ships
-//     doesn't see $0 costs — they see the SDK's best-effort number
+//     doesn't see $0 costs, they see the SDK's best-effort number
 //     until the next backend deploy adds the row.
 //
 // Returns (totalUSD, unknownModelIDs). Caller uses unknownModelIDs to
 // emit a single audit_event per execution (not per event) for the
 // dashboard's unknown-model surface.
 //
-// Events whose payload fails to unmarshal are skipped silently — a
+// Events whose payload fails to unmarshal are skipped silently, a
 // single malformed event shouldn't break cost computation for the
 // whole execution.
 func computeExecutionCost(
@@ -4988,7 +4988,7 @@ func computeExecutionCost(
 		if p.OutputTokens < 0 {
 			p.OutputTokens = 0
 		}
-		// — per-project override wins outright, even
+		//, per-project override wins outright, even
 		// when the model is otherwise unknown to the canonical
 		// priceTable. This is the path that lets a customer running
 		// a fine-tuned variant of a model Mesedi never shipped
@@ -5004,7 +5004,7 @@ func computeExecutionCost(
 			totalUSD += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)
 			continue
 		}
-		// Unknown to backend table — fall back to SDK-shipped cost
+		// Unknown to backend table, fall back to SDK-shipped cost
 		// on this event. Treat negative or NaN as 0 defensively.
 		if p.EstimatedCostUSD > 0 {
 			totalUSD += p.EstimatedCostUSD
@@ -5100,7 +5100,7 @@ func (h *Handlers) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 // "role": "admin|write|read"}. When role is omitted the minted key
 // inherits the caller's user role (legacy behavior); when present,
 // the minted key resolves to that role verbatim regardless of the
-// caller's identity — the mechanism that lets an admin create
+// caller's identity, the mechanism that lets an admin create
 // scoped credentials for CI, monitoring scripts, or partners.
 func (h *Handlers) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	if !h.requireRole(w, r, "admin") {
@@ -6003,7 +6003,7 @@ func (h *Handlers) HandleSetProjectName(w http.ResponseWriter, r *http.Request) 
 	}
 	h.Logger.Info("project renamed",
 		"project_id", authProjectID, "new_name", newName)
-	// step C — project rename is admin-tier and changes how the
+	// step C, project rename is admin-tier and changes how the
 	// project surfaces in invoices, emails, and the dashboard. Worth
 	// the audit row.
 	h.recordAuditEvent(r, AuditProjectRename, "project", authProjectID, map[string]any{

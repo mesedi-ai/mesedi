@@ -27,7 +27,7 @@ type CostVelocityRateConfig struct {
 // DefaultCostVelocityRateConfig is the fallback returned to the
 // handler when the per-project read fails. Matches the migration 044
 // defaults so behavior is identical to a freshly-inserted project.
-// $5/min over a 5-minute window — clearly anomalous for any real
+// $5/min over a 5-minute window, clearly anomalous for any real
 // workload without flooding on routine bursts.
 var DefaultCostVelocityRateConfig = CostVelocityRateConfig{
 	ThresholdUSDPerMin: 5.00,

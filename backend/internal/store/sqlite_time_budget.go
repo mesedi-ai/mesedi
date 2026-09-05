@@ -2,7 +2,7 @@ package store
 
 // Per-project time_budget detector threshold store methods, SQLite
 // implementation (migration 041). Sidecar file matching the
-// provider_incident layout — keeps the main sqlite.go projects-table
+// provider_incident layout, keeps the main sqlite.go projects-table
 // scans unchanged. Reads/writes only the time_budget_ms column.
 
 import (

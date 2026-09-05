@@ -140,10 +140,10 @@ func (h *Handlers) runFailureGroupDispatch(
 
 	// Compute event severity ONCE for this failure_group (+
 	// validator_failures.G1). Resolution chain:
-	//   1. per-project class override (customer dashboard policy) — wins
+	//   1. per-project class override (customer dashboard policy), wins
 	//   2. severity_hint on the failure_group row (SDK-supplied
-	//      per-event signal; today only validator_failures populates) — wins over default
-	//   3. severity.Default(failureClass) — fallback
+	//      per-event signal; today only validator_failures populates), wins over default
+	//   3. severity.Default(failureClass), fallback
 	// The result rides on the webhook payload AND determines
 	// per-webhook filter eligibility in the loop below.
 	eventSeverity := severity.Default(failureClass)
@@ -160,7 +160,7 @@ func (h *Handlers) runFailureGroupDispatch(
 		// over a config-lookup hiccup.
 		logger.Warn("webhook dispatch: severity override lookup failed (using default)",
 			"error", oerr.Error())
-		// (extended): durable telemetry — surfaces in the
+		// (extended): durable telemetry, surfaces in the
 		// dashboard's Severity Routing section so customers see
 		// when their severity overrides are being silently ignored.
 		h.recordAuditEventForProject(
@@ -388,7 +388,7 @@ func (h *Handlers) resolveDashboardBase(r *http.Request) string {
 //
 //   - isNew=true: dispatchFailureGroupCreated (fires
 //     "failure_group.created" on every matching webhook regardless
-//     of recurrence mode — a brand-new failure group is interesting
+//     of recurrence mode, a brand-new failure group is interesting
 //     news no matter what).
 //   - isNew=false: dispatchFailureGroupRecurrence (path: applies
 //     per-webhook RecurrenceMode policy).

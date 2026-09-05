@@ -52,7 +52,7 @@ var failureTerminalStatuses = map[string]struct{}{
 }
 
 // CascadingFailureThresholds carries the per-project tunable knobs
-// for this detector (extensions wave — closes G2 + G3).
+// for this detector (extensions wave, closes G2 + G3).
 //
 //   - CascadeWindowSeconds bounds the time between handoff_emitted_at
 //     and child_ended_at; rows outside the window are excluded from
@@ -122,13 +122,13 @@ func DetectCascadingFailureWithThresholds(
 		if _, bad := failureTerminalStatuses[r.ChildStatus]; !bad {
 			continue
 		}
-		// extensions wave — cascading_failure.G3. Skip
+		// extensions wave, cascading_failure.G3. Skip
 		// spawn handoffs when the customer has opted out of
 		// treating them as cascades.
 		if t.ExcludeSpawnHandoffs && r.HandoffKind == "spawn" {
 			continue
 		}
-		// extensions wave — cascading_failure.G2. Skip
+		// extensions wave, cascading_failure.G2. Skip
 		// rows where child_ended_at is more than CascadeWindowSeconds
 		// after handoff_emitted_at. ChildEndedAt is nullable; when
 		// nil we conservatively keep the row (no timestamp = we

@@ -163,8 +163,8 @@ func Test_TokenWaste_EmptyInputs(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────
 
 // Test_TokenWaste_TimestampPrefixStripCatches verifies that prompts
-// with per-turn ISO-8601 timestamps at the leading edge — which
-// would previously hash distinctly and slip past the detector —
+// with per-turn ISO-8601 timestamps at the leading edge, which
+// would previously hash distinctly and slip past the detector ,
 // now cluster via the strip-then-exact-hash path. Signature uses
 // the canonical `token_waste:<hex8>` shape (no `near_dup` prefix)
 // because the strip path resolved to identical normalized text.
@@ -189,7 +189,7 @@ func Test_TokenWaste_TimestampPrefixStripCatches(t *testing.T) {
 
 // Test_TokenWaste_UUIDPrefixStripCatches verifies the same end-to-end
 // behavior for hex-UUID request-id prefixes. Same canonical signature
-// shape — strip resolves the variable material; exact-hash on the
+// shape, strip resolves the variable material; exact-hash on the
 // normalized text fires.
 func Test_TokenWaste_UUIDPrefixStripCatches(t *testing.T) {
 	body := strings.Repeat("Wasted context body. ", 100)
@@ -208,8 +208,8 @@ func Test_TokenWaste_UUIDPrefixStripCatches(t *testing.T) {
 }
 
 // Test_TokenWaste_ShingleFallbackPositive verifies that prompts the
-// exact-hash path cannot resolve — variable material EMBEDDED in
-// the prefix rather than at the leading edge — still cluster via
+// exact-hash path cannot resolve, variable material EMBEDDED in
+// the prefix rather than at the leading edge, still cluster via
 // the shingle-Jaccard fallback. Signature uses the new
 // `token_waste:near_dup:<hex8>` shape so it doesn't pollute the
 // canonical cluster space.
@@ -217,7 +217,7 @@ func Test_TokenWaste_UUIDPrefixStripCatches(t *testing.T) {
 // Fixture uses a VARIED-content body that approximates real
 // production prompt shape (system instructions, examples, RAG
 // chunks). A repeating-unit body would compress the shingle set
-// and inflate the impact of small differing regions — that's an
+// and inflate the impact of small differing regions, that's an
 // artifact of the fixture, not the detector. Real production
 // agents accumulate varied content where ~2000 chars yields
 // ~2000 distinct shingles.
@@ -225,7 +225,7 @@ func Test_TokenWaste_ShingleFallbackPositive(t *testing.T) {
 	// ~1800 chars of varied English. Each 8-char window is
 	// effectively unique, so the shingle set size approximates the
 	// length. Three prompts share this full body but have distinct
-	// short IDs embedded after a shared header — strip can't reach
+	// short IDs embedded after a shared header, strip can't reach
 	// the embedded ID (it's not at the leading edge); exact-hash
 	// treats them as distinct; shingle fallback should catch them.
 	body := "You are a customer-support agent for an enterprise SaaS " +

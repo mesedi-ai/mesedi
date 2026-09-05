@@ -163,7 +163,7 @@ func TestRekorLookupRejectsANonIndexEntryID(t *testing.T) {
 // the sha256 the log would record for it.
 //
 // The verifier hashes the preimage rather than comparing the checkpoint
-// hash directly, because the log never records the checkpoint hash — it
+// hash directly, because the log never records the checkpoint hash, it
 // records sha256 of a leaf containing it. Building the fixture the same
 // way the producer does is what keeps these tests honest.
 func leafFor(cpHash string) (preimage, logValue string) {

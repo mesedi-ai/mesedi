@@ -170,7 +170,7 @@ type TierSettingsClampedInput struct {
 	// column name.
 	Setting string
 	// OldValue and NewValue are pre-formatted strings ("90 days" or
-	// "indefinite" — not raw integers). The cascade layer formats
+	// "indefinite", not raw integers). The cascade layer formats
 	// them to keep unit-handling out of the mail template.
 	OldValue string
 	NewValue string
@@ -202,7 +202,7 @@ type WelcomeInput struct {
 	APIKeyPrefix string // e.g. "mesedi_sk_abc123..." prefix only
 	DashboardURL string // e.g. https://app.mesedi.ai
 	DocsURL      string // e.g. https://app.mesedi.ai/docs/quickstart
-	// VerifyURL is populated for raw-email signups — the
+	// VerifyURL is populated for raw-email signups, the
 	// one-click link the recipient must click before the dashboard
 	// unlocks. Empty string means "skip the verify block" (e.g. SSO
 	// signups inherit a verified email from the IdP and don't need it).
@@ -820,7 +820,7 @@ func (m *ResendMailer) SendDowngradeScheduled(ctx context.Context, in DowngradeS
 // SendTierSettingsClamped notifies the customer that a per-project
 // setting was reduced because their project's tier changed. Fires
 // AFTER the retention_days (or future setting) has already been
-// clamped in the DB by applyTierChangeCascade — the email is a
+// clamped in the DB by applyTierChangeCascade, the email is a
 // courtesy heads-up, not a request for permission.
 //
 // Design notes:

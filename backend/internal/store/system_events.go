@@ -13,7 +13,7 @@ package store
 //     actions; the dashboard chip surfaces these as operational
 //     telemetry, not as audit history.
 //
-// Schema is intentionally narrow — no actor_* columns since system
+// Schema is intentionally narrow, no actor_* columns since system
 // events have no human actor; the `actor` string identifies which
 // subsystem produced the row.
 

@@ -1,11 +1,11 @@
 package api
 
-// Operator notices — non-error events worth interrupting the founder
+// Operator notices, non-error events worth interrupting the founder
 // for, sent to the same MESEDI_ALERT_WEBHOOK_URL that carries 5xx
 // alerts.
 //
 // WHY THIS IS SEPARATE FROM fireAlertWebhook:
-// That function is shaped around an HTTP failure — it takes a status
+// That function is shaped around an HTTP failure, it takes a status
 // code, a method, a path and a duration, and renders everything in
 // alarm red. A signup is not a failure and should not look like one;
 // an operator who learns to dismiss red boxes will eventually dismiss
@@ -14,7 +14,7 @@ package api
 //
 // Deliberately reuses the existing alert webhook rather than adding a
 // second secret. One channel the founder actually watches beats two
-// they configure once and forget — and the volume here is signups,
+// they configure once and forget, and the volume here is signups,
 // not requests.
 
 import (
@@ -39,8 +39,8 @@ const operatorNoticeColor = 0x3b82f6
 // caller has already succeeded by the time this runs.
 //
 // fields render as label/value rows on Slack and Discord and as a
-// flat object on any other receiver. Order is not guaranteed — Go map
-// iteration is random — so do not encode meaning in position.
+// flat object on any other receiver. Order is not guaranteed, Go map
+// iteration is random, so do not encode meaning in position.
 func fireOperatorNotice(
 	title, detail string,
 	fields map[string]string,
@@ -57,7 +57,7 @@ func fireOperatorNotice(
 
 	go func() {
 		body, contentType := operatorNoticePayload(url, title, detail, fields)
-		// context.Background(), NOT the request context — deliberate.
+		// context.Background(), NOT the request context, deliberate.
 		// The signup response has already been written by the time
 		// this runs, so the request context is either cancelled or
 		// about to be; inheriting it would cancel the notice before
@@ -66,7 +66,7 @@ func fireOperatorNotice(
 		//
 		// This also means the send does not survive a restart: if the
 		// machine dies mid-flight the notice is lost. That is the
-		// right trade — the signup itself is already committed to
+		// right trade, the signup itself is already committed to
 		// Postgres, and a missed "someone signed up" ping is an
 		// inconvenience, not data loss. Persisting and retrying
 		// notices would mean a queue, a table and a worker for
@@ -174,7 +174,7 @@ func operatorNoticePayload(
 // The operator channel is a Discord server, and a webhook URL is a
 // bearer credential that has already been pasted into a chat
 // transcript once today. Putting customers' full email addresses on
-// the other end of that is a needless standing exposure — the domain
+// the other end of that is a needless standing exposure, the domain
 // is what tells you whether a signup is a real company or a throwaway,
 // and the full address is one click away in the admin dashboard when
 // it actually matters.

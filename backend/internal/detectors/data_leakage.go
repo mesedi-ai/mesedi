@@ -3,7 +3,7 @@ package detectors
 // data_leakage detector per-project tunables (data_leakage.G5 wave).
 //
 // Unlike most detectors in this package, data_leakage has no
-// stand-alone scan function here — the heavy lifting lives in the
+// stand-alone scan function here, the heavy lifting lives in the
 // dlp/ package (rule registry + scanner) and the store layer
 // (FindFirstDLPSignal* methods select which hits promote to a
 // failure_group). The per-project knob this file exposes controls
@@ -16,7 +16,7 @@ package detectors
 // severity strings whose dlp_scan_result hits promote to a
 // failure_group on the execution-close path. Hits at severities NOT
 // in this list are still recorded (the scanner runs the full rule
-// set regardless and emits dlp_scan_result events for every hit) —
+// set regardless and emits dlp_scan_result events for every hit) ,
 // they just don't create or update a failure_group.
 //
 // Default ["critical", "high"] matches the historical hardcoded
@@ -35,7 +35,7 @@ func DefaultDataLeakageThresholds() DataLeakageThresholds {
 	}
 }
 
-// EffectiveAllowedSeverities returns the validated severity slice —
+// EffectiveAllowedSeverities returns the validated severity slice ,
 // defensive against bad config that escaped the validators registry.
 // Empty input or any value outside the closed set {"critical",
 // "high", "medium"} reverts the whole slice to the default. We

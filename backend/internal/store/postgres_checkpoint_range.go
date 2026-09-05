@@ -13,7 +13,7 @@ import (
 //
 // The dialect differences are the usual two and both matter here. Numbered
 // placeholders instead of ?, and timestamps scanned straight into
-// time.Time instead of through a string parse — TIMESTAMPTZ round-trips as
+// time.Time instead of through a string parse, TIMESTAMPTZ round-trips as
 // a time, whereas SQLite stores text. The second difference is exactly
 // where the false-tampering bug of 2026-09-04 lived, so it is worth
 // naming: Postgres truncates to microseconds, which is why canonicalTime

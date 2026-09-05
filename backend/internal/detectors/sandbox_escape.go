@@ -67,29 +67,29 @@ var sandboxPatterns = mustCompilePatterns([]struct {
 		pattern: `\b(?:eval|exec)\s*\(`,
 	},
 	{
-		// Node.js `vm` module — vm.runInNewContext, vm.runInContext,
+		// Node.js `vm` module, vm.runInNewContext, vm.runInContext,
 		// vm.createContext. The vm module IS a sandbox primitive in
 		// Node; an agent reaching for it from inside a code-exec
 		// sandbox is trying to spawn a nested context with
 		// potentially-elevated capabilities (e.g. passing globals
-		// from the outer scope). quick-wins-bundle wave — closes
+		// from the outer scope). quick-wins-bundle wave, closes
 		// sandbox_escape.G3.
 		id:      "js_vm_module",
 		pattern: `\bvm\.(?:runInNewContext|runInContext|createContext)\s*\(`,
 	},
 	{
-		// Node.js dynamic require — require(variableName). Mesedi's
+		// Node.js dynamic require, require(variableName). Mesedi's
 		// baseline assumed agents would use static require calls
 		// with literal module paths; require with a non-literal
 		// argument is the JS equivalent of `eval` for module loading
 		// and a classic sandbox-escape vector. Matches require(x),
-		// require(varName), require(getModulePath()) — but not the
+		// require(varName), require(getModulePath()), but not the
 		// safe form require('fs') with a string literal.
 		id:      "js_dynamic_require",
 		pattern: `\brequire\s*\(\s*[^"'\s)]`,
 	},
 	{
-		// Node.js Function constructor — `new Function(body)` or the
+		// Node.js Function constructor, `new Function(body)` or the
 		// non-`new` form Function(body). Constructs a runnable
 		// function from a string at runtime; identical attack surface
 		// to eval. Word-boundary on the lowercase prefix avoids

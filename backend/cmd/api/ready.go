@@ -1,4 +1,4 @@
-// /ready — the readiness probe that /health only pretended to be.
+// /ready, the readiness probe that /health only pretended to be.
 //
 // WHY THIS IS A SEPARATE ENDPOINT FROM /health
 // fly.toml points Fly's machine health check at /health, every 30s with
@@ -26,7 +26,7 @@
 // The binary is built with GOFIPS140=certified, which links the Go
 // Cryptographic Module holding CMVP Certificate #5247. Until now the
 // only evidence of that was a line in the startup log, which you can
-// read only if you already have log access — that is, only if you are
+// read only if you already have log access, that is, only if you are
 // us. A compliance claim that just its author can confirm is worth
 // very little, so the posture is reported here, where any monitor or
 // third-party evaluator can poll it without credentials.

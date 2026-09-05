@@ -8,7 +8,7 @@ import (
 
 // Signup notices go to a Discord server reached by a bearer URL. A
 // full customer email address sitting in that channel is a standing
-// exposure with no operational benefit — the domain is what tells you
+// exposure with no operational benefit, the domain is what tells you
 // whether a signup is a real company, and the full address is one
 // click away in the admin dashboard. Pin the masking so a future
 // refactor cannot quietly widen it.
@@ -102,7 +102,7 @@ func TestOperatorNoticePayload_SlackShape(t *testing.T) {
 }
 
 // An unrecognised webhook host still has to receive something
-// parseable — silently sending Discord embeds to a generic endpoint
+// parseable, silently sending Discord embeds to a generic endpoint
 // would look like a delivery success and produce nothing readable.
 func TestOperatorNoticePayload_GenericFallback(t *testing.T) {
 	t.Parallel()

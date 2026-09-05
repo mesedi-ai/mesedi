@@ -4,7 +4,7 @@
 // key lives in the `MESEDI_TOTP_ENCRYPTION_KEY` Fly secret as a
 // 64-character hex string (32 raw bytes). Without that key, the
 // stored `user_totp.secret_encrypted` ciphertext is useless even if
-// the database is exfiltrated — an attacker cannot replay a
+// the database is exfiltrated, an attacker cannot replay a
 // customer's TOTP without it.
 //
 // Why GCM, not CBC: GCM gives authenticated encryption (the

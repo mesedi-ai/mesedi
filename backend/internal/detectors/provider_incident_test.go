@@ -40,7 +40,7 @@ func Test_DetectProviderIncident_AboveThreshold(t *testing.T) {
 }
 
 func Test_DetectProviderIncident_DegenerateInputs(t *testing.T) {
-	// Empty provider OR empty error_class should NOT fire — would
+	// Empty provider OR empty error_class should NOT fire, would
 	// produce a degenerate signature like "provider_incident::" that
 	// the dashboard can't render usefully.
 	cases := []struct {

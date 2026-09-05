@@ -74,7 +74,7 @@ const (
 // distinguishes nothing.
 //
 // The default is "unknown", not a fabricated value. A dev build genuinely
-// does not know its commit, and saying so is the honest answer — the
+// does not know its commit, and saying so is the honest answer, the
 // deploy check treats "unknown" as a distinct failure from a stale SHA,
 // because the two have different causes and different fixes.
 var buildGitSHA = "unknown"
@@ -397,7 +397,7 @@ func main() {
 		HobbyAIAnalysisLimit:  envInt("MESEDI_HOBBY_AI_ANALYSIS_LIMIT_OVERRIDE", 0),
 		TeamAIAnalysisLimit:   envInt("MESEDI_TEAM_AI_ANALYSIS_LIMIT_OVERRIDE", 0),
 	}, logger)
-	// — SSO + magic-link sign-in. The dashboard server calls
+	//, SSO + magic-link sign-in. The dashboard server calls
 	// POST /signin from its OAuth callback / magic-link verify
 	// routes; empty secret leaves /signin returning 503 so a
 	// misconfigured deploy fails loudly rather than letting random
@@ -428,7 +428,7 @@ func main() {
 		logger.Info("2fa endpoints disabled (MESEDI_TOTP_ENCRYPTION_KEY unset; /me/2fa/* will 503)")
 	}
 
-	// — OpenTelemetry parallel emission. Initialize the
+	//, OpenTelemetry parallel emission. Initialize the
 	// global emitter from env (OTEL_EXPORTER_OTLP_ENDPOINT etc.).
 	// When the endpoint is unset, Init returns a disabled emitter
 	// that no-ops on every Emit call, so the wiring is safe to
@@ -455,7 +455,7 @@ func main() {
 		}()
 	}
 
-	// — LLM-assisted root-cause analysis. The client is
+	//, LLM-assisted root-cause analysis. The client is
 	// disabled when ANTHROPIC_API_KEY is unset; the handler returns
 	// 503 in that case so the dashboard can render a "not configured"
 	// state rather than a 500. No retry/backoff: a single API failure
@@ -465,7 +465,7 @@ func main() {
 	logger.Info("anthropic client configured",
 		"enabled", anthropicClient.Enabled())
 
-	// — founder burn-rate widget on /admin. Uses the
+	//, founder burn-rate widget on /admin. Uses the
 	// Anthropic Admin API Cost Report endpoint via the
 	// ANTHROPIC_ADMIN_KEY env var (sk-ant-admin-...). Disabled when
 	// the env var is empty; the admin handler returns a "not
@@ -527,26 +527,26 @@ func main() {
 	mux.Handle("GET /ui/", publicMux)
 	mux.Handle("POST /signup", signupHandler)
 	mux.Handle("OPTIONS /signup", signupHandler)
-	// — POST /signin is a server-to-server endpoint guarded by
+	//, POST /signin is a server-to-server endpoint guarded by
 	// MESEDI_SIGNIN_SECRET, registered on the same public mux so it
 	// bypasses the bearer-token auth chain (the dashboard server has
 	// no customer key when calling /signin).
 	mux.Handle("POST /signin", signupHandler)
 	mux.Handle("OPTIONS /signin", signupHandler)
-	// commit 2 — magic-link routes. /start is browser-callable
+	// commit 2, magic-link routes. /start is browser-callable
 	// (rate-limited by IP, no secret). /verify is server-to-server
 	// (gated inside the handler by MESEDI_SIGNIN_SECRET).
 	mux.Handle("POST /magic-link/start", signupHandler)
 	mux.Handle("OPTIONS /magic-link/start", signupHandler)
 	mux.Handle("GET /magic-link/verify", signupHandler)
 	mux.Handle("OPTIONS /magic-link/verify", signupHandler)
-	// Batch 2 — POST /auth/logout destroys the caller's session
+	// Batch 2, POST /auth/logout destroys the caller's session
 	// cookie. Intentionally on the public mux: a customer who has
 	// already lost their session row (expired, kicked, key revoked)
 	// should still be able to click Sign Out without a 401.
 	mux.Handle("POST /auth/logout", signupHandler)
 	mux.Handle("OPTIONS /auth/logout", signupHandler)
-	// — server-to-server 2FA verify. Same shape as /signin:
+	//, server-to-server 2FA verify. Same shape as /signin:
 	// shared secret in X-Mesedi-Signin-Secret, called by the
 	// dashboard Worker after the customer enters their authenticator
 	// code on /login/2fa. Lives on signupHandler so it bypasses the
@@ -570,7 +570,7 @@ func main() {
 	mux.Handle("POST /events", privateHandler)
 	// Slice 1, dashboard reads the calling project's identity.
 	mux.Handle("GET /project", privateHandler)
-	// — customer-side project rename so SSO-created
+	//, customer-side project rename so SSO-created
 	// projects can move off the default "Default project" name.
 	// Admin scope required; enforced inside the handler.
 	mux.Handle("PATCH /project/name", privateHandler)
@@ -596,7 +596,7 @@ func main() {
 	// LLM-assisted root-cause analysis (auth-required).
 	// Cached on the failure_group row; ?regenerate=1 forces a refresh.
 	mux.Handle("POST /failure-groups/{id}/analyze", privateHandler)
-	// failure-group-resolve wave — customer-initiated resolve /
+	// failure-group-resolve wave, customer-initiated resolve /
 	// unresolve. Auth-required. The inner mux's HandleResolveFailureGroup
 	// / HandleUnresolveFailureGroup are unreachable from the outer
 	// dispatch table without these forwards (see the top-level mux
@@ -721,12 +721,12 @@ func main() {
 	mux.Handle("PATCH /me/allowlist/{detector}/{allowlist_id}", privateHandler)
 	mux.Handle("DELETE /me/allowlist/{detector}/{allowlist_id}", privateHandler)
 	mux.Handle("GET /me/allowlist-stats", privateHandler)
-	// Empty-states wave A — detector-status observability surface.
+	// Empty-states wave A, detector-status observability surface.
 	// Generic per-detector empty-state + priming metadata the
 	// dashboard reads on overview-page load. Closes the backend half
 	// of semantic_loop.G2 + tool_schema_drift.G2.
 	mux.Handle("GET /v1/detector-status", privateHandler)
-	// — customer-facing 2FA / TOTP. All five live on
+	//, customer-facing 2FA / TOTP. All five live on
 	// privateHandler because they manage the calling customer's own
 	// authenticator-app enrollment and need the session cookie.
 	// Without these explicit forwards the routes registered on the
@@ -843,7 +843,7 @@ func main() {
 
 	// Top-level middleware chain. SecurityHeaders is outermost so its
 	// four hardening headers (HSTS, X-Content-Type-Options,
-	// X-Frame-Options, Referrer-Policy) stamp every response —
+	// X-Frame-Options, Referrer-Policy) stamp every response ,
 	// including unauthenticated 401s and 404s that pre-date the auth
 	// chain. NewTopChain handles panic recovery and request logging.
 	root := api.SecurityHeaders(api.NewTopChain(logger)(mux))

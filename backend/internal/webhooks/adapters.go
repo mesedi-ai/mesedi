@@ -3,12 +3,12 @@
 // Mesedi's canonical Payload is a generic, versioned JSON envelope
 // designed for customer-side parsers (their own services consuming
 // the webhook). For first-party chat / on-call receivers (Slack,
-// Discord, PagerDuty), that generic shape doesn't render — each
+// Discord, PagerDuty), that generic shape doesn't render, each
 // service requires its own body schema or the message either fails
 // outright (400) or shows up as an unhelpful raw-JSON blob.
 //
 // The dispatcher detects known receiver URL patterns and reshapes
-// the body before send. The HMAC signature (when we sign at all —
+// the body before send. The HMAC signature (when we sign at all ,
 // PagerDuty verifies via routing_key inside the body, so we skip
 // the header there) is computed over the body actually sent, so the
 // signing contract stays correct.
@@ -91,7 +91,7 @@ func isPagerDutyURL(rawURL string) bool {
 //
 // Slack + Discord: they don't verify signatures either, but they
 // also don't leak them back to any third party, so we keep the
-// header — it lets customers who front their own Slack app with a
+// header, it lets customers who front their own Slack app with a
 // receiver still verify the payload.
 func AdapterSkipsHMAC(rawURL string) bool {
 	return isPagerDutyURL(rawURL)
@@ -143,7 +143,7 @@ func failureClassHexColor(failureClass string) string {
 // discordEmbedColor returns the Discord embed accent color (decimal
 // int; Discord rejects strings here) matched to failureClassHexColor.
 // Kept as a separate function because Discord's numeric API is
-// specific to that adapter — Slack expects strings.
+// specific to that adapter, Slack expects strings.
 func discordEmbedColor(severityValue, failureClass string) int {
 	hex := severityHexColor(severityValue, failureClass)
 	// Strip leading '#' and parse as decimal int. Guaranteed safe
@@ -168,7 +168,7 @@ func eventHumanKind(event string) string {
 		// Deliberately NOT "test delivery". Every adapter already
 		// prepends "Mesedi test" when Payload.Test is set, so saying
 		// "test" here too produced "Mesedi test test delivery" in the
-		// customer's Discord/Slack channel — and "Mesedi test: Mesedi
+		// customer's Discord/Slack channel, and "Mesedi test: Mesedi
 		// test delivery: ..." in PagerDuty. The word "test" belongs to
 		// the Test flag, not to the event label.
 		return "delivery"
@@ -260,7 +260,7 @@ func BuildDiscordBody(p Payload) ([]byte, error) {
 // BuildSlackBody returns a JSON body shaped for Slack's incoming-
 // webhook API using Block Kit. Modern Slack blocks render with
 // consistent typography, are copy-pasteable, and support inline
-// button actions — none of which the legacy attachments API did well.
+// button actions, none of which the legacy attachments API did well.
 //
 // Block layout:
 //
@@ -349,7 +349,7 @@ func BuildSlackBody(p Payload) ([]byte, error) {
 // BuildPagerDutyBody returns a JSON body shaped for PagerDuty Events
 // API v2. This is a "trigger" event; PagerDuty deduplicates on
 // dedup_key so recurrences update the same incident rather than
-// creating new ones. The dedup_key is (project_id + group_id) —
+// creating new ones. The dedup_key is (project_id + group_id) ,
 // stable for the lifetime of the failure group, unique across
 // projects, and long enough to satisfy PagerDuty's requirements.
 //
@@ -383,7 +383,7 @@ func BuildPagerDutyBody(p Payload, routingKey string) ([]byte, error) {
 
 	// Prefix is built in one place rather than wrapping an already-
 	// built summary, which is what produced "Mesedi test: Mesedi
-	// delivery: ..." — the product name appearing twice in a single
+	// delivery: ...", the product name appearing twice in a single
 	// PagerDuty incident title.
 	prefix := "Mesedi"
 	if p.Test {
@@ -394,7 +394,7 @@ func BuildPagerDutyBody(p Payload, routingKey string) ([]byte, error) {
 
 	// Real events: dedup by (project, group) so recurrences update
 	// the same PagerDuty incident. Test events: always use the
-	// delivery_id — a test must never share dedup with a real
+	// delivery_id, a test must never share dedup with a real
 	// incident, even if the payload happens to carry a group_id, or
 	// the "Test Webhook" button on the dashboard could quietly merge
 	// into an active on-call incident.
@@ -492,7 +492,7 @@ func BuildPagerDutyBody(p Payload, routingKey string) ([]byte, error) {
 // dashboardExecutionURL builds the React-dashboard execution detail
 // URL from the DashboardURL (root, no path) and an execution ID. The
 // /app/executions/{id} route lives in the dispatcher's knowledge,
-// not the receiver's — receivers consuming the raw payload get just
+// not the receiver's, receivers consuming the raw payload get just
 // the base and can build their own deep links.
 func dashboardExecutionURL(dashboardURL, executionID string) string {
 	base := strings.TrimRight(dashboardURL, "/")
@@ -510,7 +510,7 @@ func orDefault(v, def string) string {
 }
 
 // adaptedBody applies any receiver-specific payload reshape. Returns
-// (body, true) when an adapter matched; (nil, false) otherwise —
+// (body, true) when an adapter matched; (nil, false) otherwise ,
 // the caller falls back to the canonical JSON marshal of Payload.
 //
 // PagerDuty requires the routing_key sourced from the webhook

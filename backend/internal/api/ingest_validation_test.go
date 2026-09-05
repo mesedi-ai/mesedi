@@ -10,8 +10,8 @@ import (
 	"mesedi/backend/internal/events"
 )
 
-// Before this file, the ingest first pass had no test of any kind — no
-// Go test constructs HandleIngestEvents — so four rules deciding whether
+// Before this file, the ingest first pass had no test of any kind, no
+// Go test constructs HandleIngestEvents, so four rules deciding whether
 // a customer's events are kept or silently dropped were unverified.
 //
 // The reserved-type rule is the one this change added, and it carries
@@ -106,7 +106,7 @@ func TestOneBadEventDoesNotPoisonTheBatch(t *testing.T) {
 }
 
 // A missing timestamp is defaulted rather than rejected, and a supplied
-// one is never overwritten — the customer's clock is their claim.
+// one is never overwritten, the customer's clock is their claim.
 func TestIngestDefaultsOnlyAMissingTimestamp(t *testing.T) {
 	logger, _ := capturingLogger()
 	supplied := okEvent("has-ts", events.EventTypeLLMCall)

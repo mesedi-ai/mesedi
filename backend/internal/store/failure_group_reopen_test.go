@@ -16,7 +16,7 @@ import (
 // The bug this pins: the recurrence upsert incremented event_count,
 // affected_executions and last_seen but never cleared resolved_at. The
 // group list filters `resolved_at IS NULL`, so a resolved group that
-// kept failing became invisible — counters climbing behind a row the
+// kept failing became invisible, counters climbing behind a row the
 // customer could not see, and no webhook, because the failure class
 // was not new.
 //
@@ -90,7 +90,7 @@ func TestFailureGroupReopensOnRecurrence(t *testing.T) {
 		t.Fatalf("group missing after resolve: err=%v", err)
 	}
 	if g.ResolvedAt == nil {
-		t.Fatal("resolve did not set resolved_at — the rest of this " +
+		t.Fatal("resolve did not set resolved_at, the rest of this " +
 			"test would pass vacuously")
 	}
 	countBefore := g.EventCount

@@ -12,7 +12,7 @@
 // This detector consumes a single (provider, error_class,
 // tenant_count) tuple computed by the handler from
 // store.CountDistinctTenantsWithProviderError. It fires when
-// tenant_count meets or exceeds the threshold (default 2 —
+// tenant_count meets or exceeds the threshold (default 2 ,
 // "at least two tenants experienced the same error in the same
 // window"). The handler runs this only after observing the
 // current execution emit at least one matching error, so the

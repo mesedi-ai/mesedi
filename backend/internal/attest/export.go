@@ -30,7 +30,7 @@ const ChainExportFormatV1 = "mesedi.chain-export.v1"
 // The digest root, not the events. An auditor can fold these roots and
 // confirm they produce the anchored interval root, which proves the set of
 // executions is complete and unaltered. It does NOT let them confirm that
-// a given digest describes what their agent actually did — that needs the
+// a given digest describes what their agent actually did, that needs the
 // events, and is a separate, far larger retrieval. Stated in Unverified
 // rather than glossed over.
 type ExportedExecution struct {
@@ -45,7 +45,7 @@ type ExportedInterval struct {
 
 	// LogEntryID and AnchoredAt describe where the checkpoint hash was
 	// published. Both are unverifiable from inside the export by
-	// construction — confirming them is exactly what requires leaving the
+	// construction, confirming them is exactly what requires leaving the
 	// export and asking the log.
 	LogEntryID string    `json:"log_entry_id"`
 	AnchoredAt time.Time `json:"anchored_at"`
@@ -71,7 +71,7 @@ type ExportedInterval struct {
 	// value against Checkpoint.Hash finds a mismatch every time and is
 	// right to. With the preimage the reader can hash it, compare against
 	// what the log holds, and confirm the checkpoint's own hash appears
-	// inside it — none of which requires trusting Mesedi.
+	// inside it, none of which requires trusting Mesedi.
 	//
 	// Empty on checkpoints anchored before 2026-09-04. Those are
 	// permanently unverifiable, because the nonce inside their preimages
@@ -85,8 +85,8 @@ type ExportedInterval struct {
 	// committed under a root the log signed: a JSON object holding
 	// log_id, entry_body and inclusion_proof.
 	//
-	// It is what turns the sentence above — "confirming them is exactly
-	// what requires leaving the export and asking the log" — from true
+	// It is what turns the sentence above, "confirming them is exactly
+	// what requires leaving the export and asking the log", from true
 	// into false. With it, the export is self-contained: a verifier
 	// recomputes the Merkle root from the sibling path, checks the log's
 	// signature over that root against a pinned public key, and confirms
@@ -125,8 +125,8 @@ type ChainExport struct {
 	GeneratedAt time.Time `json:"generated_at"`
 
 	// ProjectID is whose export this is. The verifier checks every leaf
-	// belongs to this project, so an export that mixes tenants — whether
-	// by bug or by malice — is rejected rather than silently reported as
+	// belongs to this project, so an export that mixes tenants, whether
+	// by bug or by malice, is rejected rather than silently reported as
 	// someone else's activity.
 	ProjectID string `json:"project_id"`
 
@@ -155,8 +155,8 @@ type ExportVerification struct {
 	// Unverified is the load-bearing field of this whole package.
 	//
 	// A verification report that lists only what passed invites the reader
-	// to assume everything was checked. Every limit — offline mode, events
-	// not retrieved, log entries not resolved — goes here, and the PDF
+	// to assume everything was checked. Every limit, offline mode, events
+	// not retrieved, log entries not resolved, goes here, and the PDF
 	// prints it as prominently as the passes. An evaluator who discovers a
 	// limit themselves concludes it was concealed; one who is handed it
 	// concludes the rest is straight.
@@ -329,7 +329,7 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		// is built to defeat.
 		//
 		// VerifyTenantSubChain cannot check the predecessor of its FIRST
-		// leaf — there is nothing before it to compare against. So an
+		// leaf, there is nothing before it to compare against. So an
 		// export that simply omits a project's earliest leaves, presenting
 		// those hours as "no activity", chains perfectly and verifies
 		// clean. Every later link is intact; the removed history leaves no
@@ -340,8 +340,8 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		// ExecutionCount. Anything larger means executions happened before
 		// this export begins, whether or not the export admits it.
 		//
-		// A partial export is perfectly legitimate — an auditor asking for
-		// last month does not want a year — so this is not a failure. It
+		// A partial export is perfectly legitimate, an auditor asking for
+		// last month does not want a year, so this is not a failure. It
 		// is a fact that must be REPORTED, because the difference between
 		// "complete from your first execution" and "starts partway, with
 		// 4,812 executions before it" is the difference the reader needs.
@@ -391,7 +391,7 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 			"published. Re-run with network access to check the log.",
 		"Execution digests were not opened. This confirms the set of executions is "+
 			"complete and unaltered, not that any individual digest describes what "+
-			"an agent actually did — that requires retrieving the events.",
+			"an agent actually did. That requires retrieving the events.",
 		"Nothing here judges whether the AI was correct. A passing report means the "+
 			"record is intact, not that the decisions in it were good.",
 	)

@@ -40,7 +40,7 @@ import (
 // of timeout-firing modes the customer wants to alert on; the
 // detector skips any payload whose mode isn't in this set. Default
 // `["explicit", "sla_exceeded"]` matches the historical hardcoded
-// behavior — customers who don't tune see byte-identical detection.
+// behavior, customers who don't tune see byte-identical detection.
 // Customers can restrict to `["explicit"]` only (treat response_kind=
 // timeout as control flow not an alert is rare; more common is the
 // opposite) or `["sla_exceeded"]` only (the explicit timeout is
@@ -57,7 +57,7 @@ func DefaultHITLTimeoutThresholds() HITLTimeoutThresholds {
 	}
 }
 
-// EffectiveFireModes returns the validated fire-mode slice —
+// EffectiveFireModes returns the validated fire-mode slice ,
 // defensive against bad config that escaped the validators registry.
 // Empty input or any value outside the closed set
 // {"explicit", "sla_exceeded"} reverts the whole slice to the

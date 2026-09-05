@@ -51,7 +51,7 @@ func Test_DetectorThresholds_RegistryHasExpectedDetectors(t *testing.T) {
 		// Second consumer of the json-string-slice helpers from
 		// data_leakage.G5.
 		"hitl_timeout:fire_modes",
-		// — per-project custom_model_pricing override.
+		//, per-project custom_model_pricing override.
 		// First non-detector entry in the registry (pricing is read
 		// at execution close, not by any specific detector). Rides
 		// the same JSON-keyed-map shape as custom_model_windows.
@@ -204,7 +204,7 @@ func Test_DetectorThresholds_PrefixWindowTierCapEnforced(t *testing.T) {
 	if _, err := spec.Parse("8192", ""); err == nil {
 		t.Errorf("expected tier-cap error on empty tier with 8192")
 	}
-	// Legacy "pro" tier maps to Team — 8192 should be accepted.
+	// Legacy "pro" tier maps to Team, 8192 should be accepted.
 	if _, err := spec.Parse("8192", TierProLegacy); err != nil {
 		t.Errorf("legacy pro tier should accept Team-cap values: %v", err)
 	}

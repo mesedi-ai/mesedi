@@ -14,7 +14,7 @@ package api
 // Why -1 as the inherit sentinel: every threshold here is a
 // strictly-positive quantity (milliseconds, tenant count, bytes).
 // -1 is unambiguous, distinguishable from "unset" (which doesn't
-// exist — every project has a non-null row today), and doesn't
+// exist, every project has a non-null row today), and doesn't
 // collide with any meaningful threshold value. The PUT validators
 // accept -1 as a "clear my override; inherit from org" sentinel.
 
@@ -25,7 +25,7 @@ import (
 	"mesedi/backend/internal/store"
 )
 
-// Default-key constants — must match the strings the dashboard
+// Default-key constants, must match the strings the dashboard
 // PUT request body uses. Centralized so a typo can't desync the
 // store from the resolver.
 const (
@@ -38,7 +38,7 @@ const (
 // from the org default." Used by all 3 cascading thresholds.
 const InheritSentinel = -1
 
-// Hardcoded constants — keep in sync with the historical defaults
+// Hardcoded constants, keep in sync with the historical defaults
 // each threshold shipped with.
 const (
 	HardcodedTimeBudgetMs               = 60_000 // 60s
@@ -115,7 +115,7 @@ func (h *Handlers) resolveCascadingInt(
 }
 
 // lookupOrgIDForProject returns the org_id for projectID. Empty
-// string on any error — caller treats that as "no org, skip the
+// string on any error, caller treats that as "no org, skip the
 // org-default lookup."
 //
 // Relationship: projects.owner_user_id →
@@ -132,7 +132,7 @@ func (h *Handlers) lookupOrgIDForProject(
 	// ListOrganizationsForUser walks organization_members; the
 	// project owner is always a member of any org they created
 	// (member row written at create-time). For multi-org users
-	// (rare today) the first match wins — same posture as the
+	// (rare today) the first match wins, same posture as the
 	// dashboard's existing org-context picker.
 	orgs, err := h.Store.ListOrganizationsForUser(ctx, proj.OwnerUserID)
 	if err != nil || len(orgs) == 0 {

@@ -83,7 +83,7 @@ func TestEncryptTOTPSecret_DifferentNoncesPerCall(t *testing.T) {
 func TestDecryptTOTPSecret_TamperingRejected(t *testing.T) {
 	// Flipping one bit in the ciphertext MUST surface as a decrypt
 	// error (GCM tag check). This is what makes "encrypted at rest"
-	// meaningful — an attacker with DB access cannot silently swap
+	// meaningful, an attacker with DB access cannot silently swap
 	// in a different TOTP secret.
 	key, _ := ParseTOTPEncryptionKey(validKey)
 	plaintext := []byte("JBSWY3DPEHPK3PXP")

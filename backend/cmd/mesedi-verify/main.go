@@ -38,7 +38,7 @@
 //
 // It is no longer true for a checkpoint carrying an inclusion proof.
 // That proof is Sigstore's signature over a Merkle tree head, and
-// verifying it needs no network and no trust in Mesedi — the signature
+// verifying it needs no network and no trust in Mesedi, the signature
 // either checks out against a key compiled into this binary or it does
 // not. For those checkpoints an offline run is STRONGER than a lookup:
 // a lookup asks the log what it holds today and believes the answer,
@@ -222,12 +222,12 @@ func main() {
 		// Run for both modes. An offline run now checks every stored
 		// inclusion proof rather than skipping the anchors entirely, so
 		// the old "offline shows only internal consistency" branch would
-		// understate what happened — which is a falsehood in the safe
+		// understate what happened, which is a falsehood in the safe
 		// direction, but still a falsehood in a report whose job is to
 		// say precisely what was established.
 		rep.LogEntries = resolveLogEntries(export, *rekorURL, *offline)
 
-		// A failed entry is a finding. An unverifiable one is not — but
+		// A failed entry is a finding. An unverifiable one is not, but
 		// it still means this report does not establish what it set out
 		// to, so neither may leave rep.OK true. Exit 0 on a chain nobody
 		// can check would be the single most misleading thing this tool
@@ -243,8 +243,8 @@ func main() {
 			}
 		}
 		if len(unverifiable) > 0 {
-			// No cause is asserted here. This used to name one — "anchored
-			// before the leaf preimage was retained" — which was the only
+			// No cause is asserted here. This used to name one, "anchored
+			// before the leaf preimage was retained", which was the only
 			// cause that existed when it was written and is now one of
 			// several: a mock ledger, a missing preimage, or an offline run
 			// against a checkpoint that carries no inclusion proof. Printing
@@ -253,7 +253,7 @@ func main() {
 			// where they are individually true, per checkpoint, above.
 			rep.Structural.Unverified = append(rep.Structural.Unverified, fmt.Sprintf(
 				"Checkpoints %v could NOT be checked. That is not a finding against "+
-					"the record — nothing here says they are wrong — but nothing here "+
+					"the record. Nothing here says they are wrong, but nothing here "+
 					"says they are right either. The reason differs per checkpoint and "+
 					"is given against each one in the PUBLIC TRANSPARENCY LOG section.",
 				unverifiable))
@@ -266,7 +266,7 @@ func main() {
 		// An earlier version substituted "Each checkpoint hash was
 		// confirmed PRESENT in the public log" whenever the run was
 		// online, regardless of whether a single entry had been resolved
-		// — so a run in which nothing could be checked printed a claim of
+		//, so a run in which nothing could be checked printed a claim of
 		// verification directly above a RESULT line saying the opposite.
 		// A false claim of verification inside the section whose entire
 		// job is to prevent overclaiming is the worst place in the report
@@ -331,7 +331,7 @@ func writePDF(path string, rep report) error {
 // Both used to be one sentence, returned by logResolutionCaveat and
 // filed under the heading WHAT THIS REPORT DOES NOT SHOW. That heading
 // is right for a limitation and wrong for a finding, and the sentence
-// contained both — so the strongest statement the verifier can make
+// contained both, so the strongest statement the verifier can make
 // ("all 4 confirmed PRESENT, and checked against Sigstore's own signed
 // tree head") was printed under a banner announcing it as something the
 // report does NOT show, beside four genuine limitations. A reader
@@ -340,7 +340,7 @@ func writePDF(path string, rep report) error {
 //
 // It is the same defect as the two fixed earlier the same day: a true
 // sentence placed where its position contradicts its content. The cause
-// was mechanical rather than intentional — this text replaces the attest
+// was mechanical rather than intentional, this text replaces the attest
 // library's standing offline warning, so it inherited that warning's
 // location regardless of what it had come to say.
 //
@@ -411,7 +411,7 @@ func logConfirmation(entries []LogEntryCheck) string {
 		return head + fmt.Sprintf(" %s additionally checked against Sigstore's own "+
 			"signed tree head, using a public key compiled into this verifier, so that "+
 			"much does not depend on the log being reachable or truthful at the moment "+
-			"you read this — and it will still hold if that log is ever retired.",
+			"you read this, and it will still hold if that log is ever retired.",
 			subject)
 
 	default:
@@ -500,7 +500,7 @@ func readExport(path string) ([]byte, error) {
 // sha256 of a canonical leaf built by the anchoring service, and the
 // checkpoint hash is one field inside that leaf. An earlier version of
 // this function compared the log's value against Checkpoint.Hash
-// directly and reported a mismatch on every checkpoint in production —
+// directly and reported a mismatch on every checkpoint in production ,
 // correctly, in the sense that the two are never equal, and uselessly,
 // in the sense that it could not distinguish that from real tampering.
 //
@@ -520,8 +520,8 @@ func readExport(path string) ([]byte, error) {
 //
 // Every checkpoint is now attempted against its stored inclusion proof
 // first, whether or not the network is allowed. A proof settles the
-// question outright and more strongly than a lookup does — see
-// offline.go — so the lookup is a fallback for checkpoints that carry no
+// question outright and more strongly than a lookup does, see
+// offline.go, so the lookup is a fallback for checkpoints that carry no
 // proof, which is every checkpoint anchored before 2026-09-05.
 //
 // offline=true therefore does not mean "prove less". It means "use only

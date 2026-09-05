@@ -66,7 +66,7 @@ func TestEffectiveLimits_PartialOverride_UnsetFieldsFallBack(t *testing.T) {
 	resetOverrides(t)
 	InitTestOverrides(TestOverrides{
 		HobbyExecutionLimit: 10, // set
-		// other three left at 0 (unset) — should fall back to constants
+		// other three left at 0 (unset), should fall back to constants
 	}, discardLogger())
 	t.Cleanup(func() { resetOverrides(t) })
 
@@ -124,7 +124,7 @@ func TestActiveTestOverrides_OnlyReturnsSetFields(t *testing.T) {
 }
 
 // TestTierExecutionLimit_HonorsOverride covers the routing through
-// tierExecutionLimit — the central helper — as an end-to-end proof
+// tierExecutionLimit, the central helper, as an end-to-end proof
 // that the plumbing wires up.
 func TestTierExecutionLimit_HonorsOverride(t *testing.T) {
 	resetOverrides(t)

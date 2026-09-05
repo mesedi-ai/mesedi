@@ -7,11 +7,11 @@ import (
 
 // All-matches-recorded wave tests (closes sandbox_escape.G1 +
 // grounding_failure.G2 + hitl_timeout.G3). One test file covering
-// all 3 detectors' new AllMatches variants — same code shape so
+// all 3 detectors' new AllMatches variants, same code shape so
 // the tests are best read together.
 
 // ──────────────────────────────────────────────────────────────────────
-// sandbox_escape — DetectSandboxEscapeAllMatchesWithCustom
+// sandbox_escape, DetectSandboxEscapeAllMatchesWithCustom
 // ──────────────────────────────────────────────────────────────────────
 
 func Test_DetectSandboxEscapeAllMatches_EmptyInput(t *testing.T) {
@@ -61,7 +61,7 @@ func Test_DetectSandboxEscapeAllMatches_DedupSameSig(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// grounding_failure — DetectGroundingFailureAllMatchesWithThresholds
+// grounding_failure, DetectGroundingFailureAllMatchesWithThresholds
 // ──────────────────────────────────────────────────────────────────────
 
 func Test_DetectGroundingFailureAllMatches_EmptyInput(t *testing.T) {
@@ -97,7 +97,7 @@ func Test_DetectGroundingFailureAllMatches_DedupSameEvalMetric(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// hitl_timeout — DetectHITLTimeoutAllMatches
+// hitl_timeout, DetectHITLTimeoutAllMatches
 // ──────────────────────────────────────────────────────────────────────
 
 func Test_DetectHITLTimeoutAllMatches_EmptyInput(t *testing.T) {
@@ -128,7 +128,7 @@ func Test_DetectHITLTimeoutAllMatches_BothConditionsFire(t *testing.T) {
 }
 
 func Test_DetectHITLTimeoutAllMatches_OnlyExplicit(t *testing.T) {
-	// Just an explicit timeout — only that one sig.
+	// Just an explicit timeout, only that one sig.
 	payloads := []json.RawMessage{
 		json.RawMessage(`{"response_kind":"timeout"}`),
 	}

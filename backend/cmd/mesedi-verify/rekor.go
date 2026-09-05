@@ -17,7 +17,7 @@ import (
 //
 // This is the file that makes the report evidence rather than
 // self-assessment. Everything else in this binary checks that Mesedi's
-// export is internally consistent — which a Mesedi that lied consistently
+// export is internally consistent, which a Mesedi that lied consistently
 // would also pass. Only asking a log that neither Mesedi nor Verdifax
 // controls whether a given hash is actually in it breaks that circle.
 //
@@ -27,7 +27,7 @@ import (
 // WHAT IS NOT: the log's signed tree head. Be precise about what that
 // leaves open, because the obvious reading is wrong. Verifying the tree
 // head would guard against SIGSTORE being dishonest. It is not what
-// protects anyone from MESEDI — for a hash to be found here at all, Mesedi
+// protects anyone from MESEDI, for a hash to be found here at all, Mesedi
 // must genuinely have published it to an append-only log it does not
 // control, which is the property being sold. Interception is already
 // covered by TLS. So the residual is the trust assumption this design
@@ -35,7 +35,7 @@ import (
 // guarantee is gone.
 //
 // Doing it properly needs Rekor's public key obtained trustworthily, which
-// means Sigstore's TUF root — a heavy dependency in a binary whose value
+// means Sigstore's TUF root, a heavy dependency in a binary whose value
 // depends on an auditor being able to read it in one sitting. Rigour in
 // the verifier bought by making the verifier unverifiable is a bad trade.
 //
@@ -45,7 +45,7 @@ import (
 // log instance has been retired. Verdifax's /attest already returns the
 // inclusion proof and Mesedi currently discards it. See the tasks.
 
-// DefaultRekorURL is Sigstore's public good instance — free, with a 99.5%
+// DefaultRekorURL is Sigstore's public good instance, free, with a 99.5%
 // availability SLO, and operated by neither party to this transaction,
 // which is the entire reason it is worth anchoring to.
 const DefaultRekorURL = "https://rekor.sigstore.dev"
@@ -68,7 +68,7 @@ const (
 
 	// StatusUnverifiable: the export does not carry what is needed to
 	// check this entry, or no public-log claim was made for it. NOT a
-	// finding against the record — an absence of evidence either way.
+	// finding against the record, an absence of evidence either way.
 	StatusUnverifiable = "unverifiable"
 )
 
@@ -84,7 +84,7 @@ type LogEntryCheck struct {
 	Integrated time.Time
 
 	// Method names which check produced Status. Empty when the entry was
-	// settled before either ran — a mock ledger, say, or a missing
+	// settled before either ran, a mock ledger, say, or a missing
 	// preimage.
 	Method string
 

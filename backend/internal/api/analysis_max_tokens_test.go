@@ -3,15 +3,15 @@ package api
 import "testing"
 
 // The premium model must get a larger output budget than the standard
-// one. This is not a style preference — it is the difference between
+// one. This is not a style preference, it is the difference between
 // an analysis and a blank card.
 //
 // On 2026-08-24, coordination_deadlock (the most reasoning-heavy class
 // in the taxonomy: a cycle in a handoff graph across named agents)
 // returned HTTP 200 with the correct model recorded and ZERO text,
 // reproducibly, while 19 simpler classes succeeded through the exact
-// same code path. The output budget — 1024, a number chosen when Haiku
-// was the only model — was consumed before any prose was emitted.
+// same code path. The output budget, 1024, a number chosen when Haiku
+// was the only model, was consumed before any prose was emitted.
 func TestAnalysisMaxTokens_PremiumGetsMoreThanStandard(t *testing.T) {
 	t.Parallel()
 	std := analysisMaxTokensForModel(AnalysisModelStandard)

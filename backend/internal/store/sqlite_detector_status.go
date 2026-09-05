@@ -5,7 +5,7 @@ package store
 // the events table only carries execution_id; the JOIN pattern
 // matches ListSuccessfulToolReturns + ListProjectModelsSince.
 //
-// Both methods are intentionally read-only observability queries —
+// Both methods are intentionally read-only observability queries ,
 // they run on dashboard-overview page load (~once per visit per
 // project), not on the per-execution hot path. The 2 indexed
 // SELECTs each touch the (event_type, timestamp) index on events
@@ -29,12 +29,12 @@ type ToolCallCount struct {
 	CallCount int    `json:"call_count"`
 }
 
-// CountCheckpointEventsForProject — SQLite implementation. Joins
+// CountCheckpointEventsForProject, SQLite implementation. Joins
 // events to executions (events itself has no project_id column) and
 // filters event_type='checkpoint'. Returns (0, nil, nil) when the
-// project has never emitted a checkpoint event — the dashboard
+// project has never emitted a checkpoint event, the dashboard
 // detector-status surface uses count=0 to render the semantic_loop
-// "no checkpoint data yet — instrument mesedi.checkpoint() to
+// "no checkpoint data yet, instrument mesedi.checkpoint() to
 // enable" empty state.
 func (s *SQLiteStore) CountCheckpointEventsForProject(
 	ctx context.Context,
@@ -61,7 +61,7 @@ func (s *SQLiteStore) CountCheckpointEventsForProject(
 	return count, lastAt, nil
 }
 
-// CountLLMCallsByProviderSince — SQLite implementation. Returns a
+// CountLLMCallsByProviderSince, SQLite implementation. Returns a
 // map of provider → count of llm_call events for the project over
 // the last `since` window. Used by the detector-status surface
 // () to determine whether a project is Ollama-only and
@@ -108,7 +108,7 @@ func (s *SQLiteStore) CountLLMCallsByProviderSince(
 	return out, nil
 }
 
-// ListToolCallCountsForProject — SQLite implementation. Returns the
+// ListToolCallCountsForProject, SQLite implementation. Returns the
 // per-tool count of non-failed tool_call events across all
 // executions for the project. Ordered by call_count DESC, tool_name
 // ASC so the dashboard shows busiest-first; ties broken

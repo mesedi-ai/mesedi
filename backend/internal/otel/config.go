@@ -15,9 +15,9 @@
 // The env var OTEL_SEMCONV_STABILITY_OPT_IN can hold a
 // comma-separated list of opt-in tokens. We support:
 //
-//   - "gen_ai/dup" — emit BOTH stable and incubating names
-//   - "gen_ai"     — emit only the incubating names
-//   - any other value or empty — emit only stable names
+//   - "gen_ai/dup", emit BOTH stable and incubating names
+//   - "gen_ai"    , emit only the incubating names
+//   - any other value or empty, emit only stable names
 //
 // This package is callable from any other package; importing it has
 // no side effects beyond cheap env reads on first use.

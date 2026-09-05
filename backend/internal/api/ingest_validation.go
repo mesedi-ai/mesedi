@@ -14,7 +14,7 @@ import (
 // PER EVENT, never per batch, so one malformed event does not cost a
 // customer the other ninety-nine in the same request. Every rejection is
 // logged with the index and ids, because an event silently vanishing
-// from an agent's record is the worst outcome available here — the
+// from an agent's record is the worst outcome available here, the
 // record would look complete and be short.
 //
 // Extracted from HandleIngestEvents so these rules can be tested. They

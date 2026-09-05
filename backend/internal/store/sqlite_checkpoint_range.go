@@ -34,7 +34,7 @@ const MaxCheckpointRange = 744
 // Returned together because every consumer needs both and fetching the
 // anchor separately would reintroduce the per-row round trip this file
 // exists to avoid. They stay separate TYPES because the anchor is not
-// hash-committed — see the note on CheckpointAnchor.
+// hash-committed, see the note on CheckpointAnchor.
 type AnchoredCheckpoint struct {
 	Checkpoint attest.Checkpoint
 	Anchor     CheckpointAnchor
@@ -80,7 +80,7 @@ func (s *SQLiteStore) ListCheckpointRange(
 	// single place a checkpoint row is decoded and its stored hash
 	// recomputed. Selecting the anchor columns alongside would mean a
 	// fourteen-column Scan that scanCheckpointRow cannot serve, and the
-	// only way to write that is to copy its body — including the hash
+	// only way to write that is to copy its body, including the hash
 	// check, which is precisely the line that must never exist twice.
 	// Two round trips for a whole range is still O(1), which was the point.
 	rows, err := s.db.QueryContext(ctx, `
@@ -171,7 +171,7 @@ func (s *SQLiteStore) listCheckpointAnchorRange(
 // Returns ALL tenants' leaves, not just one project's, because building
 // an inclusion proof requires the whole level. That is safe here and only
 // here: this is a server-side read, and what leaves the building is the
-// proof — about log2(n) opaque sibling hashes — never this map.
+// proof, about log2(n) opaque sibling hashes, never this map.
 func (s *SQLiteStore) ListCheckpointLeavesRange(
 	ctx context.Context, fromSeq, toSeq uint64,
 ) (map[uint64][]attest.TenantLeaf, error) {

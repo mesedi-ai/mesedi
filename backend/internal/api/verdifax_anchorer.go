@@ -7,8 +7,8 @@ package api
 // Verdifax receives a hash and nothing else: no payloads, no execution
 // ids, not even a project id. It cannot interpret what the checkpoint
 // covers, which is correct, because it is not supposed to. Its receipt
-// says one thing — this exact digest existed at this time and has not
-// changed since — and the independence in that claim comes from
+// says one thing, this exact digest existed at this time and has not
+// changed since, and the independence in that claim comes from
 // Sigstore's log, not from Verdifax.
 //
 // TWO RESPONSE CHECKS ARE THE POINT OF THIS FILE
@@ -21,7 +21,7 @@ package api
 //     against itself.
 //
 //  2. The returned provenance must be same-legal-entity-submitted.
-//     Verdifax, LLC does business as Mesedi — one Delaware LLC — so a
+//     Verdifax, LLC does business as Mesedi, one Delaware LLC, so a
 //     receipt claiming a third party submitted this is false. If
 //     Verdifax says otherwise, the API key is misclassified, and every
 //     receipt it produces asserts an independent party that does not
@@ -60,7 +60,7 @@ const (
 
 	// verdifaxAnchorTimeout bounds a single submission. An unbounded
 	// call from the scheduler would stall the worker indefinitely, and a
-	// stalled scheduler stops closing intervals — the failure the whole
+	// stalled scheduler stops closing intervals, the failure the whole
 	// chain exists to prevent. Generous because a real Sigstore write
 	// is not fast, but finite.
 	verdifaxAnchorTimeout = 30 * time.Second
@@ -80,7 +80,7 @@ const (
 	// would couple the two products' build graphs for no benefit. The
 	// cost is that this literal must track store.ProvenanceSameLegal
 	// EntitySubmitted, and the mitigation is that a drift fails LOUDLY
-	// at the first anchor rather than silently — which is the direction
+	// at the first anchor rather than silently, which is the direction
 	// you want a mismatch to fail in.
 	expectedProvenance = "same-legal-entity-submitted"
 
@@ -155,7 +155,7 @@ type verdifaxAttestResponse struct {
 	// Sigstore anything. Present only when Verdifax anchored to a real
 	// transparency log and is new enough to return them; absent means
 	// offline verification is not available for this checkpoint, which
-	// is weaker than the preimage being absent — an anchor with a
+	// is weaker than the preimage being absent, an anchor with a
 	// preimage and no proof is still checkable by fetching the entry.
 	//
 	// InclusionProof is kept as raw JSON and never decoded here. Mesedi
@@ -200,7 +200,7 @@ func (a *VerdifaxAnchorer) client() *http.Client {
 func (a *VerdifaxAnchorer) AnchorCheckpoint(
 	ctx context.Context, cp attest.Checkpoint,
 ) (store.CheckpointAnchor, error) {
-	// The digest sent is the CHECKPOINT hash — the value the whole chain
+	// The digest sent is the CHECKPOINT hash, the value the whole chain
 	// is built on. Verdifax validates it as 64 lowercase hex, which
 	// CheckpointHash always produces.
 	body, err := json.Marshal(verdifaxAttestRequest{
@@ -294,8 +294,8 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 	// Checks 1 and 2 both ask Verdifax to vouch for itself, which is
 	// worth exactly as much as it sounds: they catch a misconfigured
 	// endpoint, not a dishonest one. This check is different. The log
-	// does not record cp.Hash — it records sha256 of a canonical leaf
-	// containing it — so without the preimage there is no path at all
+	// does not record cp.Hash, it records sha256 of a canonical leaf
+	// containing it, so without the preimage there is no path at all
 	// from a checkpoint to its log entry, and an auditor comparing the
 	// two finds a mismatch every time and is right to.
 	//
@@ -318,7 +318,7 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 	// anchor. A missing proof costs offline verification; refusing would
 	// cost the chain, because the scheduler treats an error here as "not
 	// anchored" and retries forever. Task #32 was one event-less
-	// execution stopping checkpointing for every tenant — the same shape
+	// execution stopping checkpointing for every tenant, the same shape
 	// of mistake, and not one to repeat for a degradation that leaves
 	// the anchor perfectly checkable online.
 	//
@@ -354,7 +354,7 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 //
 // A partial envelope is worse than none. A proof with no entry body
 // makes the Merkle walk start from the wrong value and fail, and that
-// failure looks exactly like tampering to whoever reads the report — a
+// failure looks exactly like tampering to whoever reads the report, a
 // verifier should say "cannot be checked", not "does not match". So all
 // three parts or nothing.
 func buildAnchorProof(out verdifaxAttestResponse) string {

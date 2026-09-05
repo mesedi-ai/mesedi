@@ -22,7 +22,7 @@ import (
 
 // stubDLPStore is the narrowest Store implementation that
 // applyDLPToBatch reaches: only ListProjectPatterns is called (to
-// load custom patterns). All other methods panic if invoked —
+// load custom patterns). All other methods panic if invoked ,
 // applyDLPToBatch must not exercise any other store path.
 type stubDLPStore struct {
 	store.Store

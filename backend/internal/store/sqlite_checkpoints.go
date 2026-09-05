@@ -32,7 +32,7 @@ import (
 )
 
 // mustParseStoredTime parses a timestamp that participates in a hash.
-// Strict on purpose — see the file header.
+// Strict on purpose, see the file header.
 func mustParseStoredTime(field, s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, fmt.Errorf(
@@ -54,7 +54,7 @@ func mustParseStoredTime(field, s string) (time.Time, error) {
 //
 // One transaction, and that is the whole point. Leaves without their
 // checkpoint, or a checkpoint without its leaves, is a chain that reads
-// as corrupt to a verifier rather than as a crash — and the difference
+// as corrupt to a verifier rather than as a crash, and the difference
 // between "this system crashed" and "this record was altered" is the
 // only thing this mechanism sells.
 //
@@ -217,12 +217,12 @@ func scanCheckpointRow(row rowScanner) (*attest.Checkpoint, error) {
 //
 // ORDER BY position, not by project_id and not unordered. The interval
 // root depends on leaf order, and row order from a SELECT is not a
-// contract — it can differ between SQLite and Postgres, and between two
+// contract, it can differ between SQLite and Postgres, and between two
 // runs on the same engine. Reconstructing the tree in a different order
 // computes a different root than the one anchored, and a verifier
 // reports tampering on data nobody touched.
 //
-// CROSS-TENANT BY DESIGN — INTERNAL USE ONLY.
+// CROSS-TENANT BY DESIGN, INTERNAL USE ONLY.
 //
 // This returns EVERY project's leaf for the interval, including their
 // execution counts and running totals. It has to: that is the set the
@@ -287,7 +287,7 @@ func (s *SQLiteStore) GetCheckpointLeaves(
 // predecessor is attest.ZeroHash.
 //
 // Scoped to one project, and the scope is in the WHERE clause rather
-// than applied after the read — the same discipline as the attestation
+// than applied after the read, the same discipline as the attestation
 // reads in verdifax-orchestrator. Verified against its stored hash for
 // the same reason as GetCheckpointLeaves: this value feeds the NEXT
 // leaf's PrevLeafHash, so an altered row here would silently corrupt
@@ -389,7 +389,7 @@ func (s *SQLiteStore) MarkCheckpointAnchored(
 	// The preimage is NOT required here, deliberately. This store must
 	// still be able to record an anchor produced by a ledger that does
 	// not supply one, and refusing would turn an unverifiable anchor
-	// into a stalled chain — strictly worse, because the chain stops
+	// into a stalled chain, strictly worse, because the chain stops
 	// while the anchor it refused was still real. The caller is the
 	// right place to insist (see VerdifaxAnchorer), and the export
 	// reports an empty preimage as unverifiable rather than hiding it.

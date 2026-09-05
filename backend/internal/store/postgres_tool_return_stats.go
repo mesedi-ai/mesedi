@@ -32,7 +32,7 @@ func (s *PostgresStore) GetToolReturnValueStats(
 	// must cast first: `ev.payload::jsonb->>'key'`. Same convention as
 	// postgres_detector_status.go. Without the cast Postgres raises
 	// "operator does not exist: text ->> unknown" (SQLSTATE 42883) and
-	// the handler 500s — which is exactly what was happening in prod on
+	// the handler 500s, which is exactly what was happening in prod on
 	// /me/tool-return-value-stats until this wave.
 	//
 	// COUNT(*) FILTER (WHERE ...) is more idiomatic than SUM(CASE)

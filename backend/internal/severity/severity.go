@@ -103,7 +103,7 @@ func Default(failureClass string) Severity {
 }
 
 // FromSDKValue maps the SDK's per-event severity string (one of
-// "warning" | "error" | "critical" — the vocabulary
+// "warning" | "error" | "critical", the vocabulary
 // validator_result() accepts on the Python + TS SDKs) to the
 // backend's 3-level Severity enum (Critical, Warning, Info).
 //

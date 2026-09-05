@@ -2,7 +2,7 @@
 //
 // drift.go ships two distinct drift signals:
 //
-//   - DetectModelDrift: categorical drift — a model in `current` is
+//   - DetectModelDrift: categorical drift, a model in `current` is
 //     not present in `historical`. Returns a "new_model:<id>"
 //     signature. Day-one safety: returns false when historical is
 //     empty (every model would otherwise look new).
@@ -14,7 +14,7 @@
 //     0.70). DefaultDriftThresholds + DriftThresholds.validForBucketing
 //     guard against bad customer-supplied overrides.
 //
-// These tests are 's drift_test.go coverage gap closeout —
+// These tests are 's drift_test.go coverage gap closeout ,
 // drift.go had 608 lines of production logic with zero unit tests
 // before this commit (integration tests in test_detectors.py only
 // covered the happy path via test_lexical_drift). The test cases
@@ -205,7 +205,7 @@ func Test_DetectLexicalDrift_InvalidThresholdsFallBackToDefaults(t *testing.T) {
 	historical := []string{"abc def ghi abc def ghi"}
 
 	bad := DriftThresholds{
-		LexicalLow:    0.80, // higher than Medium — invalid
+		LexicalLow:    0.80, // higher than Medium, invalid
 		LexicalMedium: 0.60,
 		LexicalHigh:   0.70,
 	}
@@ -312,7 +312,7 @@ func Test_DriftThresholds_validForBucketing(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// DefaultDriftThresholds — guard against accidental default drift
+// DefaultDriftThresholds, guard against accidental default drift
 // ─────────────────────────────────────────────────────────────────────
 
 func Test_DefaultDriftThresholds_LocksDocumentedValues(t *testing.T) {
@@ -337,7 +337,7 @@ func Test_DefaultDriftThresholds_LocksDocumentedValues(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// normalize helper — covered indirectly elsewhere, locked here
+// normalize helper, covered indirectly elsewhere, locked here
 // ─────────────────────────────────────────────────────────────────────
 
 func Test_normalize(t *testing.T) {

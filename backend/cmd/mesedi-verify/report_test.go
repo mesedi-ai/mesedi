@@ -8,7 +8,7 @@ import (
 
 // These three tests come from one run against production. Every unit
 // test passed, the cryptography was correct, checkpoint 24 verified
-// offline exactly as designed — and the report printed around that
+// offline exactly as designed, and the report printed around that
 // correct result contained three false statements.
 //
 // The lesson is not about wording. It is that the report's PROSE was
@@ -72,7 +72,7 @@ func TestReportDoesNotPointAtASectionItDidNotPrint(t *testing.T) {
 
 // The caveat must not name a cause it cannot know. It once asserted the
 // missing leaf preimage, which was the only possible cause when written
-// and is now one of at least three — so on this run it stated, with
+// and is now one of at least three, so on this run it stated, with
 // confidence, a reason that was false for all six checkpoints.
 func TestUnverifiableCaveatDoesNotAssertACauseItCannotKnow(t *testing.T) {
 	var buf bytes.Buffer

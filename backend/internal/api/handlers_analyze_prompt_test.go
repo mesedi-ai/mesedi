@@ -1,4 +1,4 @@
-// Unit tests for buildFailureGroupAnalysisPrompt — verifies the
+// Unit tests for buildFailureGroupAnalysisPrompt, verifies the
 // playbook-injection behavior added when the AI-analysis quality
 // audit (internal-extract/ai-analyses-vs-playbooks-audit.md) found
 // the previous prompt was sending only failure-group metadata to
@@ -55,7 +55,7 @@ func TestBuildFailureGroupAnalysisPrompt_InjectsPlaybook(t *testing.T) {
 		t.Errorf("expected playbook header in prompt; got:\n%s", prompt)
 	}
 
-	// (2) Playbook body landed — verify by checking for content
+	// (2) Playbook body landed, verify by checking for content
 	//     unique to the data_leakage playbook (the DLP-redaction-at-
 	//     ingest framing that the AI audit specifically called out
 	//     as missing from the model's outputs).
@@ -92,7 +92,7 @@ func TestBuildFailureGroupAnalysisPrompt_FallsBackWhenPlaybookMissing(t *testing
 	t.Parallel()
 	now := time.Now().UTC()
 	group := &store.FailureGroup{
-		// Unknown failure class — playbooks.Resolve returns false,
+		// Unknown failure class, playbooks.Resolve returns false,
 		// playbooks.Load returns ErrNotFound. The prompt builder
 		// should silently fall back to its pre-playbook shape.
 		FailureClass:       "nonexistent_class_for_test",
@@ -105,19 +105,19 @@ func TestBuildFailureGroupAnalysisPrompt_FallsBackWhenPlaybookMissing(t *testing
 
 	prompt := buildFailureGroupAnalysisPrompt(group, nil, nil, "")
 
-	// (1) Playbook header is NOT present — we fell back.
+	// (1) Playbook header is NOT present, we fell back.
 	if strings.Contains(prompt, "# Mesedi playbook for this failure class") {
 		t.Errorf("did not expect playbook header on fallback path; got:\n%s", prompt)
 	}
 
-	// (2) Playbook-anchored task instruction is NOT present — the
+	// (2) Playbook-anchored task instruction is NOT present, the
 	//     fallback uses the original prompt that doesn't reference
 	//     a playbook.
 	if strings.Contains(prompt, "Use the Mesedi playbook above") {
 		t.Errorf("did not expect playbook-anchored instruction on fallback path; got:\n%s", prompt)
 	}
 
-	// (3) Original prompt structure intact — failure-group metadata
+	// (3) Original prompt structure intact, failure-group metadata
 	//     + the standard task instruction still ship.
 	if !strings.Contains(prompt, "# Failure group context") {
 		t.Errorf("expected failure_group context section on fallback path; got:\n%s", prompt)
@@ -129,14 +129,14 @@ func TestBuildFailureGroupAnalysisPrompt_FallsBackWhenPlaybookMissing(t *testing
 
 func TestAnalysisSystemPrompt_MentionsKnobsAndSignatureDecomposition(t *testing.T) {
 	t.Parallel()
-	// — the two tail sentences in analysisSystemPrompt are
+	//, the two tail sentences in analysisSystemPrompt are
 	// what lift the two B-grade analyses (context_overflow,
 	// cost_velocity) to A- in the post-audit. If either of these
 	// sentences ever drops out of the constant, this test fails
 	// loudly so the system-prompt regression doesn't ship silently.
 
 	// (1) The per-project tuning knobs nudge. The exact phrasing
-	//     matters less than the keywords — if the wording changes,
+	//     matters less than the keywords, if the wording changes,
 	//     update the test to match, but the intent (mention knobs
 	//     by name when relevant) must remain.
 	if !strings.Contains(analysisSystemPrompt, "per-project tuning knobs") {
@@ -158,7 +158,7 @@ func TestAnalysisSystemPrompt_MentionsKnobsAndSignatureDecomposition(t *testing.
 	}
 
 	// (3) The existing system prompt directives are preserved
-	//     (regression guard — the new instructions extend, they
+	//     (regression guard, the new instructions extend, they
 	//     don't replace).
 	if !strings.Contains(analysisSystemPrompt, "Be precise, opinionated") {
 		t.Errorf("expected pre-existing 'Be precise, opinionated' directive to remain; got:\n%s", analysisSystemPrompt)
@@ -199,7 +199,7 @@ func TestBuildFailureGroupAnalysisPrompt_HandlesSubSignaturePlaybook(t *testing.
 
 func TestBuildFailureGroupAnalysisPrompt_RendersSampleEvents(t *testing.T) {
 	t.Parallel()
-	// — verifies that when sampleEvents is non-empty, the
+	//, verifies that when sampleEvents is non-empty, the
 	// prompt includes a `## Sample events from execution <id>` section
 	// with event type, sequence, timestamp, duration, and payload (with
 	// 500-char truncation). This is the structural difference that
@@ -227,7 +227,7 @@ func TestBuildFailureGroupAnalysisPrompt_RendersSampleEvents(t *testing.T) {
 	}
 
 	// Two events: a small payload (no truncation expected) and a
-	// large payload (truncation expected — past the 500-char cap).
+	// large payload (truncation expected, past the 500-char cap).
 	smallPayload, _ := json.Marshal(map[string]any{
 		"tool_name": "fetch_item",
 		"error":     "timeout",
@@ -264,7 +264,7 @@ func TestBuildFailureGroupAnalysisPrompt_RendersSampleEvents(t *testing.T) {
 		t.Errorf("expected events section header in prompt; got:\n%s", prompt)
 	}
 
-	// (2) Both event types land — the model needs the type to know
+	// (2) Both event types land, the model needs the type to know
 	//     how to interpret the payload schema.
 	if !strings.Contains(prompt, "tool_call") {
 		t.Errorf("expected tool_call event type in prompt; got:\n%s", prompt)
@@ -289,7 +289,7 @@ func TestBuildFailureGroupAnalysisPrompt_RendersSampleEvents(t *testing.T) {
 		t.Errorf("large payload should be truncated; full 600-char body should not be in prompt")
 	}
 
-	// (5) Sequence numbers ship — for ordered reasoning ("the third
+	// (5) Sequence numbers ship, for ordered reasoning ("the third
 	//     call was the one that failed").
 	if !strings.Contains(prompt, "seq=1") {
 		t.Errorf("expected seq=1 in events section; got:\n%s", prompt)
@@ -301,7 +301,7 @@ func TestBuildFailureGroupAnalysisPrompt_RendersSampleEvents(t *testing.T) {
 
 func TestBuildFailureGroupAnalysisPrompt_OmitsEventsSectionWhenEmpty(t *testing.T) {
 	t.Parallel()
-	// — when sampleEvents is nil/empty (event-fetch failed,
+	//, when sampleEvents is nil/empty (event-fetch failed,
 	// or the execution had no captured events), the prompt must
 	// silently omit the events section. The pre-K.2 prompt shape is
 	// preserved exactly so legacy analyses still ship cleanly.
@@ -325,7 +325,7 @@ func TestBuildFailureGroupAnalysisPrompt_OmitsEventsSectionWhenEmpty(t *testing.
 	if strings.Contains(prompt, "## Sample events from execution") {
 		t.Errorf("did not expect events section when sampleEvents is nil; got:\n%s", prompt)
 	}
-	// Sanity — the rest of the prompt is intact.
+	// Sanity, the rest of the prompt is intact.
 	if !strings.Contains(prompt, "**Likely cause**") {
 		t.Errorf("expected task instruction to still be present; got:\n%s", prompt)
 	}
@@ -333,7 +333,7 @@ func TestBuildFailureGroupAnalysisPrompt_OmitsEventsSectionWhenEmpty(t *testing.
 
 func TestBuildFailureGroupAnalysisPrompt_CapsAtMaxSampleEvents(t *testing.T) {
 	t.Parallel()
-	// — when sampleEvents exceeds MaxSampleEventsInPrompt,
+	//, when sampleEvents exceeds MaxSampleEventsInPrompt,
 	// the prompt renders only the first MaxSampleEventsInPrompt and
 	// includes a "showing first N of M events" footer so the model
 	// knows it's looking at a truncated window.

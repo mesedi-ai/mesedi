@@ -9,8 +9,8 @@ import (
 //
 // It is asserted rather than merely observed because of a failure mode
 // the compiler cannot see. Store is composed of six embedded
-// sub-interfaces, and if a method is DROPPED from one of them —
-// during a split, a merge, or a careless edit — nothing breaks. Every
+// sub-interfaces, and if a method is DROPPED from one of them ,
+// during a split, a merge, or a careless edit, nothing breaks. Every
 // implementation still has the method, the interface simply stops
 // requiring it, the package compiles, and the whole suite passes. A
 // requirement disappears in silence.
@@ -38,8 +38,8 @@ func TestStoreInterfaceIsComplete(t *testing.T) {
 				"If you ADDED a store method, bump StoreMethodCount in this file in "+
 				"the same commit.\n"+
 				"If you did not add one, a method has been dropped from an embedded "+
-				"sub-interface. That does not break the build — the implementations "+
-				"still have it and the interface just stopped requiring it — so this "+
+				"sub-interface. That does not break the build, the implementations "+
+				"still have it and the interface just stopped requiring it, so this "+
 				"test is the only thing that will tell you.",
 			got, StoreMethodCount)
 	}

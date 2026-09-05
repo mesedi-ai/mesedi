@@ -18,10 +18,10 @@ package api
 // unknown / empty tier falls back to the Hobby cap (strictest).
 //
 // sequence:
-//   B.a (this file) — registry + REST handlers + tier-cap accessor
-//   B.b — wire detectors to read per-project values
-//   B.c — dashboard editor
-//   B.d — telemetry + integration tests + customer docs
+//   B.a (this file), registry + REST handlers + tier-cap accessor
+//   B.b, wire detectors to read per-project values
+//   B.c, dashboard editor
+//   B.d, telemetry + integration tests + customer docs
 
 import (
 	"encoding/json"
@@ -42,7 +42,7 @@ type DetectorThresholdSpec struct {
 	// ThresholdKey is the spec's unique key within its detector
 	// ("revisit_threshold", "prefix_window_chars", etc).
 	ThresholdKey string
-	// ValueType is "int" or "float" — used by the handler to
+	// ValueType is "int" or "float", used by the handler to
 	// surface the expected JSON shape on validation errors.
 	ValueType string
 	// Description is a one-line plain-English explanation surfaced
@@ -51,7 +51,7 @@ type DetectorThresholdSpec struct {
 	Description string
 	// Default is the typed value the registry returns when no
 	// per-project override exists. MUST be the same value as the
-	// detector's existing hardcoded default — backward compat.
+	// detector's existing hardcoded default, backward compat.
 	Default any
 	// Parse validates valueJSON and returns the typed value or an
 	// error. Implementations enforce global bounds + the tier cap.
@@ -256,10 +256,10 @@ func init() {
 		},
 	})
 	// ─────────────────────────────────────────────────────────────
-	// Loops family — extends the primitive to a 4th detector
+	// Loops family, extends the primitive to a 4th detector
 	// family. Closes loops.G2 (step_count), loops.G3 (identical_call_
 	// loop), loops.G4 (similar_call_loop). All 4 knobs are pure
-	// alerting-sensitivity (no cost asymmetry across tiers — no tier
+	// alerting-sensitivity (no cost asymmetry across tiers, no tier
 	// caps). Defaults match the existing hardcoded values exactly so
 	// customers who never tune see byte-identical detector behavior.
 	// ─────────────────────────────────────────────────────────────
@@ -341,12 +341,12 @@ func init() {
 		},
 	})
 	// ─────────────────────────────────────────────────────────────
-	// extensions wave — closes grounding_failure.G3 +
+	// extensions wave, closes grounding_failure.G3 +
 	// cascading_failure.G2 + cascading_failure.G3 + hitl_rejection_
 	// spike.G3. Introduces two new ValueTypes ('bool' and 'json')
 	// to the validators registry. After this wave, the
 	// primitive supports the full {int, float, bool, json} value
-	// space — any future detector with structured config can ride
+	// space, any future detector with structured config can ride
 	// it without inventing new storage.
 	// ─────────────────────────────────────────────────────────────
 	registerThresholdSpec(&DetectorThresholdSpec{
@@ -428,7 +428,7 @@ func init() {
 			return v, nil
 		},
 	})
-	// hitl_timeout.G4 — per-project fire-mode toggle. Closed set
+	// hitl_timeout.G4, per-project fire-mode toggle. Closed set
 	// ["explicit", "sla_exceeded"]; default both fire (matches the
 	// historical hardcoded behavior). Customers can opt out of
 	// either mode when their stack pages explicit timeouts via a
@@ -461,12 +461,12 @@ func init() {
 			return v, nil
 		},
 	})
-	// context_overflow.G3 — per-project custom model windows. Unlocks
+	// context_overflow.G3, per-project custom model windows. Unlocks
 	// detection coverage for Ollama / fine-tuned models that aren't
 	// in the static models.ContextWindow registry. Customer overrides
 	// win even for KNOWN models (the customer knows their effective
-	// window — e.g. behind an upstream proxy with a tighter limit —
-	// better than the registry). NO tier cap — observability of
+	// window, e.g. behind an upstream proxy with a tighter limit ,
+	// better than the registry). NO tier cap, observability of
 	// self-hosted models is a Hobby-tier feature.
 	registerThresholdSpec(&DetectorThresholdSpec{
 		Detector:     "context_overflow",
@@ -492,7 +492,7 @@ func init() {
 			return m, nil
 		},
 	})
-	// — per-project custom_model_pricing override.
+	//, per-project custom_model_pricing override.
 	// Slots into the project_detector_thresholds bag under the
 	// "pricing" detector key. Wins over the canonical priceTable for
 	// the exact model name; per-prefix family entries in the
@@ -500,7 +500,7 @@ func init() {
 	// declare non-zero rates for Ollama fine-tunes (GPU/electricity
 	// amortization) or to ship pricing for an obscure commercial
 	// provider Mesedi does not yet ship priceTable entries for.
-	// NO tier cap — observability of self-hosted costs is a
+	// NO tier cap, observability of self-hosted costs is a
 	// Hobby-tier feature.
 	registerThresholdSpec(&DetectorThresholdSpec{
 		Detector:     "pricing",
@@ -531,10 +531,10 @@ func init() {
 			return m, nil
 		},
 	})
-	// data_leakage.G5 — per-project severity-firing policy. Closed
+	// data_leakage.G5, per-project severity-firing policy. Closed
 	// set ["critical", "high", "medium"]; default ["critical", "high"]
 	// matches the historical hardcoded posture in
-	// store.FindFirstDLPSignal's IN clause. NO tier cap — security
+	// store.FindFirstDLPSignal's IN clause. NO tier cap, security
 	// policy is customer judgment, not a cost knob (same posture as
 	// custom DLP patterns + allowlist + prompt-injection patterns).
 	registerThresholdSpec(&DetectorThresholdSpec{
@@ -566,7 +566,7 @@ func init() {
 }
 
 // registerThresholdSpec adds a spec to the registry. Panics on
-// duplicate (detector, threshold_key) — caught at startup.
+// duplicate (detector, threshold_key), caught at startup.
 func registerThresholdSpec(s *DetectorThresholdSpec) {
 	k := s.Detector + ":" + s.ThresholdKey
 	if _, exists := detectorThresholdRegistry[k]; exists {

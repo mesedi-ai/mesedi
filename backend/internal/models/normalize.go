@@ -16,13 +16,13 @@ package models
 //             e.g. gemini-1.5-flash-002
 //
 // Without normalization, ContextWindow + Provider + IsKnown all
-// return "unknown" for these routed identifiers — and the
+// return "unknown" for these routed identifiers, and the
 // context_overflow detector silently skips the execution, missing
 // real customer signals. With normalization, the routed identifier
 // resolves to the canonical entry already in the registry.
 //
 // Azure OpenAI uses customer-chosen deployment names (e.g.
-// "my-prod-gpt4") that are not deterministic — normalization is
+// "my-prod-gpt4") that are not deterministic, normalization is
 // impossible without a customer-supplied mapping. Azure customers
 // need the per-project model-window override (context_overflow.G3,
 // banked as separate wave).
@@ -56,7 +56,7 @@ var vertexSuffixRe = regexp.MustCompile(`-\d{3}$`)
 //
 // Algorithm: apply Bedrock prefix-strip + Bedrock suffix-strip
 // (independently, both may apply); then apply Vertex suffix-strip
-// (only if the Bedrock passes didn't already change the input —
+// (only if the Bedrock passes didn't already change the input ,
 // the `-NNN` Vertex pattern overlaps with `-vN:M` Bedrock if the
 // caller passed a mangled input, so prefer Bedrock when both
 // match).
@@ -65,11 +65,11 @@ var vertexSuffixRe = regexp.MustCompile(`-\d{3}$`)
 //
 //	"anthropic.claude-3-5-sonnet-20240620-v1:0" → "claude-3-5-sonnet"
 //	"cohere.command-r-plus-v1:0"                → ""
-//	  (wait — this case: `cohere.` strips first → `command-r-plus-v1:0`;
+//	  (wait, this case: `cohere.` strips first → `command-r-plus-v1:0`;
 //	   then bedrockSuffixRe doesn't match because no date; Vertex
 //	   doesn't match because no 3-digit suffix. Returns
 //	   `command-r-plus-v1:0`. NOT in registry. This is the right
-//	   behavior — Bedrock with no date segment isn't a valid
+//	   behavior, Bedrock with no date segment isn't a valid
 //	   Bedrock identifier; we treat it as unknown rather than
 //	   guessing.)
 //	"gemini-1.5-pro-001"                        → "gemini-1.5-pro"
@@ -96,7 +96,7 @@ func normalizeModelID(modelID string) string {
 		bedrockApplied = true
 	}
 	// Vertex suffix strip: `...-001` → `...`. Skip if Bedrock
-	// already touched the string — Bedrock's `-vN:M` doesn't
+	// already touched the string, Bedrock's `-vN:M` doesn't
 	// overlap with Vertex's `-NNN`, but if a caller passes a
 	// hybrid mangled string, preferring Bedrock first is the
 	// deterministic choice.

@@ -1,6 +1,6 @@
 package store
 
-// Per-project detector threshold overrides — SQLite implementation
+// Per-project detector threshold overrides, SQLite implementation
 // (migration 048). Backs . Matches the
 // postgres_detector_thresholds.go twin field-for-field.
 //
@@ -40,7 +40,7 @@ type DetectorThreshold struct {
 
 // GetProjectDetectorThreshold reads the override for the given
 // (projectID, detector, threshold_key). Returns ErrNotFound when
-// no override row exists — the caller falls back to the registry
+// no override row exists, the caller falls back to the registry
 // default in that case.
 func (s *SQLiteStore) GetProjectDetectorThreshold(
 	ctx context.Context,

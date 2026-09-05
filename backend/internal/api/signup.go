@@ -307,7 +307,7 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Tell the operator a human just signed up. Fire-and-forget on a
-	// goroutine and fails open — a webhook outage must never affect a
+	// goroutine and fails open, a webhook outage must never affect a
 	// signup that has already succeeded.
 	//
 	// The email is masked. The operator channel is a Discord server
@@ -330,7 +330,7 @@ func (h *Handlers) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	//    signups we issue a one-shot verification token and
 	//    embed the click-through URL in the welcome email so the
 	//    dashboard can gate behind email_verified=true. If token
-	//    issuance fails we still send the plain welcome — the user
+	//    issuance fails we still send the plain welcome, the user
 	//    can request a fresh verify link from the dashboard
 	//    interstitial later.
 	verifyURL := ""

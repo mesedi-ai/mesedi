@@ -14,7 +14,7 @@ import (
 // catch both, because each one looks like caution from the other side.
 //
 // Recording a PARTIAL proof is the first. A proof with no entry body
-// makes the Merkle walk start from the wrong value, so the walk fails —
+// makes the Merkle walk start from the wrong value, so the walk fails ,
 // and a verifier reporting a failed walk is saying "this does not
 // match", which is a claim about tampering. The truth is "this cannot
 // be checked". Those must not be confused, so a partial envelope is not
@@ -25,8 +25,8 @@ import (
 // as "not anchored" and retries on every tick, so a refusal here stops
 // checkpointing for every tenant. That is task #32 exactly: one
 // event-less execution halting the whole chain. A missing proof costs
-// offline verification and nothing else — the anchor is still fully
-// checkable by asking the log — and it must never cost the chain.
+// offline verification and nothing else, the anchor is still fully
+// checkable by asking the log, and it must never cost the chain.
 
 const testInclusionProof = `{"logIndex":2718374165,"rootHash":"dd44",` +
 	`"treeSize":2718374166,"hashes":["ee55","ff66"],"checkpoint":"rekor.sigstore.dev\n1\n"}`
@@ -160,8 +160,8 @@ func TestAnchorer_AnchorsWithoutAProofRatherThanHaltingTheChain(t *testing.T) {
 	anchor, err := a.AnchorCheckpoint(t.Context(), cp)
 	if err != nil {
 		t.Fatalf("a receipt with no offline proof halted the anchor: %v.\n"+
-			"A missing proof costs offline verification only — the anchor is still "+
-			"checkable against the log — and refusing it stops checkpointing for "+
+			"A missing proof costs offline verification only, the anchor is still "+
+			"checkable against the log, and refusing it stops checkpointing for "+
 			"every tenant on every tick", err)
 	}
 	if !anchor.Anchored {

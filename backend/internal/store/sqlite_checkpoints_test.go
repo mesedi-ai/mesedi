@@ -6,7 +6,7 @@ package store
 //
 // The store persists attest.Checkpoint field by field. Add a field to
 // that struct, forget to persist it, and a reloaded checkpoint carries
-// a zero value where the original had data — so it recomputes to a
+// a zero value where the original had data, so it recomputes to a
 // DIFFERENT hash, chain verification fails, and a verifier reports
 // tampering on a row nobody touched. That failure would point an
 // auditor at a crime that did not happen, which is worse than missing a
@@ -200,7 +200,7 @@ func TestCheckpointLeavesReturnInHashedOrder(t *testing.T) {
 	}
 	for i := range leaves {
 		if got[i].ProjectID != leaves[i].ProjectID {
-			t.Fatalf("leaf %d is %q, want %q — leaves are not coming back in the "+
+			t.Fatalf("leaf %d is %q, want %q, leaves are not coming back in the "+
 				"order they were hashed, so the tree cannot be reproduced",
 				i, got[i].ProjectID, leaves[i].ProjectID)
 		}
@@ -376,7 +376,7 @@ func TestEditedLeafRowIsDetectedOnLoad(t *testing.T) {
 		t.Fatalf("InsertCheckpoint: %v", err)
 	}
 
-	// Understate one tenant's activity, leaving leaf_hash alone — the
+	// Understate one tenant's activity, leaving leaf_hash alone, the
 	// edit someone would make to shrink what a customer appears to have
 	// run.
 	if _, err := s.db.ExecContext(ctx, `
@@ -393,7 +393,7 @@ func TestEditedLeafRowIsDetectedOnLoad(t *testing.T) {
 		t.Error("LatestTenantLeaf returned an edited leaf without complaint; the " +
 			"next leaf would be built on a corrupted predecessor")
 	}
-	// An untouched project must still read fine — the check has to be
+	// An untouched project must still read fine, the check has to be
 	// per row, not a blanket failure that hides which row is bad.
 	if _, err := s.LatestTenantLeaf(ctx, "proj-alpha"); err != nil {
 		t.Errorf("an untouched project's leaf failed to load: %v", err)

@@ -2,7 +2,7 @@ package store
 
 // Per-project provider_incident detector threshold store methods,
 // SQLite implementation (migration 040). Sidecar file matching the
-// retention helper layout — keeps the main sqlite.go projects-table
+// retention helper layout, keeps the main sqlite.go projects-table
 // scans unchanged. Reads/writes only the
 // provider_incident_min_tenants column.
 

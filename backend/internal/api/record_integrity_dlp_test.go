@@ -12,7 +12,7 @@ import (
 // A DLP sibling reuses its parent's sequence number so the dashboard can
 // render the pair together. record_integrity reads the SET of sequence
 // values, so that shared number looked like the customer claiming one
-// sequence twice — and the signal fired on EVERY execution with a
+// sequence twice, and the signal fired on EVERY execution with a
 // critical or high-severity DLP hit. The customer was told their records
 // were corrupt, by us, about an event we wrote, at the moment they had a
 // real leak to deal with.

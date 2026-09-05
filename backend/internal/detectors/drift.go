@@ -14,7 +14,7 @@
 //     diverged from the project's historical 3-gram distribution
 //     beyond a configured cosine cutoff. Signature shapes:
 //     "lexical_drift_<cutoff>+" with the tripped bucket's value
-//     (defaults 0.45/0.55/0.70 — low/medium/high). Per-project
+//     (defaults 0.45/0.55/0.70, low/medium/high). Per-project
 //     tunable via DriftThresholds.
 //
 // What this file does NOT do: it does not consider WHICH agent or
@@ -178,7 +178,7 @@ func DefaultDriftThresholds() DriftThresholds {
 // back to the all-defaults path; bucketing chaos is worse than
 // ignoring the customer's broken override. The validators registry
 // rejects out-of-range values at write time but does NOT enforce
-// cross-threshold ordering — the detector is the last line of
+// cross-threshold ordering, the detector is the last line of
 // defense for that constraint.
 func (t DriftThresholds) validForBucketing() bool {
 	if t.LexicalLow < 0 || t.LexicalLow > 1 {
@@ -224,7 +224,7 @@ func DetectLexicalDrift(current, historical []string) (signature string, distanc
 // tuned values match the defaults exactly) see the historical
 // "lexical_drift_0.45+" / "0.55+" / "0.70+" signatures. Customers
 // who tune get signatures embedding THEIR cutoff values, e.g.
-// "lexical_drift_0.60+" — keeps the dashboard signature filter
+// "lexical_drift_0.60+", keeps the dashboard signature filter
 // meaningful for tuned projects.
 func DetectLexicalDriftWithThresholds(
 	current, historical []string,
@@ -429,7 +429,7 @@ const (
 	// MaxSimilarCallScanWindow caps the most-recent N user_messages
 	// scanned by DetectSimilarCallLoopWithThresholds. Closes
 	// loops.G9: the pairwise O(N²) cosine-distance scan is otherwise
-	// unbounded — an ReAct agent emitting 10K LLM calls would pay
+	// unbounded, an ReAct agent emitting 10K LLM calls would pay
 	// ~100M trigram-distance computations per execution-close
 	// (seconds of compute). Cap at 200 → max 40K comparisons,
 	// sub-second worst case. Recent-N preserves signal: stuck loops
@@ -513,7 +513,7 @@ func DetectSimilarCallLoopWithThresholds(
 		minCluster = SimilarCallMinClusterSize
 	}
 
-	// loops.G9 — cap N at the most-recent MaxSimilarCallScanWindow
+	// loops.G9, cap N at the most-recent MaxSimilarCallScanWindow
 	// before the pairwise O(N²) scan. Stuck loops are recent
 	// activity; the historical tail of a long session adds compute
 	// cost without detection value. Pre-cap so bag building also

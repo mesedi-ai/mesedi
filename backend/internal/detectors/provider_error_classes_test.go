@@ -52,7 +52,7 @@ func Test_ProviderSideErrorClasses_NonEmpty(t *testing.T) {
 }
 
 func Test_IsProviderSideErrorClass_ProviderSide(t *testing.T) {
-	// Classes the provider is responsible for — MUST trigger
+	// Classes the provider is responsible for, MUST trigger
 	// cross-tenant aggregation.
 	cases := []string{
 		ErrorClassRateLimited,
@@ -70,7 +70,7 @@ func Test_IsProviderSideErrorClass_ProviderSide(t *testing.T) {
 }
 
 func Test_IsProviderSideErrorClass_CustomerSide(t *testing.T) {
-	// Classes the customer is responsible for — MUST NOT trigger
+	// Classes the customer is responsible for, MUST NOT trigger
 	// cross-tenant aggregation (would generate noise grouping
 	// unrelated customer-side errors together).
 	cases := []string{

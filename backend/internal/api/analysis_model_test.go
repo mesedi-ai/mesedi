@@ -62,12 +62,12 @@ func TestAnalysisModelForTier_LegacyProNormalizesToStandard(t *testing.T) {
 // Uses HasExplicitRate rather than comparing rates by value: sonnet-5's
 // real price ($2/$10) is identical to UnknownModelRate, so a value
 // comparison reports it missing even when it is correctly listed. That
-// is not hypothetical — this test failed that exact way on first run.
+// is not hypothetical, this test failed that exact way on first run.
 func TestAnalysisModelsHaveExplicitPricing(t *testing.T) {
 	t.Parallel()
 	for _, model := range []string{AnalysisModelStandard, AnalysisModelPremium} {
 		if !anthropic.HasExplicitRate(model) {
-			t.Errorf("%s is not in modelRates — add an explicit entry in "+
+			t.Errorf("%s is not in modelRates, add an explicit entry in "+
 				"internal/anthropic/pricing.go so cost reporting isn't a "+
 				"coincidence", model)
 		}

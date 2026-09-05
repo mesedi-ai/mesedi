@@ -19,7 +19,7 @@ import (
 //
 // The Postgres twin is not tested here. Per the project's documented
 // B18 exemption in .git/foundation_audit.conf, no store sidecar test
-// has a Postgres twin yet — the SQLite in-memory pattern is the
+// has a Postgres twin yet, the SQLite in-memory pattern is the
 // established style and the Postgres CI path is tracked as its own
 // task rather than being re-litigated in each detector's commit.
 func TestGroupRecordIntegrityUsesTheRecordIntegrityClass(t *testing.T) {
@@ -50,7 +50,7 @@ func TestGroupRecordIntegrityUsesTheRecordIntegrityClass(t *testing.T) {
 	}
 	// Note the status: an execution with a hole in its event record can
 	// have completed perfectly well. Seeding it as completed rather
-	// than crashed keeps the test honest about what this class means —
+	// than crashed keeps the test honest about what this class means ,
 	// the record is incomplete, not the run.
 	if err := s.CreateExecution(ctx, &events.Execution{
 		ExecutionID: executionID,
@@ -76,7 +76,7 @@ func TestGroupRecordIntegrityUsesTheRecordIntegrityClass(t *testing.T) {
 		t.Fatalf("GetFailureGroupByClassSignature: %v", err)
 	}
 	if g == nil {
-		t.Fatal("no group created under failure_class=record_integrity — " +
+		t.Fatal("no group created under failure_class=record_integrity, " +
 			"the wrapper is grouping under the wrong class")
 	}
 	if g.FailureClass != FailureClassRecordIntegrity {

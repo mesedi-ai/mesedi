@@ -13,7 +13,7 @@ package detectors
 
 // ErrorClass* constants re-export the generated wire-format values
 // under the historical Go-style names. The generated file is the
-// source of truth — these are bindings, not declarations.
+// source of truth, these are bindings, not declarations.
 var (
 	ErrorClassRateLimited        = ErrorClassValues["RATE_LIMITED"]
 	ErrorClassQuotaExhausted     = ErrorClassValues["QUOTA_EXHAUSTED"]

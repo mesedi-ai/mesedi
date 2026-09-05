@@ -1,7 +1,7 @@
 package detectors
 
 // Unit tests for cascading_failure WithThresholds variants
-// (extensions wave — closes G2 + G3). Covers:
+// (extensions wave, closes G2 + G3). Covers:
 //   - Default thresholds preserve historical behavior.
 //   - Cascade-window filter excludes child-failures whose
 //     ChildEndedAt is more than CascadeWindowSeconds after
@@ -10,7 +10,7 @@ package detectors
 //     when ExcludeSpawnHandoffs is true.
 //   - Legacy DetectCascadingFailure wrapper produces byte-identical
 //     behavior to DetectCascadingFailureWithThresholds(rows,
-//     defaults) — backward compat.
+//     defaults), backward compat.
 //   - Bad config (window out of bounds) falls back to default.
 
 import (
@@ -45,11 +45,11 @@ func Test_CascadingFailure_LegacyWrapperUsesDefaults(t *testing.T) {
 		rows, DefaultCascadingFailureThresholds(),
 	)
 	if legacyFired != newFired {
-		t.Errorf("legacy fired=%v vs WithThresholds default fired=%v — backward compat broken",
+		t.Errorf("legacy fired=%v vs WithThresholds default fired=%v, backward compat broken",
 			legacyFired, newFired)
 	}
 	if legacySig != newSig {
-		t.Errorf("legacy sig=%q vs WithThresholds default sig=%q — backward compat broken",
+		t.Errorf("legacy sig=%q vs WithThresholds default sig=%q, backward compat broken",
 			legacySig, newSig)
 	}
 }

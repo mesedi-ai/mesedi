@@ -110,7 +110,7 @@ func (s *SQLiteStore) ListRequestLog(
 	// ("project_id = ?", "api_key_id = ?", etc.). All user-supplied
 	// values flow through args... as parameterized placeholders, never
 	// into the concatenated SQL fragment.
-	//nolint:gosec // G202: false positive — see comment above.
+	//nolint:gosec // G202: false positive, see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT log_id, project_id, api_key_id, ip_address,
 		       method, path, status_code, received_at
@@ -223,7 +223,7 @@ func (s *PostgresStore) ListRequestLog(
 	// via fmt.Sprintf format strings under this function's control.
 	// All user-supplied values flow through args... as parameterized
 	// placeholders, never into the concatenated SQL fragment.
-	//nolint:gosec // G202: false positive — see comment above.
+	//nolint:gosec // G202: false positive, see comment above.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT log_id, project_id, api_key_id, ip_address,
 		       method, path, status_code, received_at

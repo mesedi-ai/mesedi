@@ -14,7 +14,7 @@ import (
 
 // startBackgroundWorkers starts every long-running worker the API process
 // owns. It was lifted out of main() unchanged: main() had grown past 1000
-// lines and roughly an eighth of it was this one responsibility — deciding
+// lines and roughly an eighth of it was this one responsibility, deciding
 // which periodic jobs run and with what dependencies. That is a question
 // worth being able to answer by opening one file.
 //
@@ -133,8 +133,8 @@ func startBackgroundWorkers(
 // Not started, rather than started with a nil anchorer, because a scheduler
 // with nowhere to anchor still builds a genesis checkpoint and then stalls.
 // That would leave an orphan un-anchored checkpoint in the database of
-// every deployment that never configured Verdifax — including self-hosters
-// — and an un-anchored chain is worth nothing. Building one with no
+// every deployment that never configured Verdifax, including self-hosters
+// , and an un-anchored chain is worth nothing. Building one with no
 // prospect of anchoring is noise that looks like a half-working feature.
 //
 // It also spends money. Once VERDIFAX_LEDGER_MODE=rekor on the Verdifax

@@ -1,4 +1,4 @@
-// Unit tests for requireEmailVerified — the shared email-verified
+// Unit tests for requireEmailVerified, the shared email-verified
 // gate that runs on every authenticated request from both auth
 // paths (Bearer API key + session cookie).
 //
@@ -8,14 +8,14 @@
 //     file was written to prevent: admin login was 403'ing
 //     "email_not_verified" because the internal _admin project's
 //     OwnerEmail had never been through the customer email-verify
-//     flow — a category error, admin auth is not customer
+//     flow, a category error, admin auth is not customer
 //     onboarding).
 //   - The specific exempt endpoint /me/email-verification-status
 //     stays bypassed so the dashboard interstitial can poll it.
 //   - MESEDI_DISABLE_EMAIL_VERIFY_GATE=1 env-var bypass still
 //     wins over every path check (integration-test posture).
 //   - Fail-open on transient DB error (missing project or
-//     IsEmailVerified error) — a healthy request must not be
+//     IsEmailVerified error), a healthy request must not be
 //     blocked by a DB blip.
 
 package api
@@ -107,7 +107,7 @@ func TestRequireEmailVerified_CustomerRouteUnverifiedIs403(t *testing.T) {
 	// dashboard + SDKs can surface a precise message.
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		t.Fatalf("body not valid JSON: %v — raw=%s", err, string(body))
+		t.Fatalf("body not valid JSON: %v, raw=%s", err, string(body))
 	}
 	if parsed["error"] != "email_not_verified" {
 		t.Errorf("expected error=email_not_verified; got %q", parsed["error"])
@@ -166,7 +166,7 @@ func TestRequireEmailVerified_AdminPathBypassesEvenIfEmailUnverified(t *testing.
 
 // TestRequireEmailVerified_AdminPrefixIsExact prevents an
 // over-broad prefix match. "/administrator" or a customer route
-// like "/orgs/admin/foo" must NOT be exempt — only paths that begin
+// like "/orgs/admin/foo" must NOT be exempt, only paths that begin
 // exactly with "/admin/".
 func TestRequireEmailVerified_AdminPrefixIsExact(t *testing.T) {
 	t.Parallel()
@@ -182,7 +182,7 @@ func TestRequireEmailVerified_AdminPrefixIsExact(t *testing.T) {
 	// therefore must still gate.
 	notAdmin := []string{
 		"/administrator",  // does NOT start with "/admin/"
-		"/admin",          // bare "/admin" (no trailing slash) — not exempt
+		"/admin",          // bare "/admin" (no trailing slash), not exempt
 		"/orgs/admin/foo", // "admin" segment inside customer path
 	}
 	for _, p := range notAdmin {
@@ -198,7 +198,7 @@ func TestRequireEmailVerified_AdminPrefixIsExact(t *testing.T) {
 }
 
 // TestRequireEmailVerified_StatusEndpointExempt guards the one
-// customer-facing exempt path — the dashboard's poll endpoint that
+// customer-facing exempt path, the dashboard's poll endpoint that
 // the verify interstitial uses to detect when the user has clicked
 // the magic link in another tab. If this regresses the interstitial
 // loops forever.
@@ -222,7 +222,7 @@ func TestRequireEmailVerified_StatusEndpointExempt(t *testing.T) {
 // escape hatch. When MESEDI_DISABLE_EMAIL_VERIFY_GATE=1 the gate
 // skips regardless of path, project, or verification state.
 func TestRequireEmailVerified_EnvBypass(t *testing.T) {
-	// Intentionally NOT t.Parallel — this test mutates process env.
+	// Intentionally NOT t.Parallel, this test mutates process env.
 	t.Setenv("MESEDI_DISABLE_EMAIL_VERIFY_GATE", "1")
 	s := &stubEmailVerifyStore{
 		projects: map[string]*store.Project{
@@ -245,7 +245,7 @@ func TestRequireEmailVerified_MissingProjectFailsOpen(t *testing.T) {
 	t.Parallel()
 	s := &stubEmailVerifyStore{
 		projects: map[string]*store.Project{},
-		// getProjectErr not set — GetProject returns ErrNotFound.
+		// getProjectErr not set, GetProject returns ErrNotFound.
 	}
 	allowed, code, _ := runGate(t, s, "/executions", "proj_missing")
 	if !allowed {
@@ -253,7 +253,7 @@ func TestRequireEmailVerified_MissingProjectFailsOpen(t *testing.T) {
 	}
 }
 
-// TestRequireEmailVerified_IsEmailVerifiedErrorFailsOpen — same
+// TestRequireEmailVerified_IsEmailVerifiedErrorFailsOpen, same
 // posture for the second lookup failing.
 func TestRequireEmailVerified_IsEmailVerifiedErrorFailsOpen(t *testing.T) {
 	t.Parallel()
@@ -286,7 +286,7 @@ func TestRequireEmailVerified_AdminPrefixIsRegistered(t *testing.T) {
 		t.Errorf("/admin/ prefix missing from emailVerifyExemptPathPrefixes; " +
 			"admin login will 403 on any project whose OwnerEmail is unverified")
 	}
-	// Also assert the prefix has a trailing slash — a bare "/admin"
+	// Also assert the prefix has a trailing slash, a bare "/admin"
 	// would over-match "/administrator" and any customer path
 	// containing "admin" as a substring.
 	for _, prefix := range emailVerifyExemptPathPrefixes {

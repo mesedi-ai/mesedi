@@ -56,7 +56,7 @@ type AllowlistDetectorStats struct {
 
 // ListProjectAllowlist returns the customer-defined allowlist
 // entries for the given (projectID, detector) pair, ordered by
-// created_at ascending (oldest first — preserves customer-perceived
+// created_at ascending (oldest first, preserves customer-perceived
 // row stability across dashboard reloads).
 func (s *SQLiteStore) ListProjectAllowlist(
 	ctx context.Context,
@@ -293,7 +293,7 @@ func (s *SQLiteStore) GetAllowlistStats(
 // We update by (project_id, detector, allowlist_key) rather than
 // by allowlist_id because the detector hot path knows the
 // signature but not the row's primary key. The query is the same
-// shape as CheckAllowlistMatch — same indexed lookup — so cost is
+// shape as CheckAllowlistMatch, same indexed lookup, so cost is
 // minimal.
 func (s *SQLiteStore) IncrementAllowlistMatchCount(
 	ctx context.Context,

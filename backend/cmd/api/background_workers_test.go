@@ -105,7 +105,7 @@ func TestCheckpointChainDisabledWhenUnconfigured(t *testing.T) {
 			// is an interface. Assigning a typed nil pointer to an interface
 			// produces a NON-NIL interface, so a refactor that stores the
 			// result first and nil-checks the interface would start the
-			// scheduler with an anchorer that panics on first use — 30
+			// scheduler with an anchorer that panics on first use, 30
 			// seconds after boot, in production, with nothing else wrong.
 			// startCheckpointChain nil-checks the concrete pointer before
 			// the assignment precisely to avoid that. This asserts the
@@ -140,7 +140,7 @@ func TestCheckpointChainEnabledWhenFullyConfigured(t *testing.T) {
 }
 
 // The API key is a credential. Startup logs are the most widely shipped,
-// least access-controlled output the process produces — they land in Fly's
+// least access-controlled output the process produces, they land in Fly's
 // log stream and in whatever aggregator is attached. A key that appears
 // there is disclosed, and rotating it is the only remedy.
 func TestCheckpointChainNeverLogsTheAPIKey(t *testing.T) {

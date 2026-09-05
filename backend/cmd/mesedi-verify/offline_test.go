@@ -23,9 +23,9 @@ import (
 // property working: a forged proof does not verify.
 //
 // The consequence is that the green path is provable only against a real
-// production checkpoint, not in CI. Everything else — every way a proof
+// production checkpoint, not in CI. Everything else, every way a proof
 // can be absent, malformed, from the wrong log, or about the wrong
-// record — is covered below, and the one that matters most is
+// record, is covered below, and the one that matters most is
 // TestOfflineRefusesAProofAboutADifferentRecord.
 
 // rekorEntryBodyFor builds a base64 hashedrekord body that records the
@@ -80,7 +80,7 @@ func intervalWithProof(preimage string, proof json.RawMessage) attest.ExportedIn
 // THE ONE THAT MATTERS.
 //
 // A Merkle inclusion proof says an entry is in the log. It says nothing
-// about whether that entry concerns your checkpoint — read rekorproof.go:
+// about whether that entry concerns your checkpoint, read rekorproof.go:
 // when EntryBody is set, VerifyAnchor computes the leaf from the body and
 // never looks at LeafHashHex. So a real, valid, unmodified proof lifted
 // from an unrelated Rekor entry passes every cryptographic check in it.
@@ -90,7 +90,7 @@ func intervalWithProof(preimage string, proof json.RawMessage) attest.ExportedIn
 // else's data, which is worse than being wrong: it is being wrong in a
 // way an auditor has no way to notice.
 func TestOfflineRefusesAProofAboutADifferentRecord(t *testing.T) {
-	// A genuine entry body — for a completely different preimage.
+	// A genuine entry body, for a completely different preimage.
 	somebodyElse := rekorEntryBodyFor("verdifax.ledger.input.v2.env.SOMEONE-ELSE.bind.9")
 
 	res := verifyAnchorOffline(intervalWithProof(testPreimage,
@@ -142,7 +142,7 @@ func TestOfflineGetsPastTheBindingWhenTheEntryIsOurs(t *testing.T) {
 }
 
 // Rekor's global entry id and the proof's in-tree position are
-// different numbers for the same entry — on production, 2725800899 and
+// different numbers for the same entry, on production, 2725800899 and
 // 2603896637, a gap of ~122 million being the earlier shards. The
 // report shows both. If it does not say they are different measures, an
 // auditor reads the pair as the verifier having caught something.
@@ -178,7 +178,7 @@ func TestVerifiedDetailExplainsTheTwoIndexSpaces(t *testing.T) {
 
 // Everything that should leave the question OPEN rather than answer it.
 // Each of these must fall through to a log lookup, because none of them
-// is a statement about the record — they are statements about the proof
+// is a statement about the record, they are statements about the proof
 // or about this binary.
 func TestOfflineFallsThroughRatherThanAccusing(t *testing.T) {
 	good := rekorEntryBodyFor(testPreimage)
@@ -252,7 +252,7 @@ func TestOfflineDoesNotBlameTheRecordForTheVerifiersKey(t *testing.T) {
 
 // Verdifax serialises pkg/ledger.InclusionProof with no JSON tags, so its
 // field names on the wire are Go's defaults. This parser has no tags
-// either, which makes encoding/json match case-insensitively — so it
+// either, which makes encoding/json match case-insensitively, so it
 // keeps working if that struct ever gains lower-case tags. Pinned here
 // because the tolerance is a property of leaving tags off, and someone
 // "tidying up" by adding them would remove it.

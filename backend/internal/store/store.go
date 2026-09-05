@@ -259,7 +259,7 @@ type APIKey struct {
 	// credentials (e.g. a read-only key for a monitoring script or
 	// a write key for a CI pipeline) without having to invite a new
 	// user to hold the reduced role. Empty preserves legacy
-	// behavior — every pre-056 key resolves via user role.
+	// behavior, every pre-056 key resolves via user role.
 	Role string `json:"role,omitempty"`
 }
 
@@ -359,10 +359,10 @@ type ProjectWebhook struct {
 	SeverityFilter string `json:"severity_filter"`
 	// RecurrenceMode controls whether the webhook fires on recurrences
 	// of an existing failure group. One of:
-	//   "off"         — only fire on new failure groups (default; matches
+	//   "off"        , only fire on new failure groups (default; matches
 	//                   behavior for every legacy webhook).
-	//   "every_event" — fire on every recurrence with no throttling.
-	//   "throttled"   — fire on the first recurrence in each rolling
+	//   "every_event", fire on every recurrence with no throttling.
+	//   "throttled"  , fire on the first recurrence in each rolling
 	//                   window of RecurrenceWindowSeconds, suppress
 	//                   further recurrences until the window elapses.
 	// The dispatcher treats unknown values as "off" so a malformed
@@ -392,7 +392,7 @@ const (
 )
 
 // WebhookRecurrenceState is one row of the webhook_recurrence_state
-// table — the last time a given webhook fired for a specific failure
+// table, the last time a given webhook fired for a specific failure
 // group. The dispatcher reads this row to decide whether the
 // throttled-mode window has elapsed; upserts it on every successful
 // fire so the next decision has the right baseline.
@@ -640,7 +640,7 @@ const (
 	// It reports incompleteness, NOT tampering. A gap is far more
 	// often a dropped request or an SDK killed mid-flush than anyone
 	// deleting anything, and the detector documentation says so
-	// plainly — an integrity signal that overclaims gets ignored.
+	// plainly, an integrity signal that overclaims gets ignored.
 	// Proving a record was not altered after the fact requires it to
 	// have been signed when written, which this service does not do.
 	FailureClassRecordIntegrity = "record_integrity"
@@ -668,12 +668,12 @@ type FailureGroup struct {
 	// as SUM(executions.total_tokens_in / total_tokens_out) across all
 	// executions linked to the group (same rollup pattern as
 	// CostWastedUSD). TotalTokens is the sum of the two. Populated
-	// only when the summed value is positive — nil means "no LLM
+	// only when the summed value is positive, nil means "no LLM
 	// call in this group's executions had recorded token usage."
 	// The dashboard's per-failure-class metric policy decides which
-	// failure_class surfaces these fields prominently (Tier 1 — token
-	// classes), as secondary context (Tier 2 — most classes), or hides
-	// them on the group header entirely (Tier 3 — HITL / tool /
+	// failure_class surfaces these fields prominently (Tier 1, token
+	// classes), as secondary context (Tier 2, most classes), or hides
+	// them on the group header entirely (Tier 3, HITL / tool /
 	// coordination classes where tokens are non-diagnostic). See
 	// mesedi-web/dashboard/lib/failureClass.ts for the policy.
 	TotalTokensIn     *int64 `json:"total_tokens_in,omitempty"`
@@ -708,7 +708,7 @@ type FailureGroup struct {
 	// failure_group was created (migration 047). Today only
 	// validator_failures populates it (via the SDK
 	// `validator_result(..., severity=...)` parameter). NULL means
-	// no hint was supplied — severity resolution falls through to
+	// no hint was supplied, severity resolution falls through to
 	// the class default. Severity precedence (+ validator
 	// failures.G1):
 	//   1. project_class_severities override
@@ -723,7 +723,7 @@ type FailureGroup struct {
 	// ListFailureGroupsOpts.IncludeResolved to surface them again.
 	// Sentry-style semantic: new events for a resolved group's
 	// signature still cluster into it and update last_seen but do
-	// NOT auto-reopen — only an explicit Unresolve action does that.
+	// NOT auto-reopen, only an explicit Unresolve action does that.
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 	ResolvedBy *string    `json:"resolved_by,omitempty"`
 }
@@ -874,8 +874,8 @@ type CheckpointAnchor struct {
 	// at LogEntryID is committed under a root the log signed. It is what
 	// makes a checkpoint verifiable WITHOUT contacting the log.
 	//
-	// A JSON envelope with three members — log_id, entry_body and
-	// inclusion_proof — carried as opaque bytes rather than parsed into
+	// A JSON envelope with three members, log_id, entry_body and
+	// inclusion_proof, carried as opaque bytes rather than parsed into
 	// typed fields, because it is Verdifax's and Sigstore's evidence
 	// passing through Mesedi, not Mesedi's own data. Re-encoding it here
 	// would silently drop anything either of them adds later.

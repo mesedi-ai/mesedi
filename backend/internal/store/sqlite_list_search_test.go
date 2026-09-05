@@ -4,7 +4,7 @@
 // so the test stays scoped to the search semantics.
 //
 // Coverage focus: q-filter behavior. The existing
-// limit/offset/ordering paths are not re-tested here — those have
+// limit/offset/ordering paths are not re-tested here, those have
 // been in production for months and a regression would surface
 // the existing /failure-groups and /executions endpoints, not
 // the q-filter.
@@ -33,7 +33,7 @@ func openMinimalListStore(t *testing.T) *SQLiteStore {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
-	// failure_groups + executions schemas — just the columns
+	// failure_groups + executions schemas, just the columns
 	// ListFailureGroups + ListExecutions touch. Keep it minimal so
 	// the test isn't dragged into the full migration sequence.
 	if _, err := db.Exec(`
@@ -285,7 +285,7 @@ func TestResolveFailureGroup_TenantScopedReturnsNotFound(t *testing.T) {
 	st := openMinimalListStore(t)
 	insertGroup(t, st, "g1", "crashes", "ValueError:foo")
 
-	// Attempt to resolve from a different project — must return
+	// Attempt to resolve from a different project, must return
 	// ErrNotFound, no cross-tenant leak.
 	err := st.ResolveFailureGroup(context.Background(), "g1", "other_proj", "user_y")
 	if err != ErrNotFound {

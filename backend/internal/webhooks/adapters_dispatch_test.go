@@ -2,8 +2,8 @@
 //
 // Complements adapters_test.go (which unit-tests the Build*Body pure
 // functions in isolation). This file drives the FULL Deliver()
-// pipeline — URL routing → adapter selection → HMAC decision → HTTP
-// request assembly → wire bytes on the outbound side — against three
+// pipeline, URL routing → adapter selection → HMAC decision → HTTP
+// request assembly → wire bytes on the outbound side, against three
 // mock destinations, and asserts the exact bytes each receiver would
 // see. No network, no credentials, no live Slack / PagerDuty / Discord
 // account required.
@@ -17,24 +17,24 @@
 //
 // What each destination assertion covers, at a glance:
 //
-//	Slack       — body is Block Kit (blocks[]: header, section, context);
+//	Slack      , body is Block Kit (blocks[]: header, section, context);
 //	              Content-Type application/json; X-Mesedi-Signature present
 //	              (HMAC over the ADAPTED body, not the canonical Payload).
-//	PagerDuty   — body has routing_key = webhook.AuthToken (NOT Secret),
+//	PagerDuty  , body has routing_key = webhook.AuthToken (NOT Secret),
 //	              event_action = "trigger", dedup_key stable per
 //	              (project_id, group_id) for real events and per
 //	              delivery_id for test events (so the "Test webhook"
 //	              button can never merge into an active on-call incident),
 //	              severity clamped to PagerDuty's 4-value vocabulary;
 //	              X-Mesedi-Signature ABSENT per AdapterSkipsHMAC.
-//	Discord     — body has embeds[] with title, description, color as
+//	Discord    , body has embeds[] with title, description, color as
 //	              a decimal int (Discord rejects hex strings), footer
 //	              carrying the delivery_id; X-Mesedi-Signature present.
 //
 // If any of these break, the resulting Slack message renders as raw
 // JSON, the PagerDuty event 400s with "invalid routing_key", or the
 // Discord embed silently drops. All three are customer-visible
-// regressions — this file is the wall between them and prod.
+// regressions, this file is the wall between them and prod.
 
 package webhooks
 
@@ -145,13 +145,13 @@ func newRealPayload() Payload {
 // newSlackWebhook + newDiscordWebhook + newPagerDutyWebhook mint
 // canonical ProjectWebhook rows whose URLs pass each destination's
 // pattern-match. Secret is a fixed 64-char hex string so the HMAC
-// signature stays deterministic across test runs — makes debugging
+// signature stays deterministic across test runs, makes debugging
 // easier when an assertion fails.
 func newSlackWebhook() *store.ProjectWebhook {
 	return &store.ProjectWebhook{
 		WebhookID: "wh_wireshape",
 		ProjectID: "proj_wireshape",
-		// isSlackURL is a prefix match — segments after the prefix can
+		// isSlackURL is a prefix match, segments after the prefix can
 		// be arbitrarily short. We use T0/B0/xxx so the URL passes
 		// isSlackURL without matching GitHub's secret-scan regex for
 		// Slack incoming-webhook or workflow-trigger URLs (both
@@ -181,7 +181,7 @@ func newPagerDutyWebhook() *store.ProjectWebhook {
 		// PagerDuty adapter reads AuthToken (32-char integration key),
 		// NOT Secret. Any 32-char hex works for the shape test.
 		AuthToken: "00000000000000000000000000000000",
-		// Secret is still set — the point of the assertion below is
+		// Secret is still set, the point of the assertion below is
 		// that PagerDuty's body carries AuthToken, NEVER Secret.
 		Secret: "PLAINTEXT-HMAC-SECRET-NEVER-SEND-TO-PAGERDUTY",
 	}
@@ -230,7 +230,7 @@ func TestDispatchSlack_WireShape(t *testing.T) {
 	// context) in the right order.
 	var body map[string]any
 	if err := json.Unmarshal(req.body, &body); err != nil {
-		t.Fatalf("Slack body not valid JSON: %v — raw=%s", err, string(req.body))
+		t.Fatalf("Slack body not valid JSON: %v, raw=%s", err, string(req.body))
 	}
 	blocks, ok := body["blocks"].([]any)
 	if !ok {
@@ -249,7 +249,7 @@ func TestDispatchSlack_WireShape(t *testing.T) {
 	}
 	// Block Kit contract: FIRST block must be header (title), LAST block
 	// must be context (delivery id footer). Middle blocks are all
-	// sections — one or more depending on which optional fields the
+	// sections, one or more depending on which optional fields the
 	// payload carries (base fields grid always present; playbook adds a
 	// second section when the payload includes a PlaybookURL).
 	if len(types) == 0 || types[0] != "header" {
@@ -311,7 +311,7 @@ func TestDispatchPagerDuty_WireShape(t *testing.T) {
 	// into PagerDuty's server logs while doing nothing useful (PD
 	// authenticates via routing_key in the body).
 	if got := req.headers.Get(SignatureHeader); got != "" {
-		t.Errorf("PagerDuty: X-Mesedi-Signature MUST be absent; got %q — this leaks the HMAC secret to PagerDuty's logs", got)
+		t.Errorf("PagerDuty: X-Mesedi-Signature MUST be absent; got %q, this leaks the HMAC secret to PagerDuty's logs", got)
 	}
 
 	// Body must be Events API v2 shape.
@@ -326,7 +326,7 @@ func TestDispatchPagerDuty_WireShape(t *testing.T) {
 		t.Errorf("PagerDuty routing_key: got %q want AuthToken value; if this shows the Secret string we're leaking HMAC keys to PagerDuty", got)
 	}
 	if strings.Contains(string(req.body), "PLAINTEXT-HMAC-SECRET-NEVER-SEND-TO-PAGERDUTY") {
-		t.Error("PagerDuty body contains the HMAC Secret — regression, this must never leave Mesedi's process")
+		t.Error("PagerDuty body contains the HMAC Secret, regression, this must never leave Mesedi's process")
 	}
 	if got, _ := body["event_action"].(string); got != "trigger" {
 		t.Errorf("PagerDuty event_action: got %q want trigger", got)
@@ -444,7 +444,7 @@ func TestDispatchPagerDuty_TestDeliveryDedupIsolation(t *testing.T) {
 		t.Fatalf("dedup_key empty on one of the requests (real=%q test=%q)", realDedup, testDedup)
 	}
 	if realDedup == testDedup {
-		t.Errorf("dedup_key must differ between real + test deliveries; both got %q — test webhook would merge into active on-call incident", realDedup)
+		t.Errorf("dedup_key must differ between real + test deliveries; both got %q, test webhook would merge into active on-call incident", realDedup)
 	}
 	if !strings.Contains(testDedup, "test") {
 		t.Errorf("test dedup_key %q should include :test: segment for operator traceability", testDedup)
@@ -504,13 +504,13 @@ func TestDispatchNonDestinationURL_UsesCanonicalPayload(t *testing.T) {
 		t.Fatalf("canonical body not JSON: %v", err)
 	}
 	if _, hasBlocks := body["blocks"]; hasBlocks {
-		t.Error("canonical destination: body carries Slack-shape blocks[] — adapter routing leaked")
+		t.Error("canonical destination: body carries Slack-shape blocks[], adapter routing leaked")
 	}
 	if _, hasEmbeds := body["embeds"]; hasEmbeds {
-		t.Error("canonical destination: body carries Discord-shape embeds[] — adapter routing leaked")
+		t.Error("canonical destination: body carries Discord-shape embeds[], adapter routing leaked")
 	}
 	if _, hasRoutingKey := body["routing_key"]; hasRoutingKey {
-		t.Error("canonical destination: body carries PagerDuty routing_key — adapter routing leaked")
+		t.Error("canonical destination: body carries PagerDuty routing_key, adapter routing leaked")
 	}
 	if got, _ := body["event"].(string); got != "failure_group.created" {
 		t.Errorf("canonical event: got %q want failure_group.created", got)
@@ -529,7 +529,7 @@ func safeIndex(s []string, i int) string {
 	return s[i]
 }
 
-// keysOf returns a deterministic slice of the map's keys — useful in
+// keysOf returns a deterministic slice of the map's keys, useful in
 // t.Fatal messages so a schema regression shows what the body DID
 // carry instead of what was expected.
 func keysOf(m map[string]any) []string {

@@ -25,7 +25,7 @@ package api
 // If detector signature granularity later expands (tool_failures.G3
 // / validator_failures.G3), the allowlist_key column stays as
 // opaque string and the new signature shape just becomes the new
-// allowlist_key — no schema change. Backward-compat for existing
+// allowlist_key, no schema change. Backward-compat for existing
 // allowlist entries preserved.
 //
 // Server-side enforcement:
@@ -360,7 +360,7 @@ func sanitizeAllowlistKey(raw string) (string, string) {
 // checkAllowlistAndMaybeSkip is the Allowlist.b hot-path entry
 // point used by the 3 detector call sites in handlers.go (crashes,
 // tool_failures, validator_failures). Returns true when the
-// signature matches a customer allowlist entry — callers should
+// signature matches a customer allowlist entry, callers should
 // SKIP both the GroupX call AND the maybeFireWebhook call when
 // true is returned.
 //
@@ -370,7 +370,7 @@ func sanitizeAllowlistKey(raw string) (string, string) {
 //
 // Fail-safe: any store error on the lookup returns false (detection
 // fires as if no allowlist exists). Silently suppressing on a
-// broken read would be the worst possible failure mode — customers
+// broken read would be the worst possible failure mode, customers
 // would lose detection coverage without seeing the cause. Match-
 // count increment errors log warn + continue (telemetry-only;
 // suppression decision already made).
@@ -444,7 +444,7 @@ func (h *Handlers) HandleGetAllowlistStats(w http.ResponseWriter, r *http.Reques
 	}
 	// Aggregate totals server-side so the dashboard tile renders one
 	// scalar without re-summing on the client (matches the proven
-	// pattern from /me/savings + /me/rollup — server returns both the
+	// pattern from /me/savings + /me/rollup, server returns both the
 	// breakdown and the totals so the surface is one-shot renderable).
 	// Loop variable named `stat` to avoid shadowing the outer
 	// *http.Request `r`.

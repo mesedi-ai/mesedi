@@ -12,8 +12,8 @@ import (
 // The PDF is tested at the content layer, not the pixel layer.
 //
 // buildPDFDoc is a pure function, so every property that actually
-// matters — that a failure says FAILED, that the caveats survive
-// verbatim, that an offline run does not claim the log was consulted —
+// matters, that a failure says FAILED, that the caveats survive
+// verbatim, that an offline run does not claim the log was consulted ,
 // can be asserted without parsing PDF bytes. renderPDF gets a smoke
 // test, because the useful question there is "does it produce a valid
 // file without panicking on awkward input", and that is answerable.
@@ -42,7 +42,7 @@ func sampleReport(ok, online bool) report {
 				{Name: "chain continuity", OK: ok, Detail: "3 consecutive checkpoints"},
 			},
 			Unverified: []string{
-				"Execution digests were not opened — that requires the events.",
+				"Execution digests were not opened, that requires the events.",
 				"Nothing here judges whether the AI was correct.",
 			},
 		},
@@ -150,12 +150,12 @@ func TestPDFPassingVerdictDoesNotClaimCorrectness(t *testing.T) {
 // proved every checkpoint against Sigstore's signature printed "this run
 // does not show the record was ever published. It is a structural check,
 // not evidence." Understating a real verification is not the safe
-// direction — it is the line a procurement officer quotes.
+// direction, it is the line a procurement officer quotes.
 //
 // So the disclaimer is now tied to nothing having been confirmed, which
 // is what it was always trying to express.
 func TestPDFSaysSoWhenNothingWasCheckedAgainstTheLog(t *testing.T) {
-	// No log entries at all — the state an offline run reached before it
+	// No log entries at all, the state an offline run reached before it
 	// could check inclusion proofs, and still the state when a run
 	// resolves nothing. Entries marked UNVERIFIABLE are a different case
 	// and get the stronger INCOMPLETE verdict, tested separately.
@@ -175,7 +175,7 @@ func TestPDFSaysSoWhenNothingWasCheckedAgainstTheLog(t *testing.T) {
 	for _, f := range d.Fields {
 		if f[0] == "Transparency log" {
 			found = true
-			if !strings.Contains(f[1], "not consulted") {
+			if !strings.Contains(f[1], "not queried") {
 				t.Errorf("transparency log field reads %q when nothing was checked", f[1])
 			}
 		}
@@ -292,7 +292,7 @@ func TestRenderPDFProducesAReadableFile(t *testing.T) {
 
 // Long single-token details and empty strings are the two shapes most
 // likely to break a fixed-width layout: one cannot be wrapped, the other
-// has no lines to measure. Both come from real fields — a sha256 is a
+// has no lines to measure. Both come from real fields, a sha256 is a
 // 64-character unbreakable token, and a Detail can be empty.
 func TestRenderPDFSurvivesAwkwardContent(t *testing.T) {
 	rep := sampleReport(false, true)

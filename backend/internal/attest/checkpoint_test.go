@@ -4,14 +4,14 @@ package attest
 //
 // The four that carry the security property:
 //
-//   TestVerifyChain_MissingCheckpointIsDetected      — the whole point
-//   TestVerifyChain_RecomputesRatherThanTrusts       — a stored hash
+//   TestVerifyChain_MissingCheckpointIsDetected     , the whole point
+//   TestVerifyChain_RecomputesRatherThanTrusts      , a stored hash
 //                                                      nobody recomputes
 //                                                      is decoration
-//   TestBuildCheckpoint_EmptyIntervalUsesEmptyRoot   — an empty interval
+//   TestBuildCheckpoint_EmptyIntervalUsesEmptyRoot  , an empty interval
 //                                                      must not look
 //                                                      like a missing one
-//   TestVerifyChain_TenantDroppedFromTreeIsDetected  — per-tenant
+//   TestVerifyChain_TenantDroppedFromTreeIsDetected , per-tenant
 //                                                      sub-chain
 //
 // The golden hashes below were computed by an INDEPENDENT Python
@@ -96,7 +96,7 @@ func TestCanonicalField_EncodingIsUnambiguous(t *testing.T) {
 	x := string(appendCanonicalField(nil, "ab", "c"))
 	y := string(appendCanonicalField(nil, "a", "bc"))
 	if x == y {
-		t.Errorf("(\"ab\",\"c\") and (\"a\",\"bc\") encode identically to %q — "+
+		t.Errorf("(\"ab\",\"c\") and (\"a\",\"bc\") encode identically to %q, "+
 			"the length prefix is not doing its job", x)
 	}
 }
@@ -137,7 +137,7 @@ func TestCheckpointHash_MatchesIndependentImplementation(t *testing.T) {
 		t.Fatalf("BuildCheckpoint: %v", err)
 	}
 	// Both values are computed by an independent Python implementation of
-	// the spec, not copied from this code's output — a golden taken from
+	// the spec, not copied from this code's output, a golden taken from
 	// the thing it checks only asserts that the code equals itself.
 	//
 	// wantRoot is UNCHANGED across the v1 -> v2 bump, and that is the
@@ -222,7 +222,7 @@ func TestRootOverExecutionDigests_OrderChangesTheRoot(t *testing.T) {
 
 // An empty input must REFUSE, not return the empty-tree root. That
 // value is a real 64-hex digest and would be indistinguishable from a
-// genuine root over data that went missing — the exact confusion the
+// genuine root over data that went missing, the exact confusion the
 // empty-interval sentinel exists to avoid.
 func TestRootOverExecutionDigests_RefusesEmptyRatherThanReturningTheEmptyTreeRoot(t *testing.T) {
 	got, err := RootOverExecutionDigests(nil)
@@ -278,7 +278,7 @@ func TestVerifyChain_MissingCheckpointIsDetected(t *testing.T) {
 
 	err := VerifyChain(gapped, testInterval)
 	if err == nil {
-		t.Fatal("a chain with checkpoint 3 removed VERIFIED — omission is undetectable, " +
+		t.Fatal("a chain with checkpoint 3 removed VERIFIED, omission is undetectable, " +
 			"which is the one thing this mechanism exists to prevent")
 	}
 	if !errors.Is(err, ErrChainSequence) {
@@ -294,13 +294,13 @@ func TestVerifyChain_MissingCheckpointIsDetected(t *testing.T) {
 func TestVerifyChain_RecomputesRatherThanTrusts(t *testing.T) {
 	chain := buildChain(t, 3)
 
-	// Rewrite the contents and leave the stored Hash alone — what
+	// Rewrite the contents and leave the stored Hash alone, what
 	// someone editing the database would do.
 	chain[1].CumulativeCount = 9999
 
 	err := VerifyChain(chain, testInterval)
 	if err == nil {
-		t.Fatal("edited contents with a stale Hash verified — VerifyChain is trusting " +
+		t.Fatal("edited contents with a stale Hash verified, VerifyChain is trusting " +
 			"the stored hash instead of recomputing it")
 	}
 	if !errors.Is(err, ErrChainHashMismatch) {
@@ -414,7 +414,7 @@ func TestVerifyChain_TenantDroppedFromTreeIsDetected(t *testing.T) {
 		t.Fatalf("cp2: %v", err)
 	}
 
-	// The global chain still verifies — this is the honest limitation,
+	// The global chain still verifies, this is the honest limitation,
 	// and it is why the per-tenant PrevLeafHash exists.
 	if err := VerifyChain([]Checkpoint{cp1, cp2}, testInterval); err != nil {
 		t.Fatalf("global chain should still verify: %v", err)
@@ -694,7 +694,7 @@ func TestVerifyChain_InputValidation(t *testing.T) {
 	}
 }
 
-// Alignment is checked by the verifier too, not only the builder — the
+// Alignment is checked by the verifier too, not only the builder, the
 // verifier is what an auditor runs and must not assume the builder was
 // careful.
 func TestVerifyChain_MisalignedIntervalIsDetected(t *testing.T) {

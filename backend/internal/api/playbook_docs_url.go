@@ -17,7 +17,7 @@ import "strings"
 // underscores (`/docs/observability/coordination_deadlock`), but two
 // use hyphens (`cost-velocity`, `prompt-injection`). That inconsistency
 // is baked into shipped URLs, so it is mapped explicitly rather than
-// guessed at — a wrong guess produces a confident 404 in a customer's
+// guessed at, a wrong guess produces a confident 404 in a customer's
 // analysis, which is worse than no link at all.
 var playbookDocSlugs = map[string]string{
 	// Hyphenated routes.
@@ -31,8 +31,8 @@ var playbookDocSlugs = map[string]string{
 // docsBaseURL resolves the docs-site origin, mirroring the fallback
 // chain the transactional-email path already uses.
 //
-// This matters: Handlers.DocsURL is NOT assigned anywhere at startup —
-// there is no flag and no env var for it — so it is always "" in
+// This matters: Handlers.DocsURL is NOT assigned anywhere at startup ,
+// there is no flag and no env var for it, so it is always "" in
 // production. Reading it directly would make every playbook link
 // silently disappear. MESEDI_DASHBOARD_URL is set in fly.toml
 // ("https://app.mesedi.ai") and marketingOrigin strips the app.

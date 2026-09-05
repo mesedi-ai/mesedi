@@ -8,7 +8,7 @@
 //	coercions that Postgres rejects (e.g. the ->> operator on a TEXT
 //	column raises SQLSTATE 42883: "operator does not exist: text ->>
 //	unknown"). The /me/tool-return-value-stats prod 500 was exactly
-//	this class of bug — the SQLite twin's tests passed but the
+//	this class of bug, the SQLite twin's tests passed but the
 //	Postgres path crashed every invocation. This harness lets every
 //	postgres_*.go file have a real-engine test against the same
 //	migrations the production stack runs.
@@ -20,7 +20,7 @@
 //
 // Cleanup (container teardown + connection close) is automatic via
 // t.Cleanup. If Docker is not running on the host, the helper calls
-// t.Skip so the rest of the test suite still runs cleanly — developers
+// t.Skip so the rest of the test suite still runs cleanly, developers
 // without Docker get a yellow SKIP, CI with Docker gets a real run.
 //
 // Closes pending roadmap item (Postgres CI test path for store
@@ -67,7 +67,7 @@ func newTestPostgresStore(t *testing.T) *PostgresStore {
 		),
 	)
 	if err != nil {
-		// Docker unreachable or postgres image pull failed — skip
+		// Docker unreachable or postgres image pull failed, skip
 		// cleanly so a dev without Docker doesn't see a hard failure.
 		// CI runners (GitHub Actions ubuntu-latest) have Docker
 		// preinstalled so this skip only fires on local laptops

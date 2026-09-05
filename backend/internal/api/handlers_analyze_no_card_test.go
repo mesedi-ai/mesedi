@@ -1,6 +1,6 @@
 // Unit tests for HandleAnalyzeFailureGroup's no-card gate (
 // hotfix). This is the test that would have caught the migration-022
-// DEFAULT-1 bug — a Hobby project with no real card on file should
+// DEFAULT-1 bug, a Hobby project with no real card on file should
 // receive a 402 from the analyze endpoint, NOT have an analysis run.
 //
 // Why this test was missing in the original ship:
@@ -45,7 +45,7 @@ func quietLogger() *slog.Logger {
 
 // stubAnalyzeStore implements just the Store methods that
 // HandleAnalyzeFailureGroup reaches before the no-card gate fires.
-// Other methods panic if invoked — a test exercising the gate must
+// Other methods panic if invoked, a test exercising the gate must
 // not depend on count queries or LLM round-trips.
 type stubAnalyzeStore struct {
 	store.Store
@@ -86,7 +86,7 @@ func (s *stubAnalyzeStore) CountAIAnalysesByTenantSince(
 // after the gates pass, to build the LLM prompt. Returning empty
 // keeps the post-gate path predictable without forcing a real LLM
 // call (the Anthropic client below has a fake key, so Call would
-// fail — but the gates we test return 402 before reaching Call).
+// fail, but the gates we test return 402 before reaching Call).
 func (s *stubAnalyzeStore) ListExecutionsByFailureGroup(
 	ctx context.Context, groupID string, limit, offset int,
 ) ([]*events.Execution, error) {
@@ -129,7 +129,7 @@ func fakeAnthropicClient() *anthropic.Client {
 
 func TestHandleAnalyze_Hobby_NoCard_Returns402(t *testing.T) {
 	// The regression test for : this is the exact scenario
-	// Robert hit on production — Hobby project, no card on file,
+	// Robert hit on production, Hobby project, no card on file,
 	// clicked Analyze, got an analysis. The fix makes this 402.
 	st := &stubAnalyzeStore{
 		project:      newAnalyzeStubProject(TierHobby, false),
