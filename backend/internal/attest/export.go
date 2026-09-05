@@ -139,6 +139,18 @@ type ChainExport struct {
 	Intervals []ExportedInterval `json:"intervals"`
 }
 
+// plural renders a count with the right noun.
+//
+// Small, and worth having: this report is read by auditors, contracting
+// officers and commanders, and "1 hourly entries" reads as carelessness
+// in a document whose whole argument is that it was careful.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
 // CheckResult is one named finding. Carries prose because the destination
 // is a PDF read by someone who is not a cryptographer, and "false" on its
 // own tells them nothing they can act on.
@@ -186,12 +198,12 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 	v := ExportVerification{OK: true}
 
 	if e.Format != ChainExportFormatV1 {
-		v.add("export format", false,
+		v.add("file format", false,
 			"export claims format %q, this verifier understands %q",
 			e.Format, ChainExportFormatV1)
 		return v
 	}
-	v.add("export format", true, "%s", e.Format)
+	v.add("file format", true, "%s", e.Format)
 
 	if e.ProjectID == "" {
 		v.add("project identity", false, "export names no project")
@@ -217,11 +229,11 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		cps = append(cps, iv.Checkpoint)
 	}
 	if err := VerifyChain(cps, interval); err != nil {
-		v.add("chain continuity", false, "%v", err)
+		v.add("records link up", false, "%v", err)
 	} else {
-		v.add("chain continuity", true,
-			"%d consecutive checkpoints, each naming its predecessor, "+
-				"every hash recomputed from its own fields", len(cps))
+		v.add("records link up", true,
+			"%d checkpoints in an unbroken sequence, each naming the one before it. "+
+				"Every fingerprint was recalculated here, not taken on trust", len(cps))
 	}
 
 	// 2. Every anchored checkpoint must name where it was anchored. A
@@ -234,12 +246,12 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		}
 	}
 	if len(unanchored) > 0 {
-		v.add("all checkpoints anchored", false,
-			"checkpoints %v carry no log entry id, so they were never published",
+		v.add("all checkpoints published", false,
+			"checkpoints %v do not say where they were published",
 			unanchored)
 	} else {
-		v.add("all checkpoints anchored", true,
-			"every checkpoint names a transparency log entry")
+		v.add("all checkpoints published", true,
+			"every checkpoint says where it was published")
 	}
 
 	// 3. This project's leaves, per interval.
@@ -253,7 +265,7 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 
 		if iv.Leaf == nil {
 			if iv.Proof != nil || len(iv.Executions) > 0 {
-				v.add(fmt.Sprintf("interval %d consistency", seq), false,
+				v.add(fmt.Sprintf("hour %d consistency", seq), false,
 					"no leaf for this project, but the export still carries a proof "+
 						"or executions for it")
 			}
@@ -263,7 +275,7 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		withActivity++
 
 		if iv.Leaf.ProjectID != e.ProjectID {
-			v.add(fmt.Sprintf("interval %d tenant identity", seq), false,
+			v.add(fmt.Sprintf("hour %d ownership", seq), false,
 				"export is for project %q but this leaf belongs to %q",
 				e.ProjectID, iv.Leaf.ProjectID)
 			continue
@@ -271,13 +283,13 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		leaves = append(leaves, *iv.Leaf)
 
 		if iv.Proof == nil {
-			v.add(fmt.Sprintf("interval %d inclusion", seq), false,
+			v.add(fmt.Sprintf("hour %d inclusion", seq), false,
 				"leaf present but no inclusion proof, so it cannot be tied to the "+
 					"anchored root")
 			continue
 		}
 		if err := VerifyTenantLeafInclusion(iv.Checkpoint, *iv.Leaf, *iv.Proof); err != nil {
-			v.add(fmt.Sprintf("interval %d inclusion", seq), false, "%v", err)
+			v.add(fmt.Sprintf("hour %d inclusion", seq), false, "%v", err)
 			continue
 		}
 
@@ -290,26 +302,26 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		}
 		got, err := RootOverExecutionDigests(roots)
 		if err != nil {
-			v.add(fmt.Sprintf("interval %d execution root", seq), false,
+			v.add(fmt.Sprintf("hour %d combined fingerprint", seq), false,
 				"cannot fold %d execution digests: %v", len(roots), err)
 			continue
 		}
 		if got != iv.Leaf.IntervalRoot {
-			v.add(fmt.Sprintf("interval %d execution root", seq), false,
+			v.add(fmt.Sprintf("hour %d combined fingerprint", seq), false,
 				"the %d executions listed fold to %s, but the anchored leaf "+
 					"committed to %s", len(roots), short(got), short(iv.Leaf.IntervalRoot))
 			continue
 		}
 		if iv.Leaf.ExecutionCount != len(iv.Executions) {
-			v.add(fmt.Sprintf("interval %d execution count", seq), false,
+			v.add(fmt.Sprintf("hour %d run count", seq), false,
 				"leaf claims %d executions, export lists %d",
 				iv.Leaf.ExecutionCount, len(iv.Executions))
 			continue
 		}
 
-		v.add(fmt.Sprintf("interval %d", seq), true,
-			"%d executions fold to the leaf root, and the leaf is under the "+
-				"anchored checkpoint root", len(iv.Executions))
+		v.add(fmt.Sprintf("hour %d", seq), true,
+			"%d agent runs, whose combined fingerprint matches this project's entry "+
+				"for the hour, inside the published checkpoint", len(iv.Executions))
 	}
 
 	// 5. The tenant sub-chain. Each of this project's leaves names the
@@ -317,11 +329,11 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 	// link even though the interval tree for that hour still verifies.
 	if len(leaves) > 0 {
 		if err := VerifyTenantSubChain(e.ProjectID, leaves); err != nil {
-			v.add("tenant sub-chain", false, "%v", err)
+			v.add("this project's entries", false, "%v", err)
 		} else {
-			v.add("tenant sub-chain", true,
-				"%d leaves for this project, each naming its predecessor, "+
-					"cumulative counts consistent", len(leaves))
+			v.add("this project's entries", true,
+				"%s for this project, each naming the one before it, with running "+
+					"totals that add up", plural(len(leaves), "hourly entry", "hourly entries"))
 		}
 
 		// 6. WHERE THE EXPORT BEGINS. This check exists because its
@@ -351,36 +363,36 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 
 		switch {
 		case atGenesis && priorExecutions == 0:
-			v.add("export completeness", true,
-				"begins at this project's first anchored activity; no earlier "+
-					"executions exist to be missing")
+			v.add("coverage", true,
+				"starts at this project's first published activity, so nothing "+
+					"earlier is missing")
 
 		case atGenesis && priorExecutions > 0:
 			// Self-contradictory: claims to be the first leaf while its own
 			// running total says otherwise. One of the two was edited.
-			v.add("export completeness", false,
+			v.add("coverage", false,
 				"the earliest leaf claims to be this project's first, but its "+
 					"cumulative total of %d exceeds its own count of %d, so %d "+
 					"executions preceded it",
 				first.CumulativeCount, first.ExecutionCount, priorExecutions)
 
 		default:
-			v.add("export completeness", true,
-				"partial export: %d executions were anchored before the first "+
-					"interval shown here",
+			v.add("coverage", true,
+				"starts partway through: %d earlier agent runs were published but "+
+					"are not covered here",
 				priorExecutions)
 			v.Unverified = append(v.Unverified, fmt.Sprintf(
-				"This export does not begin at the project's first activity. %d "+
-					"executions were anchored earlier and are NOT covered by this "+
-					"report. Request the full range to verify them.",
+				"This file starts partway through the project's history. %d earlier "+
+					"agent runs were published and are NOT covered here. Ask for the "+
+					"full range to check them.",
 				priorExecutions))
 		}
 	}
 
 	if emptyForUs > 0 {
-		v.add("intervals with no activity", true,
-			"%d of %d intervals contain no executions for this project. That is "+
-				"normal, not a gap: the checkpoints still exist and still chain",
+		v.add("quiet hours", true,
+			"%d of %d hours held no agent runs for this project. That is normal and "+
+				"not a gap: the hourly records still exist and still link up",
 			emptyForUs, len(e.Intervals))
 	}
 
@@ -389,10 +401,10 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		"Transparency log entries were NOT resolved. This check confirms the export "+
 			"is internally consistent; it does not confirm the checkpoints were "+
 			"published. Re-run with network access to check the log.",
-		"Execution digests were not opened. This confirms the set of executions is "+
-			"complete and unaltered, not that any individual digest describes what "+
-			"an agent actually did. That requires retrieving the events.",
-		"Nothing here judges whether the AI was correct. A passing report means the "+
+		"The agent runs themselves were not opened. This shows the set of runs is "+
+			"complete and unaltered. It does not show what any individual run did, "+
+			"which needs the underlying records.",
+		"Nothing here judges whether the AI was right. A passing report means the "+
 			"record is intact, not that the decisions in it were good.",
 	)
 

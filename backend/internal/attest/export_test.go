@@ -153,7 +153,7 @@ func TestVerifyChainExportTreatsQuietHoursAsNormal(t *testing.T) {
 	}
 	found := false
 	for _, c := range v.Checks {
-		if strings.Contains(c.Name, "no activity") && c.OK {
+		if strings.Contains(c.Name, "quiet hours") && c.OK {
 			found = true
 		}
 	}
@@ -172,14 +172,14 @@ func TestVerifyChainExportDetectsTampering(t *testing.T) {
 		{
 			name:    "an execution is removed from an interval",
 			mutate:  func(e *ChainExport) { e.Intervals[0].Executions = e.Intervals[0].Executions[1:] },
-			wantHit: "execution root",
+			wantHit: "combined fingerprint",
 		},
 		{
 			name: "an execution digest is swapped",
 			mutate: func(e *ChainExport) {
 				e.Intervals[2].Executions[0].DigestRoot = digestRoot(9999)
 			},
-			wantHit: "execution root",
+			wantHit: "combined fingerprint",
 		},
 		{
 			name: "the executions are reordered",
@@ -187,7 +187,7 @@ func TestVerifyChainExportDetectsTampering(t *testing.T) {
 				x := e.Intervals[0].Executions
 				x[0], x[2] = x[2], x[0]
 			},
-			wantHit: "execution root",
+			wantHit: "combined fingerprint",
 		},
 		{
 			name: "a leaf's execution count is inflated",
@@ -201,19 +201,19 @@ func TestVerifyChainExportDetectsTampering(t *testing.T) {
 		{
 			name:    "a whole checkpoint is dropped from the middle",
 			mutate:  func(e *ChainExport) { e.Intervals = append(e.Intervals[:1], e.Intervals[2:]...) },
-			wantHit: "chain continuity",
+			wantHit: "records link up",
 		},
 		{
 			name: "a checkpoint's stored hash is rewritten",
 			mutate: func(e *ChainExport) {
 				e.Intervals[1].Checkpoint.Hash = strings.Repeat("b", 64)
 			},
-			wantHit: "chain continuity",
+			wantHit: "records link up",
 		},
 		{
 			name:    "a checkpoint was never anchored",
 			mutate:  func(e *ChainExport) { e.Intervals[1].LogEntryID = "" },
-			wantHit: "anchored",
+			wantHit: "published",
 		},
 		{
 			name: "the inclusion proof is replaced with another interval's",
@@ -230,7 +230,7 @@ func TestVerifyChainExportDetectsTampering(t *testing.T) {
 				l.ProjectID = "proj-someone-else"
 				e.Intervals[0].Leaf = &l
 			},
-			wantHit: "tenant identity",
+			wantHit: "ownership",
 		},
 		{
 			name: "a leaf is dropped from the MIDDLE of the tenant sub-chain",
@@ -249,7 +249,7 @@ func TestVerifyChainExportDetectsTampering(t *testing.T) {
 		{
 			name:    "the cadence is misdeclared to hide a missing hour",
 			mutate:  func(e *ChainExport) { e.IntervalSeconds = 7200 },
-			wantHit: "chain continuity",
+			wantHit: "records link up",
 		},
 	}
 
@@ -314,7 +314,7 @@ func TestVerifyChainExportReportsWhenHistoryIsMissingFromTheStart(t *testing.T) 
 	full := buildExport(t, []int{3, 1, 4})
 	if v := VerifyChainExport(full); !v.OK {
 		t.Fatalf("baseline export failed: %v", failedChecks(v))
-	} else if !hasCheck(v, "completeness", "first anchored activity") {
+	} else if !hasCheck(v, "coverage", "first published activity") {
 		t.Error("a genesis-complete export should say so explicitly")
 	}
 
@@ -325,17 +325,17 @@ func TestVerifyChainExportReportsWhenHistoryIsMissingFromTheStart(t *testing.T) 
 	truncated.Intervals[0].Executions = nil
 
 	v := VerifyChainExport(truncated)
-	if !hasCheck(v, "completeness", "partial export") {
+	if !hasCheck(v, "coverage", "starts partway through") {
 		t.Errorf("withholding the earliest leaves was not reported as a partial "+
 			"export.\nchecks: %v", v.Checks)
 	}
 	// The three withheld executions must be named, not merely implied.
-	if !hasUnverified(v, "3 executions") {
+	if !hasUnverified(v, "3 earlier agent runs") {
 		t.Errorf("the count of withheld executions was not surfaced.\nunverified: %v",
 			v.Unverified)
 	}
 	// And it must be distinguishable from the complete export above.
-	if hasCheck(v, "completeness", "first anchored activity") {
+	if hasCheck(v, "coverage", "first published activity") {
 		t.Error("a truncated export claimed to begin at the project's first activity")
 	}
 }

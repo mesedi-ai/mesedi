@@ -351,12 +351,11 @@ func writePDF(path string, rep report) error {
 // whyTreeHeadMatters is appended wherever the tree head is discussed. It
 // is true whether or not the tree head was checked, which is why it
 // belongs to neither half exclusively.
-const whyTreeHeadMatters = " That further step guards against Sigstore " +
-	"itself being dishonest; it is not what protects you from Mesedi. For a hash " +
-	"to be found there at all, Mesedi must genuinely have published it to an " +
-	"append-only log it does not control. If Sigstore is dishonest, this system's " +
-	"guarantee is gone by design, and that premise is stated up front rather than " +
-	"papered over."
+const whyTreeHeadMatters = " That step guards against Sigstore being dishonest, " +
+	"not against Mesedi. For a record to be found there at all, Mesedi must have " +
+	"genuinely published it to a log it does not control. If Sigstore is dishonest " +
+	"this system's guarantee is gone by design, which is stated here rather than " +
+	"buried."
 
 // countVerified reports how many entries passed and how many of those
 // were settled by an inclusion proof rather than a network lookup.
@@ -388,30 +387,32 @@ func logConfirmation(entries []LogEntryCheck) string {
 
 	var head string
 	if verified == total {
-		head = fmt.Sprintf("All %d checkpoint leaves were confirmed PRESENT in the "+
-			"public log at the index each claims.", total)
+		head = fmt.Sprintf("All %d checkpoints were confirmed PRESENT in Sigstore's "+
+			"public log, at the position each claims.", total)
 	} else {
-		head = fmt.Sprintf("%d of %d checkpoints were confirmed PRESENT in the public "+
-			"log at the index each claims. The remaining %d were not; the reason for "+
-			"each is given against it above.", verified, total, total-verified)
+		head = fmt.Sprintf("%d of %d checkpoints were confirmed PRESENT in Sigstore's "+
+			"public log. The remaining %d were not; the reason for each is given "+
+			"above.", verified, total, total-verified)
 	}
 
 	switch {
 	case offlineVerified == 0:
 		// Confirmed by asking the log. Worth having and worth qualifying,
 		// since it trusts whoever answered.
-		return head + " Each was confirmed by querying the log, which means trusting " +
-			"the answer that endpoint gave at the moment of this run."
+		return head + " Each was confirmed by asking the log, which means trusting the " +
+			"answer it gave during this run."
 
 	case offlineVerified == verified:
 		subject := fmt.Sprintf("Those %d were", verified)
 		if verified == 1 {
 			subject = "That one was"
 		}
-		return head + fmt.Sprintf(" %s additionally checked against Sigstore's own "+
-			"signed tree head, using a public key compiled into this verifier, so that "+
-			"much does not depend on the log being reachable or truthful at the moment "+
-			"you read this, and it will still hold if that log is ever retired.",
+		return head + fmt.Sprintf(" %s checked against a summary Sigstore itself "+
+			"signed, using Sigstore's public key built into this verifier, so this "+
+			"result does not depend on the log being reachable or honest when you read "+
+			"it, and it holds even if that log is retired. Position numbers count "+
+			"within the volume Sigstore is currently writing; the entry ids above "+
+			"count across every volume, so the two differ and are not meant to match.",
 			subject)
 
 	default:
@@ -419,9 +420,9 @@ func logConfirmation(entries []LogEntryCheck) string {
 		if offlineVerified == 1 {
 			subject = "One of those was"
 		}
-		return head + fmt.Sprintf(" %s proven with an inclusion proof carried in the "+
-			"export, which does include Sigstore's signed tree head. The rest were "+
-			"confirmed by asking the log, which does not.", subject)
+		return head + fmt.Sprintf(" %s proven from a proof stored in the file, which "+
+			"checks Sigstore's own signature. The rest were confirmed by asking the "+
+			"log, which does not.", subject)
 	}
 }
 
@@ -461,15 +462,14 @@ func logResolutionCaveat(entries []LogEntryCheck, offline bool) string {
 		// the log has been append-only ACROSS tree heads, which needs
 		// consistency proofs between them and independent witnesses. That
 		// is a real gap and it is the correct thing to say here.
-		return "The log's signed tree head was checked, but not its history. An " +
-			"inclusion proof shows an entry sits under one tree head Sigstore signed; " +
-			"it does not show that log has only ever been appended to, which would " +
-			"require comparing tree heads over time against independent witnesses." +
-			whyTreeHeadMatters
+		return "Sigstore's signature was checked, but not the log's history. The proof " +
+			"shows this record is covered by one summary Sigstore signed. It does not " +
+			"show the log has only ever been added to, which would mean comparing " +
+			"summaries over time against independent observers." + whyTreeHeadMatters
 
 	default:
-		return "What was not additionally checked, for the entries confirmed by " +
-			"querying the log, is the log's own signed tree head." + whyTreeHeadMatters
+		return "For the checkpoints confirmed by asking the log, Sigstore's own " +
+			"signature was not checked." + whyTreeHeadMatters
 	}
 }
 
@@ -556,7 +556,8 @@ func resolveOne(
 
 	if iv.LogEntryID == "" {
 		check.Status = StatusFailed
-		check.Detail = "the export names no log entry for this checkpoint, so it was never published"
+		check.Detail = "this checkpoint does not say where it was published, so there " +
+			"is no sign it ever was"
 		return check
 	}
 
@@ -577,10 +578,9 @@ func resolveOne(
 	// entry may well be genuine; it simply cannot be tied to anything.
 	if iv.LeafPreimage == "" {
 		check.Status = StatusUnverifiable
-		check.Detail = "the export carries no leaf preimage for this checkpoint, so its " +
-			"log entry cannot be tied back to it. Checkpoints anchored before " +
-			"2026-09-04 are permanently in this state and cannot be repaired. " +
-			"This is NOT evidence of tampering"
+		check.Detail = "this checkpoint cannot be tied to its log entry, because the " +
+			"value needed to connect them was not kept. Checkpoints published before " +
+			"2026-09-04 are permanently in this state. This is NOT evidence of tampering"
 		return check
 	}
 
@@ -590,8 +590,8 @@ func resolveOne(
 	if !strings.Contains(iv.LeafPreimage, iv.Checkpoint.Hash) {
 		check.Status = StatusFailed
 		check.Detail = fmt.Sprintf(
-			"the leaf that was anchored does not contain this checkpoint's hash (%s), "+
-				"so the log entry describes a different record",
+			"what was published does not contain this checkpoint (%s), so the log "+
+				"entry describes something else",
 			shorten(iv.Checkpoint.Hash))
 		return check
 	}
@@ -615,9 +615,9 @@ func resolveOne(
 	// would be indistinguishable from one that checked it.
 	if client == nil {
 		check.Status = StatusUnverifiable
-		check.Detail = "this run did not contact the log, and this checkpoint carries " +
-			"no usable inclusion proof, so nothing here checked it. Re-run without " +
-			"--offline. This is NOT a finding about the record"
+		check.Detail = "no proof was stored with this checkpoint and the log was not " +
+			"queried, so it was not checked. Run again without --offline to ask the " +
+			"log. This is not a finding against the record"
 		return check
 	}
 
@@ -635,15 +635,14 @@ func resolveOne(
 	if !strings.EqualFold(recorded, computed) {
 		check.Status = StatusFailed
 		check.Detail = fmt.Sprintf(
-			"the log entry records %s but this checkpoint's leaf hashes to %s. The "+
-				"published record and the record you were given are not the same",
+			"the log holds %s but this checkpoint produces %s. What was published "+
+				"and what you were given are not the same",
 			shorten(recorded), shorten(computed))
 		return check
 	}
 
 	check.Status = StatusVerified
-	check.Detail = "the leaf committing to this checkpoint is present in the public log " +
-		"at the index it claims"
+	check.Detail = "found in the public log at the position it claims"
 	return check
 }
 

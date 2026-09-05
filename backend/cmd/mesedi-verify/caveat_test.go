@@ -93,7 +93,7 @@ func TestCaveatNeverClaimsVerificationThatDidNotHappen(t *testing.T) {
 			// "What was not ADDITIONALLY checked" presumes a baseline. It
 			// must not appear when nothing was checked at all, because it
 			// invites the reader to infer verification that never happened.
-			hasTreeHead := strings.Contains(got, "additionally checked")
+			hasTreeHead := strings.Contains(got, "signature was not checked")
 			if hasTreeHead && !tc.allowsTreeHeadPar {
 				t.Errorf("the tree-head paragraph implies a baseline of verified "+
 					"entries, but %d of %d were verified:\n%s",
@@ -130,12 +130,12 @@ func TestCaveatIsNeverEmpty(t *testing.T) {
 // understating rather than overstating, and still wrong.
 func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing.T) {
 	all := logConfirmation(entriesFor(4, 4, 4))
-	if strings.Contains(all, "was not additionally checked") {
+	if strings.Contains(all, "signature was not checked") {
 		t.Errorf("every checkpoint was proven with an inclusion proof, which verifies "+
 			"the signed tree head, yet the caveat says the tree head was not "+
 			"checked:\n%s", all)
 	}
-	if !strings.Contains(all, "signed tree head") {
+	if !strings.Contains(all, "summary Sigstore itself signed") {
 		t.Errorf("the caveat does not mention that the tree head WAS checked:\n%s", all)
 	}
 	if !strings.Contains(all, "retired") {
@@ -164,7 +164,7 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 	// in every branch of that half.
 	for _, off := range [][3]int{{4, 4, 2}, {4, 4, 0}, {4, 4, 4}} {
 		c := logResolutionCaveat(entriesFor(off[0], off[1], off[2]), false)
-		if !strings.Contains(c, "guards against Sigstore itself being dishonest") {
+		if !strings.Contains(c, "guards against Sigstore being dishonest") {
 			t.Errorf("the caveat for %d/%d (%d offline) dropped the explanation of why "+
 				"the tree head matters:\n%s", off[0], off[1], off[2], c)
 		}
@@ -181,7 +181,7 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 
 	// None proven offline: the original denial, unchanged.
 	none := logResolutionCaveat(entriesFor(4, 4, 0), false)
-	if !strings.Contains(none, "was not additionally checked") {
+	if !strings.Contains(none, "signature was not checked") {
 		t.Errorf("nothing was proven offline, so the tree-head denial must stand:\n%s",
 			none)
 	}
@@ -192,11 +192,11 @@ func TestCaveatDoesNotDenyCheckingTheTreeHeadWhenItCheckedTheTreeHead(t *testing
 	// whether the log has only ever been appended to across tree heads.
 	// Leaving no caveat at all would be worse than the old false one.
 	allOff := logResolutionCaveat(entriesFor(4, 4, 4), true)
-	if strings.Contains(allOff, "was not additionally checked") {
+	if strings.Contains(allOff, "signature was not checked") {
 		t.Errorf("the tree head WAS checked for every entry, yet the caveat still "+
 			"denies it:\n%s", allOff)
 	}
-	if !strings.Contains(allOff, "not its history") {
+	if !strings.Contains(allOff, "not the log's history") {
 		t.Errorf("with the tree head checked, the caveat must name the remaining "+
 			"limit, that one signed tree head says nothing about the log's "+
 			"history:\n%s", allOff)

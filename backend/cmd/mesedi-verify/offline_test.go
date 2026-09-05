@@ -135,7 +135,7 @@ func TestOfflineGetsPastTheBindingWhenTheEntryIsOurs(t *testing.T) {
 		t.Error("the binding rejected an entry that records exactly this checkpoint's " +
 			"leaf; the binding check is too strict and would fail valid proofs")
 	}
-	if !strings.Contains(res.Detail, "does not verify") {
+	if !strings.Contains(res.Detail, "does not check out") {
 		t.Errorf("expected the failure to come from proof verification, got: %s",
 			res.Detail)
 	}
@@ -147,29 +147,38 @@ func TestOfflineGetsPastTheBindingWhenTheEntryIsOurs(t *testing.T) {
 // report shows both. If it does not say they are different measures, an
 // auditor reads the pair as the verifier having caught something.
 //
-// Asserted on the source text rather than by running a verified case,
-// because a verified case cannot be produced without Sigstore's private
-// key. That makes this weaker than it looks, and it is still worth
-// having: the sentence is the thing being protected.
-func TestVerifiedDetailExplainsTheTwoIndexSpaces(t *testing.T) {
+// The explanation lives in the SECTION SUMMARY, not on each row. It used
+// to be repeated in full on every checkpoint, which cost six lines per
+// row and pushed the document past two pages while saying the same thing
+// four times. Said once, it still has to be said.
+func TestTheReportExplainsTheTwoIndexSpacesExactlyOnce(t *testing.T) {
+	summary := logConfirmation(entriesFor(4, 4, 4))
+	for _, want := range []string{
+		"Position numbers count within the volume", // what the small number is
+		"count across every volume",                // what the big number is
+		"not meant to match",                       // that the difference is expected
+	} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("the summary no longer contains %q, so the report prints two "+
+				"unequal numbers for one entry with nothing telling the reader they "+
+				"are different measures:\n%s", want, summary)
+		}
+	}
+
+	// And NOT on the individual rows, which is what made it four times as
+	// long as it needed to be.
 	src, err := os.ReadFile("offline.go")
 	if err != nil {
 		t.Fatalf("read offline.go: %v", err)
 	}
-	s := string(src)
-	for _, want := range []string{
-		"at position %d of %s",     // in-tree position, named tree
-		"NOT the global",           // says which one it is not
-		"across every Rekor shard", // says why they differ
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("the verified-case wording no longer contains %q, so the report "+
-				"prints two unequal indices for one entry with nothing to tell a "+
-				"reader they are different measures", want)
-		}
+	if strings.Contains(string(src), "count across every volume") {
+		t.Error("the per-checkpoint detail repeats the two-index explanation. Said " +
+			"once per row it costs six lines each and pushes the report past two pages")
 	}
+
 	// The equality check that must never be added.
-	if strings.Contains(s, "proof.LogIndex != ") || strings.Contains(s, "!= proof.LogIndex") {
+	if strings.Contains(string(src), "proof.LogIndex != ") ||
+		strings.Contains(string(src), "!= proof.LogIndex") {
 		t.Error("something compares the proof's in-tree index against another index. " +
 			"They live in different spaces and are never equal; such a check would " +
 			"fail on every genuine Sigstore entry")

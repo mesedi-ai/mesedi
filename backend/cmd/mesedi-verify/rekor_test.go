@@ -333,9 +333,9 @@ func TestResolveLogEntriesReportsEveryCheckpoint(t *testing.T) {
 		}
 	}
 	// The one with no entry id at all gets its own explanation.
-	if !strings.Contains(results[3].Detail, "never published") {
-		t.Errorf("a checkpoint with no log entry should say it was never published, got: %s",
-			results[3].Detail)
+	if !strings.Contains(results[3].Detail, "no sign it ever was") {
+		t.Errorf("a checkpoint with no log entry should say there is no sign it was "+
+			"published, got: %s", results[3].Detail)
 	}
 }
 

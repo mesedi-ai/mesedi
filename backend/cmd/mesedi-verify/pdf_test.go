@@ -87,7 +87,7 @@ func TestPDFRendersAnUncheckableChainAsIncompleteNotFailed(t *testing.T) {
 	if d.Verdict != "INCOMPLETE" {
 		t.Errorf("verdict = %q, want INCOMPLETE", d.Verdict)
 	}
-	for _, want := range []string{"could not be checked", "not a verified chain"} {
+	for _, want := range []string{"could not be checked", "as a verified record"} {
 		if !strings.Contains(d.VerdictNote, want) {
 			t.Errorf("the note should contain %q, got: %s", want, d.VerdictNote)
 		}
@@ -134,7 +134,7 @@ func TestPDFCarriesTheCaveatsVerbatim(t *testing.T) {
 // an assertion rather than a hope.
 func TestPDFPassingVerdictDoesNotClaimCorrectness(t *testing.T) {
 	note := buildPDFDoc(sampleReport(true, true), "deadbeef").VerdictNote
-	if !strings.Contains(note, "does not say the AI was correct") {
+	if !strings.Contains(note, "does not say the AI was right") {
 		t.Errorf("a passing verdict should distinguish intact from correct, got: %s", note)
 	}
 }
@@ -167,8 +167,8 @@ func TestPDFSaysSoWhenNothingWasCheckedAgainstTheLog(t *testing.T) {
 		t.Errorf("a run that confirmed nothing should refuse the word evidence, got: %s",
 			d.VerdictNote)
 	}
-	if !strings.Contains(d.VerdictNote, "structural check") {
-		t.Errorf("a run that confirmed nothing should name itself a structural check, got: %s",
+	if !strings.Contains(d.VerdictNote, "consistency check") {
+		t.Errorf("a run that confirmed nothing should name itself a consistency check, got: %s",
 			d.VerdictNote)
 	}
 	var found bool
@@ -206,9 +206,8 @@ func TestPDFCreditsAnOfflineRunThatProvedEveryCheckpoint(t *testing.T) {
 		t.Errorf("the verdict does not say the checkpoints were proven present:\n%s",
 			d.VerdictNote)
 	}
-	if !strings.Contains(d.VerdictNote, "without\ncontacting the log") &&
-		!strings.Contains(d.VerdictNote, "without contacting the log") {
-		t.Errorf("the verdict does not say this held without contacting the log:\n%s",
+	if !strings.Contains(d.VerdictNote, "without contacting Sigstore") {
+		t.Errorf("the verdict does not say this held without contacting Sigstore:\n%s",
 			d.VerdictNote)
 	}
 	// And the section it used to suppress entirely on an offline run.

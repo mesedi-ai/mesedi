@@ -150,8 +150,8 @@ func verifyAnchorOffline(iv attest.ExportedInterval) offlineResult {
 		return offlineResult{
 			Decided: true,
 			Status:  StatusFailed,
-			Detail: fmt.Sprintf("the inclusion proof carried in this export does not "+
-				"verify against Sigstore's published key: %v", err),
+			Detail: fmt.Sprintf("the proof stored with this checkpoint does not check "+
+				"out against Sigstore's published key: %v", err),
 		}
 	}
 
@@ -175,20 +175,11 @@ func verifyAnchorOffline(iv attest.ExportedInterval) offlineResult {
 	// binding that actually matters is the entry body hashing to this
 	// checkpoint's leaf, which happens above and does not depend on any
 	// index at all.
-	shard := "an unnamed tree"
-	if origin, _, found := strings.Cut(proof.Checkpoint, "\n"); found && origin != "" {
-		shard = origin
-	}
 	return offlineResult{
 		Decided: true,
 		Status:  StatusVerified,
-		Detail: fmt.Sprintf("the leaf committing to this checkpoint is proven present "+
-			"at position %d of %s, whose %d-entry tree head Sigstore signed. That "+
-			"position counts within that tree and is deliberately NOT the global "+
-			"entry id in the heading, which counts across every Rekor shard; the two "+
-			"differ by the size of the earlier shards and are not comparable. "+
-			"Checked offline against a key compiled into this binary; the log was "+
-			"not contacted", proof.LogIndex, shard, proof.TreeSize),
+		Detail: fmt.Sprintf("proven present in the public log at position %d, under a "+
+			"summary Sigstore signed covering %d entries", proof.LogIndex, proof.TreeSize),
 	}
 }
 
@@ -227,9 +218,8 @@ func bindEntryToLeaf(entryBodyB64, leafPreimage string) (offlineResult, bool) {
 		return offlineResult{
 			Decided: true,
 			Status:  StatusFailed,
-			Detail: fmt.Sprintf("the log entry proven present records %s, but this "+
-				"checkpoint's leaf hashes to %s. The proof is about a different "+
-				"record, so it says nothing about this checkpoint",
+			Detail: fmt.Sprintf("the log entry this proof points to describes %s, but "+
+				"this checkpoint is %s. The proof is about a different record",
 				shorten(recorded), shorten(computed)),
 		}, false
 	}

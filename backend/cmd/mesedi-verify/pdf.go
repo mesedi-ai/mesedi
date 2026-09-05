@@ -131,14 +131,13 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 	// claims and the difference is the whole product.
 	switch {
 	case realFailure:
-		d.VerdictNote = "One or more checks did not pass. The findings are listed below. " +
-			"Do not treat this record as reliable evidence until each failure is explained."
+		d.VerdictNote = "One or more checks did not pass. The findings are listed " +
+			"below. Do not rely on this record until each one is explained."
 	case unchecked > 0:
-		d.VerdictNote = fmt.Sprintf("The record is internally consistent, but %d "+
-			"checkpoint(s) could not be checked against the public log at all. Nothing "+
-			"in this report says those records are wrong; nothing in it says they are "+
-			"right either. This is not a verified chain and must not be presented as "+
-			"one.", unchecked)
+		d.VerdictNote = fmt.Sprintf("The record holds together, but %d checkpoint(s) "+
+			"could not be checked against the public log at all. Nothing here says "+
+			"those are wrong. Nothing here says they are right. Do not present this "+
+			"as a verified record.", unchecked)
 	case verifiedCount > 0 && offlineCount == verifiedCount:
 		// Proven without the network. The old code reached the `default`
 		// branch here and told the reader "the transparency log was NOT
@@ -152,26 +151,25 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 		// discarding the strongest claim the product can make because the
 		// verdict was driven by whether the network was used rather than
 		// by what was established.
-		d.VerdictNote = "The record is internally consistent and every checkpoint was " +
-			"proven present in the public transparency log, at the position it claims, " +
-			"under a signed tree head Sigstore itself produced. That was checked without " +
-			"contacting the log, so it does not depend on the log being reachable or " +
-			"honest when you read this. It says the record is intact. It does not say " +
-			"the AI was correct."
+		d.VerdictNote = "The record holds together, and every checkpoint was proven " +
+			"present in Sigstore's public log under a summary Sigstore signed. That was " +
+			"checked here without contacting Sigstore, so it does not depend on that " +
+			"log being reachable or honest today. This says the record is intact. It " +
+			"does not say the AI was right."
 	case verifiedCount > 0 && offlineCount > 0:
-		d.VerdictNote = "The record is internally consistent and every checkpoint was found " +
-			"in the public transparency log at the position it claims. Some were proven " +
-			"from inclusion proofs carried in the export, which check Sigstore's signature " +
-			"directly; the rest were confirmed by querying the log. This says the record " +
-			"is intact. It does not say the AI was correct."
+		d.VerdictNote = "The record holds together, and every checkpoint was found in " +
+			"Sigstore's public log where it claims to be. Some were proven from a proof " +
+			"stored in the file, which checks Sigstore's signature directly. The rest " +
+			"were confirmed by asking the log. This says the record is intact. It does " +
+			"not say the AI was right."
 	case verifiedCount > 0:
-		d.VerdictNote = "The record is internally consistent and every checkpoint was found " +
-			"in the public transparency log at the position it claims. This says the record " +
-			"is intact. It does not say the AI was correct."
+		d.VerdictNote = "The record holds together, and every checkpoint was found in " +
+			"Sigstore's public log where it claims to be. This says the record is " +
+			"intact. It does not say the AI was right."
 	default:
-		d.VerdictNote = "The record is internally consistent, but nothing here was checked " +
-			"against a public transparency log, so this run does not show the record was " +
-			"ever published. It is a structural check, not evidence."
+		d.VerdictNote = "The record holds together, but nothing was checked against a " +
+			"public log, so this does not show the record was ever published. It is a " +
+			"consistency check, not evidence."
 	}
 
 	// Leads with what WAS established, then how.
@@ -290,21 +288,19 @@ func howToCheck(verifier string) []string {
 	}
 
 	return []string{
-		"1. Confirm this report is about your file. Run:  shasum -a 256 <export.json>",
-		"   The result must equal the Export SHA-256 in the subject block above. If it",
-		"   does not, this report describes a different file and says nothing about yours.",
+		"1. Confirm this report is about your file:  shasum -a 256 <export.json>",
+		"   It must match the Export SHA-256 above. If not, this report is about a",
+		"   different file and says nothing about yours.",
 		"",
-		"2. Obtain the verifier from source, NOT as a binary from Mesedi. A verdict",
-		"   produced by a program the audited party handed you is that party asserting",
-		"   again, which is what this document exists to avoid.",
+		"2. Build the verifier yourself, NOT as a binary from Mesedi: a verdict",
+		"   from a program the audited party gave you is that party speaking again.",
 		"     git clone https://github.com/mesedi-ai/mesedi",
 		"     cd mesedi/backend && git checkout " + at,
 		"     go build ./cmd/mesedi-verify",
 		"",
-		"3. Run it against the same export:",
-		"     ./mesedi-verify --offline <export.json>",
-		"   --offline needs no network where checkpoints carry inclusion proofs, and is",
-		"   the stronger check. Omit it to additionally query the log for any that do not.",
+		"3. Run it on the same file:  ./mesedi-verify --offline <export.json>",
+		"   --offline needs no network and is the stronger check. Drop it to also ask",
+		"   the log about any checkpoint with no stored proof.",
 		"",
 		"4. Compare. Any disagreement between your run and this document is a finding,",
 		"   and should be treated as one rather than resolved in Mesedi's favour.",
