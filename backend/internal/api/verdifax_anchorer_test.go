@@ -130,7 +130,7 @@ func TestAnchorer_SendsTheCheckpointHashWithTheRightHeaderAndFields(t *testing.T
 	})
 	defer done()
 
-	anchor, err := a.AnchorCheckpoint(context.Background(), cp)
+	anchor, err := a.AnchorCheckpoint(context.Background(), cp, 0)
 	if err != nil {
 		t.Fatalf("AnchorCheckpoint: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestAnchorer_RefusesAReceiptWithNoLeafPreimage(t *testing.T) {
 	})
 	defer done()
 
-	_, err := a.AnchorCheckpoint(context.Background(), cp)
+	_, err := a.AnchorCheckpoint(context.Background(), cp, 0)
 	if err == nil {
 		t.Fatal("accepted a receipt with no leaf preimage. The log records a hash " +
 			"of a string that was not returned, so this anchor could never be " +
@@ -226,7 +226,7 @@ func TestAnchorer_RefusesAnInternallyInconsistentReceipt(t *testing.T) {
 	})
 	defer done()
 
-	_, err := a.AnchorCheckpoint(context.Background(), cp)
+	_, err := a.AnchorCheckpoint(context.Background(), cp, 0)
 	if err == nil {
 		t.Fatal("accepted a receipt whose preimage does not hash to the leaf it reports")
 	}
@@ -250,7 +250,7 @@ func TestAnchorer_RefusesALeafThatDoesNotContainTheCheckpointHash(t *testing.T) 
 	})
 	defer done()
 
-	_, err := a.AnchorCheckpoint(context.Background(), cp)
+	_, err := a.AnchorCheckpoint(context.Background(), cp, 0)
 	if err == nil {
 		t.Fatal("accepted an internally consistent receipt whose leaf does not " +
 			"contain this checkpoint's hash; the log entry would describe a " +
@@ -273,7 +273,7 @@ func TestAnchorer_RefusesAReceiptForADifferentDigest(t *testing.T) {
 	})
 	defer done()
 
-	_, err := a.AnchorCheckpoint(context.Background(), cp)
+	_, err := a.AnchorCheckpoint(context.Background(), cp, 0)
 	if err == nil {
 		t.Fatal("accepted a receipt for a digest we never submitted. Nothing " +
 			"downstream would catch this: the chain would name a log entry that " +
@@ -293,7 +293,7 @@ func TestAnchorer_RefusesAReceiptClaimingAThirdParty(t *testing.T) {
 	})
 	defer done()
 
-	_, err := a.AnchorCheckpoint(context.Background(), cp)
+	_, err := a.AnchorCheckpoint(context.Background(), cp, 0)
 	if err == nil {
 		t.Fatal("accepted a receipt claiming an independent submitter. Mesedi and " +
 			"Verdifax are one legal entity, so that receipt is false, and it " +
@@ -357,7 +357,7 @@ func TestAnchorer_FailureModes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a, done := anchorerAgainst(t, tc.handler)
 			defer done()
-			anchor, err := a.AnchorCheckpoint(context.Background(), cp)
+			anchor, err := a.AnchorCheckpoint(context.Background(), cp, 0)
 			entryID := anchor.LogEntryID
 			if err == nil {
 				t.Fatalf("expected a failure, got entry id %q", entryID)
@@ -387,7 +387,7 @@ func TestAnchorer_ErrorsNeverContainTheAPIKey(t *testing.T) {
 	defer srv.Close()
 
 	a := NewVerdifaxAnchorer(srv.URL, secret, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	_, err := a.AnchorCheckpoint(context.Background(), cp)
+	_, err := a.AnchorCheckpoint(context.Background(), cp, 0)
 	if err == nil {
 		t.Fatal("expected an error")
 	}

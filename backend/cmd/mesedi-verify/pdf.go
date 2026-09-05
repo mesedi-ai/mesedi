@@ -246,6 +246,19 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 				Detail: rep.LogSummary,
 			})
 		}
+		// Marked by what it found, not by where it sits. A broken growth
+		// proof is a finding about the log and must not be rendered with
+		// the same tick as a proof that held.
+		if rep.LogGrowth != "" {
+			mark := statusMark(StatusVerified)
+			if rep.LogGrowthFailed {
+				mark = statusMark(StatusFailed)
+			}
+			logs.Rows = append(logs.Rows, pdfRow{
+				Mark: mark, Label: "the log only grew",
+				Detail: rep.LogGrowth,
+			})
+		}
 		d.Sections = append(d.Sections, logs)
 	}
 

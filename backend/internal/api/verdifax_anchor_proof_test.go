@@ -123,7 +123,7 @@ func TestAnchorer_CapturesTheProofFromTheReceipt(t *testing.T) {
 	})
 	defer done()
 
-	anchor, err := a.AnchorCheckpoint(t.Context(), cp)
+	anchor, err := a.AnchorCheckpoint(t.Context(), cp, 0)
 	if err != nil {
 		t.Fatalf("AnchorCheckpoint: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestAnchorer_AnchorsWithoutAProofRatherThanHaltingTheChain(t *testing.T) {
 	})
 	defer done()
 
-	anchor, err := a.AnchorCheckpoint(t.Context(), cp)
+	anchor, err := a.AnchorCheckpoint(t.Context(), cp, 0)
 	if err != nil {
 		t.Fatalf("a receipt with no offline proof halted the anchor: %v.\n"+
 			"A missing proof costs offline verification only, the anchor is still "+
@@ -192,7 +192,7 @@ func TestAnchorer_DoesNotStoreAHalfProof(t *testing.T) {
 	})
 	defer done()
 
-	anchor, err := a.AnchorCheckpoint(t.Context(), cp)
+	anchor, err := a.AnchorCheckpoint(t.Context(), cp, 0)
 	if err != nil {
 		t.Fatalf("a partial proof halted the anchor: %v", err)
 	}

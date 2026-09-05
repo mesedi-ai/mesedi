@@ -37,6 +37,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -58,7 +59,12 @@ type CheckpointAnchorer interface {
 	// AnchorCheckpoint submits cp.Hash and returns the log entry id and
 	// backend name. An error means NOT anchored; the caller must not
 	// treat a partial result as success.
-	AnchorCheckpoint(ctx context.Context, cp attest.Checkpoint) (store.CheckpointAnchor, error)
+	// previousTreeSize is the log's tree size when checkpoint Seq-1 was
+	// anchored, or zero when that is unknown or does not exist. Passing
+	// it lets the anchorer ask the log to prove it only grew, which is
+	// the one question no inclusion proof can answer.
+	AnchorCheckpoint(ctx context.Context, cp attest.Checkpoint,
+		previousTreeSize int64) (store.CheckpointAnchor, error)
 }
 
 // Defaults. Interval is deliberately NOT configurable at runtime: a
@@ -445,6 +451,51 @@ func (s *CheckpointScheduler) projectIntervalRoot(
 	return root, len(ids), nil
 }
 
+// previousTreeSize reports how large the log's tree was when checkpoint
+// seq-1 was anchored, so this anchor can ask the log to prove it only
+// grew since.
+//
+// Returns 0, meaning "do not ask", for the first checkpoint and for any
+// predecessor whose anchor predates the proof material being captured.
+// NEVER returns an error: a missing previous size must not stall the
+// chain. The chain stalling is reserved for an anchor that did not
+// happen, and this is a strictly additional question about one that
+// did. A zero here costs one unproven link in the report, which the
+// verifier names; an error here would cost the interval.
+func (s *CheckpointScheduler) previousTreeSize(ctx context.Context, seq uint64) int64 {
+	if seq <= 1 {
+		return 0
+	}
+	prev, err := s.Store.GetCheckpointAnchor(ctx, seq-1)
+	if err != nil || prev.AnchorProofJSON == "" {
+		return 0
+	}
+	// TreeSize carries NO json tag, deliberately, and for the same
+	// reason wireInclusionProof in cmd/mesedi-verify/offline.go carries
+	// none: Verdifax's inclusion proof struct has no tags either, so on
+	// the wire its keys are whatever Go's default marshalling produces,
+	// which is PascalCase. Leaving the tag off lets encoding/json fall
+	// back to case-insensitive matching, so this keeps working if that
+	// struct ever gains explicit lower-case tags.
+	//
+	// A pinned tag of "TreeSize" would also work today and is what this
+	// had first, but it is not snake_case and the audit is right to
+	// reject it: it would read as a field we designed rather than a
+	// field we are reading from somebody else's serialiser.
+	var env struct {
+		InclusionProof struct {
+			TreeSize int64
+		} `json:"inclusion_proof"`
+	}
+	if err := json.Unmarshal([]byte(prev.AnchorProofJSON), &env); err != nil {
+		s.Logger.Warn("checkpoint_scheduler: previous anchor proof would not parse, so "+
+			"this checkpoint cannot ask the log to prove it only grew",
+			"seq", seq, "previous_seq", seq-1, "error", err.Error())
+		return 0
+	}
+	return env.InclusionProof.TreeSize
+}
+
 // anchor submits a checkpoint and records where it landed.
 func (s *CheckpointScheduler) anchor(ctx context.Context, cp attest.Checkpoint) error {
 	if s.Anchorer == nil {
@@ -454,7 +505,7 @@ func (s *CheckpointScheduler) anchor(ctx context.Context, cp attest.Checkpoint) 
 				"the next interval cannot be built until this one reaches a log")
 		return fmt.Errorf("no anchorer configured")
 	}
-	anchor, err := s.Anchorer.AnchorCheckpoint(ctx, cp)
+	anchor, err := s.Anchorer.AnchorCheckpoint(ctx, cp, s.previousTreeSize(ctx, cp.Seq))
 	if err != nil {
 		s.Logger.Warn("checkpoint_scheduler: anchor failed, chain stalled",
 			"seq", cp.Seq, "error", err.Error())

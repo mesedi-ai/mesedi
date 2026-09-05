@@ -157,6 +157,28 @@ type report struct {
 	// in that case rather than as a hedge.
 	LogSummary string `json:"log_summary,omitempty"`
 
+	// LogGrowth is what the run established about the LOG, as distinct
+	// from what it established about the entries in it.
+	//
+	// Every other field here is satisfied by a log that quietly rebuilt
+	// its tree with different contents: each entry still verifies
+	// against the new signed head, including any that were altered.
+	// This is the only line that speaks to that, and it is empty when
+	// the export carries nothing to decide it, never a claim by
+	// default.
+	LogGrowth string `json:"log_growth,omitempty"`
+
+	// LogGrowthFailed says whether LogGrowth above is a finding or a
+	// confirmation.
+	//
+	// Carried explicitly rather than inferred from OK. OK is false when
+	// ANY check failed, so a renderer keying off it would mark a growth
+	// proof that held as a failure whenever something unrelated broke,
+	// and a reader would be told the public log had been rewritten when
+	// it had not. That is the worst direction for this particular field
+	// to be wrong in.
+	LogGrowthFailed bool `json:"log_growth_failed,omitempty"`
+
 	OK bool `json:"ok"`
 }
 
@@ -288,6 +310,45 @@ func main() {
 				rep.Structural.Unverified = append(rep.Structural.Unverified,
 					fmt.Sprintf("Checkpoint %d: %s.", e.Seq, e.ProofNote))
 			}
+		}
+
+		// Did the log only grow, or is it a different log wearing the
+		// same name? Nothing above can tell, because every check above
+		// is satisfied by a rewritten tree.
+		//
+		// A broken growth proof FAILS the report: it is a positive
+		// finding about the log, not a gap in our evidence. An absent
+		// one does not, and lands in the caveats instead.
+		growth := checkLogGrowth(export.Intervals)
+		rep.LogGrowth = growthSummary(growth)
+
+		// The caveat above says the log's history was not checked. Once
+		// every step IS checked that sentence becomes false, and a false
+		// sentence in the section whose whole job is honesty is the
+		// worst place in the report for one. Narrow it to what actually
+		// remains: the split view, which no consistency proof addresses
+		// and which needs witnesses Sigstore does not yet publish.
+		if growth.Proven > 0 && growth.Unproven == 0 && len(growth.Failures) == 0 {
+			rep.Structural.Unverified = replacePrefix(
+				rep.Structural.Unverified,
+				"Sigstore's signature was checked, but not the log's history",
+				"Sigstore's signature and its growth were both checked, but not whether "+
+					"it showed the same log to everyone. A log that served one version of "+
+					"itself to us and another to somebody else would satisfy everything "+
+					"here. Catching that needs independent observers co-signing the same "+
+					"summaries, and Sigstore's summaries today carry only its own "+
+					"signature. This guards against Sigstore, not against Mesedi.")
+		}
+		if len(growth.Failures) > 0 {
+			rep.OK = false
+			rep.LogGrowthFailed = true
+		}
+		if growth.Unproven > 0 {
+			rep.Structural.Unverified = append(rep.Structural.Unverified,
+				fmt.Sprintf("Whether the public log only grew is not shown for %s here. "+
+					"That needs a proof captured at the time each hour was published, "+
+					"and hours published before 5 September 2026 carry none.",
+					countOf(growth.Unproven, "hour", "hours")))
 		}
 	}
 
@@ -680,6 +741,9 @@ func printReport(w io.Writer, rep report) {
 		// caveat list, where the heading told readers it was a limitation.
 		if rep.LogSummary != "" {
 			fmt.Fprintf(w, "\n  %s\n", wrap(rep.LogSummary, 76, "  "))
+		}
+		if rep.LogGrowth != "" {
+			fmt.Fprintf(w, "\n  %s\n", wrap(rep.LogGrowth, 76, "  "))
 		}
 	}
 

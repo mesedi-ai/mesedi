@@ -159,12 +159,20 @@ type fakeAnchorer struct {
 	calls  int
 	fail   error
 	nextID int
+
+	// prevSizes records the previousTreeSize argument of every call, so
+	// a test can assert the scheduler actually looked up the previous
+	// anchor rather than passing a placeholder. A hardcoded zero here
+	// would compile, pass, and silently mean the log is never asked to
+	// prove it only grew.
+	prevSizes []int64
 }
 
 func (a *fakeAnchorer) AnchorCheckpoint(
-	_ context.Context, cp attest.Checkpoint,
+	_ context.Context, cp attest.Checkpoint, previousTreeSize int64,
 ) (store.CheckpointAnchor, error) {
 	a.calls++
+	a.prevSizes = append(a.prevSizes, previousTreeSize)
 	if a.fail != nil {
 		return store.CheckpointAnchor{}, a.fail
 	}

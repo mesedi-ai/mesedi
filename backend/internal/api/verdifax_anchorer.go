@@ -133,6 +133,20 @@ type verdifaxAttestRequest struct {
 	Algorithm  string `json:"algorithm"`
 	SubjectRef string `json:"subject_ref,omitempty"`
 	LeafCount  int    `json:"leaf_count,omitempty"`
+
+	// PreviousTreeSize asks the log to prove it only grew since the
+	// previous checkpoint was anchored.
+	//
+	// Every other value in this exchange is about one entry: is it in
+	// the log, at the position it claims. None of them notice a log
+	// that quietly rebuilt its tree with different contents, because
+	// each entry in the rebuilt tree verifies perfectly against the
+	// new signed head, including any that were altered.
+	//
+	// Zero for the first checkpoint, which has no earlier tree to be
+	// consistent with, and zero whenever the previous anchor did not
+	// record a tree size. Zero means the question is not being asked.
+	PreviousTreeSize int64 `json:"previous_tree_size,omitempty"`
 }
 
 type verdifaxAttestResponse struct {
@@ -167,6 +181,12 @@ type verdifaxAttestResponse struct {
 	EntryBody      string          `json:"entry_body"`
 	LogID          string          `json:"log_id"`
 
+	// ConsistencyProof answers a different question from the three
+	// above and is absent far more often: only when a previous tree
+	// size was sent, the backend is a real log, and the log answered.
+	// Kept as raw JSON for the same reason as InclusionProof.
+	ConsistencyProof json.RawMessage `json:"consistency_proof"`
+
 	Provenance string `json:"provenance"`
 	Error      string `json:"error"`
 }
@@ -187,6 +207,17 @@ type anchorProofEnvelope struct {
 	LogID          string          `json:"log_id,omitempty"`
 	EntryBody      string          `json:"entry_body,omitempty"`
 	InclusionProof json.RawMessage `json:"inclusion_proof,omitempty"`
+
+	// ConsistencyProof, when present, shows the tree this checkpoint
+	// landed in contains the tree the PREVIOUS checkpoint landed in
+	// unchanged, as a prefix.
+	//
+	// Unlike the three fields above, this one is optional in a way that
+	// is not a degradation of the same claim: it answers a different
+	// question. The others prove an entry is in a tree. This proves the
+	// tree is the same tree, and its absence is reported separately for
+	// that reason.
+	ConsistencyProof json.RawMessage `json:"consistency_proof,omitempty"`
 }
 
 func (a *VerdifaxAnchorer) client() *http.Client {
@@ -197,8 +228,14 @@ func (a *VerdifaxAnchorer) client() *http.Client {
 }
 
 // AnchorCheckpoint submits cp.Hash and returns where it landed.
+//
+// previousTreeSize is the size of the log's tree when the PREVIOUS
+// checkpoint was anchored, and asks the log to prove it only grew since
+// then. Zero for the first checkpoint, and zero whenever the previous
+// anchor recorded no tree size, which is every checkpoint anchored
+// before 4 September 2026.
 func (a *VerdifaxAnchorer) AnchorCheckpoint(
-	ctx context.Context, cp attest.Checkpoint,
+	ctx context.Context, cp attest.Checkpoint, previousTreeSize int64,
 ) (store.CheckpointAnchor, error) {
 	// The digest sent is the CHECKPOINT hash, the value the whole chain
 	// is built on. Verdifax validates it as 64 lowercase hex, which
@@ -212,7 +249,8 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 		// whoever can read the log.
 		SubjectRef: fmt.Sprintf("checkpoint/%d/%s",
 			cp.Seq, cp.IntervalStart.UTC().Format(time.RFC3339)),
-		LeafCount: cp.TenantLeafCount,
+		LeafCount:        cp.TenantLeafCount,
+		PreviousTreeSize: previousTreeSize,
 	})
 	if err != nil {
 		return store.CheckpointAnchor{}, fmt.Errorf("verdifax anchor: marshal request: %w", err)
@@ -357,14 +395,21 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 // failure looks exactly like tampering to whoever reads the report, a
 // verifier should say "cannot be checked", not "does not match". So all
 // three parts or nothing.
+// The consistency proof is carried when present and simply omitted when
+// not. It is deliberately NOT part of the all-three-or-nothing rule
+// above: those three are one claim that breaks if any is missing, while
+// this is a separate claim about the log rather than about the entry.
+// Withholding an inclusion proof because no consistency proof came back
+// would trade a check we can make for one we cannot.
 func buildAnchorProof(out verdifaxAttestResponse) string {
 	if len(out.InclusionProof) == 0 || out.EntryBody == "" || out.LogID == "" {
 		return ""
 	}
 	b, err := json.Marshal(anchorProofEnvelope{
-		LogID:          out.LogID,
-		EntryBody:      out.EntryBody,
-		InclusionProof: out.InclusionProof,
+		LogID:            out.LogID,
+		EntryBody:        out.EntryBody,
+		InclusionProof:   out.InclusionProof,
+		ConsistencyProof: out.ConsistencyProof,
 	})
 	if err != nil {
 		// Unreachable for two strings and a json.RawMessage that was
