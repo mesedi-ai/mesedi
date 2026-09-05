@@ -51,6 +51,34 @@ the next moat, competitive parity, engineering debt, business, spikes.
 Then the substance. No preamble, no recap of what the person watched
 happen.
 
+## Every change gets a non-technical summary
+
+Anything built, fixed or updated is explained in plain language before
+the conversation moves on. Not a changelog line and not the commit
+message reworded. What was wrong, what it means for someone who will
+never read the code, and what is still not true.
+
+The audience is an auditor, a contracting officer, or a commander. If a
+sentence needs a reader to know what a Merkle tree is, rewrite it.
+
+## Documents that must be kept current
+
+These go stale silently, and a stale document is worse than none because
+it is quoted with confidence. After any change that touches what they
+assert, update all four in the same sitting:
+
+- `~/VERDIFAX/business-records/` walkthrough, the end-to-end technical
+  document. Built from `content.py` via `build.py`.
+- `~/VERDIFAX/business-records/` competitive landscape. Built from
+  `competitive_content.py` via `build_competitive.py`.
+- `~/VERDIFAX/business-records/` mandate analysis. Built from
+  `mandate_content.py` via the same builder.
+- The task list, including closing what shipped and filing what the work
+  exposed.
+
+Each `.md` still needs its PDF companion, and the builders refuse to
+render an em dash, so a stale document cannot be blamed on the tooling.
+
 ## Commits
 
 Subject line, then at most three lines of body. Not more. Explain why,
