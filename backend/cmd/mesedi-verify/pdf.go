@@ -70,7 +70,21 @@ type pdfDoc struct {
 	Fields      [][2]string
 	Sections    []pdfSection
 	Limits      []string
-	FooterID    string
+
+	// HowToCheck is the reader's route to reproducing this verdict
+	// WITHOUT us. Built here rather than written into the renderer
+	// because step two has to name the exact commit this binary came
+	// from, and that is data.
+	//
+	// It used to be one sentence ending "then run mesedi-verify yourself",
+	// which assumes the reader has mesedi-verify. An auditor handed this
+	// document has the export and the report and no verifier, and no
+	// instruction for obtaining one — so in practice they cannot check
+	// and end up trusting us anyway, which is the one outcome this whole
+	// report exists to prevent.
+	HowToCheck []string
+
+	FooterID string
 }
 
 // buildPDFDoc turns a report into the document to be drawn. Pure: no
@@ -234,7 +248,58 @@ func buildPDFDoc(rep report, exportSHA string) pdfDoc {
 	// prevent.
 	d.Limits = append(d.Limits, rep.Structural.Unverified...)
 
+	d.HowToCheck = howToCheck(rep.Verifier)
+
 	return d
+}
+
+// howToCheck spells out reproducing this verdict independently.
+//
+// # THE STEP THAT WAS MISSING, AND WHY IT MATTERED MOST
+//
+// The old text said "then run mesedi-verify yourself" and stopped. A
+// reader holding this PDF has the export and the report and no verifier,
+// and nothing here told them where to get one — so the practical outcome
+// of "check us, don't trust us" was that they trusted us.
+//
+// The second instruction is the load-bearing one and it is a refusal: do
+// not accept a compiled binary from Mesedi. A verdict produced by a
+// program the audited party handed you is that party asserting again. It
+// has to be built from source the reader fetched themselves, at the
+// commit named in the report, or the independence is decorative.
+//
+// Deliberately short on shell detail beyond that. Instructions that go
+// stale are worse than a pointer, because a command that fails reads as
+// the system being broken rather than the document being old.
+func howToCheck(verifier string) []string {
+	// Only a reproducible build can be pinned to a commit; resolveVersion
+	// marks the rest. Telling a reader to check out "unknown" would send
+	// them after something that does not exist.
+	at := "the commit shown in the Verifier field above"
+	if versionIsReproducible(verifier) {
+		at = verifier
+	}
+
+	return []string{
+		"1. Confirm this report is about your file. Run:  shasum -a 256 <export.json>",
+		"   The result must equal the Export SHA-256 in the subject block above. If it",
+		"   does not, this report describes a different file and says nothing about yours.",
+		"",
+		"2. Obtain the verifier from source — NOT as a binary from Mesedi. A verdict",
+		"   produced by a program the audited party handed you is that party asserting",
+		"   again, which is what this document exists to avoid.",
+		"     git clone https://github.com/mesedi-ai/mesedi",
+		"     cd mesedi/backend && git checkout " + at,
+		"     go build ./cmd/mesedi-verify",
+		"",
+		"3. Run it against the same export:",
+		"     ./mesedi-verify --offline <export.json>",
+		"   --offline needs no network where checkpoints carry inclusion proofs, and is",
+		"   the stronger check. Omit it to additionally query the log for any that do not.",
+		"",
+		"4. Compare. Any disagreement between your run and this document is a finding,",
+		"   and should be treated as one rather than resolved in Mesedi's favour.",
+	}
 }
 
 func stamp(t time.Time) string {
@@ -288,7 +353,7 @@ func renderPDF(d pdfDoc) ([]byte, error) {
 		w.section(s)
 	}
 	w.limits(d.Limits)
-	w.closing()
+	w.closing(d)
 
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {
@@ -454,17 +519,20 @@ func (w *pdfWriter) limits(limits []string) {
 	p.Ln(2)
 }
 
-func (w *pdfWriter) closing() {
+func (w *pdfWriter) closing(d pdfDoc) {
 	p := w.pdf
 	if p.GetY() > 250 {
 		p.AddPage()
 	}
-	p.SetFont("Helvetica", "I", 8)
-	p.SetTextColor(90, 90, 90)
-	p.MultiCell(pdfContentW, 4,
-		w.tr("To check this report rather than believe it: hash the export file with "+
-			"`shasum -a 256` and confirm it matches the Export SHA-256 above, then run "+
-			"`mesedi-verify <export>` yourself. Disagreement between your run and this "+
-			"document is a finding."),
-		"", "L", false)
+	p.SetFont("Helvetica", "B", 9)
+	p.SetTextColor(0, 0, 0)
+	p.MultiCell(pdfContentW, 4.4,
+		w.tr("TO CHECK THIS REPORT RATHER THAN BELIEVE IT"), "", "L", false)
+	p.Ln(1)
+
+	p.SetFont("Helvetica", "", 8)
+	p.SetTextColor(60, 60, 60)
+	for _, line := range d.HowToCheck {
+		p.MultiCell(pdfContentW, 3.8, w.tr(line), "", "L", false)
+	}
 }
