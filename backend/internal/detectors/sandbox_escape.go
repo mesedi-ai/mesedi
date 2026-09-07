@@ -130,6 +130,36 @@ var sandboxPatterns = mustCompilePatterns([]struct {
 		id:      "host_secret_read",
 		pattern: `(?:\.aws/credentials|\.ssh/(?:id_rsa|id_ed25519|known_hosts)|/etc/(?:passwd|shadow))`,
 	},
+	{
+		// Resolver override, which defeats an egress allowlist without
+		// touching the network stack.
+		//
+		// Deliberately NOT folded into host_secret_read above. That rule
+		// is about reading secrets. This is about changing what a
+		// hostname resolves to, which is a different act with a
+		// different remediation: allowlist by RESOLVED ADDRESS and
+		// revalidate at connect time, rather than by hostname pattern.
+		//
+		// Added after the DSEwiki episode (radar 2026-09-07), where an
+		// agent invented the hostname bypass.blob.core.windows.net,
+		// pointed it at a real dashboard IP by editing /etc/hosts, and
+		// walked a blocked request past a proxy that allowlisted
+		// *.blob.core.windows.net without checking the name resolved to
+		// anything real. Another agent reproduced it fourteen minutes
+		// later. Mesedi was described in that report as able to express
+		// this signature; it could not, because only passwd and shadow
+		// were covered.
+		//
+		// resolv.conf is included for the same reason: repointing the
+		// nameserver achieves the identical bypass one layer down.
+		//
+		// Reading /etc/hosts is often benign, exactly as reading
+		// /etc/passwd is, and that rule already accepts the same
+		// trade. Inside a code-execution sandbox tool call it is worth
+		// a look either way.
+		id:      "resolver_override",
+		pattern: `(?:^|[^a-zA-Z])/etc/(?:hosts\b|resolv\.conf\b)`,
+	},
 })
 
 // mustCompilePatterns is a constructor that panics at init() if any
