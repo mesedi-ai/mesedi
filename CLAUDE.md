@@ -94,6 +94,10 @@ not what; the diff shows what.
   `head`, `tail`, or `grep`. Choosing which parts of a safety report get
   seen is the same instinct as skipping the check.
 - Give the push command on its own, after everything else has passed.
+- **The Mesedi repository is public. Batch commits and push ONCE.** Several
+  commits in a stretch of work get one push at the end, not a push each.
+  Every push is visible to anyone watching, and a run of small pushes
+  advertises churn.
 - Every document produced as `.md` needs a PDF companion.
 - Business-sensitive material goes in `~/VERDIFAX/business-records/`,
   outside git.
@@ -103,6 +107,22 @@ not what; the diff shows what.
 Commit, push, then build, then run, then generate the PDF. Building from
 a dirty tree stamps the report "UNCOMMITTED CHANGES", which correctly
 tells the reader the result cannot be reproduced by anyone else.
+
+## Read the check before trying to satisfy it
+
+When `foundation-audit` fails, open the check's source in
+`~/foundation-audit/foundation_audit/post/machine.py` and read what it
+actually matches. Do not guess at what would satisfy it and re-run.
+
+Guessing wastes a round trip every time and sometimes several. B5 was
+"fixed" by writing a six-line justification comment ABOVE the offending
+line, which the check never looks at: its documented escape hatch is
+`if "//" in line`, an inline comment on the SAME line. Two minutes of
+reading would have replaced two failed audit runs, and the checks are
+short, commented, and explain their own reasoning.
+
+The same applies before writing a scope file. The word minimum, the
+required keys and the task-name match are all in that source.
 
 ## Verification
 
