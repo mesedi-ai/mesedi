@@ -51,6 +51,13 @@ NOTES.md
 PRICING.md
 INTERNAL_*.md
 
+# Working rules for the assistant. Internal process, not product, and it
+# carries defect history and business-record paths. It was tracked for
+# six commits before anyone noticed it did not belong here. Those stay in
+# the log; history is not rewritten, because reports issued to auditors
+# name exact commits and a rewrite would orphan them.
+CLAUDE.md
+
 # Scratch commit-message drafts (legacy pattern: .c-msg-<topic>.txt).
 # Local-only working files; delete after the commit ships.
 # Critical to ignore here because this repo is going public.
