@@ -73,8 +73,9 @@ assert, update all four in the same sitting:
   `competitive_content.py` via `build_competitive.py`.
 - `~/VERDIFAX/business-records/` mandate analysis. Built from
   `mandate_content.py` via the same builder.
-- The task list, including closing what shipped and filing what the work
-  exposed.
+- `~/VERDIFAX/business-records/BACKLOG.md` and its PDF, which is the
+  authoritative backlog. The in-app task list is a convenience over this
+  file, never the only copy of it.
 
 Each `.md` still needs its PDF companion, and the builders refuse to
 render an em dash, so a stale document cannot be blamed on the tooling.
@@ -108,6 +109,17 @@ not what; the diff shows what.
 - Every document produced as `.md` needs a PDF companion.
 - Business-sensitive material goes in `~/VERDIFAX/business-records/`,
   outside git.
+- **Nothing of value lives only where I put it.** Every artifact worth
+  keeping is written into one of the person's own folders. Not the
+  session outputs directory, not an app-managed store, not anywhere
+  neither of us can back up or inspect.
+
+  The backlog was kept only in the in-app task list. On 2026-09-07 it
+  went from 49 tasks to zero between one tool call and the next, with no
+  action that accounts for it and no storage either of us can open. It
+  was recoverable only because the list happened to be echoed into the
+  session. That was luck. If it is worth tracking, it belongs in a file
+  on their machine, first, and the tool is a mirror of that.
 
 ## Order of operations for anything an auditor will read
 
