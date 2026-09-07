@@ -94,10 +94,17 @@ not what; the diff shows what.
   `head`, `tail`, or `grep`. Choosing which parts of a safety report get
   seen is the same instinct as skipping the check.
 - Give the push command on its own, after everything else has passed.
-- **The Mesedi repository is public. Batch commits and push ONCE.** Several
-  commits in a stretch of work get one push at the end, not a push each.
-  Every push is visible to anyone watching, and a run of small pushes
-  advertises churn.
+- **The Mesedi repository is public. Push when the tree tells a complete
+  story and everything is green.** Sometimes that is one commit,
+  sometimes six. Batch related commits into one push rather than pushing
+  each, because a run of small pushes advertises churn to anyone
+  watching.
+
+  It is deliberately NOT a fixed number per push. A count-based rule
+  makes you sit on a one-line security fix waiting for companions, or
+  push half a refactor because you hit the number. Neither serves the
+  repository. If a commit closes a real gap in something publicly
+  documented, that is a reason to push it, not to accumulate around it.
 - Every document produced as `.md` needs a PDF companion.
 - Business-sensitive material goes in `~/VERDIFAX/business-records/`,
   outside git.
