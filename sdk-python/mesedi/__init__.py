@@ -62,7 +62,8 @@ from mesedi.cohere_integration import instrument_cohere
 from mesedi.gemini_integration import instrument_gemini
 from mesedi.ollama_integration import instrument_ollama
 from mesedi.vertex_gemini_integration import instrument_vertex_gemini
-from mesedi.client import MesediClient, configure, flush, get_client
+from mesedi.client import MesediClient, configure, flush, get_client, stats
+from mesedi._shipper import TelemetryStats
 from mesedi.events import (
     Event,
     EventType,
@@ -108,6 +109,8 @@ __all__ = [
     "emit_memory_operation",
     "flush",
     "get_client",
+    "stats",
+    "TelemetryStats",
     "HumanInterventionHandle",
     "instrument_anthropic",
     "instrument_cohere",

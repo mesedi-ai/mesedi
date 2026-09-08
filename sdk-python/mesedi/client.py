@@ -119,8 +119,25 @@ class MesediClient:
         Returns True if drained within ``timeout``, False otherwise.
         Primarily useful in tests and end-of-script synchronization;
         production code should rely on the atexit-registered shutdown.
+
+        Draining is not delivery: a refused submission drains too. Call
+        ``stats()`` afterwards when it matters whether the record
+        actually arrived.
         """
         return self._shipper.flush(timeout=timeout)
+
+    def stats(self):
+        """What happened to everything this client submitted so far.
+
+        Returns a ``TelemetryStats`` with ``delivered``, ``rejected``,
+        ``retries_exhausted``, ``dropped_queue_full``, plus ``lost`` and
+        ``complete`` conveniences. Exists because this SDK is fail-open
+        by design: agents keep working when telemetry fails, which is
+        right, and sessions were concluding "everything ok" over a
+        record that never arrived, which is not. flush() then stats()
+        answers both questions honestly.
+        """
+        return self._shipper.stats()
 
     # ── async submit (used by @wrap; default path) ────────────────────
 
@@ -237,6 +254,19 @@ def flush(timeout: float = 5.0) -> bool:
 
     Convenience wrapper for ``mesedi.get_client().flush(timeout)``. Useful
     when you want a one-liner at the end of a script to ensure all
-    observations have landed before exit.
+    observations have landed before exit. Draining is not delivery; pair
+    with ``mesedi.stats()`` when that distinction matters.
     """
     return get_client().flush(timeout=timeout)
+
+
+def stats():
+    """Module-level helper: delivery accounting for the default client.
+
+    Convenience wrapper for ``mesedi.get_client().stats()``. The
+    end-of-script pair is:
+
+        mesedi.flush(timeout=5.0)
+        assert mesedi.stats().complete, "telemetry did not fully arrive"
+    """
+    return get_client().stats()

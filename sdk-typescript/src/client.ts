@@ -42,6 +42,26 @@ export const DEFAULT_BASE_URL = "https://api.mesedi.ai";
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const SCHEMA_VERSION = "1";
 
+/**
+ * A snapshot of what happened to everything a client submitted.
+ * Mirrors the Python SDK's TelemetryStats. Units are HTTP submissions,
+ * not individual events; a rejected batch of 7 events counts once.
+ */
+export interface TelemetryStats {
+  /** Submissions the backend accepted. */
+  delivered: number;
+  /** Refused with a 4xx; never retried. */
+  rejected: number;
+  /** Gave up after transient failures. */
+  retriesExhausted: number;
+  /** Never left this process (queue full at submit time). */
+  droppedQueueFull: number;
+  /** Everything that did not reach the backend, for any reason. */
+  lost: number;
+  /** True when nothing submitted so far has been lost. */
+  complete: boolean;
+}
+
 /** Configuration accepted by `configure()`. */
 export interface ConfigureOptions {
   /**
@@ -94,7 +114,18 @@ export class MesediClient {
   private queue: ShipItem[] = [];
   private pendingEvents: Event[] = [];
   private lastFlush: number = Date.now();
+
+  // Delivery accounting, mirroring the Python SDK's TelemetryStats.
+  // Until 2026-09-08 only queue-full drops were counted; a permanent
+  // 4xx rejection and a retry-exhausted send were each logged once and
+  // then counted nowhere, so no caller could learn telemetry was lost.
+  // flush() answers "did the queue drain", which is true even when
+  // every submission was refused. Units are HTTP submissions, not
+  // events: a rejected batch of 7 counts once.
   private droppedCount = 0;
+  private deliveredCount = 0;
+  private rejectedCount = 0;
+  private exhaustedCount = 0;
   private stopped = false;
   private timer: NodeJS.Timeout | null = null;
   private inflight: Promise<void> = Promise.resolve();
@@ -152,6 +183,31 @@ export class MesediClient {
       event.payload = maybeTruncate(event.payload, this.maxPayloadBytes);
     }
     this.enqueue({ kind: "event", body: event });
+  }
+
+  /**
+   * What happened to everything this client submitted so far.
+   *
+   * flush() answers "did the queue drain", and that is true even when
+   * every submission was refused: this SDK is fail-open by design, so
+   * a rejected batch is logged once and the agent carries on. Right
+   * for the agent, wrong to mistake for delivery. Read this after
+   * flushing when it matters whether the record actually arrived:
+   *
+   *     await mesedi.flush();
+   *     if (!mesedi.stats().complete) { ...the record is incomplete }
+   */
+  stats(): TelemetryStats {
+    const lost =
+      this.rejectedCount + this.exhaustedCount + this.droppedCount;
+    return {
+      delivered: this.deliveredCount,
+      rejected: this.rejectedCount,
+      retriesExhausted: this.exhaustedCount,
+      droppedQueueFull: this.droppedCount,
+      lost,
+      complete: lost === 0,
+    };
   }
 
   /**
@@ -315,9 +371,13 @@ export class MesediClient {
           signal: controller.signal,
         });
         clearTimeout(timer);
-        if (resp.status < 400) return; // success
+        if (resp.status < 400) {
+          this.deliveredCount++;
+          return; // success
+        }
         if (resp.status >= 400 && resp.status < 500) {
           // Permanent failure, retrying won't help.
+          this.rejectedCount++;
           const text = await resp.text().catch(() => "");
           console.warn(
             `mesedi: ${description} rejected with ${resp.status}: ${text.slice(0, 200)}`,
@@ -332,6 +392,7 @@ export class MesediClient {
         await new Promise<void>((r) => setTimeout(r, backoffs[attempt]));
       }
     }
+    this.exhaustedCount++;
     console.warn(
       `mesedi: ${description} failed after ${backoffs.length + 1} attempts: ${String(lastErr)}`,
     );
@@ -378,4 +439,12 @@ export function getClient(): MesediClient {
 
 export async function flush(timeoutMs = 5_000): Promise<boolean> {
   return getClient().flush(timeoutMs);
+}
+
+/**
+ * Module-level helper: delivery accounting for the default client.
+ * The end-of-script pair is flush() then stats().complete.
+ */
+export function stats(): TelemetryStats {
+  return getClient().stats();
 }

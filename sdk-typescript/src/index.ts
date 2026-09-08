@@ -27,8 +27,8 @@
  *   EventType, Status: enum-style constants.
  */
 
-export { MesediClient, configure, flush, getClient } from "./client.js";
-export type { ConfigureOptions } from "./client.js";
+export { MesediClient, configure, flush, getClient, stats } from "./client.js";
+export type { ConfigureOptions, TelemetryStats } from "./client.js";
 export {
   EventType,
   Status,

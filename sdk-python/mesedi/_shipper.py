@@ -52,6 +52,38 @@ from mesedi._compress import maybe_compress
 from mesedi._truncate import DEFAULT_MAX_PAYLOAD_BYTES, maybe_truncate
 from mesedi.events import Event, Execution
 
+
+@dataclass(frozen=True)
+class TelemetryStats:
+    """A snapshot of what happened to everything this client submitted.
+
+    ``flush()`` answers "did the outgoing queue drain", and that answer
+    is True even when every submission was refused: this SDK is
+    deliberately fail-open, so a rejected batch is logged once and the
+    agent carries on. That is the right behaviour for the agent and the
+    wrong thing to mistake for delivery. Read this after flushing when
+    it matters whether the record actually arrived.
+
+    Units are HTTP submissions, not individual events. A rejected batch
+    of 7 events counts once here; the log line it produced says how many
+    events it carried.
+    """
+
+    delivered: int          # submissions the backend accepted
+    rejected: int           # refused with a 4xx; never retried
+    retries_exhausted: int  # gave up after transient failures
+    dropped_queue_full: int # never left this process
+
+    @property
+    def lost(self) -> int:
+        """Submissions that did not reach the backend, for any reason."""
+        return self.rejected + self.retries_exhausted + self.dropped_queue_full
+
+    @property
+    def complete(self) -> bool:
+        """True when nothing submitted so far has been lost."""
+        return self.lost == 0
+
 logger = logging.getLogger("mesedi.shipper")
 
 
@@ -101,7 +133,24 @@ class EventShipper:
 
         self._queue: "queue.Queue[_Item]" = queue.Queue(maxsize=max_queue)
         self._stop = threading.Event()
-        self._dropped_count = 0  # for diagnostics
+
+        # Delivery accounting. Until 2026-09-08 only queue-full drops
+        # were counted; a permanent 4xx rejection and a retry-exhausted
+        # send were each logged once and then counted nowhere, so no
+        # caller could learn that telemetry was lost. flush() answers
+        # "did the queue drain", which is true even when every single
+        # submission was refused, and a session whose whole record
+        # bounced off a 401 reported clean. These counters exist so
+        # stats() can answer the question flush() does not.
+        #
+        # Units are HTTP submissions, not events: a rejected batch of
+        # 7 events counts once. Counted from the single shipper thread
+        # except _dropped_count, which producer threads bump; that has
+        # always been a bare int and stays one, consistent with it.
+        self._dropped_count = 0    # queue full at submit time
+        self._delivered_count = 0  # 2xx/3xx responses
+        self._rejected_count = 0   # permanent 4xx, never retried
+        self._exhausted_count = 0  # gave up after max_retries
 
         self._thread = threading.Thread(
             target=self._run,
@@ -142,6 +191,15 @@ class EventShipper:
                     "mesedi: shipper queue full, dropped %d items so far",
                     self._dropped_count,
                 )
+
+    def stats(self) -> TelemetryStats:
+        """Snapshot of delivery accounting. See TelemetryStats."""
+        return TelemetryStats(
+            delivered=self._delivered_count,
+            rejected=self._rejected_count,
+            retries_exhausted=self._exhausted_count,
+            dropped_queue_full=self._dropped_count,
+        )
 
     def flush(self, timeout: float = 5.0) -> bool:
         """Block until the shipper has drained everything queued so far.
@@ -302,9 +360,11 @@ class EventShipper:
             try:
                 r = self._http.request(method, url, content=body, headers=headers)
                 if r.status_code < 400:
+                    self._delivered_count += 1
                     return  # success
                 if 400 <= r.status_code < 500:
                     # Permanent failure: retrying won't help.
+                    self._rejected_count += 1
                     logger.warning(
                         "mesedi: %s rejected with %d: %s",
                         description,
@@ -320,6 +380,7 @@ class EventShipper:
             if attempt < self._max_retries:
                 time.sleep(backoffs[attempt])
 
+        self._exhausted_count += 1
         logger.warning(
             "mesedi: %s failed after %d attempts: %s",
             description,
