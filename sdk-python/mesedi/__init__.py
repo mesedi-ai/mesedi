@@ -89,7 +89,7 @@ from mesedi.observe import (
 from mesedi.tool import tool
 from mesedi.wrap import wrap
 
-__version__ = "0.5.5"
+__version__ = "0.6.0"
 
 __all__ = [
     "Budget",
