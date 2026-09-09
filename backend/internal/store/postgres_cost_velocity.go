@@ -51,3 +51,22 @@ func (s *PostgresStore) SetProjectCostVelocityThresholdUSD(
 	}
 	return nil
 }
+
+// GroupCostVelocity is the Postgres twin of the SQLite method in
+// costvelocity.go (#48: attributed signature). Caller is responsible
+// for the per-project threshold check (see HandleUpdateExecution +
+// GetProjectCostVelocityThresholdUSD); the store layer just writes
+// the cluster.
+func (s *PostgresStore) GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64, identity string) (isNew bool, err error) {
+	signature := CostVelocityAttributedSignature(costUSD, identity)
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCostVelocity, signature)
+}
+
+// GroupCostVelocityRate is the Postgres twin of the SQLite method in
+// costvelocity.go. Companion to GroupCostVelocity using the
+// rate-bucketed signature; deliberately NOT attributed, the rate is
+// the project's aggregate burn.
+func (s *PostgresStore) GroupCostVelocityRate(ctx context.Context, executionID, projectID string, ratePerMinUSD float64) (isNew bool, err error) {
+	signature := CostVelocityRateSignature(ratePerMinUSD)
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCostVelocity, signature)
+}

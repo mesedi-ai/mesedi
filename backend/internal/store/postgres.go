@@ -1501,7 +1501,7 @@ func (s *PostgresStore) UpdateExecution(ctx context.Context, e *events.Execution
 
 func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*events.Execution, error) {
 	e := &events.Execution{}
-	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang, failureGroupID, tenantID sql.NullString
+	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang, failureGroupID, tenantID, apiKeyID sql.NullString
 	var endedAt, pausedAt sql.NullTime
 	var durationMs, tokensIn, tokensOut, totalPausedMs sql.NullInt64
 	var pauseCount sql.NullInt64
@@ -1513,7 +1513,7 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 			total_tokens_in, total_tokens_out, estimated_cost_usd,
 			input_summary, output_summary, crash_signature,
 			sdk_version, sdk_language, failure_group_id, tenant_id,
-			paused_at, total_paused_ms, pause_count
+			paused_at, total_paused_ms, pause_count, api_key_id
 		FROM executions WHERE execution_id = $1
 	`, executionID).Scan(
 		&e.ExecutionID, &e.ProjectID, &parent, &e.Status,
@@ -1521,7 +1521,7 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 		&tokensIn, &tokensOut, &costUSD,
 		&inputSum, &outputSum, &crashSig,
 		&sdkVer, &sdkLang, &failureGroupID, &tenantID,
-		&pausedAt, &totalPausedMs, &pauseCount,
+		&pausedAt, &totalPausedMs, &pauseCount, &apiKeyID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1581,6 +1581,10 @@ func (s *PostgresStore) GetExecution(ctx context.Context, executionID string) (*
 	}
 	if pauseCount.Valid {
 		e.PauseCount = int(pauseCount.Int64)
+	}
+	if apiKeyID.Valid {
+		v := apiKeyID.String
+		e.APIKeyID = &v
 	}
 	return e, nil
 }
@@ -3011,22 +3015,7 @@ func (s *PostgresStore) GroupPromptInjection(ctx context.Context, executionID, p
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassInjection, patternName)
 }
 
-// GroupCostVelocity is the Postgres twin of the SQLite method of the
-// same name. Caller is responsible for the per-project threshold
-// check (see HandleUpdateExecution + GetProjectCostVelocityThresholdUSD);
-// the store layer just writes the cluster.
-func (s *PostgresStore) GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64) (isNew bool, err error) {
-	signature := CostVelocitySignature(costUSD)
-	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCostVelocity, signature)
-}
-
-// GroupCostVelocityRate is the Postgres twin of the SQLite method of
-// the same name. Companion to GroupCostVelocity using the rate-bucketed
-// signature.
-func (s *PostgresStore) GroupCostVelocityRate(ctx context.Context, executionID, projectID string, ratePerMinUSD float64) (isNew bool, err error) {
-	signature := CostVelocityRateSignature(ratePerMinUSD)
-	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCostVelocity, signature)
-}
+// Cost-velocity grouping twins moved to postgres_cost_velocity.go in #48.
 
 func (s *PostgresStore) GroupIdenticalCallLoop(ctx context.Context, executionID, projectID, callHash string) (isNew bool, err error) {
 	if callHash == "" {

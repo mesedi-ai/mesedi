@@ -23,7 +23,24 @@ import (
 // already computed and persisted; zero-cost executions never reach
 // here with a signal worth firing on, but the guards inside keep
 // their original behaviour regardless.
-func (h *Handlers) runCostVelocityDetectors(r *http.Request, executionID, authProjectID string, effectiveCost float64) {
+//
+// tenantID and apiKeyID come from the execution row (not the PATCH
+// request's auth context, which may be a different key than the one
+// that ran the work) and resolve to the #48 attribution identity:
+// the absolute detector's group signature carries WHO, so spend from
+// a never-seen tenant or credential creates a NEW group and the
+// new-group webhook escalation fires structurally instead of folding
+// into the familiar magnitude bucket as a recurrence. The rate
+// detector stays project-wide: burn rate is aggregate spend.
+func (h *Handlers) runCostVelocityDetectors(r *http.Request, executionID, authProjectID string, effectiveCost float64, tenantID, apiKeyID *string) {
+	tenant, apiKey := "", ""
+	if tenantID != nil {
+		tenant = *tenantID
+	}
+	if apiKeyID != nil {
+		apiKey = *apiKeyID
+	}
+	identity := store.CostVelocityIdentity(tenant, apiKey)
 	// Sub-slice 16: cost-velocity detector. Any execution whose
 	// resolved cost exceeds the per-project threshold gets
 	// grouped as cost_velocity with a cost-bucketed signature.
@@ -64,7 +81,7 @@ func (h *Handlers) runCostVelocityDetectors(r *http.Request, executionID, authPr
 			)
 		}
 		if effectiveCost >= costThresholdUSD {
-			isNew, gErr := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost)
+			isNew, gErr := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost, identity)
 			if gErr != nil {
 				h.Logger.Warn("cost-velocity grouping failed (continuing)",
 					"execution_id", executionID,
@@ -73,7 +90,7 @@ func (h *Handlers) runCostVelocityDetectors(r *http.Request, executionID, authPr
 					"error", gErr.Error(),
 				)
 			}
-			h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocitySignature(effectiveCost), isNew, gErr)
+			h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocityAttributedSignature(effectiveCost, identity), isNew, gErr)
 		}
 	}
 

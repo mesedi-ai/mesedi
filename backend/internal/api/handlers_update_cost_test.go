@@ -104,7 +104,9 @@ func TestHandleUpdateExecution_FiresCostVelocityDetectors(t *testing.T) {
 		}
 	}
 
-	wantAbsolute := store.CostVelocitySignature(50.0) // cost_$10+
+	// The execution was created without tenant or API key, so the
+	// #48 attributed signature resolves to the unattributed marker.
+	wantAbsolute := store.CostVelocityAttributedSignature(50.0, "unattributed")
 	if !found[wantAbsolute] {
 		t.Errorf("absolute cost-velocity detector did not fire: no %s group "+
 			"with signature %q after a $50 execution against the $%.2f default "+
@@ -117,5 +119,73 @@ func TestHandleUpdateExecution_FiresCostVelocityDetectors(t *testing.T) {
 		t.Errorf("rate cost-velocity detector did not fire: no %s group with "+
 			"signature %q after $50 in the default window; groups found: %v",
 			store.FailureClassCostVelocity, wantRate, found)
+	}
+}
+
+// TestHandleUpdateExecution_NewActorMakesNewCostVelocityGroup drives
+// the #48 property through the real handler: two tenants each cross
+// the absolute threshold in the same magnitude bucket, and each must
+// get its OWN failure group. Pre-attribution both folded into one
+// cost_$10+ group, so a never-seen actor's spend read as routine
+// recurrence, the radar's exact complaint.
+func TestHandleUpdateExecution_NewActorMakesNewCostVelocityGroup(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st, err := store.OpenSQLite(":memory:", logger)
+	if err != nil {
+		t.Fatalf("open in-memory sqlite: %v", err)
+	}
+	// Not closed, same reason as above: detached dispatch goroutines.
+
+	ctx := context.Background()
+	const projectID = "proj_costvel_actors"
+	if err := st.CreateProject(ctx, &store.Project{
+		ProjectID: projectID, Name: "new-actor test", Tier: "hobby",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	h := &Handlers{Logger: logger, Store: st, HaltSubs: NewHaltSubscribers()}
+
+	finish := func(execID, tenant string) {
+		t.Helper()
+		tenantVal := tenant
+		if err := st.CreateExecution(ctx, &events.Execution{
+			ExecutionID: execID, ProjectID: projectID,
+			Status: events.StatusStarted, StartedAt: time.Now().UTC(),
+			TenantID: &tenantVal,
+		}); err != nil {
+			t.Fatalf("create execution %s: %v", execID, err)
+		}
+		body := `{"status":"completed","estimated_cost_usd":15.0}`
+		req := httptest.NewRequest("PATCH", "/executions/"+execID, strings.NewReader(body))
+		req.SetPathValue("id", execID)
+		req = req.WithContext(context.WithValue(req.Context(), ctxKeyProjectID, projectID))
+		rec := httptest.NewRecorder()
+		h.HandleUpdateExecution(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("PATCH %s returned %d: %s", execID, rec.Code, rec.Body.String())
+		}
+	}
+	finish("exec_known_actor", "long-standing-customer")
+	finish("exec_new_actor", "never-seen-before")
+
+	groups, err := st.ListFailureGroups(ctx, projectID, store.ListFailureGroupsOpts{Limit: 50})
+	if err != nil {
+		t.Fatalf("list groups: %v", err)
+	}
+	sigs := map[string]bool{}
+	for _, g := range groups {
+		if g.FailureClass == store.FailureClassCostVelocity {
+			sigs[g.Signature] = true
+		}
+	}
+	for _, want := range []string{
+		store.CostVelocityAttributedSignature(15.0, "tenant:long-standing-customer"),
+		store.CostVelocityAttributedSignature(15.0, "tenant:never-seen-before"),
+	} {
+		if !sigs[want] {
+			t.Errorf("missing per-actor group %q; signatures found: %v", want, sigs)
+		}
 	}
 }

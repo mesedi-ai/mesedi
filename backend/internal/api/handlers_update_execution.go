@@ -1251,7 +1251,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 
 			// Cost-velocity detection, both forms, lives in
 			// handlers_update_cost.go since the #35 Phase D carve.
-			h.runCostVelocityDetectors(r, executionID, authProjectID, effectiveCost)
+			h.runCostVelocityDetectors(r, executionID, authProjectID, effectiveCost, currentExec.TenantID, currentExec.APIKeyID)
 
 			// Time-budget detector. Catch-all for executions that ran
 			// long without a more specific cause. MOVED HERE from the

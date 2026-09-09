@@ -372,7 +372,9 @@ type DetectionStore interface {
 	GroupPromptInjection(ctx context.Context, executionID, projectID, patternName string) (bool, error)
 	// GroupCostVelocity upserts a failure_group with
 	// failure_class=cost_velocity and a cost-bucketed signature.
-	GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64) (bool, error)
+	// identity comes from CostVelocityIdentity (#48): the signature
+	// carries the actor, so a never-seen identity creates a new group.
+	GroupCostVelocity(ctx context.Context, executionID, projectID string, costUSD float64, identity string) (bool, error)
 	// GroupCostVelocityRate upserts a failure_group with
 	// failure_class=cost_velocity and a RATE-bucketed signature
 	// (rate_$X+_per_min). Companion to GroupCostVelocity, same

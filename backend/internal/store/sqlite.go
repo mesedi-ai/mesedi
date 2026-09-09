@@ -1846,7 +1846,7 @@ func (s *SQLiteStore) UpdateExecution(ctx context.Context, e *events.Execution) 
 
 func (s *SQLiteStore) GetExecution(ctx context.Context, executionID string) (*events.Execution, error) {
 	e := &events.Execution{}
-	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang, failureGroupID, tenantID sql.NullString
+	var parent, inputSum, outputSum, crashSig, sdkVer, sdkLang, failureGroupID, tenantID, apiKeyID sql.NullString
 	var endedAt, pausedAt sql.NullTime
 	var durationMs, tokensIn, tokensOut, totalPausedMs sql.NullInt64
 	var pauseCount sql.NullInt64
@@ -1858,7 +1858,7 @@ func (s *SQLiteStore) GetExecution(ctx context.Context, executionID string) (*ev
 			total_tokens_in, total_tokens_out, estimated_cost_usd,
 			input_summary, output_summary, crash_signature,
 			sdk_version, sdk_language, failure_group_id, tenant_id,
-			paused_at, total_paused_ms, pause_count
+			paused_at, total_paused_ms, pause_count, api_key_id
 		FROM executions WHERE execution_id = ?
 	`, executionID).Scan(
 		&e.ExecutionID, &e.ProjectID, &parent, &e.Status,
@@ -1866,7 +1866,7 @@ func (s *SQLiteStore) GetExecution(ctx context.Context, executionID string) (*ev
 		&tokensIn, &tokensOut, &costUSD,
 		&inputSum, &outputSum, &crashSig,
 		&sdkVer, &sdkLang, &failureGroupID, &tenantID,
-		&pausedAt, &totalPausedMs, &pauseCount,
+		&pausedAt, &totalPausedMs, &pauseCount, &apiKeyID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1926,6 +1926,10 @@ func (s *SQLiteStore) GetExecution(ctx context.Context, executionID string) (*ev
 	}
 	if pauseCount.Valid {
 		e.PauseCount = int(pauseCount.Int64)
+	}
+	if apiKeyID.Valid {
+		v := apiKeyID.String
+		e.APIKeyID = &v
 	}
 	return e, nil
 }
@@ -3819,92 +3823,7 @@ func (s *SQLiteStore) GroupPromptInjection(
 // source of truth.
 const DefaultCostVelocityThresholdUSD = 1.00
 
-// CostVelocitySignature buckets execution cost into order-of-magnitude
-// signatures so high-cost runs cluster sensibly. Independent of the
-// per-project threshold: a customer who lowers their threshold to
-// $0.05 will see "cost_$0.01+" signatures fire; a customer at the
-// default $1.00 will see "cost_$1+" and "cost_$10+" most often.
-func CostVelocitySignature(costUSD float64) string {
-	switch {
-	case costUSD < 0.01:
-		return "cost_$0.001+"
-	case costUSD < 0.10:
-		return "cost_$0.01+"
-	case costUSD < 1.00:
-		return "cost_$0.10+"
-	case costUSD < 10.00:
-		return "cost_$1+"
-	default:
-		return "cost_$10+"
-	}
-}
-
-// CostVelocityRateSignature buckets observed burn-rate ($/minute) into
-// order-of-magnitude signatures, mirroring CostVelocitySignature.
-// Independent of the per-project rate threshold: a customer at the
-// default $5/min threshold who hits $50/min sees "rate_$10+_per_min",
-// distinct from someone barely tripping at $5/min ("rate_$5+_per_min").
-// Buckets escalate so the dashboard naturally separates "barely
-// anomalous" from "runaway" without manual triage.
-func CostVelocityRateSignature(ratePerMinUSD float64) string {
-	switch {
-	case ratePerMinUSD < 1.00:
-		return "rate_$0.10+_per_min" // matches the per-project floor
-	case ratePerMinUSD < 5.00:
-		return "rate_$1+_per_min"
-	case ratePerMinUSD < 10.00:
-		return "rate_$5+_per_min" // matches default threshold
-	case ratePerMinUSD < 100.00:
-		return "rate_$10+_per_min"
-	case ratePerMinUSD < 1000.00:
-		return "rate_$100+_per_min"
-	default:
-		return "rate_$1000+_per_min"
-	}
-}
-
-// GroupCostVelocity upserts a failure_group with
-// failure_class=cost_velocity and a cost-bucketed signature. Same
-// idempotency contract, if the execution is already in a higher-
-// priority group (crash, loop, tool/validator failure), this is a
-// no-op.
-//
-// The caller (HandleUpdateExecution) is responsible for the
-// threshold check using the per-project value from
-// GetProjectCostVelocityThresholdUSD. The store layer no longer
-// enforces a threshold, the policy lives in the handler, the
-// storage in the store. Mirrors the time_budget pattern.
-func (s *SQLiteStore) GroupCostVelocity(
-	ctx context.Context,
-	executionID, projectID string,
-	costUSD float64,
-) (isNew bool, err error) {
-	signature := CostVelocitySignature(costUSD)
-	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassCostVelocity, signature)
-}
-
-// GroupCostVelocityRate upserts a failure_group with
-// failure_class=cost_velocity and a RATE-bucketed signature
-// (rate_$X+_per_min). Companion to GroupCostVelocity, same class,
-// different signature so the dashboard renders rate-based bursts as
-// a distinct cluster from per-execution magnitude. Handler is
-// responsible for the threshold check using the per-project value
-// from GetProjectCostVelocityRateConfig.
-//
-// Why a separate store method instead of overloading GroupCostVelocity
-// with a "rate" boolean: keeps the signature-computation responsibility
-// in the store (single source of truth) AND makes the call site
-// self-documenting at the handler. The cost and the rate are
-// different quantities measured in different units; conflating them
-// behind one parameter would invite future signature bugs.
-func (s *SQLiteStore) GroupCostVelocityRate(
-	ctx context.Context,
-	executionID, projectID string,
-	ratePerMinUSD float64,
-) (isNew bool, err error) {
-	signature := CostVelocityRateSignature(ratePerMinUSD)
-	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassCostVelocity, signature)
-}
+// Cost-velocity signatures + grouping moved to costvelocity.go in #48.
 
 // GroupIdenticalCallLoop upserts a failure_group with
 // failure_class=loops and signature="identical_call_<callHash>".
