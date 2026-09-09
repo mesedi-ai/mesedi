@@ -42,7 +42,15 @@ func TestHandleUpdateExecution_FiresCostVelocityDetectors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
-	defer st.Close()
+	// Deliberately NOT closed. maybeFireWebhook spawns a detached
+	// dispatch goroutine (webhook_dispatch.go, spawn-and-forget by
+	// design) that reads the store after this test returns; Close()
+	// nils the db handle and the goroutine then panics the whole
+	// test binary, which is exactly what happened on CI's slower
+	// runner while local runs won the race. The in-memory store
+	// lives until process exit, which is fine for a test binary.
+	// The durable fix, tracking dispatch goroutines for shutdown,
+	// is the B30 debt already scheduled in the #35 split.
 
 	ctx := context.Background()
 	const projectID = "proj_costvel_test"
