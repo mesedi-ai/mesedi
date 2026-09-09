@@ -2309,7 +2309,7 @@ func (s *SQLiteStore) SumExecutionCostByProjectSince(
 	args := []any{projectID}
 	if !since.IsZero() {
 		query += " AND started_at >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339))
+		args = append(args, since.UTC()) // NEVER Format(...): see #57 + sqlite_sum_execution_cost_test.go
 	}
 	var cost float64
 	var count int

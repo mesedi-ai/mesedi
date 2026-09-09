@@ -569,17 +569,6 @@ func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// HandleUpdateExecution marks an existing execution as completed, crashed,
-// halted, etc. Idempotent, repeated PATCH calls with the same status are
-// silently accepted.
-//
-// Phase 3a addition: if the PATCH transitions an execution to status=crashed
-// AND a crash_signature is provided, the execution is grouped into the
-// appropriate failure_group via Store.GroupCrashedExecution. The grouping
-// step is best-effort: if it fails, the request still returns 200 because
-// the execution's primary update has already succeeded; only the
-// dashboard's grouping view is degraded.
-
 // normalizeListQuery sanitizes a list-endpoint search query string for
 // safe SQL use. Trims whitespace, drops control characters, caps at 256
 // bytes (a search for hundreds of chars is almost certainly an exploit

@@ -21,6 +21,19 @@ import (
 	"mesedi/backend/internal/store"
 )
 
+// HandleUpdateExecution marks an existing execution as completed, crashed,
+// halted, etc. Idempotent, repeated PATCH calls with the same status are
+// silently accepted.
+//
+// Phase 3a addition: if the PATCH transitions an execution to status=crashed
+// AND a crash_signature is provided, the execution is grouped into the
+// appropriate failure_group via Store.GroupCrashedExecution. The grouping
+// step is best-effort: if it fails, the request still returns 200 because
+// the execution's primary update has already succeeded; only the
+// dashboard's grouping view is degraded.
+//
+// (This doc comment was stranded in handlers.go by the Phase C file
+// move and reunited with its function during Phase D.)
 func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request) {
 	executionID := r.PathValue("id")
 	if executionID == "" {
@@ -1236,135 +1249,9 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 				h.incrementCustomPatternMatch(r.Context(), authProjectID, matchedPatternID)
 			}
 
-			// Sub-slice 16: cost-velocity detector. Any execution whose
-			// resolved cost exceeds the per-project threshold gets
-			// grouped as cost_velocity with a cost-bucketed signature.
-			//
-			// Migration 043: threshold is per-project. Default 1.00 USD
-			// (raised from the broken $0.001 v0.0.1 floor that fired
-			// on every real execution). Cost-sensitive customers can
-			// lower it (e.g. $0.10); batch customers can raise it.
-			// Falls back to the package default on store error so a
-			// transient DB blip never silences the detector, with a
-			// durable audit_event so persistent failures surface in
-			// the dashboard config-fallback chip.
-			//
-			// Migration 044 () adds the rate-based ($/min)
-			// detector immediately after this block. Both can fire on
-			// the same execution because they answer different
-			// questions (single expensive call vs sustained burn
-			// rate); idempotent failure_group writes ensure no
-			// double-counting under the absolute signature.
-			if effectiveCost > 0 {
-				costThresholdUSD := store.DefaultCostVelocityThresholdUSD
-				if cvUSD, cvErr := h.Store.GetProjectCostVelocityThresholdUSD(r.Context(), authProjectID); cvErr == nil {
-					costThresholdUSD = cvUSD
-				} else {
-					h.Logger.Warn("get cost_velocity_threshold_usd failed; using default",
-						"execution_id", executionID,
-						"project_id", authProjectID,
-						"error", cvErr.Error(),
-					)
-					h.recordSystemEventForProject(
-						r.Context(),
-						authProjectID, "config_fallback",
-						"config_fallback", "project_config", "cost_velocity_threshold_usd",
-						map[string]any{
-							"error":          cvErr.Error(),
-							"fallback_value": costThresholdUSD,
-						},
-					)
-				}
-				if effectiveCost >= costThresholdUSD {
-					isNew, gErr := h.Store.GroupCostVelocity(r.Context(), executionID, authProjectID, effectiveCost)
-					if gErr != nil {
-						h.Logger.Warn("cost-velocity grouping failed (continuing)",
-							"execution_id", executionID,
-							"cost_usd", effectiveCost,
-							"threshold_usd", costThresholdUSD,
-							"error", gErr.Error(),
-						)
-					}
-					h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocitySignature(effectiveCost), isNew, gErr)
-				}
-			}
-
-			// Sub-slice 16b: cost-velocity RATE detector. Sums execution
-			// costs over a per-project rolling window and fires when
-			// the burn-rate ($/minute) exceeds the per-project threshold.
-			// Closes the marketing-vs-implementation gap from the audit
-			// (cost_velocity.G2): marketing promised "$/minute rate
-			// detection" but only per-execution magnitude existed.
-			//
-			// Migration 044: threshold + window are per-project. Defaults
-			// {5.00 USD/min, 5 min}. Same fallback-to-default-with-audit
-			// pattern as the absolute block above. Independent of the
-			// absolute detector, both can fire on the same execution.
-			//
-			// Aggregator reuses SumExecutionCostByProjectSince, it
-			// already exists (org-rollup endpoint), so no new store
-			// API surface and no new index requirements (the existing
-			// (project_id, started_at) covers the scan).
-			rateCfg := store.DefaultCostVelocityRateConfig
-			if rc, rcErr := h.Store.GetProjectCostVelocityRateConfig(r.Context(), authProjectID); rcErr == nil {
-				rateCfg = rc
-			} else {
-				h.Logger.Warn("get cost_velocity_rate_config failed; using default",
-					"execution_id", executionID,
-					"project_id", authProjectID,
-					"error", rcErr.Error(),
-				)
-				h.recordSystemEventForProject(
-					r.Context(),
-					authProjectID, "config_fallback",
-					"config_fallback", "project_config", "cost_velocity_rate_config",
-					map[string]any{
-						"error":                rcErr.Error(),
-						"fallback_threshold":   rateCfg.ThresholdUSDPerMin,
-						"fallback_window_mins": rateCfg.WindowMinutes,
-					},
-				)
-			}
-			windowStart := time.Now().UTC().Add(-time.Duration(rateCfg.WindowMinutes) * time.Minute)
-			windowCostUSD, _, rcAggErr := h.Store.SumExecutionCostByProjectSince(r.Context(), authProjectID, windowStart)
-			if rcAggErr != nil {
-				// Aggregator failures must NOT break the request path.
-				// Log + audit-telemetry + skip the rate fire for this
-				// execution. The absolute detector above has already
-				// run; rate is additive signal, not the only one.
-				h.Logger.Warn("cost-velocity rate aggregator failed (continuing)",
-					"execution_id", executionID,
-					"project_id", authProjectID,
-					"window_minutes", rateCfg.WindowMinutes,
-					"error", rcAggErr.Error(),
-				)
-				h.recordSystemEventForProject(
-					r.Context(),
-					authProjectID, "config_fallback",
-					"config_fallback", "project_config", "cost_velocity_rate_aggregator",
-					map[string]any{
-						"error": rcAggErr.Error(),
-					},
-				)
-			} else if rateCfg.WindowMinutes > 0 {
-				ratePerMin := windowCostUSD / float64(rateCfg.WindowMinutes)
-				if ratePerMin >= rateCfg.ThresholdUSDPerMin {
-					isNew, gErr := h.Store.GroupCostVelocityRate(r.Context(), executionID, authProjectID, ratePerMin)
-					if gErr != nil {
-						h.Logger.Warn("cost-velocity rate grouping failed (continuing)",
-							"execution_id", executionID,
-							"rate_usd_per_min", ratePerMin,
-							"threshold_usd_per_min", rateCfg.ThresholdUSDPerMin,
-							"window_minutes", rateCfg.WindowMinutes,
-							"error", gErr.Error(),
-						)
-					}
-					// Webhook fires under the rate signature
-					// distinctly from the absolute one so SREs can
-					// route them differently if they choose.
-					h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocityRateSignature(ratePerMin), isNew, gErr)
-				}
-			}
+			// Cost-velocity detection, both forms, lives in
+			// handlers_update_cost.go since the #35 Phase D carve.
+			h.runCostVelocityDetectors(r, executionID, authProjectID, effectiveCost)
 
 			// Time-budget detector. Catch-all for executions that ran
 			// long without a more specific cause. MOVED HERE from the
