@@ -112,7 +112,9 @@ func (s *SQLiteStore) DeleteExecutionsOlderThan(
 	res, err := s.db.ExecContext(ctx, `
 		DELETE FROM executions
 		WHERE project_id = ? AND started_at < ?
-	`, projectID, cutoff.UTC().Format(time.RFC3339))
+	`, projectID, cutoff.UTC()) // time.Time bound, NEVER Format(...): #57. The string
+	// bound deleted every row sharing the cutoff's calendar day, up to a
+	// day of over-deletion per retention run (' ' < 'T' after the date).
 	if err != nil {
 		return 0, fmt.Errorf("delete executions older than: %w", err)
 	}

@@ -42,7 +42,7 @@ type SQLiteStore struct {
 //
 //	file:./mesedi-dev.db?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)
 func OpenSQLite(dsn string, logger *slog.Logger) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", withSQLiteTimeFormat(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -877,7 +877,7 @@ func (s *SQLiteStore) GetDailyExecutionCounts(
 		  AND started_at <  ?
 		GROUP BY day
 		ORDER BY day ASC
-	`, projectID, since.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339))
+	`, projectID, since.UTC(), until.UTC()) // time.Time bounds, NEVER Format(...): #57
 	if err != nil {
 		return nil, fmt.Errorf("query daily execution counts: %w", err)
 	}
@@ -2285,7 +2285,7 @@ func (s *SQLiteStore) CountExecutionsByStatusSince(
 	}
 	if !cutoff.IsZero() {
 		query += " AND started_at >= ?"
-		args = append(args, cutoff.UTC().Format(time.RFC3339))
+		args = append(args, cutoff.UTC()) // time.Time bound, NEVER Format(...): #57
 	}
 
 	var n int
@@ -2346,11 +2346,11 @@ func (s *SQLiteStore) GetCostByTenant(
 	args := []any{projectID}
 	if !since.IsZero() {
 		query += " AND started_at >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339))
+		args = append(args, since.UTC()) // time.Time bound, NEVER Format(...): #57
 	}
 	if !until.IsZero() {
 		query += " AND started_at < ?"
-		args = append(args, until.UTC().Format(time.RFC3339))
+		args = append(args, until.UTC()) // time.Time bound, NEVER Format(...): #57
 	}
 	query += `
 		GROUP BY COALESCE(tenant_id, '')
@@ -3996,7 +3996,7 @@ func (s *SQLiteStore) ListModelsForProjectSince(
 		  AND json_extract(e.payload, '$.model') IS NOT NULL
 		  AND json_extract(e.payload, '$.model') != ''
 		ORDER BY model ASC
-	`, projectID, cutoff.UTC().Format(time.RFC3339), excludeExecutionID)
+	`, projectID, cutoff.UTC(), excludeExecutionID) // time.Time bound, NEVER Format(...): #57
 	if err != nil {
 		return nil, fmt.Errorf("list models for project since: %w", err)
 	}
@@ -4091,7 +4091,7 @@ func (s *SQLiteStore) ListLLMUserMessagesForProjectSince(
 		  AND json_extract(e.payload, '$.user_message') != ''
 		ORDER BY e.timestamp DESC
 	`
-	args := []interface{}{projectID, cutoff.UTC().Format(time.RFC3339), excludeExecutionID}
+	args := []interface{}{projectID, cutoff.UTC(), excludeExecutionID} // time.Time bound, NEVER Format(...): #57
 	if limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit)
