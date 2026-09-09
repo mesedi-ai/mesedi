@@ -728,3 +728,17 @@ func Test_Loops_SimilarCallLegacyWrapperUsesDefaults(t *testing.T) {
 			legacySig, newSig)
 	}
 }
+
+func TestDominantShape_TieBreaksLexicallyAndTotals(t *testing.T) {
+	shape, count, total := DominantShape(map[string]int{
+		"shapeB": 4, "shapeA": 4, "shapeC": 2,
+	})
+	if shape != "shapeA" || count != 4 || total != 10 {
+		t.Errorf("DominantShape = (%q, %d, %d), want (shapeA, 4, 10): "+
+			"ties break lexically for determinism", shape, count, total)
+	}
+	shape, count, total = DominantShape(nil)
+	if shape != "" || count != 0 || total != 0 {
+		t.Errorf("DominantShape(nil) = (%q, %d, %d), want empties", shape, count, total)
+	}
+}

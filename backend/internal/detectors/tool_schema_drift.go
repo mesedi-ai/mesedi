@@ -205,6 +205,23 @@ func DefaultToolSchemaDriftThresholds() ToolSchemaDriftThresholds {
 	return ToolSchemaDriftThresholds{MinHistoryCalls: minHistoryCalls}
 }
 
+// DominantShape returns the most frequent shape in the historical
+// roll-up (ties broken lexically for determinism), its count, and the
+// total observations. Extracted from DetectSchemaDriftWithThresholds
+// so the ranking wiring can classify the current shape against the
+// same baseline the detector fired on, rather than re-deriving it
+// with subtly different logic.
+func DominantShape(historicalShapes map[string]int) (shape string, count, total int) {
+	for s, c := range historicalShapes {
+		total += c
+		if c > count || (c == count && s < shape) {
+			shape = s
+			count = c
+		}
+	}
+	return shape, count, total
+}
+
 // DetectSchemaDriftWithThresholds is the per-project-aware variant.
 // Defensive: MinHistoryCalls < 2 reverts to default (a single-call
 // baseline cannot establish a majority; the validators registry
@@ -222,16 +239,7 @@ func DetectSchemaDriftWithThresholds(
 	if currentShape == "" || toolName == "" {
 		return "", false
 	}
-	total := 0
-	dominantShape := ""
-	dominantCount := 0
-	for shape, count := range historicalShapes {
-		total += count
-		if count > dominantCount || (count == dominantCount && shape < dominantShape) {
-			dominantShape = shape
-			dominantCount = count
-		}
-	}
+	dominantShape, dominantCount, total := DominantShape(historicalShapes)
 	if total < minHistory {
 		return "", false
 	}

@@ -8,6 +8,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -125,6 +126,17 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 				}
 
 				if sig, fired := detectors.DetectSchemaDriftWithThresholds(toolName, currentShape, shapeCounts, driftThresholds); fired {
+					// Rank the drift before emitting anything. A
+					// removed or retyped field is not the same event
+					// as an added one; the kind rides the signature so
+					// breaking and compatible drift form separate
+					// groups an operator can route differently, and
+					// the field-level reasons go to a system event so
+					// nobody has to diff two JSON blobs by hand.
+					sig = sig + ":" + string(h.rankShapeChange(
+						r.Context(), authProjectID, executionID, toolName,
+						currentReturns[0], history, shapeCounts, maxBytes,
+					))
 					isNew, gErr := h.Store.GroupToolSchemaDrift(r.Context(), executionID, authProjectID, sig)
 					if gErr != nil {
 						h.Logger.Warn("tool-schema-drift grouping failed (continuing)",
@@ -139,4 +151,59 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 			}
 		}
 	}
+}
+
+// rankShapeChange classifies the fired drift against the same
+// majority baseline the detector used, returning the kind that is
+// appended to the group signature. The baseline's structural shape is
+// recovered by rehashing history rows until one matches the dominant
+// hash; the classifier needs the shape string itself, which the hash
+// deliberately discards.
+//
+// Reasons (dotted-path diffs like "result.price: number -> string")
+// are recorded as a system event, capped at ten, and logged. Failure
+// to classify is not failure to detect: an unrecoverable baseline
+// ranks as indeterminate rather than silencing the signal.
+func (h *Handlers) rankShapeChange(
+	ctx context.Context,
+	authProjectID, executionID, toolName string,
+	currentRaw []byte,
+	history [][]byte,
+	shapeCounts map[string]int,
+	maxBytes int,
+) detectors.ShapeChangeKind {
+	dominantHash, _, _ := detectors.DominantShape(shapeCounts)
+	baselineShape := ""
+	for _, raw := range history {
+		if len(raw) > maxBytes {
+			continue
+		}
+		if detectors.ReturnShapeHash(json.RawMessage(raw)) == dominantHash {
+			baselineShape = detectors.ReturnShape(json.RawMessage(raw))
+			break
+		}
+	}
+	change := detectors.ClassifyShapeChange(baselineShape, detectors.ReturnShape(json.RawMessage(currentRaw)))
+
+	reasons := change.Reasons
+	if len(reasons) > 10 {
+		reasons = reasons[:10]
+	}
+	h.Logger.Info("tool-schema-drift ranked",
+		"execution_id", executionID,
+		"tool_name", toolName,
+		"kind", string(change.Kind),
+		"reasons", reasons,
+	)
+	h.recordSystemEventForProject(
+		ctx,
+		authProjectID, "tool_schema_drift",
+		"shape_change_ranked", "tool", toolName,
+		map[string]any{
+			"execution_id": executionID,
+			"kind":         string(change.Kind),
+			"reasons":      reasons,
+		},
+	)
+	return change.Kind
 }
