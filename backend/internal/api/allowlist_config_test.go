@@ -9,6 +9,7 @@ package api
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -145,15 +146,31 @@ func Test_ProjectAllowlistMax_MatchesPatternConfig(t *testing.T) {
 // the assertion is intentionally >= 3 rather than == 3 so the
 // guard doesn't fire on intentional growth.
 func Test_AllowlistHelperWiredFromAllDetectors(t *testing.T) {
-	data, err := os.ReadFile("handlers.go")
+	// Scans the whole package rather than one filename. The original
+	// read handlers.go alone, and on 2026-09-09 the #35 split moved
+	// HandleUpdateExecution (and the wirings inside it) to its own
+	// file, which made this guard report zero wirings while all three
+	// were alive and well. A guard pinned to a filename tests where
+	// code lives, not whether it exists; call sites can move between
+	// files of this package freely and the property still holds.
+	paths, err := filepath.Glob("*.go")
 	if err != nil {
-		t.Fatalf("read handlers.go: %v", err)
+		t.Fatalf("glob package sources: %v", err)
 	}
-	src := string(data)
 	const callSite = "h.checkAllowlistAndMaybeSkip("
-	count := strings.Count(src, callSite)
+	count := 0
+	for _, p := range paths {
+		if strings.HasSuffix(p, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		count += strings.Count(string(data), callSite)
+	}
 	if count < 3 {
-		t.Errorf("%s wired in %d places in handlers.go, want >= 3 "+
+		t.Errorf("%s wired in %d places across the api package, want >= 3 "+
 			"(one per consuming detector: crashes, tool_failures, "+
 			"validator_failures). A wiring may have been accidentally "+
 			"dropped, see Allowlist.b.", callSite, count)
