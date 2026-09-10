@@ -125,6 +125,28 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 					break
 				}
 
+				// Definition drift, checked BETWEEN description and
+				// return-shape: a changed declared schema is a
+				// contract change (the mcp-pin class), more specific
+				// than a changed return shape and less alarming than
+				// a rewritten description. Same one-signal-per-
+				// execution rule via the break.
+				if defSig, defFired := h.detectToolDefinitionDrift(
+					r.Context(), authProjectID, executionID, toolName,
+					driftThresholds,
+				); defFired {
+					isNew, gErr := h.Store.GroupToolSchemaDrift(r.Context(), executionID, authProjectID, defSig)
+					if gErr != nil {
+						h.Logger.Warn("tool-definition-drift grouping failed (continuing)",
+							"execution_id", executionID,
+							"signature", defSig,
+							"error", gErr.Error(),
+						)
+					}
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassToolSchemaDrift, defSig, isNew, gErr)
+					break
+				}
+
 				if sig, fired := detectors.DetectSchemaDriftWithThresholds(toolName, currentShape, shapeCounts, driftThresholds); fired {
 					// Rank the drift before emitting anything. A
 					// removed or retyped field is not the same event

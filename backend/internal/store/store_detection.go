@@ -177,6 +177,10 @@ type DetectionStore interface {
 	// Includes failed calls as well as successful ones: a poisoned
 	// description is worth seeing even when the call it accompanied
 	// blew up.
+	// ListToolInputSchemaHashes mirrors ListToolDescriptions for the
+	// declared-input-schema hashes SDKs send where a schema exists
+	// (the mcp-pin definition-drift gap).
+	ListToolInputSchemaHashes(ctx context.Context, projectID, toolName, excludeExecutionID string, limit int) ([]string, error)
 	ListToolDescriptions(
 		ctx context.Context,
 		projectID, toolName, excludeExecutionID string,

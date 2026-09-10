@@ -369,24 +369,32 @@ type AgentHandoffPayload struct {
 // changes: ServerName + "." + Method is the cluster signature when
 // Error / ErrorClass is set.
 type MCPCallPayload struct {
-	ServerName  string          `json:"server_name"`          // e.g. "filesystem", "github", "crm-mcp"
-	ServerURL   string          `json:"server_url,omitempty"` // e.g. "stdio:./filesystem-mcp" or "https://mcp.example.com"
-	Method      string          `json:"method"`               // e.g. "read_file", "list_resources"
-	Arguments   json.RawMessage `json:"arguments,omitempty"`
-	ReturnValue json.RawMessage `json:"return_value,omitempty"`
-	LatencyMs   int64           `json:"latency_ms,omitempty"`
-	Error       string          `json:"error,omitempty"`
-	ErrorClass  string          `json:"error_class,omitempty"` // "hard_error" | "soft_error" | "timeout" | "server_unreachable" | "method_not_found"
+	ServerName string          `json:"server_name"`          // e.g. "filesystem", "github", "crm-mcp"
+	ServerURL  string          `json:"server_url,omitempty"` // e.g. "stdio:./filesystem-mcp" or "https://mcp.example.com"
+	Method     string          `json:"method"`               // e.g. "read_file", "list_resources"
+	Arguments  json.RawMessage `json:"arguments,omitempty"`
+	// InputSchemaHash: see ToolCallPayload.InputSchemaHash; MCP tool
+	// definitions always declare a schema, the mcp-pin case proper.
+	InputSchemaHash string          `json:"input_schema_hash,omitempty"`
+	ReturnValue     json.RawMessage `json:"return_value,omitempty"`
+	LatencyMs       int64           `json:"latency_ms,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	ErrorClass      string          `json:"error_class,omitempty"` // "hard_error" | "soft_error" | "timeout" | "server_unreachable" | "method_not_found"
 }
 
 // ToolCallPayload is one invocation of a developer-registered tool.
 type ToolCallPayload struct {
-	ToolName    string          `json:"tool_name"`
-	Arguments   json.RawMessage `json:"arguments,omitempty"`
-	ReturnValue json.RawMessage `json:"return_value,omitempty"`
-	LatencyMs   int64           `json:"latency_ms,omitempty"`
-	Error       string          `json:"error,omitempty"`
-	ErrorClass  string          `json:"error_class,omitempty"` // "hard_error" | "soft_error" | "timeout" | "hallucinated_name" | "malformed_args"
+	ToolName  string          `json:"tool_name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	// InputSchemaHash is a SHA-256 over the RFC 8785 canonicalized
+	// DECLARED input schema, computed client-side where a schema
+	// exists (MCP tools, framework adapters). Empty for plain
+	// functions, which declare no schema. Feeds definition drift.
+	InputSchemaHash string          `json:"input_schema_hash,omitempty"`
+	ReturnValue     json.RawMessage `json:"return_value,omitempty"`
+	LatencyMs       int64           `json:"latency_ms,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	ErrorClass      string          `json:"error_class,omitempty"` // "hard_error" | "soft_error" | "timeout" | "hallucinated_name" | "malformed_args"
 }
 
 // CheckpointPayload captures the agent's working state at a step boundary.

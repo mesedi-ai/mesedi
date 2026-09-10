@@ -216,3 +216,22 @@ func TestDetectDescriptionDrift_EmptyCurrentIsNotDrift(t *testing.T) {
 			"out would alert every customer still on an older SDK")
 	}
 }
+
+func TestDetectToolDefinitionDrift_SignatureAndDecision(t *testing.T) {
+	hist := map[string]int{"aaaa1111bbbb2222": 12}
+	sig, fired := DetectToolDefinitionDrift(
+		"crm_lookup", "cccc3333dddd4444", hist, DefaultToolSchemaDriftThresholds(),
+	)
+	if !fired {
+		t.Fatal("a schema hash differing from a 12-call stable majority must fire")
+	}
+	if sig != "crm_lookup:def:cccc3333" {
+		t.Errorf("signature = %q, want crm_lookup:def:cccc3333 (the :def: "+
+			"marker keeps definition drift in its own failure group)", sig)
+	}
+	if _, fired := DetectToolDefinitionDrift(
+		"crm_lookup", "aaaa1111bbbb2222", hist, DefaultToolSchemaDriftThresholds(),
+	); fired {
+		t.Error("matching the majority hash must not fire")
+	}
+}

@@ -336,3 +336,29 @@ func DetectDescriptionDrift(
 	}
 	return fmt.Sprintf("%s:desc:%s", toolName, suffix), true
 }
+
+// DetectToolDefinitionDrift is the declared-DEFINITION sibling of
+// DetectDescriptionDrift, closing the mcp-pin gap: a tool whose
+// input schema changes under a byte-identical description. The
+// hashes compared here are SDK-computed SHA-256 over the RFC 8785
+// canonicalized declared schema, so the backend never needs the
+// schema itself. Same shared majority decision, distinct ":def:"
+// signature so definition drift, description drift and return-shape
+// drift form three separate failure groups.
+func DetectToolDefinitionDrift(
+	toolName string,
+	currentSchemaHash string,
+	historicalHashes map[string]int,
+	t ToolSchemaDriftThresholds,
+) (signature string, detected bool) {
+	if _, fired := DetectSchemaDriftWithThresholds(
+		toolName, currentSchemaHash, historicalHashes, t,
+	); !fired {
+		return "", false
+	}
+	suffix := currentSchemaHash
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	return fmt.Sprintf("%s:def:%s", toolName, suffix), true
+}

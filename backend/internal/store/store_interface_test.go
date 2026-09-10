@@ -31,7 +31,9 @@ import (
 // 261 since 2026-09-09: the cost-velocity baseline form added
 // EarliestExecutionStart (ExecutionStore) and
 // GroupCostVelocityBaseline (DetectionStore), both deliberate.
-const StoreMethodCount = 261
+// 262 since 2026-09-10: definition drift added
+// ListToolInputSchemaHashes (DetectionStore), deliberate.
+const StoreMethodCount = 262
 
 func TestStoreInterfaceIsComplete(t *testing.T) {
 	got := reflect.TypeOf((*Store)(nil)).Elem().NumMethod()

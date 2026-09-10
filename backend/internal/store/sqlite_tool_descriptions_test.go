@@ -12,11 +12,17 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"mesedi/backend/internal/events"
 )
 
 func openToolDescriptionStore(t *testing.T) *SQLiteStore {
@@ -236,5 +242,77 @@ func TestListToolDescriptions_LimitDefaultsAndCaps(t *testing.T) {
 	}
 	if len(got) != 5 {
 		t.Errorf("explicit limit not honoured, got %d", len(got))
+	}
+}
+
+// TestListToolInputSchemaHashes_RealWritePath: the definition-drift
+// extraction, through real SaveEvents rows, skipping rows without
+// the field so pre-upgrade traffic forms no baseline.
+func TestListToolInputSchemaHashes_RealWritePath(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st, err := OpenSQLite(":memory:", logger)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	const projectID = "proj_schema_hashes"
+	if err := st.CreateProject(ctx, &Project{
+		ProjectID: projectID, Name: "schema hash test", Tier: "hobby",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	for _, id := range []string{"exec_sh_hist", "exec_sh_cur"} {
+		if err := st.CreateExecution(ctx, &events.Execution{
+			ExecutionID: id, ProjectID: projectID,
+			Status: events.StatusStarted, StartedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("create execution %s: %v", id, err)
+		}
+	}
+	now := time.Now().UTC()
+	mk := func(execID string, seq int, payload map[string]any) events.Event {
+		b, _ := json.Marshal(payload)
+		return events.Event{
+			EventID:     fmt.Sprintf("evt_sh_%s_%d", execID, seq),
+			ExecutionID: execID, EventType: "tool_call",
+			Sequence: seq, Timestamp: now.Add(time.Duration(seq) * time.Second),
+			Payload: b,
+		}
+	}
+	batch := []events.Event{
+		mk("exec_sh_hist", 1, map[string]any{"tool_name": "crm_lookup", "input_schema_hash": "hash_a"}),
+		mk("exec_sh_hist", 2, map[string]any{"tool_name": "crm_lookup", "input_schema_hash": "hash_a"}),
+		mk("exec_sh_hist", 3, map[string]any{"tool_name": "crm_lookup"}), // pre-upgrade row: skipped
+		mk("exec_sh_hist", 4, map[string]any{"tool_name": "other_tool", "input_schema_hash": "hash_x"}),
+		// Sequence 9 puts the current execution's call LAST in time;
+		// the first draft of this fixture accidentally made the
+		// field-less history row the most recent crm_lookup call,
+		// which correctly (and confusingly) made "current" empty:
+		// if the latest call declares no schema, there is no
+		// current declared schema. That semantics is right and
+		// deliberate; this fixture now tests the intended case.
+		mk("exec_sh_cur", 9, map[string]any{"tool_name": "crm_lookup", "input_schema_hash": "hash_b"}),
+	}
+	if err := st.SaveEvents(ctx, batch); err != nil {
+		t.Fatalf("save events: %v", err)
+	}
+
+	got, err := st.ListToolInputSchemaHashes(ctx, projectID, "crm_lookup", "exec_sh_cur", 50)
+	if err != nil {
+		t.Fatalf("list hashes: %v", err)
+	}
+	if len(got) != 2 || got[0] != "hash_a" || got[1] != "hash_a" {
+		t.Errorf("history = %v, want [hash_a hash_a]: current execution "+
+			"excluded, field-less row skipped, other tool ignored", got)
+	}
+	cur, err := st.ListToolInputSchemaHashes(ctx, projectID, "crm_lookup", "", 1)
+	if err != nil {
+		t.Fatalf("list current: %v", err)
+	}
+	if len(cur) != 1 || cur[0] != "hash_b" {
+		t.Errorf("current = %v, want [hash_b] (most recent project-wide)", cur)
 	}
 }

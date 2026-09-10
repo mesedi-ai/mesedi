@@ -202,3 +202,89 @@ func TestHandleUpdateExecution_RanksCompatibleDriftSeparately(t *testing.T) {
 			"field with all baseline fields intact, got %v", driftSigs)
 	}
 }
+
+// TestHandleUpdateExecution_FiresDefinitionDrift closes the loop on
+// the mcp-pin scenario: the tool's return SHAPE and description are
+// unchanged, only the declared input schema's hash moves, and the
+// resulting group must carry the :def: signature. Descriptions are
+// deliberately absent and every return value shares one shape, so a
+// pass here cannot be the sibling detectors firing.
+func TestHandleUpdateExecution_FiresDefinitionDrift(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st, err := store.OpenSQLite(":memory:", logger)
+	if err != nil {
+		t.Fatalf("open in-memory sqlite: %v", err)
+	}
+
+	ctx := context.Background()
+	const projectID = "proj_def_drift"
+	const toolName = "crm_lookup"
+	if err := st.CreateProject(ctx, &store.Project{
+		ProjectID: projectID, Name: "definition drift test", Tier: "hobby",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, e := range []struct {
+		id string
+		at time.Time
+	}{{"exec_def_hist", now.Add(-1 * time.Hour)}, {"exec_def_cur", now.Add(-1 * time.Minute)}} {
+		if err := st.CreateExecution(ctx, &events.Execution{
+			ExecutionID: e.id, ProjectID: projectID,
+			Status: events.StatusStarted, StartedAt: e.at,
+		}); err != nil {
+			t.Fatalf("create execution %s: %v", e.id, err)
+		}
+	}
+	var batch []events.Event
+	mkEvent := func(execID string, seq int, ts time.Time, schemaHash string) {
+		payload, _ := json.Marshal(map[string]any{
+			"tool_name":         toolName,
+			"input_schema_hash": schemaHash,
+			"return_value":      json.RawMessage(`{"account": "acme", "balance": 12.5}`),
+		})
+		batch = append(batch, events.Event{
+			EventID:     fmt.Sprintf("evt_def_%s_%d", execID, seq),
+			ExecutionID: execID, EventType: "tool_call",
+			Sequence: seq, Timestamp: ts, Payload: payload,
+		})
+	}
+	for i := 1; i <= 12; i++ {
+		mkEvent("exec_def_hist", i, now.Add(-time.Duration(70-i)*time.Minute), "schema_hash_v1")
+	}
+	// Same return shape, same absent description, NEW declared schema.
+	mkEvent("exec_def_cur", 1, now.Add(-30*time.Second), "schema_hash_v2")
+	if err := st.SaveEvents(ctx, batch); err != nil {
+		t.Fatalf("save events: %v", err)
+	}
+
+	h := &Handlers{Logger: logger, Store: st, HaltSubs: NewHaltSubscribers()}
+	t.Cleanup(func() { h.DrainDispatches(); _ = st.Close() })
+
+	req := httptest.NewRequest("PATCH", "/executions/exec_def_cur",
+		strings.NewReader(`{"status":"completed"}`))
+	req.SetPathValue("id", "exec_def_cur")
+	req = req.WithContext(context.WithValue(req.Context(), ctxKeyProjectID, projectID))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateExecution(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PATCH returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	groups, err := st.ListFailureGroups(ctx, projectID, store.ListFailureGroupsOpts{Limit: 50})
+	if err != nil {
+		t.Fatalf("list groups: %v", err)
+	}
+	var driftSigs []string
+	for _, g := range groups {
+		if g.FailureClass == store.FailureClassToolSchemaDrift {
+			driftSigs = append(driftSigs, g.Signature)
+		}
+	}
+	if len(driftSigs) != 1 || !strings.Contains(driftSigs[0], ":def:") {
+		t.Errorf("want exactly one drift group with a :def: signature for "+
+			"a schema-hash change under identical shape and description, "+
+			"got %v", driftSigs)
+	}
+}
