@@ -151,16 +151,16 @@ func Deliver(
 		// our well-typed Payload. Bail with one failed-attempt record
 		// so the operator sees the bug.
 		return DeliveryResult{
-				Status:   "failed",
-				Attempts: 1,
-				Error:    "marshal payload: " + err.Error(),
-			}, []store.WebhookDelivery{{
-				WebhookID: webhook.WebhookID,
-				ProjectID: webhook.ProjectID,
-				Attempt:   1,
-				Status:    "failed",
-				Error:     "marshal payload: " + err.Error(),
-			}}
+			Status:   "failed",
+			Attempts: 1,
+			Error:    "marshal payload: " + err.Error(),
+		}, []store.WebhookDelivery{{
+			WebhookID: webhook.WebhookID,
+			ProjectID: webhook.ProjectID,
+			Attempt:   1,
+			Status:    "failed",
+			Error:     "marshal payload: " + err.Error(),
+		}}
 	}
 
 	// Receiver-specific payload reshape. Slack, Discord, and PagerDuty
@@ -175,16 +175,16 @@ func Deliver(
 	if adapted, ok, adaptErr := adaptedBody(webhook.URL, webhook.AuthToken, payload); ok {
 		if adaptErr != nil {
 			return DeliveryResult{
-					Status:   "failed",
-					Attempts: 1,
-					Error:    "marshal adapted payload: " + adaptErr.Error(),
-				}, []store.WebhookDelivery{{
-					WebhookID: webhook.WebhookID,
-					ProjectID: webhook.ProjectID,
-					Attempt:   1,
-					Status:    "failed",
-					Error:     "marshal adapted payload: " + adaptErr.Error(),
-				}}
+				Status:   "failed",
+				Attempts: 1,
+				Error:    "marshal adapted payload: " + adaptErr.Error(),
+			}, []store.WebhookDelivery{{
+				WebhookID: webhook.WebhookID,
+				ProjectID: webhook.ProjectID,
+				Attempt:   1,
+				Status:    "failed",
+				Error:     "marshal adapted payload: " + adaptErr.Error(),
+			}}
 		}
 		body = adapted
 	}

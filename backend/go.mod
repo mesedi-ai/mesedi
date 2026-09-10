@@ -1,6 +1,6 @@
 module mesedi/backend
 
-go 1.25.0
+go 1.27.1
 
 require (
 	github.com/go-pdf/fpdf v0.9.0
