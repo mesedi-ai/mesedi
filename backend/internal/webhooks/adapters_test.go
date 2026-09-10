@@ -272,7 +272,7 @@ func TestBuildDiscordBody_EmbedShape(t *testing.T) {
 func TestBuildDiscordBody_ColorFallsBackToClassPalette(t *testing.T) {
 	t.Parallel()
 	// Payload with NO severity should fall back to failure-class
-	// palette. This is the pre-#281 legacy path we still support.
+	// palette. This is the pre-severity-palette legacy path, supported.
 	p := sampleCreatedPayload()
 	p.Severity = ""
 	body, err := BuildDiscordBody(p)

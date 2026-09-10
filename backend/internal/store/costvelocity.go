@@ -1,10 +1,10 @@
 package store
 
 // Cost-velocity signatures and grouping, gathered here from
-// sqlite.go during #48 (attribution) because both store files are
-// over the size ratchet and this is the cluster #48 changes.
+// sqlite.go during the attribution work because both store files are
+// over the size ratchet and this is the cluster that work changes.
 //
-// #48's finding, from the 2026-09-07 incident radar: the absolute
+// The finding, from the 2026-09-07 incident radar: the absolute
 // detector's signature carried a dollar magnitude and nothing else,
 // so spend from a credential or tenant never seen before was
 // indistinguishable from routine spend of the same size; a new actor
@@ -16,7 +16,7 @@ package store
 // the project's aggregate spend, not of one actor.
 //
 // Baselining (spend accelerating past learned normal) remains open
-// and is a larger, separate piece of #48.
+// and is a larger, separate piece of the same work.
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func CostVelocityIdentity(tenantID, apiKeyID string) string {
 }
 
 // CostVelocityAttributedSignature is the absolute detector's group
-// signature since #48: magnitude bucket plus actor, separated by a
+// signature since attribution: magnitude bucket plus actor, with a
 // pipe. "cost_$10+|tenant:acme-prod" and "cost_$10+|key:key_ab12"
 // are distinct groups, which is the entire point.
 func CostVelocityAttributedSignature(costUSD float64, identity string) string {
@@ -163,7 +163,7 @@ func CostVelocityRateSignature(ratePerMinUSD float64) string {
 
 // GroupCostVelocity upserts a failure_group with
 // failure_class=cost_velocity and an attributed, cost-bucketed
-// signature (#48). identity comes from CostVelocityIdentity. Same
+// signature. identity comes from CostVelocityIdentity. Same
 // idempotency contract as the other grouping methods: if the
 // execution is already in a higher-priority group (crash, loop,
 // tool/validator failure), this is a no-op.

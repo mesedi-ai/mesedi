@@ -107,7 +107,7 @@ type CheckpointStore interface {
 	// same-typed strings in a row, which is a transposition waiting to
 	// happen, and a transposed anchor is not a compile error, it is a
 	// checkpoint that silently names the wrong log entry. Named fields
-	// also mean the inclusion proof (task #25) can be added without
+	// also mean the inclusion proof can be added later without
 	// touching this signature again.
 	//
 	// Anchored and AnchoredAt on the argument are ignored: the store

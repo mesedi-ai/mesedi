@@ -54,7 +54,7 @@ func (s *PostgresStore) SetProjectCostVelocityThresholdUSD(
 }
 
 // GroupCostVelocity is the Postgres twin of the SQLite method in
-// costvelocity.go (#48: attributed signature). Caller is responsible
+// costvelocity.go (attributed signature). Caller is responsible
 // for the per-project threshold check (see HandleUpdateExecution +
 // GetProjectCostVelocityThresholdUSD); the store layer just writes
 // the cluster.

@@ -147,7 +147,7 @@ func Test_ProjectAllowlistMax_MatchesPatternConfig(t *testing.T) {
 // guard doesn't fire on intentional growth.
 func Test_AllowlistHelperWiredFromAllDetectors(t *testing.T) {
 	// Scans the whole package rather than one filename. The original
-	// read handlers.go alone, and on 2026-09-09 the #35 split moved
+	// read handlers.go alone, and on 2026-09-09 the big split moved
 	// HandleUpdateExecution (and the wirings inside it) to its own
 	// file, which made this guard report zero wirings while all three
 	// were alive and well. A guard pinned to a filename tests where

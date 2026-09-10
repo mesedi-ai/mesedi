@@ -3015,7 +3015,7 @@ func (s *PostgresStore) GroupPromptInjection(ctx context.Context, executionID, p
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassInjection, patternName)
 }
 
-// Cost-velocity grouping twins moved to postgres_cost_velocity.go in #48.
+// Cost-velocity grouping twins moved to postgres_cost_velocity.go.
 
 func (s *PostgresStore) GroupIdenticalCallLoop(ctx context.Context, executionID, projectID, callHash string) (isNew bool, err error) {
 	if callHash == "" {

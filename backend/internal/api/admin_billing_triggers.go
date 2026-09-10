@@ -6,7 +6,7 @@
 //   POST /admin/projects/{id}/trigger-hobby-billing-run
 //   POST /admin/projects/{id}/trigger-team-billing-run
 //
-// The primary use case is the payment-smoke harness (#366): once the
+// The primary use case is the payment-smoke harness: once the
 // harness has pushed executions and AI analyses over the tier quotas
 // (test-mode overrides make this cheap; see billing_test_overrides.go),
 // the harness POSTs one of these endpoints to synchronously push the

@@ -114,7 +114,7 @@ func startBackgroundWorkers(
 		Logger:       logger,
 	}
 	hobbyBillingScheduler.Start(ctx)
-	// #366 admin trigger endpoint reaches back to the scheduler via
+	// The smoke-harness admin trigger reaches back to the scheduler via
 	// handlers.HobbyBillingScheduler.
 	handlers.HobbyBillingScheduler = hobbyBillingScheduler
 

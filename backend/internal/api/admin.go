@@ -169,7 +169,7 @@ func (h *Handlers) RegisterAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/projects/{id}", h.HandleAdminGetProjectDetail)
 	mux.HandleFunc("POST /admin/projects/{id}/tier", h.HandleAdminSetTier)
 	mux.HandleFunc("POST /admin/projects/{id}/grant", h.HandleAdminGrantExecutions)
-	// #366 admin trigger endpoints for the billing schedulers.
+	// Smoke-harness admin trigger endpoints for billing schedulers.
 	// See admin_billing_triggers.go for scope. Test-mode overrides
 	// (billing_test_overrides.go) make these safe to call against
 	// tiny synthetic quotas on staging.
@@ -747,7 +747,7 @@ func (h *Handlers) HandleAdminSetTier(w http.ResponseWriter, r *http.Request) {
 		projectID,
 		tierMeta,
 	)
-	// #392, clamp any per-project settings that now exceed the new
+	// Tier-clamp wave: any per-project settings that now exceed the new
 	// tier's caps (retention_days today; more settings as the tier-cap
 	// surface grows). Actor is AuditActorPlatformAdmin so the audit
 	// row attributes the clamp to Mesedi staff, matching the tier

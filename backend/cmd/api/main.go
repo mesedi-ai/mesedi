@@ -386,7 +386,7 @@ func main() {
 
 	handlers := api.New(logger, st, cfg.DashboardURL, stripeCfg, mailer)
 
-	// #366 test-mode tier-quota overrides. Never set on prod; staging
+	// Smoke-harness test-mode tier-quota overrides. Not on prod; staging
 	// sets these so the payment-smoke harness can exercise overage
 	// math with 10-20 executions instead of 5000. See
 	// backend/internal/api/billing_test_overrides.go for safety
@@ -766,7 +766,7 @@ func main() {
 	mux.Handle("OPTIONS /admin/projects/{id}/tier", adminHandler)
 	mux.Handle("POST /admin/projects/{id}/grant", adminHandler)
 	mux.Handle("OPTIONS /admin/projects/{id}/grant", adminHandler)
-	// #366 admin trigger endpoints for the billing schedulers.
+	// Smoke-harness admin trigger endpoints for billing schedulers.
 	mux.Handle("POST /admin/projects/{id}/trigger-hobby-billing-run", adminHandler)
 	mux.Handle("OPTIONS /admin/projects/{id}/trigger-hobby-billing-run", adminHandler)
 	mux.Handle("POST /admin/projects/{id}/trigger-team-billing-run", adminHandler)

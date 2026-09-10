@@ -1,7 +1,7 @@
 package api
 
 // Tests for the cost-velocity detectors AS WIRED through
-// HandleUpdateExecution, written during the #35 Phase D carve after a
+// HandleUpdateExecution, written during the split's first carve after a
 // mutation test proved the wiring had never been covered: deleting
 // the h.runCostVelocityDetectors call compiled cleanly and the whole
 // suite stayed green. A detector that can be deleted without a test
@@ -99,7 +99,7 @@ func TestHandleUpdateExecution_FiresCostVelocityDetectors(t *testing.T) {
 	}
 
 	// The execution was created without tenant or API key, so the
-	// #48 attributed signature resolves to the unattributed marker.
+	// attributed signature resolves to the unattributed marker.
 	wantAbsolute := store.CostVelocityAttributedSignature(50.0, "unattributed")
 	if !found[wantAbsolute] {
 		t.Errorf("absolute cost-velocity detector did not fire: no %s group "+
@@ -117,7 +117,7 @@ func TestHandleUpdateExecution_FiresCostVelocityDetectors(t *testing.T) {
 }
 
 // TestHandleUpdateExecution_NewActorMakesNewCostVelocityGroup drives
-// the #48 property through the real handler: two tenants each cross
+// the attribution property through the real handler: two tenants cross
 // the absolute threshold in the same magnitude bucket, and each must
 // get its OWN failure group. Pre-attribution both folded into one
 // cost_$10+ group, so a never-seen actor's spend read as routine

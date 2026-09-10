@@ -1272,7 +1272,7 @@ func (h *Handlers) handleCheckoutCompleted(event stripe.Event) error {
 	); err != nil {
 		return err
 	}
-	// #392, Checkout completion is an upgrade path (Hobby→Team). The
+	// Tier-clamp wave: Checkout completion is an upgrade (Hobby→Team). The
 	// cascade no-ops on upgrades but we call it anyway for symmetry
 	// with the other tier-flip sites and CI-guard coverage. Actor is
 	// AuditActorBillingSystem: Checkout succeeded, no customer email
@@ -1315,7 +1315,7 @@ func (h *Handlers) handleSubscriptionUpdated(event stripe.Event) error {
 	); err != nil {
 		return err
 	}
-	// #392, clamp per-project settings that now exceed the new tier's
+	// Tier-clamp wave: settings that now exceed the new tier's
 	// caps. In practice this path only upgrades (Hobby→Team when a
 	// subscription goes Active or Trialing), so the cascade is a
 	// no-op on the current code path. Called anyway for symmetry with
@@ -1359,7 +1359,7 @@ func (h *Handlers) handleSubscriptionDeleted(event stripe.Event) error {
 	); err != nil {
 		return err
 	}
-	// #392, clamp per-project settings that now exceed Hobby's caps.
+	// Tier-clamp wave: clamp settings that now exceed Hobby's caps.
 	// This is the canonical downgrade path: a Team-tier project that
 	// cancels its subscription lands here, its retention_days=90 gets
 	// clamped to 7, an audit row lands, and the customer gets an email
@@ -2252,7 +2252,7 @@ func (h *Handlers) HandleDowngradeToHobby(w http.ResponseWriter, r *http.Request
 			"could not update tier: "+err.Error())
 		return
 	}
-	// #392, clamp per-project settings that now exceed Hobby's caps.
+	// Tier-clamp wave: clamp settings that now exceed Hobby's caps.
 	// Path B is the corrupted-state variant of subscription-deleted:
 	// the DB tier flipped to Hobby instantly because no Stripe
 	// subscription existed to cancel. Same downgrade semantics as

@@ -23,7 +23,7 @@ import (
 // REFUSING THE ANCHOR when the proof is absent is the second, and it is
 // the worse of the two. The scheduler treats an error from the anchorer
 // as "not anchored" and retries on every tick, so a refusal here stops
-// checkpointing for every tenant. That is task #32 exactly: one
+// checkpointing for every tenant. That outage class exactly: one
 // event-less execution halting the whole chain. A missing proof costs
 // offline verification and nothing else, the anchor is still fully
 // checkable by asking the log, and it must never cost the chain.

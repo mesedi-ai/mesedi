@@ -103,7 +103,7 @@ type LogEntryCheck struct {
 // holds TODAY and believes the answer, so it trusts whoever is serving
 // that endpoint. An inclusion proof carries Sigstore's own signature
 // over a tree head: it cannot be forged by whoever answers the request,
-// and it remains valid after the log itself is retired (task #22).
+// and it remains valid after the log itself is retired.
 const (
 	MethodOfflineProof = "inclusion proof, offline"
 	MethodLogLookup    = "log lookup, network"

@@ -355,7 +355,7 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 	// The proof is NOT required, and its absence must not fail the
 	// anchor. A missing proof costs offline verification; refusing would
 	// cost the chain, because the scheduler treats an error here as "not
-	// anchored" and retries forever. Task #32 was one event-less
+	// anchored" and retries forever. One event-less
 	// execution stopping checkpointing for every tenant, the same shape
 	// of mistake, and not one to repeat for a degradation that leaves
 	// the anchor perfectly checkable online.

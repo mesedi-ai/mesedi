@@ -93,7 +93,7 @@ type ExportedInterval struct {
 	// signature over that root against a pinned public key, and confirms
 	// log_id names the log that key belongs to. No network, which means
 	// an auditor on a closed network can verify, and a checkpoint stays
-	// verifiable even if the log itself is later retired (task #22).
+	// verifiable even if the log itself is later retired.
 	//
 	// Raw JSON, passed through untouched from the anchoring receipt. It
 	// is the log's evidence and Verdifax's, not Mesedi's, and re-encoding

@@ -64,7 +64,7 @@ type Handlers struct {
 	// any of them is missing.
 	Stripe StripeConfig
 	// HobbyBillingScheduler is the same instance started at process
-	// boot; a pointer is stashed on Handlers so the #366 admin
+	// boot; a pointer is stashed on Handlers so the smoke-harness admin
 	// trigger endpoint (POST /admin/projects/{id}/trigger-hobby-
 	// billing-run) can invoke the scheduler's processProject step
 	// on demand. Nil in unit tests + local dev that don't spin up

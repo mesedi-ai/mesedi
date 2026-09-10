@@ -1,6 +1,6 @@
 // Cost-velocity detection, both forms, carved out of
-// HandleUpdateExecution on 2026-09-09 (task #35 Phase D, first cut)
-// because #48's attribution work needs somewhere to land that is not
+// HandleUpdateExecution on 2026-09-09 (the split's first carve)
+// because the attribution work needs somewhere to land that is not
 // the interior of a 1,500-line function.
 //
 // The absolute form fires when one execution's resolved cost exceeds
@@ -26,7 +26,7 @@ import (
 //
 // tenantID and apiKeyID come from the execution row (not the PATCH
 // request's auth context, which may be a different key than the one
-// that ran the work) and resolve to the #48 attribution identity:
+// that ran the work) and resolve to the attribution identity:
 // the absolute detector's group signature carries WHO, so spend from
 // a never-seen tenant or credential creates a NEW group and the
 // new-group webhook escalation fires structurally instead of folding

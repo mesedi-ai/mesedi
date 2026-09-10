@@ -1,18 +1,19 @@
 package store
 
-// DSN normalization for the SQLite store, task #57.
+// DSN normalization for the SQLite store's timestamp format.
 //
 // Without _time_format, the modernc driver stores a Go time.Time as
 // Go's own Time.String() text ("2026-09-09 12:45:11.06 +0000 UTC").
-// SQLite's date()/datetime()/strftime() cannot parse that suffix, so
-// day-grouping returned NULL days, and any query comparing such a
-// column against an RFC3339 string matched nothing (or, for a
-// less-than cutoff, everything: retention would have purged every
-// row). With _time_format=sqlite the driver writes
+// SQLite's date()/datetime()/strftime() cannot parse that suffix,
+// so day-grouping returned NULL days, and any query comparing such
+// a column against an RFC3339 string misjudged every row sharing
+// the bound's calendar day (sub-day windows matched nothing;
+// retention over-deleted the cutoff's own day). With
+// _time_format=sqlite the driver writes
 // "2026-09-09 12:45:11.06+00:00", which SQLite's date functions parse
 // and which orders correctly both against time.Time bounds and, at
 // second granularity, against legacy-format rows already on disk in
-// pre-#57 development databases.
+// pre-fix development databases.
 //
 // The companion rule lives at every query site: bounds are bound as
 // time.Time values, never as Format(...) strings, matching the

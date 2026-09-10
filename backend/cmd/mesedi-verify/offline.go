@@ -17,7 +17,7 @@ import (
 //
 // WHAT THIS ADDS: the export becomes self-contained evidence. An auditor
 // on a closed network can verify it, and a checkpoint stays verifiable
-// even if the log it was written to is later retired (task #22), the
+// even if the log it was written to is later retired, the
 // signature over the tree head does not expire when the server does.
 //
 // THE STEP THAT MAKES IT MEAN ANYTHING, AND THE ONE EASIEST TO OMIT
@@ -42,7 +42,7 @@ import (
 //
 // Drop the middle link and every remaining check still passes, on
 // somebody else's entry. That is the same defect verdifax-verify shipped
-// with (task #27): the recipe was documented and never executed.
+// with, historically: the recipe was documented and never executed.
 
 // anchorProof is the envelope Mesedi stores in
 // checkpoints.anchor_proof_json and emits as ExportedInterval.AnchorProof.

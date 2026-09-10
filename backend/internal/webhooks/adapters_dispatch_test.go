@@ -158,7 +158,7 @@ func newSlackWebhook() *store.ProjectWebhook {
 		// require minimum-length segment shapes that these three
 		// characters explicitly can't satisfy). Same shape as the
 		// existing adapters_test.go fixtures which have lived in the
-		// public repo since #390 shipped.
+		// public repo since the dispatch wave shipped.
 		URL:    "https://hooks.slack.com/services/T0/B0/xxx",
 		Secret: "0000000000000000000000000000000000000000000000000000000000000000",
 	}

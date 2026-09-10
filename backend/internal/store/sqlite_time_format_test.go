@@ -1,6 +1,6 @@
 package store
 
-// Regression tests for the #57 timestamp-format family. Every test
+// Regression tests for the timestamp-format family. Every test
 // writes through the REAL store write paths (CreateExecution,
 // SaveEvents) and reads through the query that was broken, because
 // the entire family survived years of green suites by being tested,
@@ -69,7 +69,7 @@ func newTimeFormatFixture(t *testing.T) (*SQLiteStore, string, time.Time) {
 }
 
 func TestDeleteExecutionsOlderThan_DeletesOnlyOldRows(t *testing.T) {
-	// Own fixture with FIXED times, not now-relative ones. The #57
+	// Own fixture with FIXED times, not now-relative ones. The format
 	// defect only decides the comparison when both sides share the
 	// same calendar-day prefix (' ' vs 'T' sits at position 10, after
 	// the date), so a cutoff on a different day than every row orders
@@ -115,7 +115,7 @@ func TestDeleteExecutionsOlderThan_DeletesOnlyOldRows(t *testing.T) {
 	if n != 2 {
 		t.Errorf("deleted %d executions, want exactly 2 (same-day-before + "+
 			"ten-days-older). 3 means the same-day-after row was deleted, "+
-			"the #57 over-deletion direction.", n)
+			"the over-deletion direction.", n)
 	}
 	if _, err := st.GetExecution(ctx, "exec_same_day_after_cutoff"); err != nil {
 		t.Errorf("same-day-after-cutoff execution gone after retention delete: %v", err)
@@ -146,7 +146,7 @@ func TestGetDailyExecutionCounts_RealDaysWithinBounds(t *testing.T) {
 	for _, c := range counts {
 		if c.Date.IsZero() {
 			t.Errorf("zero date in daily counts; date(started_at) returned "+
-				"NULL, the pre-#57 symptom: %+v", c)
+				"NULL, the pre-fix symptom: %+v", c)
 		}
 		total += c.Count
 	}
@@ -222,7 +222,7 @@ func TestListModelsAndUserMessages_SeeDriverWrittenEventTimestamps(t *testing.T)
 	}
 	if len(models) != 1 || models[0] != "claude-sonnet-5" {
 		t.Errorf("models within 24h = %v, want exactly [claude-sonnet-5]; "+
-			"empty means the timestamp bound matches nothing (pre-#57), "+
+			"empty means the timestamp bound matches nothing (pre-fix), "+
 			"two means it matches everything", models)
 	}
 

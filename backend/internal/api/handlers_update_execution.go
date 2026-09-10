@@ -1,10 +1,10 @@
 // HandleUpdateExecution and nothing else. Moved verbatim from
-// handlers.go on 2026-09-09 (task #35): 1,501 lines, a quarter of
+// handlers.go on 2026-09-09 for the split: 1,501 lines, a quarter of
 // that file in one function, next largest 334. This move changes no
 // behaviour; Go does not care which file a function lives in. It
 // exists so the interior can be carved into named stages in its own
 // home, which is what unblocks the cost-velocity attribution work
-// (#48) and wiring the schema-drift classifier (#49a).
+// and wiring the schema-drift classifier.
 package api
 
 import (

@@ -877,7 +877,7 @@ func (s *SQLiteStore) GetDailyExecutionCounts(
 		  AND started_at <  ?
 		GROUP BY day
 		ORDER BY day ASC
-	`, projectID, since.UTC(), until.UTC()) // time.Time bounds, NEVER Format(...): #57
+	`, projectID, since.UTC(), until.UTC()) // time.Time bounds, NEVER Format(...): formats can't compare
 	if err != nil {
 		return nil, fmt.Errorf("query daily execution counts: %w", err)
 	}
@@ -2289,7 +2289,7 @@ func (s *SQLiteStore) CountExecutionsByStatusSince(
 	}
 	if !cutoff.IsZero() {
 		query += " AND started_at >= ?"
-		args = append(args, cutoff.UTC()) // time.Time bound, NEVER Format(...): #57
+		args = append(args, cutoff.UTC()) // time.Time bound, NEVER Format(...): formats can't compare
 	}
 
 	var n int
@@ -2313,7 +2313,7 @@ func (s *SQLiteStore) SumExecutionCostByProjectSince(
 	args := []any{projectID}
 	if !since.IsZero() {
 		query += " AND started_at >= ?"
-		args = append(args, since.UTC()) // NEVER Format(...): see #57 + sqlite_sum_execution_cost_test.go
+		args = append(args, since.UTC()) // NEVER Format(...): see sqlite_sum_execution_cost_test.go's header
 	}
 	var cost float64
 	var count int
@@ -2350,11 +2350,11 @@ func (s *SQLiteStore) GetCostByTenant(
 	args := []any{projectID}
 	if !since.IsZero() {
 		query += " AND started_at >= ?"
-		args = append(args, since.UTC()) // time.Time bound, NEVER Format(...): #57
+		args = append(args, since.UTC()) // time.Time bound, NEVER Format(...): formats can't compare
 	}
 	if !until.IsZero() {
 		query += " AND started_at < ?"
-		args = append(args, until.UTC()) // time.Time bound, NEVER Format(...): #57
+		args = append(args, until.UTC()) // time.Time bound, NEVER Format(...): formats can't compare
 	}
 	query += `
 		GROUP BY COALESCE(tenant_id, '')
@@ -3823,7 +3823,7 @@ func (s *SQLiteStore) GroupPromptInjection(
 // source of truth.
 const DefaultCostVelocityThresholdUSD = 1.00
 
-// Cost-velocity signatures + grouping moved to costvelocity.go in #48.
+// Cost-velocity signatures + grouping moved to costvelocity.go.
 
 // GroupIdenticalCallLoop upserts a failure_group with
 // failure_class=loops and signature="identical_call_<callHash>".
@@ -3915,7 +3915,7 @@ func (s *SQLiteStore) ListModelsForProjectSince(
 		  AND json_extract(e.payload, '$.model') IS NOT NULL
 		  AND json_extract(e.payload, '$.model') != ''
 		ORDER BY model ASC
-	`, projectID, cutoff.UTC(), excludeExecutionID) // time.Time bound, NEVER Format(...): #57
+	`, projectID, cutoff.UTC(), excludeExecutionID) // time.Time bound, NEVER Format(...): formats can't compare
 	if err != nil {
 		return nil, fmt.Errorf("list models for project since: %w", err)
 	}
@@ -4010,7 +4010,7 @@ func (s *SQLiteStore) ListLLMUserMessagesForProjectSince(
 		  AND json_extract(e.payload, '$.user_message') != ''
 		ORDER BY e.timestamp DESC
 	`
-	args := []interface{}{projectID, cutoff.UTC(), excludeExecutionID} // time.Time bound, NEVER Format(...): #57
+	args := []interface{}{projectID, cutoff.UTC(), excludeExecutionID} // time.Time bound, NEVER Format(...): formats can't compare
 	if limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit)

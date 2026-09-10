@@ -113,7 +113,7 @@ func severityHexColor(severityValue, failureClass string) string {
 		return "#60A5FA" // blue
 	}
 	// Legacy fallback: color by failure_class if the payload doesn't
-	// carry a severity (should not happen post-#281 but guards
+	// carry a severity (should not happen since the palette wave; guards
 	// against old test fixtures / partial rollouts).
 	return failureClassHexColor(failureClass)
 }

@@ -212,7 +212,7 @@ func (h *Handlers) runEventsPostProcessing(r *http.Request, executionID, authPro
 			}
 
 			// Cost-velocity detection, both forms, lives in
-			// handlers_update_cost.go since the #35 Phase D carve.
+			// handlers_update_cost.go since the split's first carve.
 			h.runCostVelocityDetectors(r, executionID, authProjectID, effectiveCost, currentExec.TenantID, currentExec.APIKeyID)
 
 			// Time-budget detector. Catch-all for executions that ran

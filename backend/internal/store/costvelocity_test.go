@@ -1,6 +1,6 @@
 package store
 
-// Tests for the #48 attribution pieces: identity resolution, the
+// Tests for the attribution pieces: identity resolution, the
 // attributed signature, and the property the whole change exists
 // for, that two different actors crossing the same cost bucket land
 // in two different failure groups, while the same actor recurring
@@ -86,7 +86,7 @@ func TestGroupCostVelocity_DistinctIdentitiesDistinctGroups(t *testing.T) {
 	if isNew {
 		t.Errorf("second spend from actor-a in the same bucket should be a recurrence")
 	}
-	// Actor B, same bucket, never seen: NEW group. This is the #48
+	// Actor B, same bucket, never seen: NEW group. This is the
 	// property itself; pre-attribution both actors shared one
 	// cost_$10+ group and actor B looked like routine recurrence.
 	isNew, err = st.GroupCostVelocity(ctx, "exec_actor_b_1", projectID, 15.0, "tenant:actor-b")
@@ -95,7 +95,7 @@ func TestGroupCostVelocity_DistinctIdentitiesDistinctGroups(t *testing.T) {
 	}
 	if !isNew {
 		t.Errorf("first spend from never-seen actor-b must create a NEW group, " +
-			"not fold into actor-a's; indistinguishability is the #48 defect")
+			"not fold into actor-a's; indistinguishability was the defect")
 	}
 
 	groups, err := st.ListFailureGroups(ctx, projectID, ListFailureGroupsOpts{Limit: 10})
