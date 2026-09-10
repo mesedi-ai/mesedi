@@ -62,3 +62,7 @@ The detector accepts per-project custom regex patterns. Custom matches surface u
 ## A note on this being a security alert
 
 Sandbox escape detection is the closest thing Mesedi ships to a security-grade alert. Treat it that way. The pattern catalog is conservative (false positives are possible on legitimate analytical workflows), but the underlying signal is consequential when it is real. When in doubt, page security.
+
+## Coverage boundary
+
+Stated plainly, decided 2026-09-10: this detector sees what arrives inside `tool_call` arguments and return values, and nothing below that line. Mesedi's event schema has no filesystem-write or network-egress event type, so behavior that happens inside a sandbox without surfacing through a tool call's arguments or results, a file written by already-running code, a connection opened by a library, the technique where the escape is assembled from pieces that individually look benign, is invisible to it. If your sandbox surfaces syscall-level activity, forward it through tool events and the patterns above apply; if it does not, this detector is not your syscall monitor and should not be treated as one. Dedicated filesystem and network event types are the planned path when customers running sandboxed agents need them; until then, this boundary is the honest one.

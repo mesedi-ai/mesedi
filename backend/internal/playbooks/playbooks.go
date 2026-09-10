@@ -161,6 +161,13 @@ var patterns = []pattern{
 	{"provider_incident", "", "provider_incident/_default.md"},
 	{"sandbox_escape", "", "sandbox_escape/_default.md"},
 
+	// Documentation-only class: NO detector emits it, and its
+	// playbook says so in bold in its first line. It exists so the
+	// MCP confused-deputy attack is named and its non-coverage is
+	// stated rather than implied away; see the playbook for why an
+	// honest detector needs taint tracking Mesedi does not have.
+	{"mcp_confused_deputy", "", "mcp_confused_deputy/_default.md"},
+
 	// ── Tier 4 HITL (-) ───────────────────────────
 	{"hitl_timeout", "", "hitl_timeout/_default.md"},
 	{"hitl_rejection_spike", "", "hitl_rejection_spike/_default.md"},

@@ -232,3 +232,37 @@ func Test_AllSignatures_ConsistentWithSingleSignature(t *testing.T) {
 		t.Errorf("AllSignatures[data_leakage] (%q) != Signature(data_leakage,...) (%q)", got, single)
 	}
 }
+
+// Test_ConfusedDeputy_DocumentationOnlyClass pins the two honesty
+// commitments made 2026-09-10: the confused-deputy class resolves to
+// a playbook whose first substantive line says Mesedi does NOT
+// detect it, and the sandbox-escape playbook carries its coverage
+// boundary. Both exist so absence of an alert is never mistaken for
+// coverage; if either sentence disappears, this fails.
+func Test_ConfusedDeputy_DocumentationOnlyClass(t *testing.T) {
+	path, ok := Resolve("mcp_confused_deputy", "anything")
+	if !ok {
+		t.Fatal("mcp_confused_deputy must resolve to its playbook")
+	}
+	body, err := content.ReadFile("content/" + path)
+	if err != nil {
+		t.Fatalf("read confused-deputy playbook: %v", err)
+	}
+	if !strings.Contains(string(body), "does not detect this class") {
+		t.Error("the confused-deputy playbook must state plainly that " +
+			"Mesedi does not detect this class")
+	}
+
+	sePath, ok := Resolve("sandbox_escape", "sandbox_escape:python_os_import")
+	if !ok {
+		t.Fatal("sandbox_escape must resolve")
+	}
+	seBody, err := content.ReadFile("content/" + sePath)
+	if err != nil {
+		t.Fatalf("read sandbox-escape playbook: %v", err)
+	}
+	if !strings.Contains(string(seBody), "Coverage boundary") {
+		t.Error("the sandbox-escape playbook must carry its coverage " +
+			"boundary section")
+	}
+}
