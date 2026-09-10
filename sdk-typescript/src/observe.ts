@@ -313,70 +313,9 @@ export function emitInfrastructureEvent(
   client.submitEvent(event);
 }
 
-/**
- * Options for emitMcpCall. Mirrors the Go MCPCallPayload struct in
- * backend/internal/events/types.go field-for-field, omitting
- * `serverName` and `method` which are positional args.
- */
-export interface McpCallOptions {
-  /** Optional server URL or stdio target for the expanded view. */
-  serverUrl?: string;
-  /** Method arguments (any JSON-serializable value). */
-  arguments?: unknown;
-  /** Successful return value; omit on error. */
-  returnValue?: unknown;
-  /** Wall-clock duration in milliseconds. */
-  latencyMs?: number;
-  /** Error message when the call failed. */
-  error?: string;
-  /** Failure classifier: "hard_error" / "soft_error" / "timeout" / "server_unreachable" / "method_not_found". */
-  errorClass?: string;
-}
-
-/**
- * Emit an `mcp_call` event for one Model Context Protocol server
- * invocation.
- *
- * Use this when your agent talks to an MCP server (Anthropic's
- * filesystem / github servers, a customer-hosted MCP server, etc.).
- * The dashboard renders MCP calls in a distinct chip so cost
- * attribution can break down by server identity, and the existing
- * tool_failures detector picks up failed MCP calls when `error` or
- * `errorClass` is non-empty.
- *
- * Outside `wrap()`: silent no-op.
- */
-export function emitMcpCall(
-  serverName: string,
-  method: string,
-  opts: McpCallOptions = {},
-): void {
-  const ctx = currentExecutionContext();
-  if (!ctx) return;
-
-  const payload: Record<string, unknown> = {
-    server_name: serverName,
-    method,
-  };
-  if (opts.serverUrl) payload["server_url"] = opts.serverUrl;
-  if (opts.arguments !== undefined) payload["arguments"] = opts.arguments;
-  if (opts.returnValue !== undefined) payload["return_value"] = opts.returnValue;
-  if (opts.latencyMs) payload["latency_ms"] = Math.trunc(opts.latencyMs);
-  if (opts.error) payload["error"] = opts.error;
-  if (opts.errorClass) payload["error_class"] = opts.errorClass;
-
-  const client = getClient();
-  const event: Event = {
-    event_id: newEventId(),
-    execution_id: ctx.executionId,
-    event_type: EventType.MCP_CALL,
-    sequence: ctx.nextSequence(),
-    timestamp: utcNowRfc3339(),
-    duration_ms: opts.latencyMs,
-    payload,
-  };
-  client.submitEvent(event);
-}
+// emitMcpCall moved to mcp.ts on 2026-09-10; re-exported so existing
+// imports keep working.
+export { emitMcpCall, type McpCallOptions } from "./mcp.js";
 
 /** Options for emitEvalScore beyond the required core fields. */
 export interface EvalScoreOptions {

@@ -33,6 +33,7 @@ import uuid
 from typing import Any, Callable, Dict, Optional, TypeVar
 
 from mesedi._context import current_execution_context
+from mesedi._jcs import input_schema_hash
 from mesedi.client import get_client
 from mesedi.events import Event, EventType, utcnow_rfc3339
 
@@ -341,6 +342,12 @@ def tool(func: F) -> F:
         # description, the SDK sent the clean one eleven times, and
         # the detector correctly reported no drift.
         tool_description = _tool_description(inner)
+        # Declared input schema, read at CALL time off the DECORATED
+        # object for exactly the reasons the description is: a
+        # swapped schema between calls is the event worth catching,
+        # and frameworks attach their schema (args_schema and
+        # friends) to the object the caller holds, which is inner.
+        schema_hash = _input_schema_hash(inner)
         sequence = ctx.next_sequence()
         event_id = f"evt-{uuid.uuid4().hex[:12]}"
         args_summary = _summarize_args(args, kwargs)
@@ -361,6 +368,8 @@ def tool(func: F) -> F:
             }
             if tool_description:
                 payload["tool_description"] = tool_description
+            if schema_hash:
+                payload["input_schema_hash"] = schema_hash
             client.submit_event(Event(
                 event_id=event_id,
                 execution_id=ctx.execution_id,
@@ -385,6 +394,8 @@ def tool(func: F) -> F:
         }
         if tool_description:
             payload["tool_description"] = tool_description
+        if schema_hash:
+            payload["input_schema_hash"] = schema_hash
         # Structured JSON form for backend detectors (specifically
         # tool_schema_drift, which fingerprints the return shape).
         # Only present when the result is JSON-serializable;
@@ -408,6 +419,31 @@ def tool(func: F) -> F:
 
 def _elapsed_ms(start_wall: float) -> int:
     return int((time.perf_counter() - start_wall) * 1000)
+
+
+def _input_schema_hash(func: Any) -> str:
+    """Hash of the tool's DECLARED input schema, "" when none exists.
+
+    A plain Python function declares no schema and that absence is
+    the honest answer, the detector has no opinion about it. A
+    schema exists when a framework attached one to the decorated
+    object: ``args_schema`` (LangChain's convention, a Pydantic
+    model) or a literal ``input_schema`` dict (the MCP convention).
+    Read at call time, same reasoning as the description above.
+    """
+    explicit = getattr(func, "input_schema", None)
+    if isinstance(explicit, dict):
+        return input_schema_hash(explicit)
+    model = getattr(func, "args_schema", None)
+    if model is not None:
+        for attr in ("model_json_schema", "schema"):  # pydantic v2, then v1
+            fn = getattr(model, attr, None)
+            if callable(fn):
+                try:
+                    return input_schema_hash(fn())
+                except Exception:
+                    return ""
+    return ""
 
 
 def _tool_description(func: Any) -> str:

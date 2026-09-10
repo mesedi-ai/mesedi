@@ -23,6 +23,7 @@ import {
   newEventId,
 } from "./context.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
+import { inputSchemaHash } from "./jcs.js";
 
 const MAX_ARG_REPR = 200;
 const MAX_RESULT_REPR = 500;
@@ -70,6 +71,18 @@ export interface ToolOptions {
    * something the model never saw.
    */
   description?: string;
+  /**
+   * The tool's DECLARED input schema (JSON Schema), when one exists.
+   * Pass the same object your framework or MCP server declares. Only
+   * a canonical SHA-256 of it is sent, feeding the definition-drift
+   * detector (the mcp-pin class: parameters change under an
+   * unchanged description). Read at CALL time from this options
+   * object, so a schema swapped between calls, exactly the event
+   * worth catching, changes what goes over the wire. A plain
+   * function with nothing declared omits this and the detector has
+   * no opinion about it.
+   */
+  inputSchema?: unknown;
 }
 
 /**
@@ -137,6 +150,12 @@ export function tool<TArgs extends unknown[], TResult>(
       if (toolDescription) {
         payload.tool_description = toolDescription;
       }
+      {
+        const schemaHash = inputSchemaHash(opts.inputSchema);
+        if (schemaHash) {
+          payload.input_schema_hash = schemaHash;
+        }
+      }
       // Structured JSON-native form for backend detectors
       // (tool_schema_drift fingerprints the return shape). Only
       // present when the result is JSON-serializable AND under
@@ -179,6 +198,10 @@ export function tool<TArgs extends unknown[], TResult>(
             MAX_EXC_MSG,
           ),
           ...(toolDescription ? { tool_description: toolDescription } : {}),
+          ...((): Record<string, unknown> => {
+            const schemaHash = inputSchemaHash(opts.inputSchema);
+            return schemaHash ? { input_schema_hash: schemaHash } : {};
+          })(),
         },
       };
       client.submitEvent(event);
