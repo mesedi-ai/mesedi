@@ -74,6 +74,10 @@ type ExecutionStore interface {
 	//
 	// since=zero-time means "all time".
 	SumExecutionCostByProjectSince(ctx context.Context, projectID string, since time.Time) (totalCostUSD float64, totalCount int, err error)
+	// EarliestExecutionStart returns the project's first execution's
+	// started_at, or the zero time when the project has none. Used by
+	// the cost-velocity baseline's learning gate.
+	EarliestExecutionStart(ctx context.Context, projectID string) (time.Time, error)
 
 	// ListActiveExecutionsByProject returns executions for projectID
 	// that have not yet ended (status = "started"). Used by the

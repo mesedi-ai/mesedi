@@ -8,6 +8,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -167,5 +168,89 @@ func TestGroupCostVelocityRate_GroupsUnderRateSignature(t *testing.T) {
 	if !found {
 		t.Errorf("no rate group with signature %q; the rate detector stays "+
 			"project-wide by design and its signature must carry no identity", want)
+	}
+}
+
+func TestCostVelocityBaselineExceeded_DecisionTable(t *testing.T) {
+	cases := []struct {
+		name           string
+		rate, baseline float64
+		runs           int
+		ageHours       float64
+		wantFired      bool
+	}{
+		{"fires at 10x for a mature project", 5.0, 0.5, 50, 72, true},
+		{"silent below the multiplier", 4.9, 0.5, 200, 500, false},
+		{"silent when too young", 5.0, 0.5, 200, 71, false},
+		{"silent with too few runs", 5.0, 0.5, 49, 500, false},
+		{"silent below the absolute floor", 0.49, 0.01, 200, 500, false},
+		{"zero baseline never fires", 100.0, 0, 200, 500, false},
+		{"exactly at every gate fires", 5.0, 0.5, 50, 72, true},
+	}
+	for _, c := range cases {
+		_, fired := CostVelocityBaselineExceeded(c.rate, c.baseline, c.runs, c.ageHours)
+		if fired != c.wantFired {
+			t.Errorf("%s: fired = %v, want %v", c.name, fired, c.wantFired)
+		}
+	}
+}
+
+func TestCostVelocityBaselineSignature_Buckets(t *testing.T) {
+	cases := map[float64]string{
+		10:    "baseline_x10+",
+		99:    "baseline_x10+",
+		100:   "baseline_x100+",
+		999:   "baseline_x100+",
+		1000:  "baseline_x1000+",
+		50000: "baseline_x1000+",
+	}
+	for multiple, want := range cases {
+		if got := CostVelocityBaselineSignature(multiple); got != want {
+			t.Errorf("CostVelocityBaselineSignature(%v) = %q, want %q", multiple, got, want)
+		}
+	}
+}
+
+func TestEarliestExecutionStart_RealWritePath(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st, err := OpenSQLite(":memory:", logger)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	const projectID = "proj_earliest"
+	if err := st.CreateProject(ctx, &Project{
+		ProjectID: projectID, Name: "earliest test", Tier: "hobby",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	got, err := st.EarliestExecutionStart(ctx, projectID)
+	if err != nil {
+		t.Fatalf("earliest on empty project: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("empty project earliest = %v, want zero time", got)
+	}
+
+	now := time.Now().UTC()
+	oldest := now.Add(-72 * time.Hour)
+	for i, at := range []time.Time{now.Add(-1 * time.Hour), oldest, now.Add(-24 * time.Hour)} {
+		if err := st.CreateExecution(ctx, &events.Execution{
+			ExecutionID: fmt.Sprintf("exec_earliest_%d", i), ProjectID: projectID,
+			Status: events.StatusStarted, StartedAt: at,
+		}); err != nil {
+			t.Fatalf("create execution %d: %v", i, err)
+		}
+	}
+	got, err = st.EarliestExecutionStart(ctx, projectID)
+	if err != nil {
+		t.Fatalf("earliest: %v", err)
+	}
+	if got.Sub(oldest).Abs() > 2*time.Second {
+		t.Errorf("earliest = %v, want ~%v (the 72h-old execution)", got, oldest)
 	}
 }

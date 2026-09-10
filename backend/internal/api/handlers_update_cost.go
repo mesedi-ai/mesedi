@@ -153,6 +153,17 @@ func (h *Handlers) runCostVelocityDetectors(r *http.Request, executionID, authPr
 		)
 	} else if rateCfg.WindowMinutes > 0 {
 		ratePerMin := windowCostUSD / float64(rateCfg.WindowMinutes)
+
+		// Baseline (learned-normal) form, independent of the fixed
+		// threshold below: fires on the MULTIPLE of this project's
+		// own trailing-week burn rate, so an attacker sitting just
+		// under the operator's fixed number still surfaces. The
+		// learning gate, floor and multiplier live as constants
+		// beside the decision function in the store package; a
+		// project too young to have a normal stays silent here and
+		// keeps the fixed thresholds' protection.
+		h.runCostVelocityBaseline(r, executionID, authProjectID, ratePerMin)
+
 		if ratePerMin >= rateCfg.ThresholdUSDPerMin {
 			isNew, gErr := h.Store.GroupCostVelocityRate(r.Context(), executionID, authProjectID, ratePerMin)
 			if gErr != nil {
@@ -170,4 +181,62 @@ func (h *Handlers) runCostVelocityDetectors(r *http.Request, executionID, authPr
 			h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocityRateSignature(ratePerMin), isNew, gErr)
 		}
 	}
+}
+
+// runCostVelocityBaseline runs the learned-normal form for one
+// terminal execution. Baseline is the project's average dollars per
+// minute over its trailing week, with the week shortened to the
+// project's actual age when younger, so a four-day-old project's
+// normal is not diluted by three empty days. Store errors degrade to
+// silence with a warning; the fixed-threshold forms have already run
+// and this signal is additive.
+func (h *Handlers) runCostVelocityBaseline(r *http.Request, executionID, authProjectID string, ratePerMin float64) {
+	now := time.Now().UTC()
+	earliest, err := h.Store.EarliestExecutionStart(r.Context(), authProjectID)
+	if err != nil || earliest.IsZero() {
+		if err != nil {
+			h.Logger.Warn("cost-velocity baseline: earliest-start lookup failed (skipping)",
+				"execution_id", executionID, "error", err.Error())
+		}
+		return
+	}
+	projectAgeHours := now.Sub(earliest).Hours()
+
+	windowStart := now.AddDate(0, 0, -store.CostVelocityBaselineWindowDays)
+	if earliest.After(windowStart) {
+		windowStart = earliest
+	}
+	baselineSpanMinutes := now.Sub(windowStart).Minutes()
+	if baselineSpanMinutes <= 0 {
+		return
+	}
+	weekCostUSD, weekRuns, err := h.Store.SumExecutionCostByProjectSince(r.Context(), authProjectID, windowStart)
+	if err != nil {
+		h.Logger.Warn("cost-velocity baseline: trailing-window sum failed (skipping)",
+			"execution_id", executionID, "error", err.Error())
+		return
+	}
+	baselineRate := weekCostUSD / baselineSpanMinutes
+
+	multiple, fired := store.CostVelocityBaselineExceeded(ratePerMin, baselineRate, weekRuns, projectAgeHours)
+	if !fired {
+		return
+	}
+	isNew, gErr := h.Store.GroupCostVelocityBaseline(r.Context(), executionID, authProjectID, multiple)
+	if gErr != nil {
+		h.Logger.Warn("cost-velocity baseline grouping failed (continuing)",
+			"execution_id", executionID,
+			"rate_usd_per_min", ratePerMin,
+			"baseline_usd_per_min", baselineRate,
+			"multiple", multiple,
+			"error", gErr.Error(),
+		)
+	}
+	h.Logger.Info("cost-velocity baseline fired",
+		"execution_id", executionID,
+		"rate_usd_per_min", ratePerMin,
+		"baseline_usd_per_min", baselineRate,
+		"multiple", multiple,
+	)
+	h.maybeFireWebhook(r, authProjectID, store.FailureClassCostVelocity, store.CostVelocityBaselineSignature(multiple), isNew, gErr)
 }

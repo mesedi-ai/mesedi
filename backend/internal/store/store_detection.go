@@ -381,6 +381,9 @@ type DetectionStore interface {
 	// failure_class, different signature so rate-based bursts cluster
 	// distinctly from per-execution magnitude on the dashboard.
 	GroupCostVelocityRate(ctx context.Context, executionID, projectID string, ratePerMinUSD float64) (bool, error)
+	// GroupCostVelocityBaseline files the learned-normal form: the
+	// signature buckets the multiple of the project's own baseline.
+	GroupCostVelocityBaseline(ctx context.Context, executionID, projectID string, multiple float64) (bool, error)
 	// GroupIdenticalCallLoop upserts a failure_group with
 	// failure_class=loops and signature=identical_call_<short_hash>.
 	GroupIdenticalCallLoop(ctx context.Context, executionID, projectID, callHash string) (bool, error)

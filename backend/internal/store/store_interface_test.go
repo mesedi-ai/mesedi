@@ -28,7 +28,10 @@ import (
 //
 // 259 was the count on 2026-09-04, verified against the flat Store
 // interface immediately before it was split into sub-interfaces.
-const StoreMethodCount = 259
+// 261 since 2026-09-09: the cost-velocity baseline form added
+// EarliestExecutionStart (ExecutionStore) and
+// GroupCostVelocityBaseline (DetectionStore), both deliberate.
+const StoreMethodCount = 261
 
 func TestStoreInterfaceIsComplete(t *testing.T) {
 	got := reflect.TypeOf((*Store)(nil)).Elem().NumMethod()

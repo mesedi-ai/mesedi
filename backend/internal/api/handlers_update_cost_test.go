@@ -25,6 +25,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -188,4 +189,142 @@ func TestHandleUpdateExecution_NewActorMakesNewCostVelocityGroup(t *testing.T) {
 			t.Errorf("missing per-actor group %q; signatures found: %v", want, sigs)
 		}
 	}
+}
+
+// TestHandleUpdateExecution_BaselineFiresOnAccelerationPastNormal
+// drives the learned-normal form through the real handler: a project
+// four days old with 55 cheap runs establishes a normal of roughly a
+// cent a minute, then one $50 execution lands, a burn rate hundreds
+// of times normal. A baseline_x* group must exist afterwards,
+// independent of the fixed-threshold groups that also fire.
+func TestHandleUpdateExecution_BaselineFiresOnAccelerationPastNormal(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st, err := store.OpenSQLite(":memory:", logger)
+	if err != nil {
+		t.Fatalf("open in-memory sqlite: %v", err)
+	}
+	// Not closed: detached dispatch goroutines, as above.
+
+	ctx := context.Background()
+	const projectID = "proj_costvel_baseline"
+	if err := st.CreateProject(ctx, &store.Project{
+		ProjectID: projectID, Name: "baseline test", Tier: "hobby",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	now := time.Now().UTC()
+	// 55 modest runs spread over four days: normal is established.
+	for i := 0; i < 55; i++ {
+		if err := st.CreateExecution(ctx, &events.Execution{
+			ExecutionID: fmt.Sprintf("exec_bl_hist_%d", i), ProjectID: projectID,
+			Status:           events.StatusStarted,
+			StartedAt:        now.Add(-time.Duration(96-i) * time.Hour),
+			EstimatedCostUSD: 0.10,
+		}); err != nil {
+			t.Fatalf("create history execution %d: %v", i, err)
+		}
+	}
+	if err := st.CreateExecution(ctx, &events.Execution{
+		ExecutionID: "exec_bl_burst", ProjectID: projectID,
+		Status: events.StatusStarted, StartedAt: now.Add(-30 * time.Second),
+	}); err != nil {
+		t.Fatalf("create burst execution: %v", err)
+	}
+
+	h := &Handlers{Logger: logger, Store: st, HaltSubs: NewHaltSubscribers()}
+	req := httptest.NewRequest("PATCH", "/executions/exec_bl_burst",
+		strings.NewReader(`{"status":"completed","estimated_cost_usd":50.0}`))
+	req.SetPathValue("id", "exec_bl_burst")
+	req = req.WithContext(context.WithValue(req.Context(), ctxKeyProjectID, projectID))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateExecution(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PATCH returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	groups, err := st.ListFailureGroups(ctx, projectID, store.ListFailureGroupsOpts{Limit: 50})
+	if err != nil {
+		t.Fatalf("list groups: %v", err)
+	}
+	found := false
+	for _, g := range groups {
+		if g.FailureClass == store.FailureClassCostVelocity &&
+			strings.HasPrefix(g.Signature, "baseline_x") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no baseline_x* cost_velocity group after a burst hundreds "+
+			"of times a mature project's normal; groups: %v", groupSignatures(groups))
+	}
+}
+
+// TestHandleUpdateExecution_BaselineSilentWhileLearning: an
+// hour-old project with a handful of runs takes the same $50 burst.
+// The fixed-threshold detectors may fire; the baseline form must
+// NOT, because a project with no learned normal cannot be abnormal.
+func TestHandleUpdateExecution_BaselineSilentWhileLearning(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st, err := store.OpenSQLite(":memory:", logger)
+	if err != nil {
+		t.Fatalf("open in-memory sqlite: %v", err)
+	}
+	// Not closed: detached dispatch goroutines, as above.
+
+	ctx := context.Background()
+	const projectID = "proj_costvel_learning"
+	if err := st.CreateProject(ctx, &store.Project{
+		ProjectID: projectID, Name: "learning gate test", Tier: "hobby",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	now := time.Now().UTC()
+	for i := 0; i < 10; i++ {
+		if err := st.CreateExecution(ctx, &events.Execution{
+			ExecutionID: fmt.Sprintf("exec_lg_hist_%d", i), ProjectID: projectID,
+			Status:           events.StatusStarted,
+			StartedAt:        now.Add(-time.Duration(60-i) * time.Minute),
+			EstimatedCostUSD: 0.10,
+		}); err != nil {
+			t.Fatalf("create history execution %d: %v", i, err)
+		}
+	}
+	if err := st.CreateExecution(ctx, &events.Execution{
+		ExecutionID: "exec_lg_burst", ProjectID: projectID,
+		Status: events.StatusStarted, StartedAt: now.Add(-30 * time.Second),
+	}); err != nil {
+		t.Fatalf("create burst execution: %v", err)
+	}
+
+	h := &Handlers{Logger: logger, Store: st, HaltSubs: NewHaltSubscribers()}
+	req := httptest.NewRequest("PATCH", "/executions/exec_lg_burst",
+		strings.NewReader(`{"status":"completed","estimated_cost_usd":50.0}`))
+	req.SetPathValue("id", "exec_lg_burst")
+	req = req.WithContext(context.WithValue(req.Context(), ctxKeyProjectID, projectID))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateExecution(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PATCH returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	groups, err := st.ListFailureGroups(ctx, projectID, store.ListFailureGroupsOpts{Limit: 50})
+	if err != nil {
+		t.Fatalf("list groups: %v", err)
+	}
+	for _, g := range groups {
+		if strings.HasPrefix(g.Signature, "baseline_x") {
+			t.Errorf("baseline group %q fired for an hour-old project with "+
+				"ten runs; the learning gate exists to prevent exactly this", g.Signature)
+		}
+	}
+}
+
+func groupSignatures(groups []*store.FailureGroup) []string {
+	out := make([]string, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, g.Signature)
+	}
+	return out
 }

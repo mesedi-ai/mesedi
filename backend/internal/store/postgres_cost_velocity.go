@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // GetProjectCostVelocityThresholdUSD returns the per-project
@@ -69,4 +70,29 @@ func (s *PostgresStore) GroupCostVelocity(ctx context.Context, executionID, proj
 func (s *PostgresStore) GroupCostVelocityRate(ctx context.Context, executionID, projectID string, ratePerMinUSD float64) (isNew bool, err error) {
 	signature := CostVelocityRateSignature(ratePerMinUSD)
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCostVelocity, signature)
+}
+
+// GroupCostVelocityBaseline is the Postgres twin of the SQLite method
+// in costvelocity.go: the learned-normal form's grouping, signature
+// bucketed by the multiple of the project's own baseline.
+func (s *PostgresStore) GroupCostVelocityBaseline(ctx context.Context, executionID, projectID string, multiple float64) (isNew bool, err error) {
+	signature := CostVelocityBaselineSignature(multiple)
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCostVelocity, signature)
+}
+
+// EarliestExecutionStart is the Postgres twin of the SQLite method in
+// costvelocity.go.
+func (s *PostgresStore) EarliestExecutionStart(ctx context.Context, projectID string) (time.Time, error) {
+	var t sql.NullTime
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MIN(started_at) FROM executions WHERE project_id = $1`,
+		projectID,
+	).Scan(&t)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("earliest execution start: %w", err)
+	}
+	if !t.Valid {
+		return time.Time{}, nil
+	}
+	return t.Time.UTC(), nil
 }
