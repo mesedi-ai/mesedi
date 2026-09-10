@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mesedi/backend/internal/anthropic"
@@ -47,6 +48,9 @@ type Handlers struct {
 	Store         store.Store
 	HaltSubs      *HaltSubscribers // sub-slice 21b, SSE halt-channel registry
 	WebhookClient *http.Client     // outbound dispatcher HTTP client
+	// dispatchWG tracks spawn-and-forget webhook dispatch goroutines
+	// so shutdown and tests can drain them; see DrainDispatches.
+	dispatchWG sync.WaitGroup
 	// DashboardURL is the public origin of the React dashboard
 	// (e.g. https://app.mesedi.ai). Used to build deep-links in
 	// webhook payloads and Discord embeds. When empty, the dispatcher
@@ -569,31 +573,7 @@ func (h *Handlers) HandleCreateExecution(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// normalizeListQuery sanitizes a list-endpoint search query string for
-// safe SQL use. Trims whitespace, drops control characters, caps at 256
-// bytes (a search for hundreds of chars is almost certainly an exploit
-// attempt or a paste accident). The SQL layer parameterizes the value
-// so there's no injection risk; this is purely about response sanity
-// and avoiding pathological substring scans.
-func normalizeListQuery(raw string) string {
-	const maxLen = 256
-	out := strings.TrimSpace(raw)
-	if out == "" {
-		return ""
-	}
-	// Strip control chars (0x00-0x1F + 0x7F) which can't appear in
-	// meaningful customer-visible signature or execution_id text.
-	out = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7F {
-			return -1
-		}
-		return r
-	}, out)
-	if len(out) > maxLen {
-		out = out[:maxLen]
-	}
-	return out
-}
+// normalizeListQuery moved to list_query.go during the split.
 
 // HandleListFailureGroups returns the calling project's failure groups,
 // sorted by most-recent first. Supports `limit` (default 50, max 200) and

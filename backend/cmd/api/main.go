@@ -865,6 +865,14 @@ func main() {
 		if err := srv.Shutdown(ctx); err != nil {
 			logger.Error("graceful shutdown failed", "error", err.Error())
 		}
+		// In-flight requests are done; wait for the webhook
+		// dispatches they spawned, but never past the shutdown
+		// deadline, so a deploy cannot hang on a stuck send.
+		if err := handlers.DrainDispatchesContext(ctx); err != nil {
+			logger.Warn("webhook dispatch drain cut short by shutdown deadline", "error", err.Error())
+		} else {
+			logger.Info("webhook dispatches drained")
+		}
 	}()
 
 	logger.Info("http server listening", "addr", srv.Addr)

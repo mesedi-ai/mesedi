@@ -72,7 +72,11 @@ func (h *Handlers) dispatchFailureGroupCreated(
 ) {
 	// Spawn-and-forget. Goroutine takes ownership of its own context
 	// so the calling request can return immediately.
-	go h.runFailureGroupDispatch(projectID, failureClass, signature, dashboardBase, false)
+	h.dispatchWG.Add(1)
+	go func() {
+		defer h.dispatchWG.Done()
+		h.runFailureGroupDispatch(projectID, failureClass, signature, dashboardBase, false)
+	}()
 }
 
 // dispatchFailureGroupRecurrence is the non-blocking entry point for
@@ -82,7 +86,53 @@ func (h *Handlers) dispatchFailureGroupCreated(
 func (h *Handlers) dispatchFailureGroupRecurrence(
 	projectID, failureClass, signature, dashboardBase string,
 ) {
-	go h.runFailureGroupDispatch(projectID, failureClass, signature, dashboardBase, true)
+	h.dispatchWG.Add(1)
+	go func() {
+		defer h.dispatchWG.Done()
+		h.runFailureGroupDispatch(projectID, failureClass, signature, dashboardBase, true)
+	}()
+}
+
+// DrainDispatches blocks until every in-flight webhook dispatch
+// goroutine has finished. Each dispatch is bounded by dispatchTimeout,
+// so this returns within that bound in the worst case.
+//
+// Two callers care: server shutdown, so a deploy cannot cut off a
+// notification mid-send, and tests, which close their stores when
+// done. Before this existed, a test's deferred Close raced a live
+// dispatch and panicked CI's deploy gate (2026-09-09); the tests
+// worked around it by never closing their stores. The workaround is
+// retired: drain, then close.
+func (h *Handlers) DrainDispatches() {
+	h.dispatchWG.Wait()
+}
+
+// DrainDispatchesContext is the shutdown-path variant: it waits like
+// DrainDispatches but gives up when ctx is done, so a deploy's
+// shutdown deadline is honored even if a dispatch is stuck at its
+// own timeout ceiling.
+//
+// Durability, since a reader will ask what a restart loses here: the
+// SIGNAL is already durable before any dispatch spawns; the grouping
+// write (Store.GroupCostVelocity and its siblings) persisted the
+// failure_group row on the request path. The dispatch is a
+// best-effort notification about that row, so a restart loses at
+// most one notification attempt, never the record, and the dashboard
+// shows the group either way.
+func (h *Handlers) DrainDispatchesContext(ctx context.Context) error {
+	// Not long-lived state: max one channel per call, and it is
+	// garbage the moment the select below returns.
+	done := make(chan struct{})
+	go func() {
+		h.dispatchWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (h *Handlers) runFailureGroupDispatch(

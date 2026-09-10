@@ -35,9 +35,6 @@ func TestHandleUpdateExecution_FiresToolSchemaDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
-	// Not closed: detached webhook dispatch goroutines may outlive the
-	// test, same reasoning as the cost-velocity tests.
-
 	ctx := context.Background()
 	const projectID = "proj_drift_wiring"
 	const toolName = "weather_lookup"
@@ -89,6 +86,7 @@ func TestHandleUpdateExecution_FiresToolSchemaDrift(t *testing.T) {
 	}
 
 	h := &Handlers{Logger: logger, Store: st, HaltSubs: NewHaltSubscribers()}
+	t.Cleanup(func() { h.DrainDispatches(); _ = st.Close() })
 	body := `{"status":"completed"}`
 	req := httptest.NewRequest("PATCH", "/executions/exec_drift_current", strings.NewReader(body))
 	req.SetPathValue("id", "exec_drift_current")
@@ -134,8 +132,6 @@ func TestHandleUpdateExecution_RanksCompatibleDriftSeparately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
-	// Not closed: detached dispatch goroutines, as above.
-
 	ctx := context.Background()
 	const projectID = "proj_drift_compat"
 	const toolName = "stock_quote"
@@ -180,6 +176,7 @@ func TestHandleUpdateExecution_RanksCompatibleDriftSeparately(t *testing.T) {
 	}
 
 	h := &Handlers{Logger: logger, Store: st, HaltSubs: NewHaltSubscribers()}
+	t.Cleanup(func() { h.DrainDispatches(); _ = st.Close() })
 	req := httptest.NewRequest("PATCH", "/executions/exec_compat_current",
 		strings.NewReader(`{"status":"completed"}`))
 	req.SetPathValue("id", "exec_compat_current")

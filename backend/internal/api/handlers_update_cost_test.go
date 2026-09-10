@@ -43,16 +43,6 @@ func TestHandleUpdateExecution_FiresCostVelocityDetectors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
-	// Deliberately NOT closed. maybeFireWebhook spawns a detached
-	// dispatch goroutine (webhook_dispatch.go, spawn-and-forget by
-	// design) that reads the store after this test returns; Close()
-	// nils the db handle and the goroutine then panics the whole
-	// test binary, which is exactly what happened on CI's slower
-	// runner while local runs won the race. The in-memory store
-	// lives until process exit, which is fine for a test binary.
-	// The durable fix, tracking dispatch goroutines for shutdown,
-	// is the B30 debt already scheduled in the #35 split.
-
 	ctx := context.Background()
 	const projectID = "proj_costvel_test"
 	const executionID = "exec_costvel_1"
@@ -79,6 +69,9 @@ func TestHandleUpdateExecution_FiresCostVelocityDetectors(t *testing.T) {
 		Store:    st,
 		HaltSubs: NewHaltSubscribers(),
 	}
+	// Drain in-flight webhook dispatches BEFORE closing the store;
+	// the old workaround of never closing is retired with B30.
+	t.Cleanup(func() { h.DrainDispatches(); _ = st.Close() })
 
 	// PATCH to terminal status with an SDK-rolled-up cost. No events
 	// exist, so the backend cost walk yields zero and the handler
@@ -135,8 +128,6 @@ func TestHandleUpdateExecution_NewActorMakesNewCostVelocityGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
-	// Not closed, same reason as above: detached dispatch goroutines.
-
 	ctx := context.Background()
 	const projectID = "proj_costvel_actors"
 	if err := st.CreateProject(ctx, &store.Project{
@@ -147,6 +138,7 @@ func TestHandleUpdateExecution_NewActorMakesNewCostVelocityGroup(t *testing.T) {
 	}
 
 	h := &Handlers{Logger: logger, Store: st, HaltSubs: NewHaltSubscribers()}
+	t.Cleanup(func() { h.DrainDispatches(); _ = st.Close() })
 
 	finish := func(execID, tenant string) {
 		t.Helper()
@@ -203,8 +195,6 @@ func TestHandleUpdateExecution_BaselineFiresOnAccelerationPastNormal(t *testing.
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
-	// Not closed: detached dispatch goroutines, as above.
-
 	ctx := context.Background()
 	const projectID = "proj_costvel_baseline"
 	if err := st.CreateProject(ctx, &store.Project{
@@ -233,6 +223,7 @@ func TestHandleUpdateExecution_BaselineFiresOnAccelerationPastNormal(t *testing.
 	}
 
 	h := &Handlers{Logger: logger, Store: st, HaltSubs: NewHaltSubscribers()}
+	t.Cleanup(func() { h.DrainDispatches(); _ = st.Close() })
 	req := httptest.NewRequest("PATCH", "/executions/exec_bl_burst",
 		strings.NewReader(`{"status":"completed","estimated_cost_usd":50.0}`))
 	req.SetPathValue("id", "exec_bl_burst")
@@ -270,8 +261,6 @@ func TestHandleUpdateExecution_BaselineSilentWhileLearning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
-	// Not closed: detached dispatch goroutines, as above.
-
 	ctx := context.Background()
 	const projectID = "proj_costvel_learning"
 	if err := st.CreateProject(ctx, &store.Project{
@@ -299,6 +288,7 @@ func TestHandleUpdateExecution_BaselineSilentWhileLearning(t *testing.T) {
 	}
 
 	h := &Handlers{Logger: logger, Store: st, HaltSubs: NewHaltSubscribers()}
+	t.Cleanup(func() { h.DrainDispatches(); _ = st.Close() })
 	req := httptest.NewRequest("PATCH", "/executions/exec_lg_burst",
 		strings.NewReader(`{"status":"completed","estimated_cost_usd":50.0}`))
 	req.SetPathValue("id", "exec_lg_burst")
