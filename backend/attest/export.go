@@ -59,8 +59,10 @@ type ExportedInterval struct {
 	// Rekor index would report a mock-anchored checkpoint as a FAILURE,
 	// when the truth is that no public-log claim was ever made for it.
 	// Those are different findings and the difference is the reader's to
-	// know. Mesedi's own mock ids are additionally spelled "rekor-..."
-	// today, which makes guessing from the id itself actively unsafe.
+	// know. And guessing from the id itself is actively unsafe: mock
+	// ids minted before 2026-09-12 are spelled "rekor-...", and four
+	// such ids are sealed into this chain's canonical hashes forever,
+	// so this field is the only trustworthy signal.
 	LedgerBackend string `json:"ledger_backend,omitempty"`
 
 	// LeafPreimage is the exact string the ledger hashed to produce the
