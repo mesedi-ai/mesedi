@@ -2,10 +2,17 @@ module mesedi/backend
 
 go 1.27.1
 
+replace github.com/mesedi-ai/mesedi/backend/attest => ./attest
+
 require (
 	github.com/go-pdf/fpdf v0.9.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/klauspost/compress v1.19.2
+	// The attestation core (attest + attest/events) lives in a nested
+	// module so a standalone verifier can import it by its GitHub path.
+	// This app module is not importable (non-canonical path), so a local
+	// replace here costs nothing downstream.
+	github.com/mesedi-ai/mesedi/backend/attest v0.0.0
 	github.com/pquerna/otp v1.5.0
 	github.com/stripe/stripe-go/v82 v82.5.1
 	github.com/testcontainers/testcontainers-go v0.44.0

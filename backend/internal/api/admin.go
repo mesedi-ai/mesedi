@@ -36,8 +36,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 	"mesedi/backend/internal/anthropic"
-	"mesedi/backend/internal/events"
 	"mesedi/backend/internal/store"
 )
 
@@ -1887,8 +1887,8 @@ func (h *Handlers) HandleAdminSearchClosedProjectAudit(w http.ResponseWriter, r 
 	}
 
 	// NOTE: do not name this slice "events" -- the package imports
-	// mesedi/backend/internal/events and the local name would shadow
-	// it for the rest of the function. Pick something distinct.
+	// github.com/mesedi-ai/mesedi/backend/attest/events and the local
+	// name would shadow that package for the rest of the function.
 	auditRows, err := h.Store.SearchClosedProjectAuditEvents(
 		r.Context(), store.ClosedProjectAuditFilter{
 			Email:     email,

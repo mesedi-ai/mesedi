@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 func anchorTestCheckpoint(t *testing.T) attest.Checkpoint {

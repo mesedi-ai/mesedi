@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // Did the log only ever grow, or is it a different log wearing the same

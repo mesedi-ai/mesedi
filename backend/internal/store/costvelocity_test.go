@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 func TestCostVelocityIdentity_Resolution(t *testing.T) {

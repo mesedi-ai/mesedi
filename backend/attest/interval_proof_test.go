@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // Tree sizes are swept 1..17 rather than spot-checked at powers of two.

@@ -15,8 +15,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 	"mesedi/backend/internal/dlp"
-	"mesedi/backend/internal/events"
 	"mesedi/backend/internal/store"
 )
 

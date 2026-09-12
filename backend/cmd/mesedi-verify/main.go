@@ -74,7 +74,7 @@ import (
 	"strings"
 	"time"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // buildVersion is set at link time for released binaries. It is never

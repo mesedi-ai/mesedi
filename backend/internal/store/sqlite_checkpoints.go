@@ -28,7 +28,7 @@ import (
 	"fmt"
 	"time"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // mustParseStoredTime parses a timestamp that participates in a hash.

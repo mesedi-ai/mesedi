@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // WHAT IS NOT TESTED HERE, AND WHY THAT IS THE POINT

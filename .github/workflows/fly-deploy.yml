@@ -69,6 +69,11 @@ jobs:
       - name: go test
         working-directory: backend
         run: go test ./...
+      # The attestation core is its own module; the main module's
+      # ./... does not descend into it, so gate on it explicitly.
+      - name: go test (attest module)
+        working-directory: backend/attest
+        run: go test ./...
 
   deploy:
     name: flyctl deploy

@@ -12,8 +12,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 	"mesedi/backend/internal/detectors"
-	"mesedi/backend/internal/events"
 	"mesedi/backend/internal/store"
 )
 

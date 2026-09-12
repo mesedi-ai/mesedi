@@ -50,7 +50,7 @@ import (
 	"strings"
 	"time"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 	"mesedi/backend/internal/store"
 )
 

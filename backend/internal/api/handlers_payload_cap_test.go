@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // TestPayloadOverCap_UnderCapAccepted covers the common case: a

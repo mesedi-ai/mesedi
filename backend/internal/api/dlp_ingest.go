@@ -28,9 +28,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 	"mesedi/backend/internal/detectors"
 	"mesedi/backend/internal/dlp"
-	"mesedi/backend/internal/events"
 )
 
 // scanFieldKeys enumerates the fields per event_type that the DLP

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // The PDF is tested at the content layer, not the pixel layer.

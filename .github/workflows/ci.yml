@@ -72,7 +72,7 @@ jobs:
       - name: gofmt
         working-directory: backend
         run: |
-          unformatted="$(gofmt -l ./cmd ./internal)"
+          unformatted="$(gofmt -l ./cmd ./internal ./attest)"
           if [ -n "$unformatted" ]; then
             echo "These files are not gofmt-clean:"
             echo "$unformatted"
@@ -81,6 +81,12 @@ jobs:
           fi
       - name: go test
         working-directory: backend
+        run: go test ./...
+      # The attestation core is its own module, so the main module's
+      # ./... does not descend into it. Without this step its tests
+      # would run nowhere in CI.
+      - name: go test (attest module)
+        working-directory: backend/attest
         run: go test ./...
 
   sdk-python:

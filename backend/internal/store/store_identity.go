@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // Projects, audit events, billing events, request logs, magic links,

@@ -22,7 +22,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 func openToolDescriptionStore(t *testing.T) *SQLiteStore {

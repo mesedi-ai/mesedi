@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // Persistence of checkpoints.anchor_proof_json (migration 060), the

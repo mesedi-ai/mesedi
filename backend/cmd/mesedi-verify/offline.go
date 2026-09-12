@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // Offline verification of a checkpoint's anchor, using the Merkle

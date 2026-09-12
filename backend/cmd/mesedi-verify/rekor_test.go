@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // A fake Rekor, because the failure paths are the point.

@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // Range reads over the checkpoint chain, for assembling an auditor's

@@ -53,7 +53,7 @@ import (
 	"fmt"
 	"sort"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // ErrNoEvents means the execution recorded nothing to digest. Returned

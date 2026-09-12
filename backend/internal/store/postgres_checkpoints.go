@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"time"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // InsertCheckpoint writes a checkpoint and its tenant leaves in one

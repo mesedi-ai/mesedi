@@ -2,7 +2,7 @@
 Event types and execution records that mirror the Mesedi backend schema.
 
 Source-of-truth lives in the Go backend at
-`backend/internal/events/types.go`. Any new event_type or status value
+`backend/attest/events/types.go`. Any new event_type or status value
 added there MUST be added here (and vice versa); the strict JSON
 decoder on the backend will reject events whose fields it does not
 recognize.
@@ -31,7 +31,7 @@ class EventType:
     """Event types the backend understands today.
 
     Match exactly the EventType constants in
-    ``backend/internal/events/types.go``. Phase 3+ detectors are keyed on
+    ``backend/attest/events/types.go``. Phase 3+ detectors are keyed on
     these values, so adding a new type means coordinating SDK and backend
     in lockstep.
     """
@@ -74,7 +74,7 @@ class Status:
     """Execution lifecycle states.
 
     Match exactly the ExecutionStatus constants in
-    ``backend/internal/events/types.go``.
+    ``backend/attest/events/types.go``.
     """
 
     STARTED:           ClassVar[str] = "started"

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // Executions and the per-project configuration that governs them: budget

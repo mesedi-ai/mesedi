@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // Verified against REAL Sigstore data, not a fixture we invented.

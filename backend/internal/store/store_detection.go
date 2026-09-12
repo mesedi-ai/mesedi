@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // Event ingest and failure detection. The largest surface by far: one

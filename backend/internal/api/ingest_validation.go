@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // validateIngestBatch is the first pass over a submitted event batch:

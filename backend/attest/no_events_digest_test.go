@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // These tests exist because of a production outage on 2026-09-04.

@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // newTimeFormatFixture opens a real store and seeds one project with

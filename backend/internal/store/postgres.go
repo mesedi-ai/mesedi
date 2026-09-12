@@ -29,7 +29,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers "pgx" driver
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // ErrPostgresNotYetPorted is retained as a documented sentinel even

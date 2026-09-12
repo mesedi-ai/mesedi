@@ -3,7 +3,7 @@
  * backend's wire format and the Python SDK's data model.
  *
  * Source-of-truth lives in the Go backend at
- * `backend/internal/events/types.go`. Any new EventType or Status
+ * `backend/attest/events/types.go`. Any new EventType or Status
  * added there MUST be added here too, strict-JSON decoding on the
  * backend will reject events whose fields it doesn't recognize.
  *
@@ -30,7 +30,7 @@ export function utcNowRfc3339(): string {
 
 /**
  * Seven event types. Must match `EventType` constants in
- * backend/internal/events/types.go exactly.
+ * backend/attest/events/types.go exactly.
  */
 export const EventType = {
   LLM_CALL: "llm_call",
@@ -67,7 +67,7 @@ export type EventType = (typeof EventType)[keyof typeof EventType];
 
 /**
  * Execution lifecycle states. Must match `ExecutionStatus` constants
- * in backend/internal/events/types.go exactly.
+ * in backend/attest/events/types.go exactly.
  */
 export const Status = {
   STARTED: "started",

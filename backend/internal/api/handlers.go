@@ -26,11 +26,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mesedi-ai/mesedi/backend/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 	"mesedi/backend/internal/anthropic"
-	"mesedi/backend/internal/attest"
 	"mesedi/backend/internal/detectors"
 	"mesedi/backend/internal/dlp"
-	"mesedi/backend/internal/events"
 	"mesedi/backend/internal/mail"
 	meseditel "mesedi/backend/internal/otel"
 	"mesedi/backend/internal/playbooks"

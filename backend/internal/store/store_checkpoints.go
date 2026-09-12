@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // The checkpoint chain: execution sealing, checkpoint persistence and

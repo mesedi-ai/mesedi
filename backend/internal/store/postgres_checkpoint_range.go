@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 // Postgres twin of sqlite_checkpoint_range.go. See that file for why

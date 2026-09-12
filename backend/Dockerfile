@@ -14,8 +14,11 @@ FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # Copy module files first so `go mod download` can be cached
-# independently of source-code edits.
+# independently of source-code edits. The nested attest module's
+# go.mod must be present too: the main go.mod replaces the module
+# with ./attest, and resolving the graph reads that file.
 COPY go.mod go.sum ./
+COPY attest/go.mod attest/go.mod
 RUN go mod download
 
 # Copy the rest of the source.

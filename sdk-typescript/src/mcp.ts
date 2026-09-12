@@ -13,7 +13,7 @@ import { inputSchemaHash } from "./jcs.js";
 
 /**
  * Options for emitMcpCall. Mirrors the Go MCPCallPayload struct in
- * backend/internal/events/types.go field-for-field, omitting
+ * backend/attest/events/types.go field-for-field, omitting
  * `serverName` and `method` which are positional args.
  */
 export interface McpCallOptions {

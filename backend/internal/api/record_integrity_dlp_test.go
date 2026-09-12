@@ -3,8 +3,8 @@ package api
 import (
 	"testing"
 
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 	"mesedi/backend/internal/detectors"
-	"mesedi/backend/internal/events"
 )
 
 // The bug, and the thing that must not be over-corrected.

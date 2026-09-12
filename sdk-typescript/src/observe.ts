@@ -144,7 +144,7 @@ export function validatorResult(
 /**
  * Options for emitInfrastructureEvent. Mirrors the Go
  * InfrastructureEventPayload struct in
- * backend/internal/events/types.go field-for-field, omitting `reason`
+ * backend/attest/events/types.go field-for-field, omitting `reason`
  * which is the positional first arg of the emitter.
  */
 export interface InfrastructureEventOptions {

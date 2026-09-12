@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/attest"
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 	"mesedi/backend/internal/store"
 )
 

@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/attest"
+	"github.com/mesedi-ai/mesedi/backend/attest"
 )
 
 func cpStore(t *testing.T, name string) *SQLiteStore {

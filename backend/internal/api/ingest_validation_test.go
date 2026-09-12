@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // Before this file, the ingest first pass had no test of any kind, no

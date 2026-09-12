@@ -25,7 +25,7 @@ import (
 
 	_ "modernc.org/sqlite" // SQLite driver registers under name "sqlite"
 
-	"mesedi/backend/internal/events"
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 )
 
 // SQLiteStore is the SQLite-backed Store implementation. Safe for

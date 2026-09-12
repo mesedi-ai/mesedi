@@ -30,8 +30,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mesedi-ai/mesedi/backend/attest/events"
 	"mesedi/backend/internal/anthropic"
-	"mesedi/backend/internal/events"
 	"mesedi/backend/internal/store"
 )
 
