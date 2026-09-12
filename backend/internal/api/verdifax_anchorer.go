@@ -338,10 +338,14 @@ func (a *VerdifaxAnchorer) AnchorCheckpoint(
 	// two finds a mismatch every time and is right to.
 	//
 	// That was the state of this system until 2026-09-04. Every anchor
-	// written before that names a real Sigstore entry that nobody, this
-	// company included, can tie back to the checkpoint that produced it.
-	// The nonce inside those preimages was generated in Verdifax's
-	// handler and discarded, so they cannot be repaired.
+	// written before that named a real Sigstore entry that nobody, this
+	// company included, could tie back to the checkpoint that produced
+	// it. This comment used to end "so they cannot be repaired", which
+	// proved false: the discarded nonce was a wall-clock nanosecond
+	// bounded by the receipt row's own creation time, and on 2026-09-12
+	// every affected receipt's preimage was recovered by exhaustive
+	// search over that window, each accepted only because it hashes to
+	// the value the log already held.
 	//
 	// Fails closed. The scheduler treats an error here as "not anchored"
 	// and retries next tick, which stalls the chain visibly. That is the
