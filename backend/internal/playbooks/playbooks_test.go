@@ -266,3 +266,29 @@ func Test_ConfusedDeputy_DocumentationOnlyClass(t *testing.T) {
 			"boundary section")
 	}
 }
+
+// Test_EnvironmentMisapprehension_HonestyPins pins the commitments
+// made 2026-09-14 when the class was named from the weekly radar:
+// the playbook resolves, states plainly that Mesedi does not detect
+// the class today, and states the planned detector's honest limit,
+// that it checks the declared boundary and not the model's beliefs.
+// When the detector ships, this test changes WITH the playbook, in
+// the same commit, or it fails and forces the conversation.
+func Test_EnvironmentMisapprehension_HonestyPins(t *testing.T) {
+	path, ok := Resolve("environment_misapprehension", "anything")
+	if !ok {
+		t.Fatal("environment_misapprehension must resolve to its playbook")
+	}
+	body, err := content.ReadFile("content/" + path)
+	if err != nil {
+		t.Fatalf("read environment-misapprehension playbook: %v", err)
+	}
+	for _, sentence := range []string{
+		"does not detect this class today",
+		"only that the declared boundary was crossed in fact",
+	} {
+		if !strings.Contains(string(body), sentence) {
+			t.Errorf("the environment-misapprehension playbook must contain %q", sentence)
+		}
+	}
+}

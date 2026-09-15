@@ -168,6 +168,13 @@ var patterns = []pattern{
 	// honest detector needs taint tracking Mesedi does not have.
 	{"mcp_confused_deputy", "", "mcp_confused_deputy/_default.md"},
 
+	// Documentation-only for now, unlike the one above by intent:
+	// a declared-mode mismatch detector is planned, and the playbook
+	// states exactly what it will and will not cover. Named from the
+	// January 2026 incident in Anthropic's September report, where a
+	// run treating reality as simulation breached a real machine.
+	{"environment_misapprehension", "", "environment_misapprehension/_default.md"},
+
 	// ── Tier 4 HITL (-) ───────────────────────────
 	{"hitl_timeout", "", "hitl_timeout/_default.md"},
 	{"hitl_rejection_spike", "", "hitl_rejection_spike/_default.md"},
