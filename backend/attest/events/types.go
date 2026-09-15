@@ -57,6 +57,24 @@ const (
 	// aggregate these events to surface SLA breaches and
 	// quality regressions detected via human rejections.
 	EventTypeHumanIntervention EventType = "human_intervention"
+	// EventTypeEgress. One outbound network contact by the agent's
+	// environment: a destination the run reached beyond its own
+	// process. Added 2026-09-14 when the deferral of egress
+	// visibility was reopened after three trace-edge incidents in a
+	// fortnight. Consumed by the covert_coordination detector
+	// (distinct runs converging on one destination) and by the
+	// environment_misapprehension detector (a declared-simulation
+	// run reaching live destinations).
+	EventTypeEgress EventType = "egress"
+	// EventTypeEnvironmentDeclaration. The operator's statement of
+	// what environment this run is SUPPOSED to be in, emitted once
+	// near execution start. It exists so there is a declared
+	// boundary to check observations against; without it the
+	// environment_misapprehension detector has nothing to compare.
+	// Deliberately an event rather than an executions column: the
+	// detectors read events, and a declaration is a claim made at a
+	// moment in time, which is exactly what an event is.
+	EventTypeEnvironmentDeclaration EventType = "environment_declaration"
 )
 
 // ExecutionStatus is the lifecycle state of an Execution. There are
@@ -380,6 +398,34 @@ type MCPCallPayload struct {
 	LatencyMs       int64           `json:"latency_ms,omitempty"`
 	Error           string          `json:"error,omitempty"`
 	ErrorClass      string          `json:"error_class,omitempty"` // "hard_error" | "soft_error" | "timeout" | "server_unreachable" | "method_not_found"
+}
+
+// EgressPayload is one outbound network contact by the agent's
+// environment. Destination is the normalized target, host or
+// host:port, never a full URL with a path, so identical services
+// cluster and no query-string secrets ride along. Emitted by the
+// host application or sandbox, not inferred: Mesedi still cannot see
+// a connection nobody reports, and the sandbox_escape playbook's
+// coverage boundary says exactly where that line sits.
+type EgressPayload struct {
+	Destination string `json:"destination"`         // "api.example.com" or "10.2.3.4:443"
+	Protocol    string `json:"protocol,omitempty"`  // "https" | "tcp" | "udp" | "dns" | ...
+	ToolName    string `json:"tool_name,omitempty"` // the tool on whose behalf, when known
+	BytesOut    int64  `json:"bytes_out,omitempty"` // best-effort, 0 when the host can't count
+	Note        string `json:"note,omitempty"`
+}
+
+// EnvironmentDeclarationPayload is the operator's statement of what
+// environment the run is SUPPOSED to be in, emitted once near start.
+// Mode's well-known values are "live", "simulation" and "staging";
+// any other string is stored verbatim and treated as not-live. The
+// environment_misapprehension detector compares later observations
+// against this claim; it checks the declared boundary, never the
+// model's beliefs.
+type EnvironmentDeclarationPayload struct {
+	Mode       string `json:"mode"`                  // "live" | "simulation" | "staging" | free-form
+	DeclaredBy string `json:"declared_by,omitempty"` // "operator" | "harness" | ...
+	Note       string `json:"note,omitempty"`
 }
 
 // ToolCallPayload is one invocation of a developer-registered tool.

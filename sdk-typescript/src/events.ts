@@ -62,6 +62,16 @@ export const EventType = {
   // moment the human's decision lands. Aggregated by the
   // hitl_timeout and hitl_rejection_spike detectors.
   HUMAN_INTERVENTION: "human_intervention",
+  //  one outbound network contact by the agent's environment,
+  // reported by the host or sandbox (never inferred). Destination
+  // is host or host:port, not a full URL. Consumed by the
+  // covert_coordination and environment_misapprehension detectors.
+  EGRESS: "egress",
+  //  the operator's statement of what environment this run is
+  // SUPPOSED to be in ("live" | "simulation" | "staging"), emitted
+  // once near start. The environment_misapprehension detector
+  // compares later observations against this declared boundary.
+  ENVIRONMENT_DECLARATION: "environment_declaration",
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

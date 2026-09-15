@@ -83,3 +83,10 @@ export { MesediHalt, isMesediHalt } from "./halt.js";
 export type { Budget, HaltTrigger } from "./halt.js";
 
 export const VERSION = "0.0.4";
+
+export {
+  emitEgress,
+  emitEnvironmentDeclaration,
+  type EgressOptions,
+  type EnvironmentDeclarationOptions,
+} from "./egress.js";

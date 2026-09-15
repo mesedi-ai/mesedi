@@ -72,6 +72,10 @@ from mesedi.events import (
     utcnow_rfc3339,
 )
 from mesedi.halt import Budget, MesediHalt
+from mesedi.egress import (
+    emit_egress,
+    emit_environment_declaration,
+)
 from mesedi.observe import (
     HumanInterventionHandle,
     checkpoint,
@@ -102,6 +106,8 @@ __all__ = [
     "checkpoint",
     "configure",
     "emit_agent_handoff",
+    "emit_egress",
+    "emit_environment_declaration",
     "emit_eval_score",
     "emit_infrastructure_event",
     "emit_llm_call",
