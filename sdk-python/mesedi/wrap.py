@@ -44,6 +44,7 @@ from mesedi._context import (
     push_execution_context,
 )
 from mesedi.client import get_client
+from mesedi.egress import emit_environment_declaration
 from mesedi.events import Execution, Status, utcnow_rfc3339
 from mesedi.halt import Budget, MesediHalt
 from mesedi.halt_stream import HaltStreamReader
@@ -57,6 +58,7 @@ def wrap(
     budget: Optional[Budget] = None,
     tenant_id: Optional[str] = None,
     agent_name: Optional[str] = None,
+    execution_mode: Optional[str] = None,
 ) -> Any:
     """Decorate a function so each call is recorded as an agent execution.
 
@@ -129,6 +131,7 @@ def wrap(
                 budget=budget,
                 tenant_id=tenant_id,
                 agent_name=agent_name,
+                execution_mode=execution_mode,
             )
         return factory
 
@@ -151,6 +154,16 @@ def wrap(
             budget=budget,
             agent_name=agent_name,
         )
+
+        # Declared execution mode, the sugar for
+        # emit_environment_declaration: `@mesedi.wrap(
+        # execution_mode="simulation")` states the run's intended
+        # environment as the first event, so the backend's
+        # environment_misapprehension detector has a boundary to
+        # check egress against. None (the default) declares nothing:
+        # no boundary, no possible firing.
+        if execution_mode:
+            emit_environment_declaration(execution_mode, declared_by="wrap")
 
         # Sub-slice 21b.2: if a budget is configured for this
         # execution, spawn a background SSE reader subscribed to

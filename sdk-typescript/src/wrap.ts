@@ -40,6 +40,7 @@
 
 import { createHash } from "node:crypto";
 import { getClient } from "./client.js";
+import { emitEnvironmentDeclaration } from "./egress.js";
 import {
   newExecutionId,
   runInExecutionContext,
@@ -110,6 +111,16 @@ export interface WrapOptions {
    * must not be polluted.
    */
   agentName?: string;
+  /**
+   * Optional declared execution mode, the sugar for
+   * `emitEnvironmentDeclaration`: `wrap({ executionMode:
+   * "simulation" }, fn)` states the run's intended environment as
+   * its first event, so the backend's environment_misapprehension
+   * detector has a boundary to check egress against. Well-known
+   * values are "live", "simulation" and "staging". Omitted (the
+   * default) declares nothing: no boundary, no possible firing.
+   */
+  executionMode?: string;
 }
 
 /**
@@ -188,7 +199,14 @@ export function wrap<TArgs extends unknown[], TResult>(
     try {
       const result = await runInExecutionContext(
         executionId,
-        () => fn(...args),
+        async () => {
+          // Inside the context on purpose: the declaration emitter
+          // is a context-bound no-op everywhere else.
+          if (opts.executionMode) {
+            emitEnvironmentDeclaration(opts.executionMode, { declaredBy: "wrap" });
+          }
+          return fn(...args);
+        },
         tracker,
         opts.agentName,
       );

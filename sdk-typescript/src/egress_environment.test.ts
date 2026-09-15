@@ -19,11 +19,18 @@ vi.mock("./client.js", () => ({
     submitEvent: (e: Event) => {
       captured.push(e);
     },
+    // wrap() touches these on its start/end path; the sugar test
+    // below drives a real wrap, so the stub must carry them.
+    submitExecutionStart: () => {},
+    submitExecutionEnd: () => {},
+    baseUrl: "http://fake.invalid",
+    apiKey: "mesedi_sk_test",
   }),
 }));
 
 import { runInExecutionContext } from "./context.js";
 import { emitEgress, emitEnvironmentDeclaration } from "./egress.js";
+import { wrap } from "./wrap.js";
 
 beforeEach(() => {
   captured.length = 0;
@@ -59,6 +66,27 @@ describe("emitEgress", () => {
   it("is a silent no-op outside wrap", () => {
     emitEgress("api.example.com");
     expect(captured).toHaveLength(0);
+  });
+});
+
+describe("wrap executionMode sugar", () => {
+  it("declares the mode as the run's first event", async () => {
+    const fn = wrap({ executionMode: "simulation" }, async () => "done");
+    const out = await fn();
+    expect(out).toBe("done");
+    const decls = captured.filter((e) => e.event_type === "environment_declaration");
+    expect(decls).toHaveLength(1);
+    expect(decls[0].payload["mode"]).toBe("simulation");
+    expect(decls[0].payload["declared_by"]).toBe("wrap");
+    expect(decls[0].sequence).toBe(1);
+  });
+
+  it("declares nothing when the option is omitted", async () => {
+    const fn = wrap(async () => "quiet");
+    await fn();
+    expect(
+      captured.filter((e) => e.event_type === "environment_declaration"),
+    ).toHaveLength(0);
   });
 });
 
