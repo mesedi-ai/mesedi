@@ -480,18 +480,31 @@ func (s *SQLiteStore) ListAnalyzedFailureGroupsByProject(
 	if limit <= 0 {
 		limit = 200
 	}
+	// Full canonical column set. The previous SELECT returned 15
+	// columns against scanFailureGroup's 19 scan targets, so any
+	// project with at least one analyzed group answered 500 on the
+	// admin drill-down; the handler's stub-store test never noticed
+	// because the stub bypassed this query entirely.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT group_id, project_id, failure_class, signature,
-		       first_seen, last_seen, event_count, affected_executions,
-		       cost_wasted_usd, sample_execution_id,
-		       analysis_markdown, analyzed_at, analysis_model,
-		       analysis_playbook_signature,
-		       severity_hint
-		FROM failure_groups
-		WHERE project_id = ?
-		  AND analyzed_at IS NOT NULL
-		  AND analyzed_at >= ?
-		ORDER BY analyzed_at DESC
+		SELECT
+			fg.group_id, fg.project_id, fg.failure_class, fg.signature,
+			fg.first_seen, fg.last_seen,
+			fg.event_count, fg.affected_executions,
+			COALESCE(SUM(e.estimated_cost_usd), 0) AS computed_cost,
+			COALESCE(SUM(e.total_tokens_in), 0) AS computed_tokens_in,
+			COALESCE(SUM(e.total_tokens_out), 0) AS computed_tokens_out,
+			fg.sample_execution_id,
+			fg.analysis_markdown, fg.analyzed_at, fg.analysis_model,
+			fg.analysis_playbook_signature,
+			fg.severity_hint,
+			fg.resolved_at, fg.resolved_by
+		FROM failure_groups fg
+		LEFT JOIN executions e ON e.failure_group_id = fg.group_id
+		WHERE fg.project_id = ?
+		  AND fg.analyzed_at IS NOT NULL
+		  AND fg.analyzed_at >= ?
+		GROUP BY fg.group_id
+		ORDER BY fg.analyzed_at DESC
 		LIMIT ?
 	`, projectID, since, limit)
 	if err != nil {
