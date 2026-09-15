@@ -240,6 +240,24 @@ func (s *PostgresStore) GroupSandboxEscape(ctx context.Context, executionID, pro
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassSandboxEscape, signature)
 }
 
+// GroupEnvironmentMisapprehension is the Postgres twin of the
+// SQLite method of the same name.
+func (s *PostgresStore) GroupEnvironmentMisapprehension(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassEnvironmentMisapprehension, signature)
+}
+
+// GroupCovertCoordination is the Postgres twin of the SQLite method
+// of the same name.
+func (s *PostgresStore) GroupCovertCoordination(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassCovertCoordination, signature)
+}
+
 // GroupGroundingFailure is the Postgres twin of the SQLite method
 // of the same name.
 func (s *PostgresStore) GroupGroundingFailure(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {

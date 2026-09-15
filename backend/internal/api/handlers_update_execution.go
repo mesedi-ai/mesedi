@@ -559,6 +559,78 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Egress-derived detectors, added when the egress-visibility
+	// deferral was reopened. Both consume egress events the host
+	// reported (never inferred), so an execution with no egress
+	// events costs one cheap query and exits.
+	//
+	// environment_misapprehension: the operator declared a non-live
+	// mode and the run reached a live-looking destination anyway,
+	// the declared-boundary check, never the model's beliefs.
+	//
+	// covert_coordination: one of this run's destinations was
+	// contacted by an unusual number of DISTINCT recent executions
+	// in the project; the counting happens server-side in one query
+	// so no store call sits inside a loop over destinations.
+	if isTerminalStatus(patch.Status) {
+		egressDests, err := h.Store.ListEgressDestinations(r.Context(), executionID)
+		if err != nil {
+			h.Logger.Warn("list egress destinations for detection failed",
+				"execution_id", executionID,
+				"error", err.Error(),
+			)
+		} else if len(egressDests) > 0 {
+			declaredMode, mErr := h.Store.GetEnvironmentDeclarationMode(r.Context(), executionID)
+			if mErr != nil {
+				h.Logger.Warn("get environment declaration for detection failed",
+					"execution_id", executionID,
+					"error", mErr.Error(),
+				)
+			} else if sig, fired := detectors.DetectEnvironmentMismatch(declaredMode, egressDests); fired {
+				isNew, gErr := h.Store.GroupEnvironmentMisapprehension(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("environment-misapprehension grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassEnvironmentMisapprehension, sig, isNew, gErr)
+			}
+
+			since := time.Now().UTC().Add(-store.DefaultCovertCoordinationWindow)
+			rendezvous, cErr := h.Store.ListCoordinatingEgressDestinations(
+				r.Context(), executionID, authProjectID, since,
+				store.DefaultCovertCoordinationRunThreshold,
+			)
+			if cErr != nil {
+				h.Logger.Warn("list coordinating egress destinations failed",
+					"execution_id", executionID,
+					"error", cErr.Error(),
+				)
+			}
+			for _, rv := range rendezvous {
+				sig, fired := detectors.DetectCovertCoordination(
+					rv.Destination, rv.DistinctRuns,
+					store.DefaultCovertCoordinationRunThreshold,
+				)
+				if !fired {
+					continue
+				}
+				isNew, gErr := h.Store.GroupCovertCoordination(r.Context(), executionID, authProjectID, sig)
+				if gErr != nil {
+					h.Logger.Warn("covert-coordination grouping failed (continuing)",
+						"execution_id", executionID,
+						"signature", sig,
+						"error", gErr.Error(),
+					)
+					continue
+				}
+				h.maybeFireWebhook(r, authProjectID, store.FailureClassCovertCoordination, sig, isNew, gErr)
+			}
+		}
+	}
+
 	//, data_leakage detector. If any dlp_scan_result
 	// event for this execution recorded critical/high hits, cluster
 	// the execution under data_leakage with the matched rule_id as

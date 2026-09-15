@@ -1,6 +1,6 @@
 # Environment misapprehension
 
-**Mesedi does not detect this class today.** This playbook exists so the class is named, understood, and honestly labeled before its first detector ships, not to imply coverage that is not there yet.
+**Mesedi detects the declared-boundary half of this class, and only that half.** A detector ships with this playbook; its exact coverage and its exact blindness are both stated below, because the difference between them is the whole point of naming the class honestly.
 
 ## What the failure is
 
@@ -8,13 +8,13 @@ An agent, or the people operating it, holds a wrong belief about what environmen
 
 The failure has two directions. A run believed to be contained (an eval, a simulation, a staging exercise) acts on the real world; that is the direction that does damage. Or a production run behaves as if consequences are not real, hedging, fabricating, or treating live actions as rehearsal. Both are beliefs about context, and beliefs are not events.
 
-## Why there is no detector yet
+## What the detector covers
 
-Nothing in the event schema names an environment. An execution carries identity, timing, tokens, cost, and SDK version, and no field says "this run was supposed to be a simulation." Without a declaration there is nothing to check observations against; without reading the model's reasoning there is no access to its beliefs, and Mesedi deliberately ingests no reasoning text (the chain-of-thought monitorability that approach depends on is reported to be declining anyway).
+The damaging direction, and only it: the operator declares the run's mode near start (`emit_environment_declaration("simulation")`, well-known modes "live", "simulation", "staging"), the host or sandbox reports outbound contacts as egress events, and a run declared NOT-live that reached a live-looking destination clusters under `env_mismatch:<mode>` at Critical severity. Live-looking is judged conservatively in both directions: loopback, private and link-local addresses, .local/.internal/.test names, and bare service shortnames all read as not-live, so a well-built simulation full of stubs cannot fire; public IPs and dotted public hostnames read as live. This check would have fired on the January incident, provided the harness had declared itself a simulation.
 
-## The detector that is coming
+## What the detector is blind to
 
-The planned first detector covers the damaging direction, and only it, honestly: the operator declares the run's execution mode through the SDK, and Mesedi independently checks tool traffic for live-world characteristics, real public endpoints where stubs were expected, network-jitter latencies where mock-flat ones were expected, live and mocked responses mixed in one run. A run declared simulation whose tools touch the real internet fires. That check would have fired in January, provided the harness had declared itself a simulation; it says nothing about what the model believed, only that the declared boundary was crossed in fact.
+Everything about beliefs. It says nothing about what the model believed, only that the declared boundary was crossed in fact. A run declared "live" can never fire here, whatever the model thought it was doing; a run with no declaration has no boundary to violate; and an outbound contact the host never reported as an egress event does not exist to this detector. Mesedi still deliberately ingests no reasoning text, and the chain-of-thought monitorability a belief-reading detector would depend on is reported to be declining.
 
 ## What Mesedi DOES catch nearby
 
@@ -24,8 +24,8 @@ The planned first detector covers the damaging direction, and only it, honestly:
 
 ## What to do as an operator
 
-Declare the environment somewhere the trace can see, today that means your own metadata conventions, soon a first-class field. Keep evaluation credentials and production credentials strictly separate, so a confused run fails to authenticate rather than succeeding against the real world. And treat "the eval touched a real endpoint" as an incident with the same weight as an escape attempt, because from the third party's side they are the same event.
+Declare the mode in every harness and eval (`emit_environment_declaration`), and report egress from whatever opens the connections; the detector is only as good as what the host tells it. Keep evaluation credentials and production credentials strictly separate, so a confused run fails to authenticate rather than succeeding against the real world. And treat a firing here as an incident with the same weight as an escape attempt, which is why it defaults to Critical: from the third party's side they are the same event.
 
 ## Status
 
-Documented 2026-09-14 from the weekly incident radar, verified against every detector's source before writing. The declared-mode field and the mismatch detector are planned work; when they ship, this page becomes that detector's playbook and this boundary statement narrows accordingly. Until then, absence of a Mesedi alert says nothing about this class.
+Named 2026-09-14 from the weekly incident radar, verified against every detector's source before writing; the declared-boundary detector shipped 2026-09-15 with the egress event type. Absence of an alert still says nothing about the belief half of this class, and this page will keep saying so.

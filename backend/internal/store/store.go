@@ -561,6 +561,21 @@ const (
 	// so each escape vector clusters separately for security
 	// triage.
 	FailureClassSandboxEscape = "sandbox_escape"
+	// FailureClassEnvironmentMisapprehension groups executions whose
+	// declared environment (an environment_declaration event with a
+	// non-live mode) was contradicted by observed egress to a
+	// live-looking destination. This is the declared-boundary check,
+	// never a claim about the model's beliefs. Signature is
+	// "env_mismatch:<mode>" so each declared mode clusters its own
+	// violations.
+	FailureClassEnvironmentMisapprehension = "environment_misapprehension"
+	// FailureClassCovertCoordination groups executions whose egress
+	// destinations were shared by an unusual number of DISTINCT
+	// recent executions in the same project, the cheap counter for
+	// covert inter-agent coordination through a common external
+	// channel. Signature is "covert_coordination:<destination>" so
+	// each rendezvous point clusters separately.
+	FailureClassCovertCoordination = "covert_coordination"
 	// FailureClassGroundingFailure groups executions whose
 	// eval_score events showed the agent's output diverged from
 	// retrieved context. Signature is

@@ -214,6 +214,29 @@ type DetectionStore interface {
 	// failure_class=sandbox_escape and the detector-supplied
 	// signature.
 	GroupSandboxEscape(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// GetEnvironmentDeclarationMode returns the mode of the FIRST
+	// environment_declaration event on the execution, "" when none.
+	// Used by the environment_misapprehension detector.
+	GetEnvironmentDeclarationMode(ctx context.Context, executionID string) (string, error)
+	// ListEgressDestinations returns the execution's DISTINCT egress
+	// destinations in first-seen order, bounded. Used by the
+	// environment_misapprehension detector.
+	ListEgressDestinations(ctx context.Context, executionID string) ([]string, error)
+	// ListCoordinatingEgressDestinations returns, among this
+	// execution's egress destinations, those contacted by at least
+	// `threshold` distinct project executions since `since`, with
+	// counts. Server-side on purpose so callers never loop store
+	// calls over destinations. Used by the covert_coordination
+	// detector.
+	ListCoordinatingEgressDestinations(ctx context.Context, executionID, projectID string, since time.Time, threshold int) ([]EgressRendezvous, error)
+	// GroupEnvironmentMisapprehension upserts a failure_group with
+	// failure_class=environment_misapprehension and the
+	// detector-supplied signature.
+	GroupEnvironmentMisapprehension(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// GroupCovertCoordination upserts a failure_group with
+	// failure_class=covert_coordination and the detector-supplied
+	// signature.
+	GroupCovertCoordination(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// ListEvalScorePayloads returns every eval_score event payload
 	// on the execution in sequence order. Used by the
 	// grounding_failure detector.

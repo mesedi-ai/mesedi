@@ -33,7 +33,11 @@ import (
 // GroupCostVelocityBaseline (DetectionStore), both deliberate.
 // 262 since 2026-09-10: definition drift added
 // ListToolInputSchemaHashes (DetectionStore), deliberate.
-const StoreMethodCount = 262
+// 267 since 2026-09-15: the egress wave added
+// GetEnvironmentDeclarationMode, ListEgressDestinations,
+// ListCoordinatingEgressDestinations, GroupEnvironmentMisapprehension
+// and GroupCovertCoordination (all DetectionStore), all deliberate.
+const StoreMethodCount = 267
 
 func TestStoreInterfaceIsComplete(t *testing.T) {
 	got := reflect.TypeOf((*Store)(nil)).Elem().NumMethod()

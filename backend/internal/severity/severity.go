@@ -79,7 +79,11 @@ func Default(failureClass string) Severity {
 		"grounding_failure",
 		"cascading_failure",
 		"coordination_deadlock",
-		"sandbox_escape":
+		"sandbox_escape",
+		// A declared-simulation run reaching the live internet is
+		// the same incident class as an escape attempt: from the
+		// third party's side they are the same event.
+		"environment_misapprehension":
 		return Critical
 	case "cost_velocity",
 		"time_budget",
@@ -89,7 +93,11 @@ func Default(failureClass string) Severity {
 		"token_waste",
 		"provider_incident",
 		"hitl_timeout",
-		"hitl_rejection_spike":
+		"hitl_rejection_spike",
+		// An investigative counter, not a confirmed attack: distinct
+		// runs sharing a destination warrants a look, and paging on
+		// it would teach operators to ignore it.
+		"covert_coordination":
 		return Warning
 	case "loops",
 		"identical_call_loop",

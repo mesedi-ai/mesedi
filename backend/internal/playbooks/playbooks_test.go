@@ -268,12 +268,13 @@ func Test_ConfusedDeputy_DocumentationOnlyClass(t *testing.T) {
 }
 
 // Test_EnvironmentMisapprehension_HonestyPins pins the commitments
-// made 2026-09-14 when the class was named from the weekly radar:
-// the playbook resolves, states plainly that Mesedi does not detect
-// the class today, and states the planned detector's honest limit,
-// that it checks the declared boundary and not the model's beliefs.
-// When the detector ships, this test changes WITH the playbook, in
-// the same commit, or it fails and forces the conversation.
+// made when the class was named (2026-09-14) and revised when its
+// detector shipped (2026-09-15), exactly as the original pin
+// intended: the detector's arrival forced this test and the
+// playbook to change in the same commit. Pinned now: the playbook
+// claims the declared-boundary half and ONLY that half, and states
+// the blindness plainly, that a firing says nothing about the
+// model's beliefs.
 func Test_EnvironmentMisapprehension_HonestyPins(t *testing.T) {
 	path, ok := Resolve("environment_misapprehension", "anything")
 	if !ok {
@@ -284,11 +285,33 @@ func Test_EnvironmentMisapprehension_HonestyPins(t *testing.T) {
 		t.Fatalf("read environment-misapprehension playbook: %v", err)
 	}
 	for _, sentence := range []string{
-		"does not detect this class today",
+		"detects the declared-boundary half of this class, and only that half",
 		"only that the declared boundary was crossed in fact",
 	} {
 		if !strings.Contains(string(body), sentence) {
 			t.Errorf("the environment-misapprehension playbook must contain %q", sentence)
+		}
+	}
+}
+
+// Test_CovertCoordination_HonestyPins holds the counter to its
+// label: it counts convergence, it does not read intent, and it
+// sees only reported egress.
+func Test_CovertCoordination_HonestyPins(t *testing.T) {
+	path, ok := Resolve("covert_coordination", "anything")
+	if !ok {
+		t.Fatal("covert_coordination must resolve to its playbook")
+	}
+	body, err := content.ReadFile("content/" + path)
+	if err != nil {
+		t.Fatalf("read covert-coordination playbook: %v", err)
+	}
+	for _, sentence := range []string{
+		"It counts convergence; it does not read intent",
+		"a connection nobody reports is invisible",
+	} {
+		if !strings.Contains(string(body), sentence) {
+			t.Errorf("the covert-coordination playbook must contain %q", sentence)
 		}
 	}
 }

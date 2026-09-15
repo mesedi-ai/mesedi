@@ -435,6 +435,34 @@ func (s *SQLiteStore) GroupSandboxEscape(
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassSandboxEscape, signature)
 }
 
+// GroupEnvironmentMisapprehension upserts a failure_group with
+// failure_class=environment_misapprehension: the execution's
+// declared non-live environment was contradicted by observed
+// egress to a live-looking destination.
+func (s *SQLiteStore) GroupEnvironmentMisapprehension(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassEnvironmentMisapprehension, signature)
+}
+
+// GroupCovertCoordination upserts a failure_group with
+// failure_class=covert_coordination: one of the execution's egress
+// destinations was shared by an unusual number of distinct recent
+// executions in the project.
+func (s *SQLiteStore) GroupCovertCoordination(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassCovertCoordination, signature)
+}
+
 // GroupGroundingFailure upserts a failure_group with
 // failure_class=grounding_failure and the caller-supplied signature.
 func (s *SQLiteStore) GroupGroundingFailure(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {

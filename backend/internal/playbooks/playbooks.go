@@ -168,12 +168,15 @@ var patterns = []pattern{
 	// honest detector needs taint tracking Mesedi does not have.
 	{"mcp_confused_deputy", "", "mcp_confused_deputy/_default.md"},
 
-	// Documentation-only for now, unlike the one above by intent:
-	// a declared-mode mismatch detector is planned, and the playbook
-	// states exactly what it will and will not cover. Named from the
-	// January 2026 incident in Anthropic's September report, where a
-	// run treating reality as simulation breached a real machine.
+	// The two egress-derived classes, shipped 2026-09-15 when the
+	// egress-visibility deferral was reopened. Named from the
+	// January 2026 incident in Anthropic's September report (a run
+	// treating reality as simulation breached a real machine) and
+	// from the swarm/GitSpawn coordination demonstrations. Each
+	// playbook states exactly what its detector covers and what it
+	// is blind to; the environment page's pins are held by test.
 	{"environment_misapprehension", "", "environment_misapprehension/_default.md"},
+	{"covert_coordination", "", "covert_coordination/_default.md"},
 
 	// ── Tier 4 HITL (-) ───────────────────────────
 	{"hitl_timeout", "", "hitl_timeout/_default.md"},
