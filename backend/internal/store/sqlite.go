@@ -182,10 +182,18 @@ func (s *SQLiteStore) applyMigrations(ctx context.Context) error {
 // inside its header comment text, which broke an earlier version of
 // this splitter).
 //
-// Limitation: does NOT handle semicolons inside string literals. Our
-// migration files are simple DDL with no embedded semicolons in
-// strings, so this is sufficient. Switch to a proper SQL tokenizer
-// if that ever changes.
+// Three constructs carry semicolons that do NOT terminate a statement,
+// and all three arrived with the checkpoint-permanence migration:
+// single-quoted string literals, Postgres dollar-quoted bodies
+// ($tag$ ... $tag$), and SQLite trigger bodies (CREATE TRIGGER ...
+// BEGIN ... END), whose inner statements each end with a semicolon of
+// their own. The scanner below tracks all three so those semicolons
+// stay inside their statement.
+//
+// Remaining limitation: `--` inside a string literal would still be
+// taken for a comment, because comment stripping runs before the
+// quote-aware pass. No migration puts `--` in a string; keep it that
+// way, or move the comment stripping into the scanner.
 func splitSQLStatements(body string) []string {
 	// Pass 1: strip line comments. A `--` makes the rest of the line
 	// a comment in SQL. Drop entirely-comment lines and trim in-line
@@ -203,15 +211,128 @@ func splitSQLStatements(body string) []string {
 	}
 	cleanedBody := strings.Join(cleaned, "\n")
 
-	// Pass 2: split on semicolons now that comments are gone.
+	// Pass 2: scan for semicolons that actually end a statement.
 	out := make([]string, 0, 4)
-	for _, raw := range strings.Split(cleanedBody, ";") {
-		stmt := strings.TrimSpace(raw)
-		if stmt != "" {
-			out = append(out, stmt)
+	var cur strings.Builder
+	inQuote := false // inside a '...' literal ('' escapes toggle twice, harmlessly)
+	dollarTag := ""  // the opening $tag$ while inside a dollar-quoted body
+	for i := 0; i < len(cleanedBody); i++ {
+		c := cleanedBody[i]
+		if inQuote {
+			cur.WriteByte(c)
+			if c == '\'' {
+				inQuote = false
+			}
+			continue
+		}
+		if dollarTag != "" {
+			if c == '$' && strings.HasPrefix(cleanedBody[i:], dollarTag) {
+				cur.WriteString(dollarTag)
+				i += len(dollarTag) - 1
+				dollarTag = ""
+			} else {
+				cur.WriteByte(c)
+			}
+			continue
+		}
+		switch c {
+		case '\'':
+			inQuote = true
+			cur.WriteByte(c)
+		case '$':
+			if tag, ok := dollarQuoteTagAt(cleanedBody, i); ok {
+				dollarTag = tag
+				cur.WriteString(tag)
+				i += len(tag) - 1
+			} else {
+				cur.WriteByte(c)
+			}
+		case ';':
+			if triggerBodyStillOpen(cur.String()) {
+				cur.WriteByte(c)
+				continue
+			}
+			if stmt := strings.TrimSpace(cur.String()); stmt != "" {
+				out = append(out, stmt)
+			}
+			cur.Reset()
+		default:
+			cur.WriteByte(c)
 		}
 	}
+	if stmt := strings.TrimSpace(cur.String()); stmt != "" {
+		out = append(out, stmt)
+	}
 	return out
+}
+
+// dollarQuoteTagAt reports whether s[i:] opens a Postgres dollar-quote
+// tag ($$, $fn$, ...) and returns the full tag including both dollar
+// signs. A lone $ (or $1-style text that never closes with a second $)
+// is not a tag.
+func dollarQuoteTagAt(s string, i int) (string, bool) {
+	j := i + 1
+	for j < len(s) {
+		c := s[j]
+		if c == '$' {
+			return s[i : j+1], true
+		}
+		isTagChar := c == '_' ||
+			('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') ||
+			('0' <= c && c <= '9')
+		if !isTagChar {
+			return "", false
+		}
+		j++
+	}
+	return "", false
+}
+
+// triggerBodyStillOpen reports whether stmt is a CREATE TRIGGER whose
+// BEGIN ... END body has not closed yet, in which case a semicolon at
+// this point ends a statement INSIDE the body, not the trigger itself.
+// String literals are blanked before counting so a BEGIN or END inside
+// a message string cannot skew the balance.
+func triggerBodyStillOpen(stmt string) bool {
+	blanked := make([]byte, len(stmt))
+	inQ := false
+	for i := 0; i < len(stmt); i++ {
+		c := stmt[i]
+		if c == '\'' {
+			inQ = !inQ
+			c = ' '
+		} else if inQ {
+			c = ' '
+		}
+		blanked[i] = c
+	}
+	fields := strings.Fields(strings.ToUpper(string(blanked)))
+	if len(fields) == 0 || fields[0] != "CREATE" {
+		return false
+	}
+	// TRIGGER must appear in the head: CREATE [TEMP|TEMPORARY|OR
+	// REPLACE] TRIGGER. Postgres CREATE TRIGGER has no inline body,
+	// so its BEGIN/END count stays 0/0 and it falls through below.
+	isTrigger := false
+	for k := 1; k < len(fields) && k <= 3; k++ {
+		if fields[k] == "TRIGGER" {
+			isTrigger = true
+			break
+		}
+	}
+	if !isTrigger {
+		return false
+	}
+	begins, ends := 0, 0
+	for _, f := range fields {
+		switch strings.Trim(f, "();,") {
+		case "BEGIN":
+			begins++
+		case "END":
+			ends++
+		}
+	}
+	return begins > ends
 }
 
 // parseMigrationVersion extracts the integer prefix from `NNN_name.sql`.
