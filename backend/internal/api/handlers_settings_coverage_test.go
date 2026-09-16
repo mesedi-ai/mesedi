@@ -129,6 +129,17 @@ func TestClassSeverityOverrideLifecycle(t *testing.T) {
 	if rec := upsert("semantic_loop", `{"severity":"bogus"}`); rec.Code != 400 {
 		t.Fatalf("bogus severity = %d, want 400", rec.Code)
 	}
+	// Unknown class names are refused rather than stored invisibly:
+	// before this check, an override under any unlisted string
+	// (including the raw storage-level "loops" class) was persisted
+	// and then rendered nowhere, so the customer's setting silently
+	// did nothing.
+	if rec := upsert("loops", `{"severity":"critical"}`); rec.Code != 400 {
+		t.Fatalf("unlisted class = %d, want 400 instead of an invisible override", rec.Code)
+	}
+	if rec := upsert("not_a_class", `{"severity":"critical"}`); rec.Code != 400 {
+		t.Fatalf("unknown class = %d, want 400", rec.Code)
+	}
 	if rec := upsert("semantic_loop", `{"severity":"critical"}`); rec.Code != 200 {
 		t.Fatalf("valid upsert = %d, want 200", rec.Code)
 	}

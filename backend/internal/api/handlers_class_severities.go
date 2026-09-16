@@ -9,6 +9,58 @@ import (
 	"mesedi/backend/internal/store"
 )
 
+// severityClassList is the canonical class list the severity settings
+// surface renders and accepts. It mirrors the failure-class registry;
+// the strings here match what the detectors emit. Ordering is
+// opinionated: critical-by-default first (so the most dangerous
+// classes anchor the top of the table on /app/settings), then
+// warning-by-default cost/quality signals, then info-by-default
+// behavioral signals. severity.Default() is the source of truth for
+// the initial value; this slice controls both which classes the UI
+// renders AND which class names the upsert accepts, so a setting can
+// never be stored under a name the list will not show.
+var severityClassList = []string{
+	// critical-by-default
+	"crashes",
+	"tool_failures",
+	"validator_failures",
+	"prompt_injection",
+	"data_leakage",
+	"tool_schema_drift",
+	"grounding_failure",
+	"cascading_failure",
+	"coordination_deadlock",
+	"sandbox_escape",
+	// warning-by-default
+	"cost_velocity",
+	"time_budget",
+	"step_count",
+	"infrastructure_throttled",
+	"context_overflow",
+	"token_waste",
+	"provider_incident",
+	"hitl_timeout",
+	"hitl_rejection_spike",
+	// info-by-default
+	"identical_call_loop",
+	"similar_call_loop",
+	"semantic_loop",
+	"drift",
+}
+
+// isKnownSeverityClass reports whether the class name is one the
+// severity settings surface renders. Linear scan over twenty-three
+// entries on an admin-tier settings endpoint; a map would be
+// optimizing a code path that runs when a human clicks Save.
+func isKnownSeverityClass(class string) bool {
+	for _, c := range severityClassList {
+		if c == class {
+			return true
+		}
+	}
+	return false
+}
+
 // HandleListClassSeverities returns the full map of failure classes
 // to their currently-effective severity for the authenticated project
 // . The map includes EVERY known failure class with its current
@@ -50,44 +102,7 @@ func (h *Handlers) HandleListClassSeverities(w http.ResponseWriter, r *http.Requ
 		overrideMap[o.FailureClass] = o.Severity
 	}
 
-	// The canonical class list mirrors the failure-class registry. We
-	// avoid pulling it from a separate package to keep the surface
-	// small; the strings here match what the detectors emit.
-	//
-	// Ordering is opinionated: critical-by-default first (so the most
-	// dangerous classes anchor the top of the table on /app/settings),
-	// then warning-by-default cost/quality signals, then info-by-default
-	// behavioral signals. severity.Default() is the source of truth for
-	// the initial value; this slice only controls which classes the UI
-	// renders.
-	classes := []string{
-		// critical-by-default
-		"crashes",
-		"tool_failures",
-		"validator_failures",
-		"prompt_injection",
-		"data_leakage",
-		"tool_schema_drift",
-		"grounding_failure",
-		"cascading_failure",
-		"coordination_deadlock",
-		"sandbox_escape",
-		// warning-by-default
-		"cost_velocity",
-		"time_budget",
-		"step_count",
-		"infrastructure_throttled",
-		"context_overflow",
-		"token_waste",
-		"provider_incident",
-		"hitl_timeout",
-		"hitl_rejection_spike",
-		// info-by-default
-		"identical_call_loop",
-		"similar_call_loop",
-		"semantic_loop",
-		"drift",
-	}
+	classes := severityClassList
 
 	type classRow struct {
 		FailureClass string `json:"failure_class"`
@@ -132,6 +147,18 @@ func (h *Handlers) HandleUpsertClassSeverity(w http.ResponseWriter, r *http.Requ
 	class := r.PathValue("class")
 	if class == "" {
 		writeError(w, http.StatusBadRequest, "class path parameter required")
+		return
+	}
+	// Validate the class against the same list the GET renders.
+	// Before this check, an override stored under any other string
+	// (including the raw storage-level "loops" class) was accepted,
+	// persisted, and then invisible everywhere: the list endpoint
+	// renders only known classes, so the customer's setting silently
+	// did nothing. Rejecting loudly is the only honest answer for a
+	// settings endpoint.
+	if !isKnownSeverityClass(class) {
+		writeError(w, http.StatusBadRequest,
+			"unknown failure class '"+class+"'; use one of the classes returned by GET /me/class-severities")
 		return
 	}
 
