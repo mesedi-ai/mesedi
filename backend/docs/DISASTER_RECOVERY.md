@@ -1,141 +1,112 @@
-# Disaster recovery runbook
+# Disaster recovery
 
-Backups and restore procedure for the Mesedi production backend on
-Fly.io. Refreshed: 2026-05-24.
+How Mesedi Cloud's production data is protected, what recovery looks
+like in each failure scenario, and, stated plainly, what is not
+covered. Numbers marked "measured" come from timed drills against the
+real system, not estimates. Self-hosted deployments are not covered
+here: with self-hosting you own the database and the backups, and
+this document can serve as a template for what yours should answer.
 
-## What gets backed up
+This file replaces an earlier runbook that described the original
+SQLite-on-a-volume deployment. Production has run on managed Postgres
+since the migration, and the posture below is the one the security
+page at mesedi.ai/security describes.
 
-The production database is SQLite on a Fly persistent volume at
-`/data/mesedi.db`. Fly automatically snapshots this volume daily.
-Snapshot retention is set to **14 days** (raised from the 5-day
-default in ). Each snapshot is a point-in-time copy of the
-entire volume, taken atomically while the app is running.
+## The short version
 
-Snapshots are stored by Fly in the same region as the volume (`iad`,
-Ashburn VA) on independent infrastructure from the live volume.
+Mesedi is operated by one person. There is no on-call rotation and no
+secondary responder. Everything runs in a single US region with no
+multi-region failover. We would rather you knew that before signing
+than found it out during an incident; it is also why the SDK is
+designed so a Mesedi outage cannot break your agents.
 
-When the Postgres migration ships, this runbook gets a
-parallel "Postgres branch" using Neon's PITR (point-in-time-restore)
-plus periodic dumps to S3.
+Customer data lives in managed Postgres (Neon) with a 24-hour
+point-in-time history, plus a nightly encrypted dump held at a
+different vendor (Cloudflare R2), so losing the database provider
+does not mean losing the data.
 
-## Verify backups are still configured
+| Scenario | Data loss (RPO) | Time to recover (RTO) | Status |
+|---|---|---|---|
+| Bad migration or accidental delete | ~0 (to the second) | 39 seconds | Measured 2026-08-27 |
+| Backend machine lost | 0 | Seconds to minutes | Automatic (Fly) |
+| Dashboard lost | 0 | ~2 minutes | Redeploy |
+| Database provider lost entirely | Up to 48 hours | 11 minutes | Measured 2026-08-28 |
 
-Run periodically (monthly is fine):
+## How far back a restore can reach
 
-```
-fly volumes list -a mesedi-api
-fly volumes show <vol_id> -a mesedi-api
-```
+Data loss on recovery and reachable history are different questions.
+"Can you restore us to last Tuesday?" is the second one.
 
-Expected output includes:
+| Age of the target moment | Available | Granularity |
+|---|---|---|
+| 0 to 24 hours | Postgres point-in-time | To the second |
+| 1 to 30 days | Nightly encrypted dump | Roughly daily |
+| Over 30 days | Nothing | Objects expire |
 
-- `Scheduled snapshots: true`
-- `Snapshot retention: 14`
+The 30-day boundary is a verified lifecycle rule, not an intention. A
+corruption discovered on day 31 is not recoverable from any copy
+Mesedi holds, which is why detection (monitoring plus the monthly
+restore drill below) has to be faster than a month.
 
-If either is wrong, fix immediately:
+## The off-platform copy
 
-```
-fly volumes update <vol_id> -a mesedi-api --snapshot-retention 14
-```
+A full database dump runs nightly, is encrypted with AES-256 before
+it leaves the machine that produced it, and is stored with a
+different vendor from the database itself. It is never written
+unencrypted to durable storage.
 
-## List available snapshots
+The schedule is best-effort, and the honest consequence is stated in
+the table above: worst-case loss in the provider-loss scenario is up
+to 48 hours, not the 24 the schedule implies. A missed backup is
+detected by a dead man's switch: the backup job pings an external
+heartbeat on success, and silence past 36 hours raises an alert. It
+is deliberately not a second scheduled job checking the first, since
+a watchdog that shares the scheduler with the thing it watches fails
+silently alongside it.
 
-```
-fly volumes snapshots list <vol_id> -a mesedi-api
-```
+## The restore is tested, not just the backup
 
-Returns each snapshot's ID, size, status, and creation time. Use
-the snapshot ID for restore.
+A backup that has never been restored is a hypothesis. An automated
+drill runs monthly: it fetches a real backup, decrypts it, restores
+it into a clean database, and fails loudly if the newest backup is
+stale or the restored data is old. This also continuously proves the
+encryption and decryption parameters still agree, the failure mode
+where every new backup silently becomes undecryptable while the job
+keeps reporting success.
 
-## Create a manual snapshot
+The full recovery path for total provider loss was rehearsed by hand
+on 2026-08-28: provision a fresh Postgres instance, retrieve and
+decrypt the off-platform backup, restore, repoint the application,
+and confirm it serving from the restored data by writing real rows,
+not by a health check answering. End to end: 11 minutes, of which the
+mechanical restore was under a minute; the rest was human steps this
+runbook now shortens.
 
-Before any risky operation (Postgres cutover, schema migration,
-bulk data delete), trigger a manual snapshot first:
+## What is not covered, stated plainly
 
-```
-fly volumes snapshots create <vol_id> -a mesedi-api
-```
+Simultaneous loss of both vendors (the database provider and the
+backup store) is out of scope at current scale. Nothing currently
+watches TLS certificate or domain expiry; the certificate auto-renews
+and a lapse would take the API down without prior warning. A full
+region outage takes Mesedi down until the region returns.
 
-The snapshot is captured asynchronously; check status with the list
-command above. Manual snapshots count against the 14-day retention
-window the same as scheduled ones.
+## Detection
 
-## Restore from a snapshot
+api.mesedi.ai/ready pings the database and verifies the applied
+migration count on every check, returning 503 with a reason code when
+either fails, and is monitored every few minutes from multiple
+continents with alerting by email. The distinction from /health is
+deliberate: a process that is merely alive cannot fail a liveness
+check, and readiness is what once caught a database outage that three
+green uptime monitors sat through.
 
-There is no in-place restore for a Fly volume. The flow is:
+## Retention
 
-1. Identify the snapshot ID you want to restore from
-   (`fly volumes snapshots list ...`).
-2. Create a NEW volume from that snapshot:
-
-   ```
-   fly volumes create mesedi_data_restore \
-     --snapshot-id <snapshot_id> \
-     --region iad \
-     --size 1 \
-     -a mesedi-api
-   ```
-
-3. Stop the current backend machine:
-
-   ```
-   fly machines stop <machine_id> -a mesedi-api
-   ```
-
-4. Detach the corrupted volume (do NOT destroy it yet, keep for
-   forensics until the restore is confirmed healthy):
-
-   ```
-   fly machines update <machine_id> -a mesedi-api \
-     --volume-name mesedi_data_restore:/data
-   ```
-
-   This swaps the mount; the corrupted volume becomes orphaned.
-
-5. Restart and verify:
-
-   ```
-   fly machines start <machine_id> -a mesedi-api
-   curl https://api.mesedi.ai/health
-   ```
-
-   Then spot-check the data: open the dashboard, confirm executions
-   and failure groups are visible.
-
-6. Once verified healthy, destroy the orphaned corrupted volume:
-
-   ```
-   fly volumes destroy <old_vol_id> -a mesedi-api
-   ```
-
-Restore RTO target: under 15 minutes. RPO is at most 24 hours
-(daily snapshot cadence). When Postgres lands, RPO drops to minutes
-via PITR.
-
-## What this does NOT cover
-
-- **Application-level corruption** (a bug that writes wrong data).
-  Snapshots will faithfully restore the bad data. Defense is good
-  test coverage on writes, not backups.
-- **Off-region disaster**. If all of `iad` goes dark, the snapshot
-  is also offline. Postgres on Neon with the eu-central read replica
-  is the upgrade path for this.
-- **The Fly account itself**. If the Fly account is suspended or
-  the org is deleted, the snapshots go with it. Out of scope for
-  v0.1; the long-term answer is periodic dumps to an external bucket
-  (S3 / R2) outside the Fly blast radius.
-
-## Quick reference
-
-| Command | Purpose |
+| Data | Retained |
 |---|---|
-| `fly volumes list -a mesedi-api` | List volumes, find the ID |
-| `fly volumes show <vol_id> -a mesedi-api` | Confirm snapshot policy |
-| `fly volumes snapshots list <vol_id> -a mesedi-api` | List available restores |
-| `fly volumes snapshots create <vol_id> -a mesedi-api` | Manual snapshot now |
-| `fly volumes create <name> --snapshot-id <id> --region iad --size 1 -a mesedi-api` | New volume from snapshot |
-| `fly machines update <id> -a mesedi-api --volume-name <name>:/data` | Swap volume mount |
+| Executions, events, failure groups, webhook deliveries | Per tier: 7 days Hobby, 90 days Team, longer on hand-sold tiers |
+| Audit events | 7 years, including after project closure |
+| Nightly encrypted dumps | 30 days |
 
-## Volume identifiers (as of 2026-05-24)
-
-- Production: `vol_4y889xzpe693pg9r` (mesedi_data, 1GB, iad, encrypted)
+Review trigger for this document: any change to database provider,
+region, backup destination, or retention policy. Otherwise annually.
