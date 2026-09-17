@@ -4,10 +4,17 @@
 # modernc.org/sqlite is pure-Go (no CGO), so we set CGO_ENABLED=0
 # and get a single self-contained binary.
 #
-# Stage 2: copy the binary into a minimal runtime image. We use
-# alpine (not scratch) to get tzdata + ca-certificates for HTTPS
-# calls to Stripe + webhook destinations, and for a basic shell
-# during `fly ssh console` debugging.
+# Stage 2: copy the binary into a minimal runtime image. Distroless
+# static, which carries exactly what the binary needs (CA certificates
+# for outbound HTTPS to Stripe and webhook destinations, tzdata for
+# time.LoadLocation) and nothing else: no shell, no compiler, no
+# package manager. That is the security page's claim, and until
+# 2026-09-17 it was false, because the previous alpine base shipped
+# busybox /bin/sh and apk, kept "for fly ssh console debugging". The
+# debugging convenience is deliberately given up: an attacker who
+# reaches this container finds no shell to land in, and so does an
+# operator, which is the price of the property. Runtime state lives
+# behind /health and structured logs, not interactive sessions.
 
 FROM golang:1.27-alpine AS build
 
@@ -76,12 +83,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOFIPS140=certified go build \
 
 # ---
 
-FROM alpine:3.20
-
-# ca-certificates: TLS verification for outbound HTTPS (Stripe API,
-# webhook destinations, etc.).
-# tzdata: lets time.LoadLocation work for non-UTC formatting.
-RUN apk add --no-cache ca-certificates tzdata
+# Runs as root like the alpine stage it replaces, so file ownership
+# on any mounted volume behaves identically. ca-certificates and
+# tzdata are baked into the distroless image itself.
+FROM gcr.io/distroless/static-debian12
 
 WORKDIR /app
 COPY --from=build /out/mesedi-api /app/mesedi-api
