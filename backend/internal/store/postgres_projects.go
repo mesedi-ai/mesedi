@@ -587,6 +587,14 @@ func (s *PostgresStore) DeleteProjectCascade(
 		`DELETE FROM organization_members WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
 		`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
 		`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1)`,
+		// Email-verification purge, twin of the SQLite cascade. See
+		// the comment there for the decision and the guard: the
+		// verified_emails row dies only with the LAST project owned
+		// by its email, and tokens go first so a stale emailed link
+		// cannot recreate verification for an address whose last
+		// account is gone.
+		`DELETE FROM email_verification_tokens WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND project_id <> $1)`,
+		`DELETE FROM verified_emails WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND project_id <> $1)`,
 	}
 	// Postgres aborts the entire transaction on ANY query error
 	// (SQLSTATE 25P02): subsequent queries all return "current

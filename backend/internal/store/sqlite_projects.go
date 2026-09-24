@@ -712,6 +712,22 @@ func (s *SQLiteStore) DeleteProjectCascade(
 		`DELETE FROM organization_members WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?))`,
 		`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?))`,
 		`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?)`,
+		// Email-verification purge. The verified_emails row is keyed
+		// to the ADDRESS, not the account (one row per email that
+		// ever proved mailbox ownership; deletion of an account
+		// deliberately left it behind so re-signup skipped
+		// re-verification). Decision recorded 2026-09-24: once the
+		// LAST project owned by an email is deleted, that row and
+		// any in-flight verification tokens are retained personal
+		// data with no account behind them, so they are deleted
+		// with the account. The NOT EXISTS guard keeps the row
+		// while any OTHER live project still relies on this email's
+		// verified status for its auth gate. Tokens go first so a
+		// stale emailed link cannot recreate verification for an
+		// address whose last account is gone. Numbered ?1
+		// placeholders: the loop binds one arg for every statement.
+		`DELETE FROM email_verification_tokens WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND project_id <> ?1)`,
+		`DELETE FROM verified_emails WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND project_id <> ?1)`,
 	}
 	for _, q := range stmts {
 		if _, qerr := tx.ExecContext(ctx, q, projectID); qerr != nil {
