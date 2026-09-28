@@ -5,7 +5,6 @@ go 1.27.1
 replace github.com/mesedi-ai/mesedi/backend/attest => ./attest
 
 require (
-	github.com/go-pdf/fpdf v0.9.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/klauspost/compress v1.19.2
 	// The attestation core (attest + attest/events) lives in a nested

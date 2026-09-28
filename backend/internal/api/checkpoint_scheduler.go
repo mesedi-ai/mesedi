@@ -471,7 +471,8 @@ func (s *CheckpointScheduler) previousTreeSize(ctx context.Context, seq uint64) 
 		return 0
 	}
 	// TreeSize carries NO json tag, deliberately, and for the same
-	// reason wireInclusionProof in cmd/mesedi-verify/offline.go carries
+	// reason wireInclusionProof in the standalone verifier's offline.go
+	// (github.com/mesedi-ai/mesedi-verify) carries
 	// none: Verdifax's inclusion proof struct has no tags either, so on
 	// the wire its keys are whatever Go's default marshalling produces,
 	// which is PascalCase. Leaving the tag off lets encoding/json fall
