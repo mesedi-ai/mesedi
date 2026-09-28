@@ -95,8 +95,8 @@
   "devDependencies": {
     "@ai-sdk/anthropic": "^4.0.8",
     "@langchain/anthropic": "^1.5.1",
-    "@langchain/core": "^1.2.1",
-    "@mastra/core": "^1.48.0",
+    "@langchain/core": "^1.2.10",
+    "@mastra/core": "^1.66.0",
     "@mastra/observability": "^1.15.2",
     "@types/node": "^20.11.0",
     "typescript": "^5.4.0",
