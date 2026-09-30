@@ -255,10 +255,16 @@ func Test_DetectSandboxEscapeAllMatches_DedupAcrossPayloads(t *testing.T) {
 }
 
 func Test_DetectSandboxEscapeAllMatches_RespectsMaxCap(t *testing.T) {
-	// Build a single payload that matches many built-ins; the cap is 20,
-	// but the built-in registry only has ~11 patterns. Confirm cap
-	// constant exposed correctly.
 	if MaxSandboxEscapeMatchesPerExecution != 20 {
 		t.Errorf("MaxSandboxEscapeMatchesPerExecution = %d, want 20", MaxSandboxEscapeMatchesPerExecution)
+	}
+	// Two different stale built-in counts have been written into
+	// comments here before. The invariant that actually matters is
+	// pinned instead: the cap must keep headroom above the built-in
+	// registry, or the emit loop starts truncating custom-pattern
+	// matches for executions that trip many built-ins.
+	if len(sandboxPatterns) >= MaxSandboxEscapeMatchesPerExecution {
+		t.Errorf("len(sandboxPatterns) = %d has reached MaxSandboxEscapeMatchesPerExecution = %d; raise the cap alongside the registry",
+			len(sandboxPatterns), MaxSandboxEscapeMatchesPerExecution)
 	}
 }

@@ -206,9 +206,11 @@ type SandboxEscapeMatch struct {
 }
 
 // MaxSandboxEscapeMatchesPerExecution caps the per-execution emit
-// to defensive 20. Real executions can hit at most 12 built-in
-// patterns + N custom patterns; 20 leaves headroom without unbounded
-// growth.
+// to defensive 20. Real executions can hit at most one match per
+// built-in pattern plus N custom patterns. The built-in count has
+// already outgrown a number once written here, so it is not restated;
+// a test pins len(sandboxPatterns) below this cap to keep headroom
+// without unbounded growth.
 const MaxSandboxEscapeMatchesPerExecution = 20
 
 // DetectSandboxEscapeAllMatchesWithCustom returns ALL distinct
