@@ -37,7 +37,10 @@ import (
 // GetEnvironmentDeclarationMode, ListEgressDestinations,
 // ListCoordinatingEgressDestinations, GroupEnvironmentMisapprehension
 // and GroupCovertCoordination (all DetectionStore), all deliberate.
-const StoreMethodCount = 267
+// 271 since 2026-09-30: approval-time tool contract pins added
+// GetToolContractPins, ListToolContractPins, UpsertToolContractPin
+// and DeleteToolContractPin (migration 062), all deliberate.
+const StoreMethodCount = 271
 
 func TestStoreInterfaceIsComplete(t *testing.T) {
 	got := reflect.TypeOf((*Store)(nil)).Elem().NumMethod()

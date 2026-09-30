@@ -705,6 +705,13 @@ func main() {
 	mux.Handle("POST /me/pattern-config/{detector}", privateHandler)
 	mux.Handle("PATCH /me/pattern-config/{detector}/{pattern_id}", privateHandler)
 	mux.Handle("DELETE /me/pattern-config/{detector}/{pattern_id}", privateHandler)
+	// Approval-time tool contract pins. Same outer-mux forward
+	// requirement as every /me/* family above: without these the
+	// routes registered on privateMux inside RegisterRoutes would
+	// 404 at the outer mux before reaching the auth chain.
+	mux.Handle("GET /me/tool-pins", privateHandler)
+	mux.Handle("PUT /me/tool-pins/{tool_name}/{kind}", privateHandler)
+	mux.Handle("DELETE /me/tool-pins/{tool_name}/{kind}", privateHandler)
 	// per-project detector thresholds for the 6
 	// audit-called-out detectors (semantic_loop, token_waste,
 	// tool_schema_drift, grounding_failure, drift, context_overflow).

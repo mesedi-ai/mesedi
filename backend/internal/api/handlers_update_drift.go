@@ -101,6 +101,29 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 					}
 					shapeCounts[shape]++
 				}
+				// Approval-time pins, checked FIRST. A pin is the
+				// operator's statement of the approved contract, so a
+				// violation outranks every history-derived signal: it
+				// needs no call floor, cannot be poisoned by recent
+				// traffic (the call-three flip the 2026-09-15 radar
+				// named), and when a pin exists it REPLACES the
+				// history-based check for that kind below, so one
+				// contract change never fires two groups.
+				pins, pinErr := h.Store.GetToolContractPins(r.Context(), authProjectID, toolName)
+				if pinErr != nil {
+					h.Logger.Warn("get tool contract pins failed (continuing without pins)",
+						"execution_id", executionID,
+						"tool_name", toolName,
+						"error", pinErr.Error(),
+					)
+					pins = map[string]string{}
+				}
+				if pinFired := h.checkToolContractPins(
+					r, executionID, authProjectID, toolName, pins,
+				); pinFired {
+					break
+				}
+
 				// Description drift, checked BEFORE return-shape
 				// drift. A rewritten description is the signal that a
 				// tool the model trusts was tampered with (the MCP
@@ -108,11 +131,22 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 				// changed return shape is usually its author shipping
 				// a release. When both moved, the security reading is
 				// the one worth surfacing, and the `break` below means
-				// only one drift signal fires per execution.
-				if descSig, descFired := h.detectToolDescriptionDrift(
-					r.Context(), authProjectID, executionID, toolName,
-					driftThresholds,
-				); descFired {
+				// only one drift signal fires per execution. Skipped
+				// when a description pin exists: the pin already
+				// checked this half against a baseline the operator
+				// chose, and firing history drift on top would alert
+				// twice for one change.
+				if descFired := func() bool {
+					if _, pinned := pins[detectors.PinKindDescription]; pinned {
+						return false
+					}
+					descSig, fired := h.detectToolDescriptionDrift(
+						r.Context(), authProjectID, executionID, toolName,
+						driftThresholds,
+					)
+					if !fired {
+						return false
+					}
 					isNew, gErr := h.Store.GroupToolSchemaDrift(r.Context(), executionID, authProjectID, descSig)
 					if gErr != nil {
 						h.Logger.Warn("tool-description-drift grouping failed (continuing)",
@@ -122,6 +156,8 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 						)
 					}
 					h.maybeFireWebhook(r, authProjectID, store.FailureClassToolSchemaDrift, descSig, isNew, gErr)
+					return true
+				}(); descFired {
 					break
 				}
 
@@ -130,11 +166,19 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 				// contract change (the mcp-pin class), more specific
 				// than a changed return shape and less alarming than
 				// a rewritten description. Same one-signal-per-
-				// execution rule via the break.
-				if defSig, defFired := h.detectToolDefinitionDrift(
-					r.Context(), authProjectID, executionID, toolName,
-					driftThresholds,
-				); defFired {
+				// execution rule via the break, and the same
+				// pin-supersedes rule as description drift.
+				if defFired := func() bool {
+					if _, pinned := pins[detectors.PinKindDefinition]; pinned {
+						return false
+					}
+					defSig, fired := h.detectToolDefinitionDrift(
+						r.Context(), authProjectID, executionID, toolName,
+						driftThresholds,
+					)
+					if !fired {
+						return false
+					}
 					isNew, gErr := h.Store.GroupToolSchemaDrift(r.Context(), executionID, authProjectID, defSig)
 					if gErr != nil {
 						h.Logger.Warn("tool-definition-drift grouping failed (continuing)",
@@ -144,6 +188,8 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 						)
 					}
 					h.maybeFireWebhook(r, authProjectID, store.FailureClassToolSchemaDrift, defSig, isNew, gErr)
+					return true
+				}(); defFired {
 					break
 				}
 

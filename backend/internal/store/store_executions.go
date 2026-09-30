@@ -273,6 +273,38 @@ type ExecutionStore interface {
 		projectID, detector, thresholdKey string,
 	) error
 
+	// GetToolContractPins returns the approval-time pins for the
+	// (projectID, toolName) pair as a kind -> pinned_hash map,
+	// empty when nothing is pinned. One indexed query serves both
+	// pin kinds on the detector hot path. Migration 062.
+	GetToolContractPins(
+		ctx context.Context,
+		projectID, toolName string,
+	) (map[string]string, error)
+	// ListToolContractPins returns every pin row for the project,
+	// ordered by tool_name then kind, for the dashboard listing.
+	ListToolContractPins(
+		ctx context.Context,
+		projectID string,
+	) ([]*ToolContractPin, error)
+	// UpsertToolContractPin records the approved contract hash for
+	// (projectID, toolName, kind). Caller validates kind against
+	// the two known values and the hash's format at the API edge;
+	// the store accepts any strings so a future third kind drops
+	// in without a store change.
+	UpsertToolContractPin(
+		ctx context.Context,
+		projectID, toolName, kind, pinnedHash string,
+	) error
+	// DeleteToolContractPin removes a pin, reverting that (tool,
+	// kind) to history-based drift detection. Returns ErrNotFound
+	// when no pin row matched (no information leak across
+	// projects).
+	DeleteToolContractPin(
+		ctx context.Context,
+		projectID, toolName, kind string,
+	) error
+
 	// ListProjectAllowlist returns the customer-defined allowlist
 	// entries for the (projectID, detector) pair. Caller is
 	// responsible for validating detector ∈ {crashes,

@@ -67,3 +67,21 @@ The 2/3 majority threshold for baseline stability is hardcoded and not per-proje
 ## A note on the detection threshold
 
 `min_history_calls` defends against false positives on tools that are new to the project or rarely called. The 2/3 majority means a single odd-shaped call does not trip the detector; it requires the new shape to become dominant or the OLD shape to lose dominance before firing.
+
+That defense has a cost the history baseline cannot avoid: it is built from the tool's own recent traffic, which is exactly what an attacker controls. A tool whose description flips to carry injected instructions on call three is invisible at call three, and within a few more calls the poisoned text IS the majority the baseline defends. If that scenario is in your threat model, use a pin.
+
+## Approval-time pins
+
+A pin replaces the history baseline with your own statement of the approved contract, for either half of a tool's declared contract:
+
+- kind `definition`: the SHA-256 the SDK computes over the RFC 8785 canonicalized declared input schema (`input_schema_hash` on the wire).
+- kind `description`: the SHA-256 of the whitespace-normalized tool description.
+
+Set one with `PUT /me/tool-pins/{tool_name}/{kind}` and body `{"pinned_hash": "<64 hex>"}`; list with `GET /me/tool-pins`; remove with `DELETE /me/tool-pins/{tool_name}/{kind}`. Setting and deleting are recorded in your audit trail.
+
+While a pin exists for a (tool, kind):
+
+- The first call whose hash differs from the pin fires, with a `pin:` signature (`checkout_tool:pin:desc:1a2b3c4d`). No history floor, no majority vote, so the call-three flip above fires on call three.
+- The history-based check for that kind is skipped entirely. An intentional, approved change means updating the pin; until you do, the new contract keeps the one failure group open (repeats cluster rather than flooding).
+
+What pins do NOT cover, stated plainly: only the description and declared-schema halves can be pinned, never the return shape, because return shapes legitimately evolve and the history majority is the right baseline for them. A call that carries no hash for a pinned kind (an SDK predating the field, or a plain function with no declared schema) is inconclusive and does not fire, so a pin on a tool whose calls never carry the hash protects nothing; confirm the hash arrives (any recent `tool_call` event's payload) before relying on the pin.

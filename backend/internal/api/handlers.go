@@ -303,6 +303,16 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// (semantic_loop / token_waste / tool_schema_drift /
 	// grounding_failure / drift / context_overflow). Detectors read
 	// these in B.b; dashboard editor lands in B.c.
+	// Approval-time tool contract pins (migration 062). A pin fixes
+	// the approved description or declared-schema hash for one tool
+	// so drift fires from the first deviating call instead of after
+	// a poisonable ten-call history baseline. Set and delete write
+	// an audit_event; the routes ride privateHandler's global
+	// rateLimit with no per-tier gating, since pins are a safety
+	// control every tier gets.
+	mux.HandleFunc("GET /me/tool-pins", h.HandleListToolContractPins)
+	mux.HandleFunc("PUT /me/tool-pins/{tool_name}/{kind}", h.HandleSetToolContractPin)
+	mux.HandleFunc("DELETE /me/tool-pins/{tool_name}/{kind}", h.HandleDeleteToolContractPin)
 	mux.HandleFunc("GET /me/detector-thresholds/{detector}", h.HandleListDetectorThresholds)
 	mux.HandleFunc("GET /me/detector-thresholds/{detector}/{threshold_key}", h.HandleGetDetectorThreshold)
 	mux.HandleFunc("PUT /me/detector-thresholds/{detector}/{threshold_key}", h.HandleSetDetectorThreshold)

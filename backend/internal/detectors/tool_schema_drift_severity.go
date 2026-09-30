@@ -33,17 +33,17 @@ import (
 // exposes the string that was previously discarded, and the classifier
 // parses two of them.
 //
-// WHAT THIS DOES NOT DO, AND IT IS THE RADAR'S REAL POINT
+// WHAT THIS DOES NOT DO
 //
-// This ranks drift in what a tool RETURNS. It does not rank, or notice,
-// changes to a tool's declared DEFINITION: its input schema, its
-// annotations, its description. Mesedi never sees a tool definition,
-// because neither ToolCallPayload nor MCPCallPayload carries one. The
-// mcp-pin crawl the radar describes found seventeen definitions whose
-// input schema changed while the description stayed byte-identical, and
-// Mesedi would notice none of them. That is a coverage gap needing an
-// event-schema and SDK change, tracked separately, and this file does
-// not close it.
+// This ranks drift in what a tool RETURNS. Definition and description
+// drift are detected separately (DetectToolDefinitionDrift,
+// DetectDescriptionDrift, and the approval-time pin variant in
+// tool_schema_drift.go) but not RANKED: a contract hash can say the
+// declared schema moved, never how, because only the hash rides the
+// wire. When this paragraph previously said Mesedi never sees a tool
+// definition it was true; input_schema_hash and tool_description on
+// the payloads closed that, and the paragraph is kept honest rather
+// than deleted because the radar checks it.
 
 // ShapeChangeKind ranks one drift event.
 type ShapeChangeKind string

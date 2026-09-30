@@ -362,3 +362,58 @@ func DetectToolDefinitionDrift(
 	}
 	return fmt.Sprintf("%s:def:%s", toolName, suffix), true
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Approval-time pins
+// ─────────────────────────────────────────────────────────────────
+//
+// Every detector above compares against the tool's own recent
+// history, which needs MinHistoryCalls before it can form an
+// opinion and is built from the very traffic an attacker controls:
+// a description that flips to carry injected instructions on call
+// three is invisible at call three, and from roughly call four the
+// poisoned text IS the majority the baseline defends. A pin is the
+// operator's statement of the approved contract, so the comparison
+// below needs no floor and no majority: the first call whose hash
+// differs from the pin fires.
+
+// The two pin kinds, matching the two contract halves the SDKs
+// already hash onto the wire. Stored in tool_contract_pins.kind
+// (migration 062) and used in API paths; validated at the API edge
+// against exactly this set.
+const (
+	PinKindDefinition  = "definition"
+	PinKindDescription = "description"
+)
+
+// DetectPinnedContractDrift compares the current call's contract
+// hash for one kind against the operator's pin. Fires on any
+// difference. Returns ("", false) when either hash is empty: no pin
+// means nothing was approved, and no current hash means the call
+// carried nothing to check (pre-upgrade SDK, or a tool with no
+// declared schema), which is inconclusive rather than a violation.
+//
+// The signature carries a "pin:" marker so a pin violation never
+// shares a failure group with history-based drift on the same tool:
+// "checkout_tool:pin:desc:1a2b3c4d" in an alert says the approved
+// contract was violated, which is a stronger statement than "the
+// contract moved away from its own recent past."
+func DetectPinnedContractDrift(
+	toolName, kind, currentHash, pinnedHash string,
+) (signature string, detected bool) {
+	if toolName == "" || currentHash == "" || pinnedHash == "" {
+		return "", false
+	}
+	if currentHash == pinnedHash {
+		return "", false
+	}
+	marker := "def"
+	if kind == PinKindDescription {
+		marker = "desc"
+	}
+	suffix := currentHash
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	return fmt.Sprintf("%s:pin:%s:%s", toolName, marker, suffix), true
+}
