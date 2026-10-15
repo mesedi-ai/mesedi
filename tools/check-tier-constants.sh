@@ -91,7 +91,10 @@ assert_tier_field() {
     in_block && /^  \},?[[:space:]]*$/ { in_block=0; next }
     in_block { print }
   ' "$file")
-  if echo "$block" | grep -qE "$pattern"; then
+  # No -q here: grep -q exits on first match and closes the pipe,
+  # the writer gets EPIPE, and pipefail turns the matched pipeline
+  # into a failure (a false DRIFT). Without -q grep reads to EOF.
+  if echo "$block" | grep -E "$pattern" > /dev/null; then
     echo "OK: $description"
     return 0
   fi
@@ -239,7 +242,7 @@ assert_tier_field "Hobby auditLogs = false (TS)" \
 # missing without flipping the claim, this assertion fails.
 if grep -A 30 "func .*HandleListAuditEvents" \
     "$MESEDI_ROOT/backend/internal/api/audit.go" 2>/dev/null \
-    | grep -qE "TierTeam|TierHobby"; then
+    | grep -E "TierTeam|TierHobby" > /dev/null; then
   echo "OK: HandleListAuditEvents has tier gate (matches hobby.auditLogs=false)"
 else
   echo "DRIFT: HandleListAuditEvents no longer tier-gates Hobby, but"
@@ -367,19 +370,22 @@ while IFS=: read -r file lineno line; do
   # The constant declaration itself is not a branch.
   case "$line" in *"TierEnterprise ="*) continue ;; esac
   # Skip pure comment lines (leading whitespace then //).
-  if printf '%s' "$line" | grep -qE '^[[:space:]]*//'; then
+  # Bash-native matching throughout this loop: piping into grep -q
+  # under pipefail is SIGPIPE-prone (grep exits on first match, the
+  # writer gets EPIPE, the matched pipeline reports failure).
+  if [[ "$line" =~ ^[[:space:]]*// ]]; then
     continue
   fi
   pairing_checked=$((pairing_checked + 1))
-  if printf '%s' "$line" | grep -q "TierProduction"; then
+  if [[ "$line" == *"TierProduction"* ]]; then
     continue
   fi
   ctx=$(sed -n "$(( lineno - 3 > 0 ? lineno - 3 : 1 )),$(( lineno + 3 ))p" "$file")
-  if printf '%s' "$ctx" | grep -q "tier-production-exempt"; then
+  if [[ "$ctx" == *"tier-production-exempt"* ]]; then
     echo "SKIP (exempt): $file:$lineno"
     continue
   fi
-  if printf '%s' "$ctx" | grep -q "TierProduction"; then
+  if [[ "$ctx" == *"TierProduction"* ]]; then
     continue
   fi
   echo "DRIFT: $file:$lineno names TierEnterprise without TierProduction"
@@ -446,11 +452,15 @@ for fn in "UpdateProjectTier" "UpdateProjectBilling"; do
     # is the natural place to document a legitimately-skipped site,
     # so accept the marker either above or inside the window.
     exempt_window=$(sed -n "$((lineno - 5 > 0 ? lineno - 5 : 1)),$((lineno + 50))p" "$file")
-    if echo "$exempt_window" | grep -q "tier-cascade-exempt"; then
+    # Bash-native substring matches, not `echo | grep -q`: under
+    # pipefail, grep -q exiting on first match sends echo EPIPE and
+    # the matched pipeline reports failure, so a wired cascade was
+    # intermittently reported as DRIFT in CI.
+    if [[ "$exempt_window" == *"tier-cascade-exempt"* ]]; then
       echo "SKIP (exempt): $file:$lineno ($fn)"
       continue
     fi
-    if echo "$window" | grep -q "applyTierChangeCascade"; then
+    if [[ "$window" == *"applyTierChangeCascade"* ]]; then
       echo "OK: $file:$lineno ($fn cascade wired)"
     else
       echo "DRIFT: $file:$lineno ($fn without applyTierChangeCascade within 50 lines)"
