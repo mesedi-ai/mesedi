@@ -10,6 +10,11 @@
 #
 # Dependabot is free on every repo, public or private. This file
 # survives the public flip; no toggle needed.
+#
+# Version updates are paused while Mesedi Cloud is paused: every
+# open-pull-requests-limit below is 0, which stops version-update
+# PRs. Security updates are unaffected and still open a PR when a
+# fix exists. To resume, restore the limits to 5, 5, 3 and 3.
 
 version: 2
 updates:
@@ -21,7 +26,7 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     labels:
       - "deps"
       - "go"
@@ -39,7 +44,7 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     labels:
       - "deps"
       - "github-actions"
@@ -56,7 +61,7 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     labels:
       - "deps"
       - "python-sdk"
@@ -69,7 +74,7 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     labels:
       - "deps"
       - "typescript-sdk"
