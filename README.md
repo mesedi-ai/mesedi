@@ -83,7 +83,7 @@ You should see executions, events, failure groups, the playbook surface per fail
 
 All twenty-plus failure-class detectors are live across the Mesedi detector categories (lifecycle, cost, semantic, multi-agent, HITL, security, cross-tenant). Hard-halt with local budgets plus SSE remote channel, dashboard with collapse-by-class view, operator Halt button, webhook escalation on first-occurrence, provider auto-instrumentation across Anthropic / OpenAI / Cohere / Gemini / Ollama, framework adapters for LangChain (Python + JS) / LangGraph / OpenAI Agents / Vercel AI SDK / Mastra / CrewAI, OpenTelemetry parallel emission, and per-failure-class Tier 1 Playbooks.
 
-The hosted Cloud version runs on Fly.io for the backend and Cloudflare Workers for the dashboard. Self-host instructions are in `backend/README.md`.
+**Mesedi Cloud, the hosted version, has been paused since 19 October 2026 and is in private beta.** Its API is stopped and it is not taking signups; design partners can write to hello@mesedi.ai. When it runs, the backend is on Fly.io and the dashboard on Cloudflare Workers. Self-hosting works today: instructions are in `backend/README.md`.
 
 ## Documentation
 

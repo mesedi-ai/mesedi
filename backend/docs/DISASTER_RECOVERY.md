@@ -12,6 +12,18 @@ SQLite-on-a-volume deployment. Production has run on managed Postgres
 since the migration, and the posture below is the one the security
 page at mesedi.ai/security describes.
 
+## Paused since 19 October 2026
+
+Mesedi Cloud is paused and in private beta. Its API is stopped, and
+the nightly off-platform dump and the monthly restore drill are
+switched off (the mesedi-web workflows "DB backup to R2" and "DB
+restore drill", disabled on 19 October 2026). The last nightly dump
+ran that day at 14:07 UTC and succeeded. Dumps expire 30 days after
+they are made, so no off-platform copy is renewed while the jobs are
+off. Both jobs are switched back on as part of restarting the
+service. The rest of this document describes the service while it is
+running.
+
 ## The short version
 
 Mesedi is operated by one person. There is no on-call rotation and no

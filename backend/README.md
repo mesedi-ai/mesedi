@@ -2,7 +2,7 @@
 
 Go HTTP service that ingests AI agent execution telemetry, runs detection engines, and surfaces alerts via webhook + dashboard.
 
-**Status:** v1 in production. Hosted at https://api.mesedi.ai (Fly.io). Self-hostable from this directory.
+**Status:** v1. The hosted API (api.mesedi.ai, on Fly.io) has been paused since 19 October 2026 while Mesedi Cloud is in private beta. Self-hostable from this directory.
 
 ## Quickstart (local development)
 
