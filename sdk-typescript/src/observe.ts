@@ -116,7 +116,7 @@ export function validatorResult(
     // Don't throw: the caller's agent must not fail because of an
     // SDK-side check. Until 2026-11-16 an unknown value became "error",
     // a critical alert, and "info" was not accepted at all though the
-    // docs recommended it (outside review finding D19). Now an unknown
+    // docs recommended it (the outside review of 2026-11-15). Now an unknown
     // value becomes "warning", the backend's own default, and says so once.
     if (!warnedSeverities.has(severity)) {
       warnedSeverities.add(severity);
@@ -871,7 +871,7 @@ export interface EmitLlmCallOptions {
  * provider patches (instrumentAnthropic and the rest) produce. Use it
  * for clients the patches don't cover: custom HTTP clients, streaming
  * wrappers, local models. Twin of Python's `mesedi.emit_llm_call`,
- * added in 0.11.0 (outside review finding D34).
+ * added in 0.11.0 (the outside review of 2026-11-15).
  *
  * Halt-safe boundary: the budget check runs first. Outside `wrap()`:
  * silent no-op.

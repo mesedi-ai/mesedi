@@ -1,4 +1,4 @@
-"""Direct tests of the helpers added for findings D13 and R22 (2026-11-15):
+"""Direct tests of the helpers added for the outside review of 2026-11-15 (2026-11-15):
 EventShipper.undelivered(), which counts what an exit leaves behind, and
 egress._host_and_numeric_port(), which keeps a port only when it is digits."""
 

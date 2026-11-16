@@ -243,7 +243,7 @@ class EventShipper:
         says how many and where they were going. Until 2026-11-15 an
         exit against a backend that accepted connections but never
         answered lost everything without a word (outside review
-        finding R22).
+        the outside review of 2026-11-15).
         """
         if self._stop.is_set():
             return

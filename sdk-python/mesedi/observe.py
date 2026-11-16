@@ -159,7 +159,7 @@ def validator_result(
         # Don't raise: the caller's agent must not fail because of an
         # SDK-side check. Until 2026-11-16 an unknown value, including
         # "info", which the docs recommended, became "error" and so a
-        # critical alert (outside review finding D19). Now it becomes
+        # critical alert (the outside review of 2026-11-15). Now it becomes
         # "warning", the backend's own default, and says so once.
         if severity not in _warned_severities:
             _warned_severities.add(severity)

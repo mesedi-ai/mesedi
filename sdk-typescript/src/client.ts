@@ -256,7 +256,7 @@ export class MesediClient {
    * by then are lost, and one console.warn says how many and where
    * they were going. Until 2026-11-15 a backend that accepted
    * connections but never answered held a one-second script open for
-   * 86 seconds (outside review finding R22).
+   * 86 seconds (the outside review of 2026-11-15).
    */
   async shutdown(timeoutMs = this.shutdownTimeoutMs): Promise<void> {
     if (this.stopped) return;

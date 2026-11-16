@@ -4,7 +4,7 @@
  *
  * Until 2026-11-15 a one-second script against such a backend (which is
  * how api.mesedi.ai behaved while paused) stayed open for 86 seconds
- * (outside review finding R22). The rule now, the same in both SDKs: wait
+ * (the outside review of 2026-11-15). The rule now, the same in both SDKs: wait
  * at most `shutdownTimeoutMs` at exit, then say in one warning how many
  * items were not delivered and where they were going.
  *

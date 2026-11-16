@@ -2,7 +2,7 @@
 
 Until 2026-11-15 a short script against such a backend (which is how
 api.mesedi.ai behaved while paused) exited after 5 seconds having delivered
-nothing and printed nothing (outside review finding R22). The rule now, the
+nothing and printed nothing (the outside review of 2026-11-15). The rule now, the
 same in both SDKs: wait at most ``shutdown_timeout`` at exit, then say in one
 warning how many items were not delivered and where they were going.
 

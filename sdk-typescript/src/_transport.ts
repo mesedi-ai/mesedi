@@ -7,7 +7,7 @@
  * 2026-11-15 on Node 22), and while it does, "beforeExit" never fires,
  * so the client cannot bound how long telemetry delays exit. Against a
  * backend that accepted connections and never answered, a one-second
- * script took 86 seconds to finish (outside review finding R22). With
+ * script took 86 seconds to finish (the outside review of 2026-11-15). With
  * an unref'd socket the program exits when its own work is done, and
  * MesediClient.shutdown() decides how long to wait, holding the process
  * open with its own timer for at most `shutdownTimeoutMs`.

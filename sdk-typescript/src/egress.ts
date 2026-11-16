@@ -28,7 +28,7 @@ export function normalizeEgressDestination(destination: string): string {
     if (i >= 0) d = d.slice(0, i);
   }
   // Everything up to the last @ is userinfo (user, or user:password).
-  // Until 2026-11-15 it was kept and sent (outside review finding D13).
+  // Until 2026-11-15 it was kept and sent (the outside review of 2026-11-15).
   const at = d.lastIndexOf("@");
   if (at >= 0) d = d.slice(at + 1);
   return hostAndNumericPort(d);

@@ -1,5 +1,5 @@
-"""Validator severity "info" (finding D19) and emit_llm_call's provider and
-error_class (finding D34), both from 0.9.0 (2026-11-16)."""
+"""Validator severity "info" (the outside review of 2026-11-15) and emit_llm_call's provider and
+error_class (the outside review of 2026-11-15), both from 0.9.0 (2026-11-16)."""
 
 from __future__ import annotations
 

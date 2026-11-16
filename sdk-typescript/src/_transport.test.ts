@@ -1,6 +1,6 @@
 /**
  * Direct tests of sendUnref (src/_transport.ts), the shipper's sender
- * added 2026-11-15 for finding R22. The exit behaviour it enables is
+ * added 2026-11-15 for the outside review of 2026-11-15. The exit behaviour it enables is
  * tested end to end in exit_silent_backend.test.ts; these pin the
  * sender's own contract against a local server.
  */

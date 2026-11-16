@@ -4,7 +4,7 @@
  * file in tests/test_egress_destination_vectors.py, so the two
  * normalizers cannot drift apart. Added 2026-11-15 after the outside
  * review found both SDKs sending user:password@ to the backend
- * (finding D13).
+ * (the outside review of 2026-11-15).
  */
 
 import { readFileSync } from "node:fs";

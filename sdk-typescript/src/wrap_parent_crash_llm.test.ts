@@ -157,7 +157,7 @@ describe("VERSION", () => {
   });
 });
 
-describe("eval helper exports (finding D3)", () => {
+describe("eval helper exports (the outside review of 2026-11-15)", () => {
   // Needs the built package (npm run build), like exit_silent_backend.test.ts.
   it.each([
     ["./integrations/ragas", ["reportFaithfulness", "reportAnswerRelevance", "reportContextPrecision"]],

@@ -125,11 +125,11 @@ class Execution:
     # The enclosing @wrap's execution_id when this run is nested inside
     # another one, set automatically by wrap (2026-11-16). The backend's
     # topology view and multi-agent detectors read it; until then no SDK
-    # sent it (outside review finding D5).
+    # sent it (the outside review of 2026-11-15).
     parent_execution_id: Optional[str] = None
     # Exception class name of a crash ("ValueError"), sent with the
     # crash_signature hash so the crash allowlist can match the type
-    # people know (finding D2). Needs a backend from 2026-11-16 or later.
+    # people know (the outside review of 2026-11-15). Needs a backend from 2026-11-16 or later.
     crash_type: Optional[str] = None
 
     def start_payload(self) -> Dict[str, Any]:

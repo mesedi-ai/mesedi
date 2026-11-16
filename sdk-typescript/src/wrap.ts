@@ -162,7 +162,7 @@ export function wrap<TArgs extends unknown[], TResult>(
     const executionId = newExecutionId();
     // A run opened inside another run records the outer one as its
     // parent, as the multi-agent docs promise. Until 2026-11-16 no SDK
-    // sent it (outside review finding D5). Read before this run's own
+    // sent it (the outside review of 2026-11-15). Read before this run's own
     // context is entered.
     const outer = currentExecutionContext();
     const execution: Execution = {
@@ -246,7 +246,7 @@ export function wrap<TArgs extends unknown[], TResult>(
       execution.status = Status.CRASHED;
       execution.crash_signature = crashSignature(err);
       // The class name too, so the crash allowlist can match "TypeError"
-      // (finding D2); the signature stays a hash for grouping.
+      // (the outside review of 2026-11-15); the signature stays a hash for grouping.
       execution.crash_type = crashType(err);
       client.submitExecutionEnd(execution);
       throw err; // re-throw real crashes with original stack

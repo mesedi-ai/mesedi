@@ -2,7 +2,7 @@
 
 The TypeScript SDK runs the same file in src/egress_destination_vectors.test.ts,
 so the two normalizers cannot drift apart. Added 2026-11-15 after the outside
-review found both SDKs sending user:password@ to the backend (finding D13).
+review found both SDKs sending user:password@ to the backend (the outside review of 2026-11-15).
 """
 
 from __future__ import annotations

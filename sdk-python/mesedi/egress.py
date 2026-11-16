@@ -31,7 +31,7 @@ def _normalize_egress_destination(destination: str) -> str:
         if cut in d:
             d = d.split(cut, 1)[0]
     # Everything up to the last @ is userinfo (user, or user:password).
-    # Until 2026-11-15 it was kept and sent (outside review finding D13).
+    # Until 2026-11-15 it was kept and sent (the outside review of 2026-11-15).
     if "@" in d:
         d = d.rsplit("@", 1)[1]
     return _host_and_numeric_port(d)

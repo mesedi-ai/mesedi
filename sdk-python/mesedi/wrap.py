@@ -140,7 +140,7 @@ def wrap(
     # only the plain one: calling an async function returns a coroutine
     # at once, so the run was recorded as completed in 0 ms before any of
     # its work happened, and everything inside it went to no run at all
-    # (outside review finding D1). Both wrappers share _Run below, so the
+    # (the outside review of 2026-11-15). Both wrappers share _Run below, so the
     # lifecycle cannot drift between them.
     if inspect.iscoroutinefunction(func):
         @functools.wraps(func)
@@ -201,7 +201,7 @@ class _Run:
         self.client = get_client()
         execution_id = f"exec-{uuid.uuid4().hex[:12]}"
         # A run opened inside another run records the outer one as its
-        # parent, as the multi-agent docs promise (finding D5). Read the
+        # parent, as the multi-agent docs promise (the outside review of 2026-11-15). Read the
         # context BEFORE pushing this run's own.
         outer = current_execution_context()
         # Pass tenant_id straight through to the Execution dataclass so
