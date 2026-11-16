@@ -7,9 +7,10 @@ Mesedi Cloud (`api.mesedi.ai`) was paused and in private beta, and its API
 did not answer requests. Point the SDK at a backend you run yourself with
 `baseUrl`; the self-host guide is at https://mesedi.ai/docs/self-host.
 
-The TypeScript companion to `sdk-python/`. Feature parity for the v1
-surface (`configure()`, `wrap()`, `tool()`, async event shipper,
-fail-open posture), built on Node 18+ `http`/`https`,
+The TypeScript companion to `sdk-python/`. The core surface matches
+(`configure()`, `wrap()`, `tool()`, `emitLlmCall()`, the event shipper,
+fail-open posture); the framework adapters differ (Python has CrewAI,
+TypeScript has Mastra and the Vercel AI SDK). Built on Node 18+ `http`/`https`,
 `AsyncLocalStorage`, and `node:zlib` for opt-in gzip compression of
 request bodies above 1 KB. **Zero runtime dependencies.** Compresses
 or not transparently; small calls ship uncompressed as before.
@@ -267,7 +268,7 @@ installed for `generateText`, the integration just works.
 
 Only `generateText` is wrapped today. `streamText` and `generateObject`
 are not currently supported; use hand-instrumentation with
-`emitLLMCall` / `tool()` for those code paths.
+`emitLlmCall()` (from 0.11.0) / `tool()` for those code paths.
 
 ## Releases
 

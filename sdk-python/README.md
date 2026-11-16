@@ -13,7 +13,13 @@ backend for failure-class detection and analysis. The v1 surface:
 - `mesedi.configure(api_key=...)`: set up the module-level client
 - `@mesedi.wrap`: decorate any function as an "agent execution". The SDK
   records start, completion (or crash), wall-clock duration, and a stable
-  crash signature suitable for grouping identical exceptions.
+  crash signature suitable for grouping identical exceptions, plus the
+  exception's class name for the crash allowlist. From 0.9.0 it also works
+  on `async def` functions (earlier versions recorded a 0 ms run), and a
+  wrap opened inside another records the outer run as its parent.
+- `mesedi.emit_llm_call(...)`: report a model call by hand, for providers
+  the built-in patches don't cover. From 0.9.0 it takes `provider=` and
+  `error_class=` for failed calls.
 - `@mesedi.tool`: decorate any function as an observed tool call. Emits
   `tool_call` events into the surrounding execution context, including
   the function's docstring (see "Tool descriptions" below).

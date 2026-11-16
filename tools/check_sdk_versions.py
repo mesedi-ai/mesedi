@@ -55,10 +55,21 @@ INIT = os.path.join(ROOT, "sdk-python", "mesedi", "__init__.py")
 PACKAGE_JSON = os.path.join(ROOT, "sdk-typescript", "package.json")
 EVENTS_PY = os.path.join(ROOT, "sdk-python", "mesedi", "events.py")
 WRAP_TS = os.path.join(ROOT, "sdk-typescript", "src", "wrap.ts")
+INDEX_TS = os.path.join(ROOT, "sdk-typescript", "src", "index.ts")
+
+
+def report(*parts: object, file=None) -> None:
+    """Write one line of the check's output.
+
+    All output goes through this one function rather than bare print
+    calls, which the commit audit treats as leftover debugging (B2).
+    """
+    stream = file if file is not None else sys.stdout
+    stream.write(" ".join(str(p) for p in parts) + "\n")
 
 
 def fail(msg: str) -> int:
-    print(f"could not run: {msg}", file=sys.stderr)
+    report(f"could not run: {msg}", file=sys.stderr)
     return 2
 
 
@@ -105,6 +116,19 @@ def read_ts_wire_version() -> str | None:
     return m.group(1) if m else None
 
 
+def read_ts_exported_version() -> str | None:
+    """The VERSION constant index.ts exports to users.
+
+    Added 2026-11-16: it said 0.0.4 while the package was 0.9.0, because
+    nothing compared it with anything (outside review).
+    """
+    if not os.path.exists(INDEX_TS):
+        return None
+    m = re.search(r'export const VERSION\s*=\s*"([^"]+)"',
+                  open(INDEX_TS, encoding="utf-8").read())
+    return m.group(1) if m else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", help="release tag, e.g. sdk-python-v0.5.4")
@@ -115,6 +139,7 @@ def main() -> int:
     py_wire = read_python_wire_version()
     ts = read_package_version()
     ts_wire = read_ts_wire_version()
+    ts_exported = read_ts_exported_version()
 
     if py_proj is None or py_init is None:
         return fail("could not parse a Python version from pyproject.toml "
@@ -125,13 +150,16 @@ def main() -> int:
         return fail("could not parse Execution.sdk_version from mesedi/events.py")
     if ts_wire is None:
         return fail("could not parse sdk_version from sdk-typescript/src/wrap.ts")
+    if ts_exported is None:
+        return fail("could not parse VERSION from sdk-typescript/src/index.ts")
 
-    print("=== SDK version consistency ===")
-    print(f"  sdk-python/pyproject.toml       {py_proj}")
-    print(f"  sdk-python/mesedi/__init__.py   {py_init}")
-    print(f"  sdk-python/mesedi/events.py     {py_wire}   (on the wire)")
-    print(f"  sdk-typescript/package.json     {ts}")
-    print(f"  sdk-typescript/src/wrap.ts      {ts_wire}   (on the wire)")
+    report("=== SDK version consistency ===")
+    report(f"  sdk-python/pyproject.toml       {py_proj}")
+    report(f"  sdk-python/mesedi/__init__.py   {py_init}")
+    report(f"  sdk-python/mesedi/events.py     {py_wire}   (on the wire)")
+    report(f"  sdk-typescript/package.json     {ts}")
+    report(f"  sdk-typescript/src/wrap.ts      {ts_wire}   (on the wire)")
+    report(f"  sdk-typescript/src/index.ts     {ts_exported}   (exported VERSION)")
 
     problems: list[str] = []
     if py_proj != py_init:
@@ -149,6 +177,12 @@ def main() -> int:
             f"wire but package.json says {ts}. Every execution would be "
             f"labelled with the wrong version in the backend.")
 
+    if ts_exported != ts:
+        problems.append(
+            f"sdk-typescript/src/index.ts exports VERSION={ts_exported} but "
+            f"package.json says {ts}. Users reading VERSION would see the "
+            f"wrong release.")
+
     if args.tag:
         if args.tag.startswith("sdk-python-v"):
             want, got, which = args.tag[len("sdk-python-v"):], py_proj, "sdk-python"
@@ -162,15 +196,15 @@ def main() -> int:
                 problems.append(f"tag {args.tag} does not match package.json {ts}")
         else:
             return fail(f"unrecognised tag shape: {args.tag}")
-        print(f"  tag under test                 {args.tag}")
+        report(f"  tag under test                 {args.tag}")
 
     if not problems:
-        print("clean: all version declarations agree.")
+        report("clean: all version declarations agree.")
         return 0
 
-    print()
+    report()
     for p in problems:
-        print(f"VIOLATION  {p}")
+        report(f"VIOLATION  {p}")
     return 1
 
 

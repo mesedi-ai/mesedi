@@ -153,8 +153,13 @@ type Execution struct {
 	InputSummary      string          `json:"input_summary,omitempty"`
 	OutputSummary     string          `json:"output_summary,omitempty"`
 	CrashSignature    string          `json:"crash_signature,omitempty"`
-	SDKVersion        string          `json:"sdk_version,omitempty"`
-	SDKLanguage       string          `json:"sdk_language,omitempty"` // "python" | "typescript"
+	// CrashType is the exception class name ("ValueError", "TypeError"),
+	// sent by SDKs from 2026-11-16 so the crash allowlist can match what
+	// people know. CrashSignature stays a hash for grouping. Not stored and
+	// not part of any digest.
+	CrashType   string `json:"crash_type,omitempty"`
+	SDKVersion  string `json:"sdk_version,omitempty"`
+	SDKLanguage string `json:"sdk_language,omitempty"` // "python" | "typescript"
 	// FailureGroupID is populated when this execution was clustered into
 	// a failure_group by the detection pipeline. The dashboard uses this
 	// to render a "Flagged by [class] / [signature]" banner on the

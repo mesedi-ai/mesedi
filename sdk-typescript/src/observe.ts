@@ -69,7 +69,11 @@ export function checkpoint(
   client.submitEvent(event);
 }
 
-export type ValidatorSeverity = "warning" | "error" | "critical";
+/** "info" from 0.11.0. "error" and "critical" both alert as critical. */
+export type ValidatorSeverity = "info" | "warning" | "error" | "critical";
+
+const VALIDATOR_SEVERITIES: ReadonlySet<string> = new Set(["info", "warning", "error", "critical"]);
+const warnedSeverities = new Set<string>();
 
 export interface ValidatorResultOptions {
   message?: string;
@@ -107,15 +111,20 @@ export function validatorResult(
   const ctx = currentExecutionContext();
   if (!ctx) return;
 
-  let severity: ValidatorSeverity = opts.severity ?? "error";
-  if (
-    severity !== "warning" &&
-    severity !== "error" &&
-    severity !== "critical"
-  ) {
-    // Don't throw, the caller's agent shouldn't fail because of an
-    // SDK-side validation. Coerce to the safest default.
-    severity = "error";
+  let severity: string = opts.severity ?? "error";
+  if (!VALIDATOR_SEVERITIES.has(severity)) {
+    // Don't throw: the caller's agent must not fail because of an
+    // SDK-side check. Until 2026-11-16 an unknown value became "error",
+    // a critical alert, and "info" was not accepted at all though the
+    // docs recommended it (outside review finding D19). Now an unknown
+    // value becomes "warning", the backend's own default, and says so once.
+    if (!warnedSeverities.has(severity)) {
+      warnedSeverities.add(severity);
+      console.warn(
+        `mesedi: validator severity ${JSON.stringify(severity)} is not one of info, warning, error, critical; recording it as warning.`,
+      );
+    }
+    severity = "warning";
   }
 
   const payload: Record<string, unknown> = { name, passed, severity };
@@ -828,3 +837,82 @@ function cryptoRandomId(): string {
   return Math.random().toString(16).slice(2, 14).padEnd(12, "0");
 }
 
+const MAX_LLM_TEXT = 1000;
+
+export interface EmitLlmCallOptions {
+  /** Model identifier, e.g. "gpt-4o". Feeds drift detection and cost attribution. */
+  model: string;
+  /** The user-role prompt. Truncated to 1000 characters. */
+  userMessage: string;
+  /** The system-role prompt. Truncated to 1000 characters. */
+  systemPrompt?: string;
+  /** The model's response. Truncated to 1000 characters; sent only when status is "ok". */
+  responseText?: string;
+  /** Prompt tokens; feeds cost velocity and the token budget. */
+  inputTokens?: number;
+  /** Response tokens; feeds cost velocity and the token budget. */
+  outputTokens?: number;
+  /** Wall-clock duration of the call in milliseconds. */
+  durationMs?: number;
+  /** "ok" when the call returned cleanly, "failed" otherwise. Default "ok". */
+  status?: "ok" | "failed";
+  /** Provider name, e.g. "openai". With errorClass, feeds the provider_incident detector. */
+  provider?: string;
+  /**
+   * For a failed call: rate_limited, quota_exhausted, internal_error,
+   * service_unavailable, timeout, invalid_api_key, client_error or
+   * unknown, the values the built-in provider patches send.
+   */
+  errorClass?: string;
+}
+
+/**
+ * Emit an `llm_call` event by hand, with the same wire format the
+ * provider patches (instrumentAnthropic and the rest) produce. Use it
+ * for clients the patches don't cover: custom HTTP clients, streaming
+ * wrappers, local models. Twin of Python's `mesedi.emit_llm_call`,
+ * added in 0.11.0 (outside review finding D34).
+ *
+ * Halt-safe boundary: the budget check runs first. Outside `wrap()`:
+ * silent no-op.
+ */
+export function emitLlmCall(opts: EmitLlmCallOptions): void {
+  const ctx = currentExecutionContext();
+  if (!ctx) return;
+
+  ctx.checkBudget();
+  const inputTokens = Math.max(0, Math.trunc(opts.inputTokens ?? 0));
+  const outputTokens = Math.max(0, Math.trunc(opts.outputTokens ?? 0));
+  if (ctx.budgetTracker) {
+    ctx.budgetTracker.incrementSteps();
+    if (inputTokens > 0 || outputTokens > 0) {
+      ctx.budgetTracker.addTokens(inputTokens, outputTokens);
+    }
+  }
+
+  const status = opts.status ?? "ok";
+  const payload: Record<string, unknown> = {
+    model: opts.model,
+    system_prompt: (opts.systemPrompt ?? "").slice(0, MAX_LLM_TEXT),
+    user_message: (opts.userMessage ?? "").slice(0, MAX_LLM_TEXT),
+    status,
+  };
+  if (opts.provider) payload["provider"] = opts.provider;
+  if (opts.errorClass) payload["error_class"] = opts.errorClass;
+  if (status === "ok") {
+    payload["response_text"] = (opts.responseText ?? "").slice(0, MAX_LLM_TEXT);
+    payload["input_tokens"] = inputTokens;
+    payload["output_tokens"] = outputTokens;
+  }
+
+  const event: Event = {
+    event_id: newEventId(),
+    execution_id: ctx.executionId,
+    event_type: EventType.LLM_CALL,
+    sequence: ctx.nextSequence(),
+    timestamp: utcNowRfc3339(),
+    duration_ms: Math.max(0, Math.trunc(opts.durationMs ?? 0)),
+    payload,
+  };
+  getClient().submitEvent(event);
+}

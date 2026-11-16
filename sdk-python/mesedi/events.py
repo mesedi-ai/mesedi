@@ -114,7 +114,7 @@ class Execution:
     total_tokens_out: Optional[int] = None
     estimated_cost_usd: Optional[float] = None
     sdk_language: str = "python"
-    sdk_version: str = "0.8.0"
+    sdk_version: str = "0.9.0"
     crash_signature: Optional[str] = None
     #  optional per-execution tenant identifier from the
     # host SaaS application. When set, it surfaces in the
@@ -122,6 +122,15 @@ class Execution:
     # cost rolls up under the "(unattributed)" bucket on the
     # dashboard.
     tenant_id: Optional[str] = None
+    # The enclosing @wrap's execution_id when this run is nested inside
+    # another one, set automatically by wrap (2026-11-16). The backend's
+    # topology view and multi-agent detectors read it; until then no SDK
+    # sent it (outside review finding D5).
+    parent_execution_id: Optional[str] = None
+    # Exception class name of a crash ("ValueError"), sent with the
+    # crash_signature hash so the crash allowlist can match the type
+    # people know (finding D2). Needs a backend from 2026-11-16 or later.
+    crash_type: Optional[str] = None
 
     def start_payload(self) -> Dict[str, Any]:
         """Body for POST /executions (only the fields valid at start)."""
@@ -134,6 +143,8 @@ class Execution:
         }
         if self.tenant_id is not None:
             out["tenant_id"] = self.tenant_id
+        if self.parent_execution_id is not None:
+            out["parent_execution_id"] = self.parent_execution_id
         return out
 
     def end_payload(self) -> Dict[str, Any]:
@@ -155,6 +166,8 @@ class Execution:
             out["estimated_cost_usd"] = self.estimated_cost_usd
         if self.crash_signature is not None:
             out["crash_signature"] = self.crash_signature
+        if self.crash_type is not None:
+            out["crash_type"] = self.crash_type
         return out
 
 

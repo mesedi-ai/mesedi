@@ -42,6 +42,7 @@ import { createHash } from "node:crypto";
 import { getClient } from "./client.js";
 import { emitEnvironmentDeclaration } from "./egress.js";
 import {
+  currentExecutionContext,
   newExecutionId,
   runInExecutionContext,
 } from "./context.js";
@@ -159,15 +160,21 @@ export function wrap<TArgs extends unknown[], TResult>(
   return async function inner(...args: TArgs): Promise<TResult | undefined> {
     const client = getClient();
     const executionId = newExecutionId();
+    // A run opened inside another run records the outer one as its
+    // parent, as the multi-agent docs promise. Until 2026-11-16 no SDK
+    // sent it (outside review finding D5). Read before this run's own
+    // context is entered.
+    const outer = currentExecutionContext();
     const execution: Execution = {
       execution_id: executionId,
       status: Status.STARTED,
       started_at: utcNowRfc3339(),
       sdk_language: "typescript",
-      sdk_version: "0.10.0",
+      sdk_version: "0.11.0",
       // Optional tenant_id flows through to the wire body via
       // executionStartPayload's omitempty-style assignment.
       ...(opts.tenant_id !== undefined ? { tenant_id: opts.tenant_id } : {}),
+      ...(outer !== null ? { parent_execution_id: outer.executionId } : {}),
     };
 
     // Construct a budget tracker iff a budget was supplied. Stays
@@ -238,6 +245,9 @@ export function wrap<TArgs extends unknown[], TResult>(
 
       execution.status = Status.CRASHED;
       execution.crash_signature = crashSignature(err);
+      // The class name too, so the crash allowlist can match "TypeError"
+      // (finding D2); the signature stays a hash for grouping.
+      execution.crash_type = crashType(err);
       client.submitExecutionEnd(execution);
       throw err; // re-throw real crashes with original stack
     } finally {
@@ -261,6 +271,11 @@ export function wrap<TArgs extends unknown[], TResult>(
  * Python-emitted and TS-emitted crashes with the same root cause
  * cluster into the same failure_group.
  */
+/** Error class name for the crash allowlist: the constructor's name, or the value's type. */
+export function crashType(err: unknown): string {
+  return err instanceof Error && err.constructor.name ? err.constructor.name : typeof err;
+}
+
 function crashSignature(err: unknown): string {
   const name =
     err instanceof Error && err.constructor.name

@@ -29,6 +29,7 @@ the function-call surface stays as the foundation either way.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -36,6 +37,10 @@ from typing import Any, Dict, Optional
 from mesedi._context import current_execution_context
 from mesedi.client import get_client
 from mesedi.events import Event, EventType, utcnow_rfc3339
+
+_log = logging.getLogger("mesedi")
+_VALIDATOR_SEVERITIES = frozenset({"info", "warning", "error", "critical"})
+_warned_severities: set = set()
 
 # Truncation budget for validator messages. Validator messages are
 # typically short ("schema mismatch at field X") but we don't want a
@@ -125,7 +130,9 @@ def validator_result(
         passed: True if the validator passed, False if it failed.
         message: Optional human-readable diagnostic. Truncated to
             500 chars.
-        severity: "warning" | "error" | "critical". Hints to the
+        severity: "info" | "warning" | "error" | "critical" ("info" from
+            0.9.0; "error" and "critical" both alert as critical; any other
+            value is recorded as "warning" with a logged warning). Hints to the
             backend how aggressively to surface a failing validator
             on the dashboard; the SDK doesn't enforce values today
             but the dashboard will color-code in Phase 6.
@@ -148,10 +155,18 @@ def validator_result(
     if ctx is None:
         return
 
-    if severity not in {"warning", "error", "critical"}:
-        # Don't raise, the caller's agent shouldn't fail because of
-        # an SDK-side validation. Coerce to the safest default.
-        severity = "error"
+    if severity not in _VALIDATOR_SEVERITIES:
+        # Don't raise: the caller's agent must not fail because of an
+        # SDK-side check. Until 2026-11-16 an unknown value, including
+        # "info", which the docs recommended, became "error" and so a
+        # critical alert (outside review finding D19). Now it becomes
+        # "warning", the backend's own default, and says so once.
+        if severity not in _warned_severities:
+            _warned_severities.add(severity)
+            _log.warning(
+                "mesedi: validator severity %r is not one of info, warning, "
+                "error, critical; recording it as warning.", severity)
+        severity = "warning"
 
     client = get_client()
     payload: Dict[str, Any] = {
@@ -186,6 +201,8 @@ def emit_llm_call(
     output_tokens: int = 0,
     duration_ms: int = 0,
     status: str = "ok",
+    provider: str = "",
+    error_class: str = "",
 ) -> None:
     """Emit an ``llm_call`` event with the same wire format the
     Anthropic patch produces.
@@ -236,6 +253,13 @@ def emit_llm_call(
         status: "ok" if the call returned cleanly, "failed" otherwise.
             Failed calls still record their model name (which still
             feeds drift) but don't contribute response_text/token data.
+        provider: The provider's name ("openai", "anthropic", ...). With
+            error_class, feeds the provider_incident detector. From 0.9.0.
+        error_class: For a failed call, one of rate_limited,
+            quota_exhausted, internal_error, service_unavailable,
+            timeout, invalid_api_key, client_error, unknown, the values
+            the built-in provider patches send. From 0.9.0; before that a
+            manual call could not feed provider_incident.
     """
     ctx = current_execution_context()
     if ctx is None:
@@ -255,6 +279,10 @@ def emit_llm_call(
         "user_message": (user_message or "")[:_MAX_LLM_USER_MSG],
         "status": status,
     }
+    if provider:
+        payload["provider"] = provider
+    if error_class:
+        payload["error_class"] = error_class
     if status == "ok":
         payload["response_text"] = (response_text or "")[:_MAX_LLM_RESPONSE]
         payload["input_tokens"] = int(input_tokens)

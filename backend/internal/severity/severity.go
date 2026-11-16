@@ -111,7 +111,7 @@ func Default(failureClass string) Severity {
 }
 
 // FromSDKValue maps the SDK's per-event severity string (one of
-// "warning" | "error" | "critical", the vocabulary
+// "info" | "warning" | "error" | "critical", the vocabulary
 // validator_result() accepts on the Python + TS SDKs) to the
 // backend's 3-level Severity enum (Critical, Warning, Info).
 //
@@ -127,12 +127,17 @@ func Default(failureClass string) Severity {
 //     who never explicitly opt into "warning" or "critical" via
 //     the SDK see no behavior change.)
 //   - SDK "critical" → Critical (direct match)
+//   - SDK "info"     → Info (added 2026-11-16; the docs told people to
+//     send it, and both SDKs accept it from Python 0.9.0 and
+//     TypeScript 0.11.0, outside review finding D19)
 //   - anything else → Warning (safe fallback)
 //
 // Future detectors that gain per-event severity hints reuse this
 // helper.
 func FromSDKValue(sdkSeverity string) Severity {
 	switch strings.ToLower(strings.TrimSpace(sdkSeverity)) {
+	case "info":
+		return Info
 	case "warning":
 		return Warning
 	case "error", "critical":

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import inspect
 import time
 import traceback
 import uuid
@@ -135,21 +136,89 @@ def wrap(
             )
         return factory
 
+    # Async functions need an async wrapper. Until 2026-11-16 there was
+    # only the plain one: calling an async function returns a coroutine
+    # at once, so the run was recorded as completed in 0 ms before any of
+    # its work happened, and everything inside it went to no run at all
+    # (outside review finding D1). Both wrappers share _Run below, so the
+    # lifecycle cannot drift between them.
+    if inspect.iscoroutinefunction(func):
+        @functools.wraps(func)
+        async def ainner(*args: Any, **kwargs: Any) -> Any:
+            run = _Run(budget, tenant_id, agent_name, execution_mode)
+            try:
+                try:
+                    result = await func(*args, **kwargs)
+                except MesediHalt as halt_exc:
+                    run.halted(halt_exc)
+                    return None
+                except BaseException as exc:
+                    run.crashed(exc)
+                    raise
+                run.completed()
+                return result
+            finally:
+                run.close()
+
+        return ainner  # type: ignore[return-value] -- functools.wraps keeps the decorated signature at runtime; mypy cannot see that
+
     @functools.wraps(func)
     def inner(*args: Any, **kwargs: Any) -> Any:
-        client = get_client()
+        run = _Run(budget, tenant_id, agent_name, execution_mode)
+        try:
+            try:
+                result = func(*args, **kwargs)
+            except MesediHalt as halt_exc:
+                # Halt is NOT a crash, it's a controlled stop the SDK
+                # itself raised because a budget was exceeded. The
+                # caller of the @wrap'd function sees a None return
+                # rather than an exception.
+                run.halted(halt_exc)
+                return None
+            except BaseException as exc:
+                run.crashed(exc)
+                # Re-raise with the original traceback intact.
+                raise
+            run.completed()
+            return result
+        finally:
+            run.close()
+
+    return inner  # type: ignore[return-value] -- functools.wraps keeps the decorated signature at runtime; mypy cannot see that
+
+
+class _Run:
+    """One wrapped execution's lifecycle, shared by the plain and async
+    wrappers: start, the three ways it can end, and cleanup."""
+
+    def __init__(
+        self,
+        budget: Optional[Budget],
+        tenant_id: Optional[str],
+        agent_name: Optional[str],
+        execution_mode: Optional[str],
+    ) -> None:
+        self.client = get_client()
         execution_id = f"exec-{uuid.uuid4().hex[:12]}"
+        # A run opened inside another run records the outer one as its
+        # parent, as the multi-agent docs promise (finding D5). Read the
+        # context BEFORE pushing this run's own.
+        outer = current_execution_context()
         # Pass tenant_id straight through to the Execution dataclass so
         # start_payload() includes it in POST /executions. None (the
         # default) means "not supplied" and the field is omitted from
         # the wire body, matching the backend's omitempty contract.
-        execution = Execution(execution_id=execution_id, tenant_id=tenant_id)
+        self.execution = Execution(
+            execution_id=execution_id,
+            tenant_id=tenant_id,
+            parent_execution_id=outer.execution_id if outer is not None else None,
+        )
 
         # Submit start AFTER constructing the Execution so the timer
         # captures only the user's function, not the SDK's own overhead.
-        client.submit_execution_start(execution)
-        start_wall = time.perf_counter()
-        ctx_token = push_execution_context(
+        self.client.submit_execution_start(self.execution)
+        self.start_wall = time.perf_counter()
+        self.ctx_token = push_execution_context(
             execution_id,
             budget=budget,
             agent_name=agent_name,
@@ -173,65 +242,49 @@ def wrap(
         # with trigger="remote_signal". Fail-open: if the reader can't
         # subscribe (backend unreachable, etc.) the wrapped agent
         # still runs with whatever local budget it was given.
-        halt_reader: Optional[HaltStreamReader] = None
+        self.halt_reader: Optional[HaltStreamReader] = None
         ctx = current_execution_context()
         if ctx is not None and ctx.budget_tracker is not None:
-            halt_reader = HaltStreamReader(
+            self.halt_reader = HaltStreamReader(
                 execution_id=execution_id,
-                base_url=client.base_url,
-                api_key=client.api_key,
+                base_url=self.client.base_url,
+                api_key=self.client.api_key,
                 on_halt=ctx.budget_tracker.signal_remote_halt,
             )
-            halt_reader.start()
+            self.halt_reader.start()
 
-        try:
-            try:
-                result = func(*args, **kwargs)
-            except MesediHalt as halt_exc:
-                # Halt is NOT a crash, it's a controlled stop the SDK
-                # itself raised because a budget was exceeded. Mark
-                # the execution `halted` with the trigger metadata
-                # and return cleanly. We do NOT re-raise, the caller
-                # of the @wrap'd function sees a None return (or
-                # whatever the agent's normal "I gave up" value is)
-                # rather than an exception.
-                execution.status = Status.HALTED
-                execution.duration_ms = _elapsed_ms(start_wall)
-                execution.ended_at = utcnow_rfc3339()
-                # Pack the halt reason into crash_signature so it shows
-                # up in the dashboard's failure-group surface (reuses
-                # the existing column rather than adding a new one).
-                execution.crash_signature = f"halt:{halt_exc.trigger}"
-                client.submit_execution_end(execution)
-                return None
-            except BaseException as exc:
-                execution.status = Status.CRASHED
-                execution.duration_ms = _elapsed_ms(start_wall)
-                execution.ended_at = utcnow_rfc3339()
-                execution.crash_signature = _crash_signature(exc)
-                client.submit_execution_end(execution)
-                # Re-raise with the original traceback intact. `raise`
-                # (no argument) re-raises the active exception.
-                raise
+    def _end(self, status: str) -> None:
+        self.execution.status = status
+        self.execution.duration_ms = _elapsed_ms(self.start_wall)
+        self.execution.ended_at = utcnow_rfc3339()
 
-            execution.status = Status.COMPLETED
-            execution.duration_ms = _elapsed_ms(start_wall)
-            execution.ended_at = utcnow_rfc3339()
-            client.submit_execution_end(execution)
-            return result
-        finally:
-            # Stop the halt-stream reader BEFORE popping the context,
-            # so any in-flight signal_remote_halt() call against the
-            # tracker still finds a valid context. Daemon thread , 
-            # safe to leave running; stop() just unblocks it.
-            if halt_reader is not None:
-                halt_reader.stop()
-            # Pop the execution context on EVERY exit path, return,
-            # exception, even keyboard-interrupt, so nested wraps
-            # correctly restore the outer context.
-            pop_execution_context(ctx_token)
+    def completed(self) -> None:
+        self._end(Status.COMPLETED)
+        self.client.submit_execution_end(self.execution)
 
-    return inner  # type: ignore[return-value]
+    def halted(self, halt_exc: MesediHalt) -> None:
+        self._end(Status.HALTED)
+        # Pack the halt reason into crash_signature so it shows up in
+        # the dashboard's failure-group surface (reuses the existing
+        # column rather than adding a new one).
+        self.execution.crash_signature = f"halt:{halt_exc.trigger}"
+        self.client.submit_execution_end(self.execution)
+
+    def crashed(self, exc: BaseException) -> None:
+        self._end(Status.CRASHED)
+        self.execution.crash_signature = _crash_signature(exc)
+        self.execution.crash_type = type(exc).__name__
+        self.client.submit_execution_end(self.execution)
+
+    def close(self) -> None:
+        # Stop the halt-stream reader BEFORE popping the context, so any
+        # in-flight signal_remote_halt() call against the tracker still
+        # finds a valid context. Then pop the execution context on EVERY
+        # exit path, return, exception, even keyboard-interrupt, so
+        # nested wraps correctly restore the outer context.
+        if self.halt_reader is not None:
+            self.halt_reader.stop()
+        pop_execution_context(self.ctx_token)
 
 
 def _elapsed_ms(start_wall: float) -> int:

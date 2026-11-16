@@ -112,6 +112,18 @@ export interface Execution {
    * the "(unattributed)" bucket on the dashboard.
    */
   tenant_id?: string;
+  /**
+   * The enclosing wrap()'s execution_id when this run is nested inside
+   * another, set automatically by wrap() (2026-11-16). The backend's
+   * topology view and multi-agent detectors read it.
+   */
+  parent_execution_id?: string;
+  /**
+   * Error class name of a crash ("TypeError"), sent with the
+   * crash_signature hash so the crash allowlist can match the type.
+   * Needs a backend from 2026-11-16 or later.
+   */
+  crash_type?: string;
 }
 
 /**
@@ -142,6 +154,7 @@ export function executionStartPayload(e: Execution): Record<string, unknown> {
     sdk_version: e.sdk_version,
   };
   if (e.tenant_id !== undefined) out["tenant_id"] = e.tenant_id;
+  if (e.parent_execution_id !== undefined) out["parent_execution_id"] = e.parent_execution_id;
   return out;
 }
 
@@ -157,6 +170,7 @@ export function executionEndPayload(e: Execution): Record<string, unknown> {
   if (e.total_tokens_out !== undefined) out["total_tokens_out"] = e.total_tokens_out;
   if (e.estimated_cost_usd !== undefined) out["estimated_cost_usd"] = e.estimated_cost_usd;
   if (e.crash_signature !== undefined) out["crash_signature"] = e.crash_signature;
+  if (e.crash_type !== undefined) out["crash_type"] = e.crash_type;
   return out;
 }
 

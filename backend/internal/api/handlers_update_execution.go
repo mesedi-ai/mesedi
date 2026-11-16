@@ -300,11 +300,18 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// short-circuits as a no-op.
 	//
 	// Allowlist.b: check the per-project crashes allowlist first.
-	// When the crash_signature (= exception_type, e.g. "ValueError")
-	// matches a customer allowlist entry, SKIP both the grouping
-	// AND the webhook. Closes crashes.G3.
+	// When the exception type (crash_type, e.g. "ValueError") or the
+	// crash signature matches a customer allowlist entry, SKIP both the
+	// grouping AND the webhook. Closes crashes.G3.
+	//
+	// Until 2026-11-16 only crash_signature was checked, and the comment
+	// here said it was the exception type. The SDKs send a 16-hex hash
+	// there, so an entry such as "ValueError", which the docs tell people
+	// to write, could never match (outside review finding D2). Entries
+	// keyed by the signature hash keep matching.
 	if patch.Status == events.StatusCrashed && patch.CrashSignature != "" {
-		if h.checkAllowlistAndMaybeSkip(r, authProjectID, "crashes", patch.CrashSignature) {
+		if (patch.CrashType != "" && h.checkAllowlistAndMaybeSkip(r, authProjectID, "crashes", patch.CrashType)) ||
+			h.checkAllowlistAndMaybeSkip(r, authProjectID, "crashes", patch.CrashSignature) {
 			// Suppressed by customer allowlist; no failure_group,
 			// no webhook. match_count incremented inside the helper.
 		} else {
