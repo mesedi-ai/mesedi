@@ -1,6 +1,11 @@
 # Mesedi Python SDK
 
-**Status:** v0.5.3. Live on PyPI.
+**Status:** live on PyPI.
+
+**Hosted service:** when this version was released, in November 2026,
+Mesedi Cloud (`api.mesedi.ai`) was paused and in private beta, and its API
+did not answer requests. Point the SDK at a backend you run yourself with
+`base_url=`; the self-host guide is at https://mesedi.ai/docs/self-host.
 
 The Mesedi SDK observes autonomous AI agent runs and ships them to the Mesedi
 backend for failure-class detection and analysis. The v1 surface:
@@ -35,8 +40,9 @@ def run_my_agent(query: str) -> str:
 run_my_agent("hello")
 ```
 
-For local backend development against `localhost:8080`, pass an explicit
-`base_url=`. Otherwise the SDK posts to the Mesedi production backend.
+For a self-hosted or local backend, pass `base_url=` (for example
+`base_url="http://localhost:8080"`). Without it, the SDK posts to
+`https://api.mesedi.ai`, the hosted service (see the note at the top).
 
 ## What lands in the backend
 
@@ -50,9 +56,12 @@ For each `@wrap`-decorated call:
   `crash_signature` (SHA-256-derived stable hash of exception type + top
   of traceback), then the original exception is re-raised.
 
-Network failures during observation NEVER block the wrapped function. The
-SDK is fail-open: a Mesedi outage degrades to invisibility, not to broken
-production code.
+Network failures during observation never block the wrapped function: the
+SDK is fail-open, so a Mesedi outage never breaks your code. It is not
+silent, though. At exit the SDK waits at most `shutdown_timeout` seconds
+(default 5; set it in `mesedi.configure()`) for telemetry not yet delivered,
+then logs one warning saying how many items were not delivered and to which
+backend. `mesedi.stats()` reports delivery counts at any time.
 
 ## Tool descriptions
 

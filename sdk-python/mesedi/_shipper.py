@@ -118,8 +118,19 @@ class EventShipper:
         max_queue: int = 10_000,
         max_retries: int = 3,
         max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
+        shutdown_timeout: float = 5.0,
+        endpoint: str = "",
     ):
         self._http = http
+        # How long shutdown() waits for undelivered items at exit, and
+        # where they were going, so the exit warning can say both.
+        self._shutdown_timeout = shutdown_timeout
+        self._endpoint = endpoint
+        # Items taken off the queue but not yet resolved: the events
+        # batch being built, and the items of the send in progress.
+        # Read by shutdown() to count what an exit leaves behind.
+        self._pending_events: List[Event] = []
+        self._inflight = 0
         self._flush_interval = flush_interval_ms / 1000.0
         self._batch_size = batch_size
         self._max_queue = max_queue
@@ -218,28 +229,54 @@ class EventShipper:
 
     # ── shutdown ──────────────────────────────────────────────────────
 
-    def shutdown(self, timeout: float = 5.0) -> None:
+    def shutdown(self, timeout: Optional[float] = None) -> None:
         """Stop the worker thread; flush remaining items with timeout.
 
-        Safe to call multiple times. Registered with ``atexit`` at
-        construction time, so an explicit call is normally unnecessary , 
-        but explicit ``client.close()`` will trigger this immediately
-        rather than waiting for interpreter shutdown.
+        ``timeout`` defaults to the ``shutdown_timeout`` the client was
+        configured with (5 seconds unless changed). Safe to call
+        multiple times. Registered with ``atexit`` at construction
+        time, so an explicit call is normally unnecessary, but explicit
+        ``client.close()`` will trigger this immediately rather than
+        waiting for interpreter shutdown.
+
+        If items are still undelivered when the wait ends, one warning
+        says how many and where they were going. Until 2026-11-15 an
+        exit against a backend that accepted connections but never
+        answered lost everything without a word (outside review
+        finding R22).
         """
         if self._stop.is_set():
             return
         self._stop.set()
+        wait = self._shutdown_timeout if timeout is None else timeout
         # The worker may be blocked on queue.get() with a timeout up to
-        # flush_interval; just join() with a generous timeout and let
-        # the daemon-thread fallback handle the unlikely case where the
-        # worker is stuck mid-retry on a slow backend.
-        self._thread.join(timeout=timeout)
+        # flush_interval, or mid-retry on a slow backend; join() waits
+        # at most ``wait`` and the daemon thread dies with the process.
+        self._thread.join(timeout=wait)
+        if self._thread.is_alive():
+            left = self.undelivered()
+            if left:
+                logger.warning(
+                    "mesedi: %d item(s) were not delivered to %s before exit: "
+                    "the backend did not answer within %.1fs. Pass a larger "
+                    "shutdown_timeout to mesedi.configure() to wait longer.",
+                    left,
+                    self._endpoint or "the Mesedi backend",
+                    wait,
+                )
+
+    def undelivered(self) -> int:
+        """Items submitted but not yet delivered, rejected or given up on:
+        still queued, waiting in the events batch, or in the send in
+        progress. Barriers are not items."""
+        with self._queue.mutex:
+            queued = sum(1 for i in self._queue.queue if i.kind != "barrier")
+        return queued + len(self._pending_events) + self._inflight
 
     # ── worker thread ─────────────────────────────────────────────────
 
     def _run(self) -> None:
         """Main loop: drain queue, batch events, dispatch."""
-        pending_events: List[Event] = []
         last_flush = time.monotonic()
 
         while True:
@@ -258,25 +295,25 @@ class EventShipper:
                 item = self._queue.get(timeout=timeout)
             except queue.Empty:
                 # Time-based flush window elapsed; flush any pending events.
-                if pending_events:
-                    self._send_events(pending_events)
-                    pending_events = []
+                if self._pending_events:
+                    batch, self._pending_events = self._pending_events, []
+                    self._send_events(batch)
                 last_flush = time.monotonic()
                 continue
 
             if item.kind == "event":
                 assert isinstance(item.body, Event)
-                pending_events.append(item.body)
-                if len(pending_events) >= self._batch_size:
-                    self._send_events(pending_events)
-                    pending_events = []
+                self._pending_events.append(item.body)
+                if len(self._pending_events) >= self._batch_size:
+                    batch, self._pending_events = self._pending_events, []
+                    self._send_events(batch)
                     last_flush = time.monotonic()
             elif item.kind == "barrier":
                 # Flush any pending events FIRST so the barrier represents
                 # "everything submitted before me is done".
-                if pending_events:
-                    self._send_events(pending_events)
-                    pending_events = []
+                if self._pending_events:
+                    batch, self._pending_events = self._pending_events, []
+                    self._send_events(batch)
                     last_flush = time.monotonic()
                 assert isinstance(item.body, threading.Event)
                 item.body.set()
@@ -284,9 +321,9 @@ class EventShipper:
                 # Non-event item, flush pending events FIRST to preserve
                 # ordering (a PATCH must not arrive before its preceding
                 # events for the same execution).
-                if pending_events:
-                    self._send_events(pending_events)
-                    pending_events = []
+                if self._pending_events:
+                    batch, self._pending_events = self._pending_events, []
+                    self._send_events(batch)
                     last_flush = time.monotonic()
 
                 assert isinstance(item.body, Execution)
@@ -298,35 +335,42 @@ class EventShipper:
                     logger.warning("mesedi: unknown item kind %r", item.kind)
 
         # Final flush on shutdown.
-        if pending_events:
-            self._send_events(pending_events)
+        if self._pending_events:
+            batch, self._pending_events = self._pending_events, []
+            self._send_events(batch)
 
     # ── dispatchers with retry ────────────────────────────────────────
 
     def _send_create_execution(self, execution: Execution) -> None:
+        self._inflight = 1
         self._send_with_retry(
             method="POST",
             url="/executions",
             json_body=execution.start_payload(),
             description=f"create_execution {execution.execution_id}",
         )
+        self._inflight = 0
 
     def _send_update_execution(self, execution: Execution) -> None:
+        self._inflight = 1
         self._send_with_retry(
             method="PATCH",
             url=f"/executions/{execution.execution_id}",
             json_body=execution.end_payload(),
             description=f"update_execution {execution.execution_id}",
         )
+        self._inflight = 0
 
     def _send_events(self, events: List[Event]) -> None:
         body = [e.to_dict() for e in events]
+        self._inflight = len(events)
         self._send_with_retry(
             method="POST",
             url="/events",
             json_body=body,
             description=f"send_events batch of {len(events)}",
         )
+        self._inflight = 0
 
     def _send_with_retry(
         self,

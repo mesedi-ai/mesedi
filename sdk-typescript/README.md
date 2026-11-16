@@ -1,10 +1,15 @@
 # Mesedi TypeScript SDK
 
-**Status:** v0.7.1. Live on npm.
+**Status:** live on npm.
+
+**Hosted service:** when this version was released, in November 2026,
+Mesedi Cloud (`api.mesedi.ai`) was paused and in private beta, and its API
+did not answer requests. Point the SDK at a backend you run yourself with
+`baseUrl`; the self-host guide is at https://mesedi.ai/docs/self-host.
 
 The TypeScript companion to `sdk-python/`. Feature parity for the v1
 surface (`configure()`, `wrap()`, `tool()`, async event shipper,
-fail-open posture), built on Node 18+ native `fetch`,
+fail-open posture), built on Node 18+ `http`/`https`,
 `AsyncLocalStorage`, and `node:zlib` for opt-in gzip compression of
 request bodies above 1 KB. **Zero runtime dependencies.** Compresses
 or not transparently; small calls ship uncompressed as before.
@@ -66,9 +71,13 @@ For each `tool()`-decorated call (from inside a `wrap()`):
   sanitized args + status + result_summary (or exception fields).
 
 All HTTP is async via a single in-process queue + a `setInterval`
-drainer. Network failures during observation NEVER throw back into the
-wrapped agent. The SDK is fail-open: a Mesedi outage degrades to
-invisibility, not to broken production code.
+drainer. Network failures during observation never throw back into the
+wrapped agent: the SDK is fail-open, so a Mesedi outage never breaks your
+code or holds your process open. It is not silent, though. At exit the SDK
+waits at most `shutdownTimeoutMs` (default 5000; set it in `configure()`)
+for telemetry not yet delivered, then prints one `console.warn` saying how
+many items were not delivered and to which backend. `stats()` reports
+delivery counts at any time.
 
 ## Tool descriptions
 

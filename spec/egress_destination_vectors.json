@@ -1,0 +1,42 @@
+{
+  "_README": [
+    "Shared test vectors for egress destination normalization. Both SDKs",
+    "(sdk-python tests/test_egress_destination_vectors.py and sdk-typescript",
+    "src/egress_destination_vectors.test.ts) run every case below, so the two",
+    "cannot drift apart.",
+    "",
+    "The rule: a destination is reduced to host or host:port before it leaves",
+    "the process. Scheme, path, query, fragment and any user:password@ part are",
+    "dropped; a port survives only if it is all digits.",
+    "",
+    "Why: until 2026-11-15 both SDKs dropped scheme, path and query but kept",
+    "user:password@, so 'https://alice:s3cret@db.example.com:5432/x' was sent",
+    "as 'alice:s3cret@db.example.com:5432' while the docs said credentials",
+    "never leave the process (outside review finding D13).",
+    "",
+    "Every input containing SECRET must produce output without it; both test",
+    "files assert that for every case, not only the expected value."
+  ],
+  "cases": [
+    {"in": "https://api.example.com/v1/users?token=SECRET", "out": "api.example.com", "why": "path and query dropped"},
+    {"in": "http://10.2.3.4:8443/path#frag", "out": "10.2.3.4:8443", "why": "numeric port kept"},
+    {"in": "api.example.com", "out": "api.example.com", "why": "bare host unchanged"},
+    {"in": "api.example.com:443", "out": "api.example.com:443", "why": "bare host:port unchanged"},
+    {"in": "  https://x.io/  ", "out": "x.io", "why": "whitespace trimmed"},
+    {"in": "https://alice:SECRET@db.example.com:5432/x", "out": "db.example.com:5432", "why": "D13: user and password dropped"},
+    {"in": "postgres://u:SECRET@h:5432", "out": "h:5432", "why": "D13: database URL credentials dropped"},
+    {"in": "u:SECRET@h:5432", "out": "h:5432", "why": "credentials without a scheme dropped"},
+    {"in": "https://alice@h.example.com", "out": "h.example.com", "why": "a username alone is dropped too"},
+    {"in": "https://u:pa/SECRET@h", "out": "u", "why": "malformed: an unencoded slash in the password; the secret part never survives"},
+    {"in": "https://h.example.com:SECRET/x", "out": "h.example.com", "why": "a non-numeric port is not a port and is dropped"},
+    {"in": "https://registry.npmjs.org/@types/node", "out": "registry.npmjs.org", "why": "an @ in the path is not a credential"},
+    {"in": "https://h.example.com/x?u=a@b.com", "out": "h.example.com", "why": "an @ in the query is not a credential"},
+    {"in": "git@github.com:org/repo.git", "out": "github.com", "why": "scp-style git address"},
+    {"in": "mailto:alice@example.com", "out": "example.com", "why": "mail address reduced to its domain"},
+    {"in": "[::1]:8080", "out": "[::1]:8080", "why": "IPv6 with port"},
+    {"in": "https://[2001:db8::1]:443/x", "out": "[2001:db8::1]:443", "why": "IPv6 URL with port"},
+    {"in": "https://[2001:db8::1]/x", "out": "[2001:db8::1]", "why": "IPv6 URL without port"},
+    {"in": "redis:6379", "out": "redis:6379", "why": "service name with port"},
+    {"in": "", "out": "", "why": "empty stays empty"}
+  ]
+}

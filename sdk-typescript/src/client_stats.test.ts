@@ -8,18 +8,39 @@
  * drained, and the session concluded everything succeeded. Nothing in
  * the SDK could contradict it.
  *
- * fetch is stubbed per test; no network, no real backend.
+ * Each test answers from a local HTTP server on 127.0.0.1 with a fixed
+ * status; no outside network, no real backend. Until 2026-11-15 this
+ * stubbed global fetch; the shipper now sends through node:http (see
+ * _transport.ts), so a real local server exercises the real sender.
  */
+
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MesediClient } from "./client.js";
 import type { Event } from "./events.js";
 
-function makeClient(): MesediClient {
+let server: Server | null = null;
+
+/** Start a local server answering every request with `status` and `body`. */
+async function answerWith(status: number, body = "{}"): Promise<string> {
+  server = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(body);
+    });
+  });
+  await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+  return `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
+}
+
+function makeClient(baseUrl: string): MesediClient {
   return new MesediClient({
     apiKey: "mesedi_sk_stats_test",
-    baseUrl: "http://fake.invalid",
+    baseUrl,
     flushIntervalMs: 10,
     timeoutMs: 500,
   });
@@ -36,7 +57,6 @@ function fixtureEvent(): Event {
   } as Event;
 }
 
-const realFetch = globalThis.fetch;
 let warnSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
@@ -45,15 +65,18 @@ beforeEach(() => {
   warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
-afterEach(() => {
-  globalThis.fetch = realFetch;
+afterEach(async () => {
   warnSpy.mockRestore();
+  if (server) {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server!.close(() => r()));
+    server = null;
+  }
 });
 
 describe("TelemetryStats", () => {
   it("counts accepted submissions as delivered", async () => {
-    globalThis.fetch = vi.fn(async () => new Response("{}", { status: 200 }));
-    const c = makeClient();
+    const c = makeClient(await answerWith(200));
     c.submitEvent(fixtureEvent());
     expect(await c.flush(2000)).toBe(true);
     const st = c.stats();
@@ -63,13 +86,9 @@ describe("TelemetryStats", () => {
   });
 
   it("counts a 401 instead of only logging it", async () => {
-    globalThis.fetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ ok: false, error: "API key not recognized" }), {
-          status: 401,
-        }),
+    const c = makeClient(
+      await answerWith(401, JSON.stringify({ ok: false, error: "API key not recognized" })),
     );
-    const c = makeClient();
     c.submitEvent(fixtureEvent());
     expect(await c.flush(2000)).toBe(true); // fail-open: refused still drains
     const st = c.stats();
@@ -78,8 +97,7 @@ describe("TelemetryStats", () => {
   });
 
   it("keeps retry exhaustion separate from rejection", async () => {
-    globalThis.fetch = vi.fn(async () => new Response("boom", { status: 500 }));
-    const c = makeClient();
+    const c = makeClient(await answerWith(500, "boom"));
     c.submitEvent(fixtureEvent());
     await c.flush(15_000);
     const st = c.stats();
@@ -93,8 +111,7 @@ describe("TelemetryStats", () => {
   it("flush=true must not be read as delivery", async () => {
     // The pair of answers that started this: drained yes, arrived no.
     // stats() existing is what makes the combination detectable.
-    globalThis.fetch = vi.fn(async () => new Response("{}", { status: 401 }));
-    const c = makeClient();
+    const c = makeClient(await answerWith(401));
     c.submitEvent(fixtureEvent());
     const drained = await c.flush(2000);
     const st = c.stats();

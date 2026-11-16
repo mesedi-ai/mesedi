@@ -39,6 +39,10 @@ from mesedi.events import Event, Execution
 
 DEFAULT_BASE_URL = "https://api.mesedi.ai"
 DEFAULT_TIMEOUT = 10.0
+# How long the process waits at exit for undelivered telemetry. Bounded
+# so a Mesedi outage never holds the host program open; configurable so
+# a caller who prefers delivery to a fast exit can wait longer.
+DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 SCHEMA_VERSION = "1"
 
 # Module-level singleton client. Populated by mesedi.configure() and
@@ -65,6 +69,7 @@ class MesediClient:
         batch_size: int = 100,
         max_queue: int = 10_000,
         max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
+        shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
     ):
         if not api_key:
             raise ValueError("api_key is required")
@@ -94,6 +99,8 @@ class MesediClient:
             batch_size=batch_size,
             max_queue=max_queue,
             max_payload_bytes=max_payload_bytes,
+            shutdown_timeout=shutdown_timeout,
+            endpoint=self.base_url,
         )
 
     # ── context-manager sugar ─────────────────────────────────────────
@@ -107,8 +114,9 @@ class MesediClient:
     def close(self) -> None:
         """Shut down the shipper and close the underlying HTTP client.
 
-        Safe to call multiple times. The shipper drains its queue with
-        a timeout; any items not yet sent at the timeout are lost.
+        Safe to call multiple times. The shipper drains its queue for
+        up to ``shutdown_timeout`` seconds; any items not yet sent by
+        then are lost, and one warning says how many.
         """
         self._shipper.shutdown()
         self._http.close()
@@ -191,6 +199,7 @@ def configure(
     timeout: float = DEFAULT_TIMEOUT,
     flush_interval_ms: int = 250,
     batch_size: int = 100,
+    shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
 ) -> MesediClient:
     """Configure the module-level default client.
 
@@ -201,6 +210,11 @@ def configure(
     Calling configure() again replaces the previous default client; the
     previous client's shipper is shut down (with flush) before
     replacement.
+
+    ``shutdown_timeout`` is how many seconds the process waits at exit
+    for telemetry not yet delivered (default 5). Telemetry never holds
+    your program open longer than that; anything still undelivered is
+    reported in one warning naming the count and the backend.
     """
     global _default_client
 
@@ -228,6 +242,7 @@ def configure(
         timeout=timeout,
         flush_interval_ms=flush_interval_ms,
         batch_size=batch_size,
+        shutdown_timeout=shutdown_timeout,
     )
     return _default_client
 

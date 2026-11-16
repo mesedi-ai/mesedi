@@ -1,14 +1,15 @@
 /**
  * MesediClient, HTTP client + async event shipper for Node.
  *
- * Zero runtime dependencies: uses Node 18+ native `fetch` for HTTP,
- * `AsyncLocalStorage` for async context (in wrap()/tool()), and
+ * Zero runtime dependencies: uses Node's `http`/`https` for the
+ * shipper (see _transport.ts for why not fetch), `AsyncLocalStorage`
+ * for async context (in wrap()/tool()), and
  * `node:zlib` for opt-in gzip compression of request bodies above 1
  * KB. Below the threshold requests ship uncompressed exactly as
  * v0.2.0 did. No background threads (Node doesn't have them in the
  * Python sense); instead a `setInterval` timer drains the queue
- * periodically, and a `process.on("exit")` handler flushes any
- * remaining items at shutdown.
+ * periodically, and a `process.once("beforeExit")` handler flushes any
+ * remaining items at shutdown, waiting at most `shutdownTimeoutMs`.
  *
  * Why gzip (and why the Python SDK uses zstd): JavaScript zstd
  * encoders are heavy (WASM, ~750 KB, async init) and would break
@@ -28,6 +29,7 @@
  * the encoder throws, the body ships uncompressed instead.
  */
 
+import { sendUnref } from "./_transport.js";
 import { maybeCompress } from "./compress.js";
 import { DEFAULT_MAX_PAYLOAD_BYTES, maybeTruncate } from "./truncate.js";
 import {
@@ -40,6 +42,12 @@ import {
 
 export const DEFAULT_BASE_URL = "https://api.mesedi.ai";
 export const DEFAULT_TIMEOUT_MS = 10_000;
+/**
+ * How long the process waits at exit for undelivered telemetry. Bounded
+ * so a Mesedi outage never holds the host program open; configurable so
+ * a caller who prefers delivery to a fast exit can wait longer.
+ */
+export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
 export const SCHEMA_VERSION = "1";
 
 /**
@@ -76,6 +84,13 @@ export interface ConfigureOptions {
   baseUrl?: string;
   /** Per-request timeout in milliseconds. Default 10s. */
   timeoutMs?: number;
+  /**
+   * How long the process waits at exit for telemetry not yet delivered,
+   * in milliseconds. Default 5s. Telemetry never holds your program
+   * open longer than this; anything still undelivered is reported in
+   * one console.warn naming the count and the backend.
+   */
+  shutdownTimeoutMs?: number;
   /** How often the shipper drains the queue. Default 250ms. */
   flushIntervalMs?: number;
   /** Max items per /events POST batch. Default 100. */
@@ -106,6 +121,7 @@ export class MesediClient {
   readonly apiKey: string;
   readonly baseUrl: string;
   readonly timeoutMs: number;
+  readonly shutdownTimeoutMs: number;
   private readonly flushIntervalMs: number;
   private readonly batchSize: number;
   private readonly maxQueue: number;
@@ -129,6 +145,11 @@ export class MesediClient {
   private stopped = false;
   private timer: NodeJS.Timeout | null = null;
   private inflight: Promise<void> = Promise.resolve();
+  // Items of the send in progress, so an exit can count what it leaves
+  // behind; and the controllers that let shutdown() cut sends short.
+  private inflightItems = 0;
+  private abandoned = false;
+  private readonly controllers = new Set<AbortController>();
 
   constructor(opts: ConfigureOptions) {
     const apiKey = opts.apiKey ?? process.env["MESEDI_API_KEY"];
@@ -148,6 +169,7 @@ export class MesediClient {
     this.apiKey = apiKey;
     this.baseUrl = (opts.baseUrl ?? process.env["MESEDI_BASE_URL"] ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.shutdownTimeoutMs = opts.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
     this.flushIntervalMs = opts.flushIntervalMs ?? 250;
     this.batchSize = opts.batchSize ?? 100;
     this.maxQueue = opts.maxQueue ?? 10_000;
@@ -229,17 +251,58 @@ export class MesediClient {
   }
 
   /**
-   * Stop the shipper. Drains queue with a short blocking sleep; any
-   * items not sent in time are lost.
+   * Stop the shipper. Drains the queue for at most `timeoutMs`
+   * (default: the configured `shutdownTimeoutMs`, 5s). Items not sent
+   * by then are lost, and one console.warn says how many and where
+   * they were going. Until 2026-11-15 a backend that accepted
+   * connections but never answered held a one-second script open for
+   * 86 seconds (outside review finding R22).
    */
-  async shutdown(timeoutMs = 5_000): Promise<void> {
+  async shutdown(timeoutMs = this.shutdownTimeoutMs): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
-    await this.drainAll(timeoutMs);
+    let deadlineHit = false;
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    // Deliberately not unref'd: this timer is what keeps the process
+    // alive while it waits, and it is the only thing that does, so the
+    // wait can never exceed timeoutMs.
+    const deadline = new Promise<void>((resolve) => {
+      deadlineTimer = setTimeout(() => {
+        deadlineHit = true;
+        resolve();
+      }, timeoutMs);
+    });
+    const drain = this.inflight.then(() => this.drainAll(timeoutMs));
+    await Promise.race([drain, deadline]);
+    clearTimeout(deadlineTimer);
+    if (!deadlineHit) return;
+    const left = this.undelivered();
+    this.abandoned = true;
+    for (const c of this.controllers) c.abort();
+    if (left > 0) {
+      console.warn(
+        `mesedi: ${left} item(s) were not delivered to ${this.baseUrl} before exit: ` +
+          `the backend did not answer within ${(timeoutMs / 1000).toFixed(1)}s. ` +
+          `Pass a larger shutdownTimeoutMs to configure() to wait longer.`,
+      );
+    }
+  }
+
+  /**
+   * Items submitted but not yet delivered, rejected or given up on:
+   * still queued, waiting in the events batch, or in the send in
+   * progress. Barriers are not items.
+   */
+  private undelivered(): number {
+    return (
+      this.queue.filter((i) => i.kind !== "barrier").length +
+      this.pendingEvents.length +
+      this.inflightItems
+    );
   }
 
   // ── internals ────────────────────────────────────────────────────
@@ -316,25 +379,40 @@ export class MesediClient {
     const batch = this.pendingEvents.map(eventToWire);
     this.pendingEvents = [];
     this.lastFlush = Date.now();
-    await this.sendWithRetry("POST", "/events", batch, `send_events batch of ${batch.length}`);
+    this.inflightItems = batch.length;
+    try {
+      await this.sendWithRetry("POST", "/events", batch, `send_events batch of ${batch.length}`);
+    } finally {
+      this.inflightItems = 0;
+    }
   }
 
   private async sendCreateExecution(e: Execution): Promise<void> {
-    await this.sendWithRetry(
-      "POST",
-      "/executions",
-      executionStartPayload(e),
-      `create_execution ${e.execution_id}`,
-    );
+    this.inflightItems = 1;
+    try {
+      await this.sendWithRetry(
+        "POST",
+        "/executions",
+        executionStartPayload(e),
+        `create_execution ${e.execution_id}`,
+      );
+    } finally {
+      this.inflightItems = 0;
+    }
   }
 
   private async sendUpdateExecution(e: Execution): Promise<void> {
-    await this.sendWithRetry(
-      "PATCH",
-      `/executions/${e.execution_id}`,
-      executionEndPayload(e),
-      `update_execution ${e.execution_id}`,
-    );
+    this.inflightItems = 1;
+    try {
+      await this.sendWithRetry(
+        "PATCH",
+        `/executions/${e.execution_id}`,
+        executionEndPayload(e),
+        `update_execution ${e.execution_id}`,
+      );
+    } finally {
+      this.inflightItems = 0;
+    }
   }
 
   /**
@@ -356,10 +434,13 @@ export class MesediClient {
     const backoffs = [100, 500, 2000];
     let lastErr: unknown = null;
     for (let attempt = 0; attempt <= backoffs.length; attempt++) {
+      // After shutdown gave up waiting, stop: its warning already
+      // counted this send among the undelivered.
+      if (this.abandoned) return;
+      const controller = new AbortController();
+      this.controllers.add(controller);
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-        const resp = await fetch(this.baseUrl + path, {
+        const resp = await sendUnref(this.baseUrl + path, {
           method,
           headers: {
             Authorization: `Bearer ${this.apiKey}`,
@@ -368,9 +449,9 @@ export class MesediClient {
             ...extraHeaders,
           },
           body: finalBody,
+          timeoutMs: this.timeoutMs,
           signal: controller.signal,
         });
-        clearTimeout(timer);
         if (resp.status < 400) {
           this.deliveredCount++;
           return; // success
@@ -378,18 +459,22 @@ export class MesediClient {
         if (resp.status >= 400 && resp.status < 500) {
           // Permanent failure, retrying won't help.
           this.rejectedCount++;
-          const text = await resp.text().catch(() => "");
           console.warn(
-            `mesedi: ${description} rejected with ${resp.status}: ${text.slice(0, 200)}`,
+            `mesedi: ${description} rejected with ${resp.status}: ${resp.text.slice(0, 200)}`,
           );
           return;
         }
         lastErr = `HTTP ${resp.status}`;
       } catch (err) {
         lastErr = err;
+      } finally {
+        this.controllers.delete(controller);
       }
+      if (this.abandoned) return;
       if (attempt < backoffs.length) {
-        await new Promise<void>((r) => setTimeout(r, backoffs[attempt]));
+        // unref'd, like the socket: a retry pause never holds the
+        // process open on its own.
+        await new Promise<void>((r) => setTimeout(r, backoffs[attempt]).unref());
       }
     }
     this.exhaustedCount++;
