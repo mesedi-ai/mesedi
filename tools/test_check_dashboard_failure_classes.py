@@ -2,7 +2,7 @@
 """Tests for tools/check_dashboard_failure_classes.py.
 
 The dashboard's tier lists missed three failure classes because nothing
-compared them with the backend (outside review finding E16). These tests
+compared them with the backend (the outside review of 2026-11-15). These tests
 hold the check: a class in no tier fails, a class in two tiers fails, a
 tier naming an unknown class fails, and commented-out entries do not
 count.

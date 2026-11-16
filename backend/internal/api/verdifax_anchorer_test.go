@@ -429,5 +429,5 @@ func TestNewVerdifaxAnchorer_NilWhenUnconfigured(t *testing.T) {
 	}
 }
 
-// It must satisfy the interface the scheduler depends on.
-var _ CheckpointAnchorer = (*VerdifaxAnchorer)(nil)
+// No longer the scheduler's anchorer (2026-11-16): DirectRekorAnchorer
+// replaces it, and this file is deleted in the next commit.

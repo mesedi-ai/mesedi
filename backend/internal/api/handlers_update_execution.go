@@ -307,7 +307,7 @@ func (h *Handlers) HandleUpdateExecution(w http.ResponseWriter, r *http.Request)
 	// Until 2026-11-16 only crash_signature was checked, and the comment
 	// here said it was the exception type. The SDKs send a 16-hex hash
 	// there, so an entry such as "ValueError", which the docs tell people
-	// to write, could never match (outside review finding D2). Entries
+	// to write, could never match (the outside review of 2026-11-15). Entries
 	// keyed by the signature hash keep matching.
 	if patch.Status == events.StatusCrashed && patch.CrashSignature != "" {
 		if (patch.CrashType != "" && h.checkAllowlistAndMaybeSkip(r, authProjectID, "crashes", patch.CrashType)) ||

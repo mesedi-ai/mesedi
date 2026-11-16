@@ -130,6 +130,9 @@ Storage is in-memory today (single-instance only). Per-project overrides will ev
 | `MESEDI_PORT` | `--port` | `8080` | TCP port the HTTP server binds to |
 | `MESEDI_LOG_LEVEL` | `--log-level` | `info` | `debug` / `info` / `warn` / `error` |
 | `MESEDI_DB_URL` | `--db-url` | _(empty)_ | Postgres connection string (required for production) |
+| `MESEDI_ANCHOR_SIGNING_KEY` | | _(empty: chain off)_ | ECDSA P-256 private key (PEM) that signs each hourly checkpoint published on Sigstore's public log. A secret; publish only its public key |
+| `MESEDI_REKOR_URL` | | `https://rekor.sigstore.dev` | The Rekor log to anchor on |
+| `MESEDI_OTS_CALENDARS` | | public calendars | OpenTimestamps calendars for the Bitcoin anchor, comma separated; `off` turns it off |
 
 ## Directory layout
 

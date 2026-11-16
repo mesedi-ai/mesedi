@@ -193,7 +193,7 @@ assert_pattern "Team price = 99 (TS)" \
 assert_pattern "Hobby default cap = 200 (TS)" \
   "$TS_CONSTANTS" "defaultCapUSD:[[:space:]]*200" || true
 # And the Go value the billing scheduler applies when a project's cap is 0
-# (added 2026-11-16; before then 0 meant no cap, outside review finding E20).
+# (added 2026-11-16; before then 0 meant no cap, the outside review of 2026-11-15).
 assert_pattern "Hobby default cap = 200 (Go)" \
   "$GO_HOBBY_BILLING" "HobbyDefaultBillingCapUSD[[:space:]]*=[[:space:]]*200" || true
 

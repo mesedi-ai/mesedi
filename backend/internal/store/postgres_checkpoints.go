@@ -297,10 +297,10 @@ func (s *PostgresStore) GetCheckpointAnchor(
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT anchored_at, log_entry_id, ledger_backend, leaf_preimage,
-		       anchor_proof_json
+		       anchor_proof_json, anchor_kind
 		  FROM checkpoints WHERE seq = $1
 	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend, &a.LeafPreimage,
-		&a.AnchorProofJSON)
+		&a.AnchorProofJSON, &a.AnchorKind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CheckpointAnchor{}, ErrNotFound
 	}
@@ -335,10 +335,10 @@ func (s *PostgresStore) MarkCheckpointAnchored(
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE checkpoints
 		   SET anchored_at = $1, log_entry_id = $2, ledger_backend = $3,
-		       leaf_preimage = $4, anchor_proof_json = $5
-		 WHERE seq = $6 AND anchored_at IS NULL
+		       leaf_preimage = $4, anchor_proof_json = $5, anchor_kind = $6
+		 WHERE seq = $7 AND anchored_at IS NULL
 	`, anchoredAt.UTC(), a.LogEntryID, a.LedgerBackend, a.LeafPreimage,
-		a.AnchorProofJSON, int64(seq))
+		a.AnchorProofJSON, a.AnchorKind, int64(seq))
 	if err != nil {
 		return fmt.Errorf("mark checkpoint %d anchored: %w", seq, err)
 	}

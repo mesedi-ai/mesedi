@@ -156,6 +156,6 @@ func TestAnchorProofIsStoredVerbatim(t *testing.T) {
 	}
 	if !strings.Contains(got.AnchorProofJSON, "future_field") {
 		t.Error("a field Mesedi does not know about was dropped; the proof must " +
-			"survive whatever the log and Verdifax add to it later")
+			"survive whatever the log adds to it later")
 	}
 }

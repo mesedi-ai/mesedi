@@ -4,7 +4,7 @@ package api
 // real SQLite store, the real scheduler and the real export.
 //
 // Until then exports recomputed every digest from current records, so one
-// late event (outside review finding E3) or a retention purge (E4) made an
+// late event (the outside review of 2026-11-15) or a retention purge (E4) made an
 // honest export report tampering. Robert's decisions: store the anchored
 // digest; keep late events but flag them; keep retention, keep the digest;
 // backfill history only where it still folds; label the rest.
@@ -26,9 +26,10 @@ import (
 
 type digestTestAnchorer struct{ n int }
 
-func (a *digestTestAnchorer) AnchorCheckpoint(_ context.Context, _ attest.Checkpoint, _ int64) (store.CheckpointAnchor, error) {
+func (a *digestTestAnchorer) AnchorCheckpoint(_ context.Context, _ attest.Checkpoint, _ TreeHead) (store.CheckpointAnchor, error) {
 	a.n++
-	return store.CheckpointAnchor{Anchored: true, LogEntryID: "8000" + string(rune('0'+a.n)), LedgerBackend: "mock"}, nil
+	return store.CheckpointAnchor{Anchored: true, LogEntryID: "8000" + string(rune('0'+a.n)), LedgerBackend: "mock",
+		AnchorKind: store.AnchorKindMesediDirect}, nil
 }
 
 // preDigestStore drops the digests, as the code before migration 063 did,
@@ -283,7 +284,7 @@ func TestUnpublishedHeadIsLeftOutOfTheExport(t *testing.T) {
 
 type failingAnchorer struct{}
 
-func (failingAnchorer) AnchorCheckpoint(context.Context, attest.Checkpoint, int64) (store.CheckpointAnchor, error) {
+func (failingAnchorer) AnchorCheckpoint(context.Context, attest.Checkpoint, TreeHead) (store.CheckpointAnchor, error) {
 	return store.CheckpointAnchor{}, errAnchorUnavailable
 }
 

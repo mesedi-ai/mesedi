@@ -134,7 +134,7 @@ func (s *SQLiteStore) listCheckpointAnchorRange(
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT seq, anchored_at, log_entry_id, ledger_backend, leaf_preimage,
-		       anchor_proof_json
+		       anchor_proof_json, anchor_kind
 		  FROM checkpoints
 		 WHERE seq >= ? AND seq <= ?
 	`, from, to)
@@ -148,10 +148,10 @@ func (s *SQLiteStore) listCheckpointAnchorRange(
 		var (
 			seq                                   int64
 			anchoredAt, logEntryID, ledgerBackend sql.NullString
-			leafPreimage, anchorProof             sql.NullString
+			leafPreimage, anchorProof, anchorKind sql.NullString
 		)
 		if err := rows.Scan(&seq, &anchoredAt, &logEntryID, &ledgerBackend,
-			&leafPreimage, &anchorProof); err != nil {
+			&leafPreimage, &anchorProof, &anchorKind); err != nil {
 			return nil, fmt.Errorf("scan checkpoint anchor: %w", err)
 		}
 		a := CheckpointAnchor{
@@ -159,6 +159,7 @@ func (s *SQLiteStore) listCheckpointAnchorRange(
 			LedgerBackend:   ledgerBackend.String,
 			LeafPreimage:    leafPreimage.String,
 			AnchorProofJSON: anchorProof.String,
+			AnchorKind:      anchorKind.String,
 		}
 		if anchoredAt.Valid && anchoredAt.String != "" {
 			// parseFlexTime, not mustParseStoredTime: anchored_at is not

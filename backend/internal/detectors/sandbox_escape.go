@@ -308,7 +308,7 @@ func DetectSandboxEscapeWithCustom(
 ) (signature, matchedPatternID string, fired bool) {
 	// The first result of the function the pipeline calls, so there is
 	// one implementation and these tests exercise it. Until 2026-11-16
-	// this was a separate copy of the logic (outside review finding E27).
+	// this was a separate copy of the logic (the outside review of 2026-11-15).
 	matches := DetectSandboxEscapeAllMatchesWithCustom(toolPayloads, custom)
 	if len(matches) == 0 {
 		return "", "", false

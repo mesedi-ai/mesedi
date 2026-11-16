@@ -17,3 +17,11 @@ func seqRangeArgs(fromSeq, toSeq uint64) (int64, int64, error) {
 	}
 	return int64(fromSeq), int64(toSeq), nil
 }
+
+// checkedSeq converts one checkpoint sequence number the same way.
+func checkedSeq(seq uint64) (int64, error) {
+	if seq > math.MaxInt64 {
+		return 0, fmt.Errorf("checkpoint sequence %d exceeds the database's signed 64-bit limit", seq)
+	}
+	return int64(seq), nil
+}

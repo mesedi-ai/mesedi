@@ -99,7 +99,7 @@ func (s *PostgresStore) listCheckpointAnchorRange(
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT seq, anchored_at, log_entry_id, ledger_backend, leaf_preimage,
-		       anchor_proof_json
+		       anchor_proof_json, anchor_kind
 		  FROM checkpoints
 		 WHERE seq >= $1 AND seq <= $2
 	`, from, to)
@@ -115,9 +115,10 @@ func (s *PostgresStore) listCheckpointAnchorRange(
 			anchoredAt                sql.NullTime
 			logEntryID, ledgerBackend string
 			leafPreimage, anchorProof string
+			anchorKind                string
 		)
 		if err := rows.Scan(&seq, &anchoredAt, &logEntryID, &ledgerBackend,
-			&leafPreimage, &anchorProof); err != nil {
+			&leafPreimage, &anchorProof, &anchorKind); err != nil {
 			return nil, fmt.Errorf("scan checkpoint anchor: %w", err)
 		}
 		a := CheckpointAnchor{
@@ -125,6 +126,7 @@ func (s *PostgresStore) listCheckpointAnchorRange(
 			LedgerBackend:   ledgerBackend,
 			LeafPreimage:    leafPreimage,
 			AnchorProofJSON: anchorProof,
+			AnchorKind:      anchorKind,
 		}
 		if anchoredAt.Valid {
 			a.AnchoredAt = anchoredAt.Time.UTC()

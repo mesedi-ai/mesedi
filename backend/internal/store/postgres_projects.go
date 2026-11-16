@@ -596,7 +596,7 @@ func (s *PostgresStore) DeleteProjectCascade(
 			// 2026-11-16 any "does not exist" was, which also swallowed
 			// "column does not exist" (42703): the events statement named
 			// a column events never had, and Postgres skipped it silently
-			// while SQLite failed (outside review finding E1).
+			// while SQLite failed (the outside review of 2026-11-15).
 			if strings.Contains(msg, "SQLSTATE 42P01") {
 				// Missing relation: roll back this savepoint and move on.
 				if _, rbErr := tx.ExecContext(ctx,
@@ -676,7 +676,7 @@ var postgresProjectCascadeStatements = []string{
 	// events has no project_id column; it is reached through its
 	// execution. Until 2026-11-16 this read "WHERE project_id" and
 	// failed on both databases, so no account could be closed
-	// (outside review finding E1).
+	// (the outside review of 2026-11-15).
 	`DELETE FROM events WHERE execution_id IN (SELECT execution_id FROM executions WHERE project_id = $1)`,
 	// Customer configuration and logs with no foreign key to
 	// projects, so nothing removed them on close. Robert's decision,

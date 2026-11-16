@@ -357,7 +357,7 @@ func TestReviewedSignaturesReachTheirPlaybook(t *testing.T) {
 // Playbook pages are customer-facing text, so the house rule against em
 // dashes applies. Nine of them shipped in record_integrity's playbook
 // before 2026-11-16 because nothing checked this content (outside review
-// finding E25).
+// the outside review of 2026-11-15).
 func TestPlaybookContentHasNoEmDashes(t *testing.T) {
 	entries, err := fs.ReadDir(content, "content")
 	if err != nil {

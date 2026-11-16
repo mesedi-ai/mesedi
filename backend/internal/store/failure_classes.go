@@ -5,7 +5,7 @@ package store
 //
 // Until 2026-11-16 each consumer kept its own copy: the webhook filter
 // missed environment_misapprehension and covert_coordination (outside
-// review finding E8), and the severity defaults, the detector coverage
+// the outside review of 2026-11-15), and the severity defaults, the detector coverage
 // gate and the dashboard lagged too (E16). Consumers now build from this
 // list or are tested against it, and TestAllFailureClassesListsEveryConstant
 // fails when a FailureClass constant is added without being listed here.

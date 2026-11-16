@@ -313,8 +313,7 @@ func (s *SQLiteStore) GetCheckpointLeaves(
 // predecessor is attest.ZeroHash.
 //
 // Scoped to one project, and the scope is in the WHERE clause rather
-// than applied after the read, the same discipline as the attestation
-// reads in verdifax-orchestrator. Verified against its stored hash for
+// than applied after the read. Verified against its stored hash for
 // the same reason as GetCheckpointLeaves: this value feeds the NEXT
 // leaf's PrevLeafHash, so an altered row here would silently corrupt
 // every leaf that follows it, and the corruption would surface much
@@ -372,10 +371,10 @@ func (s *SQLiteStore) GetCheckpointAnchor(
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT anchored_at, log_entry_id, ledger_backend, leaf_preimage,
-		       anchor_proof_json
+		       anchor_proof_json, anchor_kind
 		  FROM checkpoints WHERE seq = ?
 	`, int64(seq)).Scan(&anchoredAt, &a.LogEntryID, &a.LedgerBackend, &a.LeafPreimage,
-		&a.AnchorProofJSON)
+		&a.AnchorProofJSON, &a.AnchorKind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CheckpointAnchor{}, ErrNotFound
 	}
@@ -417,15 +416,15 @@ func (s *SQLiteStore) MarkCheckpointAnchored(
 	// not supply one, and refusing would turn an unverifiable anchor
 	// into a stalled chain, strictly worse, because the chain stops
 	// while the anchor it refused was still real. The caller is the
-	// right place to insist (see VerdifaxAnchorer), and the export
+	// right place to insist (see DirectRekorAnchorer), and the export
 	// reports an empty preimage as unverifiable rather than hiding it.
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE checkpoints
 		   SET anchored_at = ?, log_entry_id = ?, ledger_backend = ?,
-		       leaf_preimage = ?, anchor_proof_json = ?
+		       leaf_preimage = ?, anchor_proof_json = ?, anchor_kind = ?
 		 WHERE seq = ? AND anchored_at IS NULL
 	`, anchoredAt.UTC(), a.LogEntryID, a.LedgerBackend, a.LeafPreimage,
-		a.AnchorProofJSON, int64(seq))
+		a.AnchorProofJSON, a.AnchorKind, int64(seq))
 	if err != nil {
 		return fmt.Errorf("mark checkpoint %d anchored: %w", seq, err)
 	}

@@ -9,7 +9,7 @@ import (
 
 // Every failure class a detector can emit must be subscribable by webhook.
 // Until 2026-11-16 the filter missed environment_misapprehension and
-// covert_coordination (outside review finding E8).
+// covert_coordination (the outside review of 2026-11-15).
 func TestWebhookFilterAcceptsEveryFailureClass(t *testing.T) {
 	for _, c := range store.AllFailureClasses {
 		if _, ok := validFailureClasses[c]; !ok {

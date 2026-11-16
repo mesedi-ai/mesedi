@@ -227,7 +227,7 @@ const RecordIntegritySigAfterDigest = "record_integrity:events_after_anchoring"
 // signalEventsAfterDigest groups every execution in the batch that now
 // holds events which arrived after its digest was stored. Those events are
 // kept but sit outside the anchored record (Robert's decision, 2026-11-16;
-// outside review finding E3), and the customer is told so through the
+// the outside review of 2026-11-15), and the customer is told so through the
 // record_integrity class rather than finding out from a failed export.
 // Best effort: a grouping error is logged and the ingest still succeeds.
 //

@@ -490,7 +490,7 @@ func buildHobbyChargeDescription(overUnits int64, analysisCount int) string {
 // none of its own (billing_cap_usd = 0). Must equal
 // TIER_CONSTANTS.hobby.defaultCapUSD in mesedi-web and the column default
 // in migration 019; tools/check-tier-constants.sh checks the Go and
-// TypeScript values (added 2026-11-16, finding E20). It lives here, beside
+// TypeScript values (added 2026-11-16, the outside review of 2026-11-15). It lives here, beside
 // the one function that applies it, rather than in billing.go, which is
 // already past the 1,000-line limit.
 const HobbyDefaultBillingCapUSD = 200.0
@@ -499,7 +499,7 @@ const HobbyDefaultBillingCapUSD = 200.0
 // cap of 0 means "use the default", as the pricing page ("defaults to
 // $200") and HandleUpdateBillingCap both say. Until 2026-11-16 this
 // scheduler read 0 as no cap at all, so a customer who cleared the field
-// could be billed without limit (outside review finding E20).
+// could be billed without limit (the outside review of 2026-11-15).
 func effectiveHobbyCapUSD(stored float64) float64 {
 	if stored > 0 {
 		return stored

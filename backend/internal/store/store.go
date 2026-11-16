@@ -880,8 +880,8 @@ type CheckpointAnchor struct {
 	// path from "this checkpoint" to "that log entry" at all.
 	//
 	// Empty on anchors recorded before 2026-09-04, and unrecoverable:
-	// Verdifax generated the nonce at request time and discarded it, so
-	// nothing can reconstruct those preimages. Empty means "this anchor
+	// the anchoring service used then generated the nonce at request time
+	// and discarded it, so nothing can reconstruct those preimages. Empty means "this anchor
 	// cannot be verified", never "not applicable".
 	LeafPreimage string
 
@@ -891,9 +891,9 @@ type CheckpointAnchor struct {
 	//
 	// A JSON envelope with three members, log_id, entry_body and
 	// inclusion_proof, carried as opaque bytes rather than parsed into
-	// typed fields, because it is Verdifax's and Sigstore's evidence
-	// passing through Mesedi, not Mesedi's own data. Re-encoding it here
-	// would silently drop anything either of them adds later.
+	// typed fields, because it is the log's evidence passing through
+	// Mesedi, not Mesedi's own data. Re-encoding it here would silently
+	// drop anything the log adds later.
 	//
 	// Empty means offline verification is not possible for this
 	// checkpoint. That is weaker than an empty LeafPreimage, which means
@@ -901,7 +901,23 @@ type CheckpointAnchor struct {
 	// no proof can still be checked by fetching the entry from the log.
 	// Readers must not collapse the two into "unverified".
 	AnchorProofJSON string
+
+	// AnchorKind says which path put the checkpoint on the log, and so
+	// whose key signed the entry: AnchorKindMesediDirect or, for every
+	// anchor made before 2026-11-16, AnchorKindVerdifaxAttest (migration
+	// 064). Empty only on a checkpoint not yet anchored.
+	AnchorKind string
 }
+
+// Anchor kinds. See CheckpointAnchor.AnchorKind.
+const (
+	// AnchorKindMesediDirect: Mesedi signed the log entry with its own key
+	// and submitted it to the log itself.
+	AnchorKindMesediDirect = "mesedi-direct"
+	// AnchorKindVerdifaxAttest: the entry was submitted, and signed, by a
+	// third-party anchoring service. Every anchor before 2026-11-16.
+	AnchorKindVerdifaxAttest = "verdifax-attest"
+)
 
 // Store is the abstract persistence interface. Phase 1.5 minimal surface;
 // will grow as later phases add read-side queries (list executions,
@@ -928,6 +944,7 @@ type Store interface {
 	BillingLifecycleStore
 	CheckpointStore
 	ExecutionDigestStore
+	CheckpointTimestampStore
 
 	// Lifecycle.
 	Close() error

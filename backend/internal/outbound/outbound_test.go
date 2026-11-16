@@ -20,6 +20,14 @@ var declared = map[string]string{
 	"mesedi.ai":     "own",
 	"app.mesedi.ai": "own",
 
+	// Public anchors (since 2026-11-16). Each receives only the hourly
+	// checkpoint hash, a fingerprint over every project's leaf that reveals
+	// nothing about any customer, and publishes it. Not subprocessors.
+	"rekor.sigstore.dev":                    "public anchor: Sigstore Rekor log",
+	"alice.btc.calendar.opentimestamps.org": "public anchor: OpenTimestamps calendar",
+	"bob.btc.calendar.opentimestamps.org":   "public anchor: OpenTimestamps calendar",
+	"finney.calendar.eternitywall.com":      "public anchor: OpenTimestamps calendar",
+
 	// Webhook destinations the customer configures; recognised only to
 	// format the payload for that service.
 	"hooks.slack.com":         "customer destination",

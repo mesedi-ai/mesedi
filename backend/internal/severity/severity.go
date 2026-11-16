@@ -78,7 +78,7 @@ func Default(failureClass string) Severity {
 // HasExplicitDefault reports whether a class has its own entry rather than
 // falling through to warning. Every failure class must have one; a test
 // checks it against store.AllFailureClasses (added 2026-11-16, when
-// record_integrity was found to fall through, outside review finding E16).
+// record_integrity was found to fall through, the outside review of 2026-11-15).
 func HasExplicitDefault(failureClass string) bool {
 	_, ok := classDefaults[strings.ToLower(failureClass)]
 	return ok
@@ -144,7 +144,7 @@ var classDefaults = map[string]Severity{
 //   - SDK "critical" → Critical (direct match)
 //   - SDK "info"     → Info (added 2026-11-16; the docs told people to
 //     send it, and both SDKs accept it from Python 0.9.0 and
-//     TypeScript 0.11.0, outside review finding D19)
+//     TypeScript 0.11.0, the outside review of 2026-11-15)
 //   - anything else → Warning (safe fallback)
 //
 // Future detectors that gain per-event severity hints reuse this

@@ -15,10 +15,10 @@ import (
 // error, exit 0. The image builds, the container starts, /health answers,
 // and the field is the dev default.
 //
-// That is not hypothetical. In verdifax-orchestrator on 2026-09-04 the
-// module was renamed and the Dockerfile kept stamping the old symbol path.
-// Eleven commits shipped claiming unknown provenance before a human noticed
-// by reading /health by hand.
+// That is not hypothetical. In another Go service on 2026-09-04 the module
+// was renamed and the Dockerfile kept stamping the old symbol path. Eleven
+// commits shipped claiming unknown provenance before a human noticed by
+// reading /health by hand.
 //
 // This repo is now one commit into the same arrangement, so the invariant is
 // pinned before it has a chance to rot: the Dockerfile's -X target must name

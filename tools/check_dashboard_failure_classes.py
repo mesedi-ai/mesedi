@@ -5,7 +5,7 @@ The dashboard (mesedi-web, dashboard/lib/failureClass.ts) decides per
 failure class whether a failure group's header shows tokens, cost or
 neither. Its tier lists were kept by hand and, by 15 November 2026,
 missed environment_misapprehension, covert_coordination and
-record_integrity (outside review finding E16). Nothing compared them
+record_integrity (the outside review of 2026-11-15). Nothing compared them
 with the backend, so new classes fell silently into the default.
 
 This check reads the backend's classes from store.go and the three tier

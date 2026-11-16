@@ -41,7 +41,7 @@ jobs:
     # A real Postgres 17 (Neon's version) for the store tests that set
     # MESEDI_TEST_POSTGRES_DSN. Until 2026-11-16 no Postgres path ran in CI,
     # and the account-closure cascade silently skipped a broken statement
-    # on Postgres while SQLite failed (outside review findings E1, E15).
+    # on Postgres while SQLite failed (the outside review of 2026-11-15).
     # A throwaway container with trust auth: there is no password to leak.
     services:
       postgres:

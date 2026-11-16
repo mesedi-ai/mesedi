@@ -72,7 +72,7 @@ func (h *Handlers) buildChainExport(
 	// not yet published. That is normal for seconds after each hour, and
 	// for as long as anchoring is stalled; a pending anchor is not
 	// tampering, and until 2026-11-16 the verifier reported it as a failure
-	// (outside review finding E19). Only the chain head can be unpublished,
+	// (the outside review of 2026-11-15). Only the chain head can be unpublished,
 	// because the scheduler builds nothing on an unanchored checkpoint, so
 	// an unpublished checkpoint in the middle still fails verification.
 	for len(cps) > 0 && cps[len(cps)-1].Anchor.LogEntryID == "" {
@@ -88,6 +88,11 @@ func (h *Handlers) buildChainExport(
 	leavesBySeq, err := h.Store.ListCheckpointLeavesRange(ctx, fromSeq, toSeq)
 	if err != nil {
 		return attest.ChainExport{}, err
+	}
+	// Each checkpoint's OpenTimestamps receipts, the second anchor.
+	timestampsBySeq, err := h.Store.ListCheckpointTimestamps(ctx, fromSeq, toSeq)
+	if err != nil {
+		return attest.ChainExport{}, fmt.Errorf("list checkpoint timestamps: %w", err)
 	}
 
 	// The cadence is measured from the data rather than assumed to be an
@@ -122,6 +127,11 @@ func (h *Handlers) buildChainExport(
 			LedgerBackend: ac.Anchor.LedgerBackend,
 			LeafPreimage:  ac.Anchor.LeafPreimage,
 			AnchorProof:   rawJSONOrNil(ac.Anchor.AnchorProofJSON),
+			AnchorKind:    ac.Anchor.AnchorKind,
+		}
+		for _, r := range timestampsBySeq[cp.Seq] {
+			iv.Timestamps = append(iv.Timestamps, attest.ExportedTimestamp{
+				Calendar: r.CalendarURL, Receipt: r.Receipt, Complete: r.Complete})
 		}
 
 		all := leavesBySeq[cp.Seq]
@@ -177,7 +187,7 @@ func (h *Handlers) buildChainExport(
 //
 // The STORED digests (migration 063, 2026-11-16): the values anchored
 // with the checkpoint. Until then this recomputed them from current
-// events, so one late event (outside review finding E3) or a retention
+// events, so one late event (the outside review of 2026-11-15) or a retention
 // purge (E4) made an honest export report tampering. Executions whose
 // records retention has since deleted keep their stored digest and are
 // marked records_deleted.

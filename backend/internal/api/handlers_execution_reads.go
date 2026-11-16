@@ -174,9 +174,9 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 // hammer the detail page they can afford to hammer this, and the
 // answer to both is the same project-scoped limit.
 //
-// Revisit the moment the Verdifax anchor lands: THAT path costs money
-// per submission to a public transparency log, and a per-project cap
-// belongs on it rather than here.
+// The checkpoint scheduler, not this endpoint, publishes to the public
+// log, once an hour for all projects together, so no per-project cap is
+// needed on that path either.
 func (h *Handlers) HandleGetExecutionDigest(w http.ResponseWriter, r *http.Request) {
 	executionID := r.PathValue("id")
 	if executionID == "" {
@@ -210,7 +210,7 @@ func (h *Handlers) HandleGetExecutionDigest(w http.ResponseWriter, r *http.Reque
 	// arrived after the execution's digest was stored with its checkpoint
 	// (2026-11-16). Those are kept but sit outside the anchored record, so
 	// including them would produce a root, and proofs, that the published
-	// checkpoint never committed to (outside review finding E3).
+	// checkpoint never committed to (the outside review of 2026-11-15).
 	evts, err := h.Store.ListDigestEventsForExecution(r.Context(), executionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list events failed: "+err.Error())

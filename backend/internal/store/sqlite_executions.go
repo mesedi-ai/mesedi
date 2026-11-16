@@ -268,9 +268,9 @@ func (s *SQLiteStore) SaveEvents(ctx context.Context, batch []events.Event) erro
 	// after_digest: an event for an execution whose digest is already
 	// stored arrived after its record was anchored. It is kept but sits
 	// outside the anchored record (Robert's decision, 2026-11-16; outside
-	// review finding E3). Timestamps are truncated to microseconds, the
+	// the outside review of 2026-11-15). Timestamps are truncated to microseconds, the
 	// precision Postgres keeps, so the stored value is the hashed value on
-	// both databases (finding E12).
+	// both databases (the outside review of 2026-11-15).
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO events (event_id, execution_id, event_type, sequence, timestamp, duration_ms, payload, after_digest)
 		VALUES (?, ?, ?, ?, ?, ?, ?, EXISTS (SELECT 1 FROM execution_digests WHERE execution_id = ?))

@@ -5,7 +5,7 @@ package store
 // Until then every execution's digest was computed while building its
 // hour's tenant leaf and thrown away; exports recomputed it from the
 // events that existed at export time. One late event (outside review
-// finding E3) or a retention purge (E4) then made an honest export report
+// the outside review of 2026-11-15) or a retention purge (E4) then made an honest export report
 // tampering. Now the anchored value is stored with its checkpoint, the
 // export reads it, and retention can delete the records while the chain
 // still vouches for them (Robert's decisions, 2026-11-16).
@@ -31,7 +31,7 @@ type ExecutionDigest struct {
 	CheckpointSeq uint64
 	// Position is the execution's index in the fold that produced the
 	// leaf's IntervalRoot. Stored so the export never depends on query
-	// order or database collation (outside review finding E28).
+	// order or database collation (the outside review of 2026-11-15).
 	Position  int
 	Root      string
 	LeafCount int
@@ -133,7 +133,7 @@ func validateDigestsFold(seq uint64, projectID, intervalRoot string, executionCo
 // ── Shared implementation ─────────────────────────────────────────────
 //
 // One body for both databases, so the two cannot drift (outside review
-// finding E15 is what drift between them cost). The dialect differences
+// the outside review of 2026-11-15 is what drift between them cost). The dialect differences
 // are placeholders and the boolean column.
 
 type digestRepo struct {

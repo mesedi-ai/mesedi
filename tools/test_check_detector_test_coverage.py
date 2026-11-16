@@ -2,7 +2,7 @@
 """Tests for tools/check_detector_test_coverage.py's two file readers.
 
 The gate's hand-kept class list missed two classes until 2026-11-16
-(outside review finding E16); it now reads store.go. On the same day
+(the outside review of 2026-11-15); it now reads store.go. On the same day
 detector tests began to live in more than one file. These tests hold both:
 the class list comes from store.go, and the gate reads every
 test_detectors*.py file, with the canonical one first.

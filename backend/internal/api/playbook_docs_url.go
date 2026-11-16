@@ -28,7 +28,7 @@ var playbookDocSlugs = map[string]string{
 	"sandbox_escape": "security/sandbox_escape",
 	// The two egress-derived classes live in the security section too.
 	// Until 2026-11-16 they fell to the observability default and linked
-	// to pages that do not exist (outside review finding D54).
+	// to pages that do not exist (the outside review of 2026-11-15).
 	"environment_misapprehension": "security/environment_misapprehension",
 	"covert_coordination":         "security/covert_coordination",
 }

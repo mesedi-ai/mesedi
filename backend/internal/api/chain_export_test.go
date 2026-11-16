@@ -60,6 +60,14 @@ func (s *exportStubStore) ListCheckpointRange(
 	return out, nil
 }
 
+// No OpenTimestamps receipts: the export tests here are about the chain
+// and its leaves; receipts in exports are tested in checkpoint_timestamper_test.go.
+func (s *exportStubStore) ListCheckpointTimestamps(
+	_ context.Context, _, _ uint64,
+) (map[uint64][]store.CheckpointTimestamp, error) {
+	return map[uint64][]store.CheckpointTimestamp{}, nil
+}
+
 func (s *exportStubStore) ListCheckpointLeavesRange(
 	_ context.Context, fromSeq, toSeq uint64,
 ) (map[uint64][]attest.TenantLeaf, error) {

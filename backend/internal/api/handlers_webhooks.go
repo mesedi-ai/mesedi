@@ -30,7 +30,7 @@ var validFailureClasses = func() map[string]struct{} {
 	// Built from store.AllFailureClasses since 2026-11-16. The hand-kept
 	// map this replaced had drifted twice; the second time it was missing
 	// environment_misapprehension and covert_coordination, so subscribing
-	// to either was rejected as unknown (outside review finding E8).
+	// to either was rejected as unknown (the outside review of 2026-11-15).
 	m := make(map[string]struct{}, len(store.AllFailureClasses)) // max: fixed, one entry per failure class
 	for _, c := range store.AllFailureClasses {
 		m[c] = struct{}{}

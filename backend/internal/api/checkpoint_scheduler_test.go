@@ -190,10 +190,10 @@ type fakeAnchorer struct {
 }
 
 func (a *fakeAnchorer) AnchorCheckpoint(
-	_ context.Context, cp attest.Checkpoint, previousTreeSize int64,
+	_ context.Context, cp attest.Checkpoint, previous TreeHead,
 ) (store.CheckpointAnchor, error) {
 	a.calls++
-	a.prevSizes = append(a.prevSizes, previousTreeSize)
+	a.prevSizes = append(a.prevSizes, previous.Size)
 	if a.fail != nil {
 		return store.CheckpointAnchor{}, a.fail
 	}

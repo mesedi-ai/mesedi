@@ -4,7 +4,7 @@ package api
 // crash_type (from 2026-11-16), and still matches the crash signature hash.
 // Until then only the hash was compared, so an entry such as "ValueError",
 // which the docs tell people to write, could never match (outside review
-// finding D2).
+// the outside review of 2026-11-15).
 
 import (
 	"context"

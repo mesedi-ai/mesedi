@@ -51,20 +51,27 @@ import (
 // CheckpointAnchorer submits a checkpoint hash to a transparency log
 // and returns where it landed.
 //
-// An interface rather than a direct Verdifax call for two reasons. The
-// caller does not exist yet, and this worker must be testable without
-// spending money, every accepted submission in rekor mode is a real
-// Sigstore entry with a real cost.
+// An interface rather than a direct log call, so this worker is testable
+// without publishing anything: every accepted submission to the real log
+// is a permanent public entry. DirectRekorAnchorer is the implementation.
 type CheckpointAnchorer interface {
 	// AnchorCheckpoint submits cp.Hash and returns the log entry id and
 	// backend name. An error means NOT anchored; the caller must not
 	// treat a partial result as success.
-	// previousTreeSize is the log's tree size when checkpoint Seq-1 was
+	// previous is the log's tree head (size and root) when checkpoint
+	// Seq-1 was
 	// anchored, or zero when that is unknown or does not exist. Passing
 	// it lets the anchorer ask the log to prove it only grew, which is
 	// the one question no inclusion proof can answer.
 	AnchorCheckpoint(ctx context.Context, cp attest.Checkpoint,
-		previousTreeSize int64) (store.CheckpointAnchor, error)
+		previous TreeHead) (store.CheckpointAnchor, error)
+}
+
+// TreeHead is the log's tree size and root (hex) at an anchor, as the
+// log's signed checkpoint states them. Zero when unknown.
+type TreeHead struct {
+	Size int64
+	Root string
 }
 
 // Defaults. Interval is deliberately NOT configurable at runtime: a
@@ -103,6 +110,11 @@ type CheckpointScheduler struct {
 	// deployment with no transparency log configured: it must not
 	// silently produce an unanchored chain that looks complete.
 	Anchorer CheckpointAnchorer
+
+	// Timestamper gives each anchored checkpoint a second public anchor
+	// through OpenTimestamps. Run at the end of every tick, after the
+	// chain's own work, and never able to stall it. Nil means none.
+	Timestamper *CheckpointTimestamper
 
 	// TickInterval governs how often the worker wakes. Default 5
 	// minutes when zero, more often than the checkpoint interval so a
@@ -219,6 +231,18 @@ func (s *CheckpointScheduler) tick(ctx context.Context) error {
 		s.Logger.Info("checkpoint_scheduler: sealed executions", "count", sealed)
 	}
 
+	if err := s.closeIntervals(ctx, now); err != nil {
+		return err
+	}
+	if s.Timestamper != nil {
+		s.Timestamper.Run(ctx)
+	}
+	return nil
+}
+
+// closeIntervals closes as many fully-elapsed intervals as one tick
+// allows.
+func (s *CheckpointScheduler) closeIntervals(ctx context.Context, now time.Time) error {
 	for i := 0; i < maxIntervalsPerTick; i++ {
 		done, err := s.closeNextInterval(ctx, now)
 		if err != nil {
@@ -303,7 +327,7 @@ func (s *CheckpointScheduler) closeNextInterval(ctx context.Context, now time.Ti
 
 	// Store every execution's digest with its checkpoint, so exports read
 	// the anchored value instead of recomputing it from records that may
-	// since have changed or been purged (findings E3, E4).
+	// since have changed or been purged (the outside review of 2026-11-15).
 	for project := range digests {
 		for i := range digests[project] {
 			digests[project][i].CheckpointSeq = cp.Seq
@@ -517,7 +541,7 @@ func (s *CheckpointScheduler) BackfillDigestHistory(ctx context.Context) (stored
 	}
 }
 
-// previousTreeSize reports how large the log's tree was when checkpoint
+// previousTreeHead reports the log's tree size and root when checkpoint
 // seq-1 was anchored, so this anchor can ask the log to prove it only
 // grew since.
 //
@@ -528,22 +552,20 @@ func (s *CheckpointScheduler) BackfillDigestHistory(ctx context.Context) (stored
 // happen, and this is a strictly additional question about one that
 // did. A zero here costs one unproven link in the report, which the
 // verifier names; an error here would cost the interval.
-func (s *CheckpointScheduler) previousTreeSize(ctx context.Context, seq uint64) int64 {
+func (s *CheckpointScheduler) previousTreeHead(ctx context.Context, seq uint64) TreeHead {
 	if seq <= 1 {
-		return 0
+		return TreeHead{}
 	}
 	prev, err := s.Store.GetCheckpointAnchor(ctx, seq-1)
 	if err != nil || prev.AnchorProofJSON == "" {
-		return 0
+		return TreeHead{}
 	}
 	// TreeSize carries NO json tag, deliberately, and for the same
 	// reason wireInclusionProof in the standalone verifier's offline.go
 	// (github.com/mesedi-ai/mesedi-verify) carries
-	// none: Verdifax's inclusion proof struct has no tags either, so on
-	// the wire its keys are whatever Go's default marshalling produces,
-	// which is PascalCase. Leaving the tag off lets encoding/json fall
-	// back to case-insensitive matching, so this keeps working if that
-	// struct ever gains explicit lower-case tags.
+	// none: proofs stored before 2026-11-16 use PascalCase keys and
+	// Rekor's own use camelCase. Leaving the tag off lets encoding/json
+	// fall back to case-insensitive matching, so both read.
 	//
 	// A pinned tag of "TreeSize" would also work today and is what this
 	// had first, but it is not snake_case and the audit is right to
@@ -552,15 +574,16 @@ func (s *CheckpointScheduler) previousTreeSize(ctx context.Context, seq uint64) 
 	var env struct {
 		InclusionProof struct {
 			TreeSize int64
+			RootHash string
 		} `json:"inclusion_proof"`
 	}
 	if err := json.Unmarshal([]byte(prev.AnchorProofJSON), &env); err != nil {
 		s.Logger.Warn("checkpoint_scheduler: previous anchor proof would not parse, so "+
 			"this checkpoint cannot ask the log to prove it only grew",
 			"seq", seq, "previous_seq", seq-1, "error", err.Error())
-		return 0
+		return TreeHead{}
 	}
-	return env.InclusionProof.TreeSize
+	return TreeHead{Size: env.InclusionProof.TreeSize, Root: env.InclusionProof.RootHash}
 }
 
 // anchor submits a checkpoint and records where it landed.
@@ -572,7 +595,7 @@ func (s *CheckpointScheduler) anchor(ctx context.Context, cp attest.Checkpoint) 
 				"the next interval cannot be built until this one reaches a log")
 		return fmt.Errorf("no anchorer configured")
 	}
-	anchor, err := s.Anchorer.AnchorCheckpoint(ctx, cp, s.previousTreeSize(ctx, cp.Seq))
+	anchor, err := s.Anchorer.AnchorCheckpoint(ctx, cp, s.previousTreeHead(ctx, cp.Seq))
 	if err != nil {
 		s.Logger.Warn("checkpoint_scheduler: anchor failed, chain stalled",
 			"seq", cp.Seq, "error", err.Error())
@@ -594,10 +617,10 @@ func (s *CheckpointScheduler) anchor(ctx context.Context, cp attest.Checkpoint) 
 	entryID, backend := anchor.LogEntryID, anchor.LedgerBackend
 	if err := s.Store.MarkCheckpointAnchored(ctx, cp.Seq, anchor, s.now()); err != nil {
 		// Anchored in the log but not recorded here. The next pass sees
-		// it as unanchored and submits again, producing a second entry.
-		// Wasteful, not incorrect: two entries for one checkpoint is
-		// visible in the log, whereas recording an entry we failed to
-		// write would be a claim with nothing behind it.
+		// it as unanchored and submits again. Since 2026-11-16 that costs
+		// nothing: the direct anchorer's signature is deterministic, so
+		// the resubmission is the identical entry, which the log refuses
+		// as a duplicate and the anchorer adopts.
 		s.Logger.Error("checkpoint_scheduler: anchored but not recorded",
 			"seq", cp.Seq, "log_entry_id", entryID, "error", err.Error())
 		return err

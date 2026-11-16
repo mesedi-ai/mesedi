@@ -65,7 +65,7 @@ def _store_failure_classes() -> List[str]:
     Read from the source since 2026-11-16. The hand-kept list this replaced
     had 21 entries for 23 classes and no entry for
     environment_misapprehension or covert_coordination (outside review
-    finding E16). The Go side holds the same set in store.AllFailureClasses,
+    the outside review of 2026-11-15). The Go side holds the same set in store.AllFailureClasses,
     with a test that it matches these constants.
     """
     store_go = os.path.join(str(Path(__file__).resolve().parent.parent), "backend", "internal", "store", "store.go")

@@ -6,7 +6,7 @@ package store
 // Until 2026-11-16 the cascade's events statement read
 // "DELETE FROM events WHERE project_id", a column events has never had, so
 // closing an account failed on SQLite and on Postgres alike (outside review
-// finding E1; the review reproduced SQLite only). Behind it, six tables
+// the outside review of 2026-11-15; the review reproduced SQLite only). Behind it, six tables
 // with no foreign key to projects were never cleaned at all.
 //
 // The rule now (Robert's decision, 2026-11-16): only the audit log outlives

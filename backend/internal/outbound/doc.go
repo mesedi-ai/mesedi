@@ -4,12 +4,12 @@
 // Why: the backend sent a failure group's sample events, which can include
 // captured prompts and responses, to the Anthropic Messages API whenever a
 // user asked for an AI analysis, and Anthropic was missing from the public
-// sub-processor list at mesedi.ai/privacy (outside review finding M77,
+// sub-processor list at mesedi.ai/privacy (the outside review of 2026-11-15,
 // 2026-11-15). A new integration now fails this test until it is declared,
 // and declaring a sub-processor names the privacy page entry it needs.
 //
 // The website's own outside hosts are checked by mesedi-web
 // tools/check-public-claims.py (outbound_parties). Neither check sees a
 // host that arrives only through an environment variable or inside a
-// vendor SDK (Stripe, Verdifax); those stay a reader's job.
+// vendor SDK (Stripe); those stay a reader's job.
 package outbound

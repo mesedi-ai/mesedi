@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"mesedi/backend/internal/api"
@@ -123,52 +125,74 @@ func startBackgroundWorkers(
 
 // startCheckpointChain starts the hourly checkpoint scheduler, which seals
 // executions, closes each elapsed interval into a checkpoint over one leaf
-// per project, and anchors that checkpoint's hash in a public transparency
-// log through Verdifax.
+// per project, signs that checkpoint with the deployment's own key and
+// anchors it on Sigstore's public Rekor log (api.DirectRekorAnchorer).
 //
-// STRICTLY OPT-IN, AND THAT IS THE POINT. With no Verdifax base URL and key
-// configured, NewVerdifaxAnchorer returns nil and the scheduler is NOT
-// STARTED AT ALL.
+// STRICTLY OPT-IN, AND THAT IS THE POINT. With no signing key in
+// MESEDI_ANCHOR_SIGNING_KEY the scheduler is NOT STARTED AT ALL, which is
+// the default for a self-hosted backend. Not started, rather than started
+// with nowhere to anchor, because a scheduler with no anchorer still
+// builds a genesis checkpoint and then stalls, leaving an orphan
+// unanchored checkpoint that looks like a half-working feature.
 //
-// Not started, rather than started with a nil anchorer, because a scheduler
-// with nowhere to anchor still builds a genesis checkpoint and then stalls.
-// That would leave an orphan un-anchored checkpoint in the database of
-// every deployment that never configured Verdifax, including self-hosters
-// , and an un-anchored chain is worth nothing. Building one with no
-// prospect of anchoring is noise that looks like a half-working feature.
-//
-// It also spends money. Once VERDIFAX_LEDGER_MODE=rekor on the Verdifax
-// side, every interval is a real Sigstore submission. A worker that starts
-// spending the moment it is deployed is not a decision anyone made
-// deliberately, so it takes two explicit environment variables to turn on.
+// It also publishes. Every interval becomes a permanent public log entry
+// signed with the configured key, so it takes a deliberate secret to turn
+// on. MESEDI_REKOR_URL overrides the log address; empty means Sigstore's
+// public log. Until 2026-11-16 anchoring went through a third-party
+// service configured by VERDIFAX_BASE_URL and VERDIFAX_API_KEY; those
+// settings are no longer read.
 func startCheckpointChain(ctx context.Context, st store.Store, logger *slog.Logger) {
-	baseURL := os.Getenv("VERDIFAX_BASE_URL")
-
-	anchorer := api.NewVerdifaxAnchorer(baseURL, os.Getenv("VERDIFAX_API_KEY"), logger)
-	if anchorer == nil {
+	keyPEM := strings.TrimSpace(os.Getenv("MESEDI_ANCHOR_SIGNING_KEY"))
+	if keyPEM == "" {
 		// Info, not Warn. For most deployments this is the correct and
 		// intended state, and crying wolf here would train operators to
 		// ignore the log line that matters.
 		logger.Info("checkpoint chain disabled",
-			"reason", "VERDIFAX_BASE_URL and VERDIFAX_API_KEY are not both set",
+			"reason", "MESEDI_ANCHOR_SIGNING_KEY is not set",
 			"effect", "executions are recorded and analysed as normal, but no "+
 				"tamper-evident chain is built and nothing is anchored",
 		)
 		return
 	}
+	// The anchorer is nil-checked as its concrete type before it reaches the
+	// scheduler's interface field: a typed nil pointer in an interface is
+	// non-nil, and would start a scheduler that panics on its first anchor.
+	anchorer, err := api.NewDirectRekorAnchorer(os.Getenv("MESEDI_REKOR_URL"), []byte(keyPEM), logger)
+	if err != nil || anchorer == nil {
+		// Error, and not started: a configured key that does not parse is
+		// a deployment mistake someone must see. The error names what is
+		// wrong with the key and never contains it.
+		logger.Error("checkpoint chain disabled", "reason", fmt.Sprint(err))
+		return
+	}
+
+	// The second anchor. MESEDI_OTS_CALENDARS lists calendars (comma
+	// separated); empty uses the public defaults, "off" turns it off. A bad
+	// list stops nothing: it is logged and the chain runs without it.
+	calendars, calErr := api.ParseOTSCalendars(os.Getenv("MESEDI_OTS_CALENDARS"))
+	if calErr != nil {
+		logger.Error("timestamping disabled", "reason", calErr.Error())
+	}
+	var timestamper *api.CheckpointTimestamper
+	if len(calendars) > 0 {
+		timestamper = &api.CheckpointTimestamper{Store: st, Calendars: calendars, Logger: logger}
+	}
 
 	checkpointScheduler := &api.CheckpointScheduler{
-		Store:    st,
-		Logger:   logger,
-		Anchorer: anchorer,
+		Store:       st,
+		Logger:      logger,
+		Anchorer:    anchorer,
+		Timestamper: timestamper,
 	}
 	checkpointScheduler.Start(ctx)
 
-	// The API key is deliberately absent from this line. The base URL is
-	// operationally useful (which Verdifax is this pointed at?); the key
-	// is a credential and never belongs in a log.
+	// The public key's fingerprint, never the key: it is what the verifier
+	// pins and what the public pages publish, so an operator can confirm
+	// the deployment signs with the key they expect.
 	logger.Info("checkpoint chain enabled",
-		"verdifax_base_url", baseURL,
+		"rekor_url", anchorer.RekorURL,
+		"signing_key_sha256", api.AnchorKeyFingerprint(&anchorer.Key.PublicKey),
 		"checkpoint_interval", api.CheckpointInterval.String(),
+		"timestamp_calendars", len(calendars),
 	)
 }

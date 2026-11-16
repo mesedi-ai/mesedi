@@ -18,7 +18,7 @@ from conftest import Backend, await_failure_group
 #
 # Added 2026-11-16. The detector coverage gate's hand-kept list had no
 # entry for either egress class, so neither had a real-SDK test (outside
-# review finding E16). The gate now reads its list from store.go.
+# the outside review of 2026-11-15). The gate now reads its list from store.go.
 # ──────────────────────────────────────────────────────────────────────
 
 def test_environment_misapprehension(backend: Backend, configured_sdk):
