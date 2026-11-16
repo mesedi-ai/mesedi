@@ -40,7 +40,7 @@ import (
 // 271 since 2026-09-30: approval-time tool contract pins added
 // GetToolContractPins, ListToolContractPins, UpsertToolContractPin
 // and DeleteToolContractPin (migration 062), all deliberate.
-const StoreMethodCount = 271
+const StoreMethodCount = 280
 
 func TestStoreInterfaceIsComplete(t *testing.T) {
 	got := reflect.TypeOf((*Store)(nil)).Elem().NumMethod()
@@ -73,6 +73,7 @@ func TestStoreEmbedsEverySubInterface(t *testing.T) {
 		{"DetectionStore", reflect.TypeOf((*DetectionStore)(nil)).Elem()},
 		{"BillingLifecycleStore", reflect.TypeOf((*BillingLifecycleStore)(nil)).Elem()},
 		{"CheckpointStore", reflect.TypeOf((*CheckpointStore)(nil)).Elem()},
+		{"ExecutionDigestStore", reflect.TypeOf((*ExecutionDigestStore)(nil)).Elem()},
 	}
 
 	var total int

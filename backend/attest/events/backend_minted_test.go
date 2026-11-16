@@ -60,10 +60,15 @@ func TestUnknownTypesAreTreatedAsTheCustomers(t *testing.T) {
 // Reads the sibling-minting source rather than importing it, because
 // internal/api imports this package and the reverse would be a cycle.
 func TestEveryTypeMintedInTheAPIPackageIsListedHere(t *testing.T) {
-	root := filepath.Join("..", "api")
+	// internal/api, from backend/attest/events. Until 2026-11-16 this read
+	// "../api", a folder that stopped existing when attest became its own
+	// module, and it skipped on the error, so the guard never ran (outside
+	// review finding E9). A missing folder now fails: a guard that cannot
+	// find what it guards must say so, not pass quietly.
+	root := filepath.Join("..", "..", "internal", "api")
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		t.Skipf("cannot read %s: %v", root, err)
+		t.Fatalf("cannot read %s, the package this guard checks: %v", root, err)
 	}
 
 	// Look for `EventType:   events.EventTypeX,` inside composite

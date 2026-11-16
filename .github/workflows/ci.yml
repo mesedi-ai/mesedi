@@ -154,6 +154,14 @@ jobs:
         run: python3 tools/check_sdk_versions.py
       - name: SDK version consistency (tests)
         run: python3 tools/test_check_sdk_versions.py
+      # The check itself needs mesedi-web beside this repo, so it runs in
+      # mesedi-web's tier-drift workflow; its tests run here.
+      - name: Dashboard failure-class tiers (tests)
+        run: python3 tools/test_check_dashboard_failure_classes.py
+      # The gate itself runs with the integration suite; its file and
+      # class readers are tested here (added 2026-11-16).
+      - name: Detector coverage gate (tests)
+        run: python3 tools/test_check_detector_test_coverage.py
       - name: Install SDK + test deps
         working-directory: sdk-python
         run: |

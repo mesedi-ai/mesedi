@@ -67,7 +67,7 @@ func TestAnHourPublishedNowhereIsCaught(t *testing.T) {
 			"passed verification. The claim that the chain cannot advance without "+
 			"publishing is not being checked. Detail was: %s", c.Detail)
 	}
-	if !strings.Contains(c.Detail, "hour 3") {
+	if !strings.Contains(c.Detail, "checkpoint 3 (") {
 		t.Errorf("the failure does not say which hour broke the link: %s", c.Detail)
 	}
 }

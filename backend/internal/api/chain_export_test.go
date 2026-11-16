@@ -84,6 +84,28 @@ func (s *exportStubStore) ListEventsForExecution(
 	return s.eventsFor[executionID], nil
 }
 
+// The stub models a chain built before digests were stored and not yet
+// backfilled, so exports take the recompute path these tests were
+// written against. Stored-digest exports are tested in
+// chain_export_stored_digests_test.go against a real store.
+func (s *exportStubStore) ListDigestEventsForExecution(
+	ctx context.Context, executionID string,
+) ([]*events.Event, error) {
+	return s.ListEventsForExecution(ctx, executionID)
+}
+
+func (s *exportStubStore) ListExecutionDigests(
+	_ context.Context, _ string, _ uint64,
+) ([]store.ExecutionDigest, error) {
+	return nil, nil
+}
+
+func (s *exportStubStore) GetDigestHistoryGap(
+	_ context.Context, _ uint64, _ string,
+) (string, bool, error) {
+	return "", false, nil
+}
+
 func exportEvents(execID string, n int, base time.Time) []*events.Event {
 	out := make([]*events.Event, 0, n)
 	for i := range n {

@@ -47,6 +47,16 @@ func (s *stubDigestStore) ListEventsForExecution(_ context.Context, _ string) ([
 	return s.evts, nil
 }
 
+// The digest endpoint reads the events the anchored digest covers.
+// This stub has no late events, so that is every event.
+func (s *stubDigestStore) ListDigestEventsForExecution(ctx context.Context, id string) ([]*events.Event, error) {
+	return s.ListEventsForExecution(ctx, id)
+}
+
+func (s *stubDigestStore) CountEventsAfterDigest(_ context.Context, _ []string) (map[string]int, error) {
+	return map[string]int{}, nil
+}
+
 func digestMux(h *Handlers) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /executions/{id}/digest", h.HandleGetExecutionDigest)

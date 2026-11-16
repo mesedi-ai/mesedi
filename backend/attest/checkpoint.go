@@ -130,8 +130,11 @@ type TenantLeaf struct {
 	ProjectID string `json:"project_id"`
 
 	// IntervalRoot is the RFC 6962 root over this project's execution
-	// digests in this interval, hex. Empty when the project had no
-	// executions but still needs a leaf to keep its sub-chain intact.
+	// digests in this interval, hex. Never empty: a project with no sealed
+	// executions in an interval gets no leaf at all, and its sub-chain
+	// links its next leaf to its previous one. (Until 2026-11-16 this said
+	// an empty root was used for such hours; the scheduler never builds
+	// one and the export would reject it, outside review finding E22.)
 	IntervalRoot string `json:"interval_root"`
 
 	// ExecutionCount is executions in THIS interval.
@@ -247,9 +250,12 @@ func appendCanonicalField(buf []byte, label, value string) []byte {
 // available: it is indistinguishable from the real thing, and it trains
 // whoever sees it to disbelieve the alarm that matters.
 //
-// Truncating here rather than at the call sites is deliberate. This is the
-// single point every hashed timestamp passes through, so a future field
-// carrying a nanosecond time cannot reintroduce the bug by forgetting.
+// Truncating here rather than at the call sites is deliberate: every
+// checkpoint timestamp passes through canonicalTime. Event leaves in
+// digest.go keep their own nine-digit layout (anchored v1 digests use it)
+// but truncate with this same constant. Until 2026-11-16 this comment said
+// canonicalTime was the only path, and event leaves hashed nanoseconds
+// (outside review finding E12).
 const storagePrecision = time.Microsecond
 
 // canonicalTime is the one time encoding used everywhere here: RFC 3339
@@ -592,6 +598,14 @@ func VerifyChain(cps []Checkpoint, interval time.Duration) error {
 			return fmt.Errorf("%w: checkpoint %d has tenant_leaf_count=%d, merkle_root=%q",
 				ErrChainEmptyRootMismatch, c.Seq, c.TenantLeafCount, c.MerkleRoot)
 		}
+		// A negative count with a non-empty root passed the line above
+		// until 2026-11-16 (outside review finding E30). The hash covers
+		// the count, so only a broken builder could emit it; an auditor's
+		// tool should still say so rather than accept it.
+		if c.TenantLeafCount < 0 {
+			return fmt.Errorf("%w: checkpoint %d has a negative tenant_leaf_count %d",
+				ErrChainEmptyRootMismatch, c.Seq, c.TenantLeafCount)
+		}
 
 		if !c.IntervalEnd.After(c.IntervalStart) {
 			return fmt.Errorf("%w: checkpoint %d ends at or before it starts",
@@ -627,6 +641,13 @@ func VerifyChain(cps []Checkpoint, interval time.Duration) error {
 					return fmt.Errorf("%w: checkpoint 1 must not name a predecessor log entry",
 						ErrChainGenesis)
 				}
+			} else if c.PrevLogEntryID == "" {
+				// The first element of a window still has a predecessor,
+				// outside the window, and must name where it was published.
+				// Checked for every later element; skipped for the first
+				// until 2026-11-16 (finding E30).
+				return fmt.Errorf("%w: checkpoint %d names no log entry for checkpoint %d",
+					ErrChainPrevHash, c.Seq, c.Seq-1)
 			}
 			continue
 		}

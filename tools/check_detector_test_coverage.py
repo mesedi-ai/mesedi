@@ -3,7 +3,8 @@
 
 Enforces that every detector in Mesedi's canonical 20-detector list
 has at least one non-skipped real-SDK integration test in
-backend/test/integration/test_detectors.py.
+backend/test/integration/test_detectors.py or a test_detectors_*.py
+file beside it.
 
 Background: the semantic_loop.G3 audit row called out a historical
 silent-failure (semantic_loop read a `state` field no SDK ever
@@ -58,29 +59,24 @@ from typing import Dict, List, Set
 # Keep this in sync — adding a new detector to Mesedi means adding
 # its name here AND adding a matching `test_<name>` to
 # test_detectors.py (the whole point of this gate).
-CANONICAL_DETECTORS: List[str] = [
-    "crashes",
-    "loops",
-    "tool_failures",
-    "validator_failures",
-    "drift",
-    "cost_velocity",
-    "prompt_injection",
-    "infrastructure_throttled",
-    "data_leakage",
-    "semantic_loop",
-    "tool_schema_drift",
-    "context_overflow",
-    "token_waste",
-    "sandbox_escape",
-    "grounding_failure",
-    "cascading_failure",
-    "coordination_deadlock",
-    "provider_incident",
-    "hitl_timeout",
-    "hitl_rejection_spike",
-    "record_integrity",
-]
+def _store_failure_classes() -> List[str]:
+    """Every FailureClass* string constant in backend/internal/store/store.go.
+
+    Read from the source since 2026-11-16. The hand-kept list this replaced
+    had 21 entries for 23 classes and no entry for
+    environment_misapprehension or covert_coordination (outside review
+    finding E16). The Go side holds the same set in store.AllFailureClasses,
+    with a test that it matches these constants.
+    """
+    store_go = os.path.join(str(Path(__file__).resolve().parent.parent), "backend", "internal", "store", "store.go")
+    with open(store_go, encoding="utf-8") as fh:
+        found = re.findall(r'^\s*FailureClass\w*\s*=\s*"([a-z_]+)"', fh.read(), re.M)
+    if len(found) < 20:
+        raise SystemExit(f"could not run: found only {len(found)} failure classes in {store_go}")
+    return found
+
+
+CANONICAL_DETECTORS: List[str] = _store_failure_classes()
 
 
 # Some detectors don't follow the strict `test_<name>` convention.
@@ -225,11 +221,26 @@ def _covers(detector: str, test_names: Set[str]) -> bool:
     return any(name == prefix or name.startswith(prefix + "_") for name in test_names)
 
 
+def _detector_test_files(root: Path) -> List[Path]:
+    """test_detectors.py and every test_detectors_*.py beside it.
+
+    Since 2026-11-16 detector tests may live in more than one file:
+    test_detectors.py is past 2,100 lines, and the commit audit refuses to
+    let a file over 1,000 lines grow (B8). The egress classes' tests went
+    to test_detectors_egress.py. The canonical file always comes first, so
+    a missing one still stops the gate with exit 2.
+    """
+    integration = root / "backend" / "test" / "integration"
+    return [integration / "test_detectors.py"] + sorted(integration.glob("test_detectors_*.py"))
+
+
 def main() -> int:
     root = _project_root()
     test_file = root / "backend" / "test" / "integration" / "test_detectors.py"
     accepted = _load_exceptions(root)
-    test_names = _collect_test_names(test_file)
+    test_names: Set[str] = set()
+    for path in _detector_test_files(root):
+        test_names |= _collect_test_names(path)
 
     missing: List[str] = []
     for detector in CANONICAL_DETECTORS:

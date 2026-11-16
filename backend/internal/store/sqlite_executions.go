@@ -265,9 +265,15 @@ func (s *SQLiteStore) SaveEvents(ctx context.Context, batch []events.Event) erro
 	}
 	defer tx.Rollback() // safe to call after Commit, becomes a no-op
 
+	// after_digest: an event for an execution whose digest is already
+	// stored arrived after its record was anchored. It is kept but sits
+	// outside the anchored record (Robert's decision, 2026-11-16; outside
+	// review finding E3). Timestamps are truncated to microseconds, the
+	// precision Postgres keeps, so the stored value is the hashed value on
+	// both databases (finding E12).
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO events (event_id, execution_id, event_type, sequence, timestamp, duration_ms, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO events (event_id, execution_id, event_type, sequence, timestamp, duration_ms, payload, after_digest)
+		VALUES (?, ?, ?, ?, ?, ?, ?, EXISTS (SELECT 1 FROM execution_digests WHERE execution_id = ?))
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare event insert: %w", err)
@@ -285,7 +291,8 @@ func (s *SQLiteStore) SaveEvents(ctx context.Context, batch []events.Event) erro
 		}
 		if _, err := stmt.ExecContext(ctx,
 			evt.EventID, evt.ExecutionID, evt.EventType, evt.Sequence,
-			evt.Timestamp, nullInt64(evt.DurationMs), string(payload),
+			evt.Timestamp.UTC().Truncate(time.Microsecond), nullInt64(evt.DurationMs), string(payload),
+			evt.ExecutionID,
 		); err != nil {
 			return fmt.Errorf("insert event %s: %w", evt.EventID, err)
 		}

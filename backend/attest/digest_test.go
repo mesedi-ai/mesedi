@@ -111,9 +111,10 @@ func TestEveryCanonicalFieldChangesTheRoot(t *testing.T) {
 		"execution_id": func(e *events.Event) { e.ExecutionID = "exec-other" },
 		"event_type":   func(e *events.Event) { e.EventType = events.EventTypeToolCall },
 		"sequence":     func(e *events.Event) { e.Sequence = 99 },
-		"timestamp":    func(e *events.Event) { e.Timestamp = base.Add(time.Nanosecond) },
-		"duration_ms":  func(e *events.Event) { e.DurationMs = 5 },
-		"payload":      func(e *events.Event) { e.Payload = json.RawMessage(`{"n":2}`) },
+		// One microsecond, the hashed precision since 2026-11-16 (E12).
+		"timestamp":   func(e *events.Event) { e.Timestamp = base.Add(time.Microsecond) },
+		"duration_ms": func(e *events.Event) { e.DurationMs = 5 },
+		"payload":     func(e *events.Event) { e.Payload = json.RawMessage(`{"n":2}`) },
 	}
 
 	for field, mutate := range mutations {
@@ -431,5 +432,41 @@ func TestSingleLeafTreeVerifies(t *testing.T) {
 	ok, err := VerifyInclusion(p)
 	if err != nil || !ok {
 		t.Errorf("single-leaf proof did not verify (ok=%v err=%v)", ok, err)
+	}
+}
+
+// The same record digests the same on Postgres (microseconds) and SQLite
+// (nanoseconds). Until 2026-11-16 the sub-microsecond digits were hashed,
+// so one record produced two roots (outside review finding E12).
+func TestDigestIgnoresSubMicrosecondPrecision(t *testing.T) {
+	ns := time.Date(2026, 9, 2, 12, 0, 0, 123456789, time.UTC)
+	us := ns.Truncate(time.Microsecond)
+	a, err := Compute("exec-1", []*events.Event{evt("a", 1, ns, `{"n":1}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Compute("exec-1", []*events.Event{evt("a", 1, us, `{"n":1}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Root != b.Root {
+		t.Fatalf("nanosecond root %s differs from microsecond root %s", a.Root, b.Root)
+	}
+}
+
+// Digests of whole-microsecond timestamps, which is every value Postgres
+// stores and therefore every anchored v1 digest, are unchanged by the
+// truncation. Pinned to a root computed before the change.
+// Computed with the pre-2026-11-16 digest code (nanoseconds hashed).
+const pinnedMicrosecondRoot = "3478514c1acbed2b1612805c15416f6298b6ce0a2c22ace5eb6b501c1dcce365"
+
+func TestMicrosecondDigestsAreUnchanged(t *testing.T) {
+	ts := time.Date(2026, 9, 2, 12, 0, 0, 123456000, time.UTC)
+	d, err := Compute("exec-1", []*events.Event{evt("a", 1, ts, `{"n":1}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Root != pinnedMicrosecondRoot {
+		t.Fatalf("root %s, want %s: anchored v1 digests would no longer verify", d.Root, pinnedMicrosecondRoot)
 	}
 }

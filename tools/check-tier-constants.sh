@@ -39,13 +39,14 @@ MESEDI_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 GO_BILLING="$MESEDI_ROOT/backend/internal/api/billing.go"
 GO_HANDLERS="$MESEDI_ROOT/backend/internal/api/handlers.go"
+GO_HOBBY_BILLING="$MESEDI_ROOT/backend/internal/api/hobby_billing_scheduler.go"
 # .F: point at the sibling mesedi-web checkout rather than a
 # locally-maintained snapshot inside mesedi/web-extract/. The
 # customer-facing dashboard is in mesedi-web; the drift check must
 # read from the actual deployed source, not a stale copy.
 TS_CONSTANTS="$MESEDI_ROOT/../mesedi-web/dashboard/lib/tier-constants.ts"
 
-for f in "$GO_BILLING" "$GO_HANDLERS" "$TS_CONSTANTS"; do
+for f in "$GO_BILLING" "$GO_HANDLERS" "$GO_HOBBY_BILLING" "$TS_CONSTANTS"; do
   if [ ! -f "$f" ]; then
     echo "ERROR: required file not found: $f"
     exit 2
@@ -191,6 +192,10 @@ assert_pattern "Team price = 99 (TS)" \
 # Hobby default cap: $200
 assert_pattern "Hobby default cap = 200 (TS)" \
   "$TS_CONSTANTS" "defaultCapUSD:[[:space:]]*200" || true
+# And the Go value the billing scheduler applies when a project's cap is 0
+# (added 2026-11-16; before then 0 meant no cap, outside review finding E20).
+assert_pattern "Hobby default cap = 200 (Go)" \
+  "$GO_HOBBY_BILLING" "HobbyDefaultBillingCapUSD[[:space:]]*=[[:space:]]*200" || true
 
 # ─── Per-feature claim drift guards (.F, closes ) ────
 #

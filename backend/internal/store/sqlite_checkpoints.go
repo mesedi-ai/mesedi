@@ -66,6 +66,29 @@ func (s *SQLiteStore) InsertCheckpoint(
 	cp attest.Checkpoint,
 	leaves []attest.TenantLeaf,
 ) error {
+	return s.InsertCheckpointWithDigests(ctx, cp, leaves, nil)
+}
+
+// InsertCheckpointWithDigests writes a checkpoint, its leaves and, when
+// digests is non-nil, every leaf's execution digests in one transaction.
+// See ExecutionDigestStore.
+func (s *SQLiteStore) InsertCheckpointWithDigests(
+	ctx context.Context,
+	cp attest.Checkpoint,
+	leaves []attest.TenantLeaf,
+	digests map[string][]ExecutionDigest,
+) error {
+	if digests != nil {
+		if len(digests) != len(leaves) {
+			return fmt.Errorf("insert checkpoint %d: digests for %d projects but %d leaves",
+				cp.Seq, len(digests), len(leaves))
+		}
+		for _, l := range leaves {
+			if err := validateDigestsFold(cp.Seq, l.ProjectID, l.IntervalRoot, l.ExecutionCount, digests[l.ProjectID]); err != nil {
+				return fmt.Errorf("insert checkpoint: %w", err)
+			}
+		}
+	}
 	if cp.Seq == 0 {
 		return errors.New("insert checkpoint: seq must be >= 1")
 	}
@@ -119,6 +142,9 @@ func (s *SQLiteStore) InsertCheckpoint(
 			return fmt.Errorf("insert checkpoint %d leaf %d (%s): %w",
 				cp.Seq, i, l.ProjectID, err)
 		}
+	}
+	if err := insertExecutionDigestsTx(ctx, tx, `INSERT INTO execution_digests (execution_id, project_id, checkpoint_seq, position, root, leaf_count, algorithm, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, leaves, digests, time.Now().UTC()); err != nil {
+		return fmt.Errorf("insert checkpoint %d: %w", cp.Seq, err)
 	}
 	return tx.Commit()
 }

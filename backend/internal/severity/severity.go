@@ -69,45 +69,60 @@ func Valid(s string) bool {
 // Unknown failure classes fall through to warning, the sensible
 // middle ground.
 func Default(failureClass string) Severity {
-	switch strings.ToLower(failureClass) {
-	case "crashes",
-		"tool_failures",
-		"validator_failures",
-		"prompt_injection",
-		"data_leakage",
-		"tool_schema_drift",
-		"grounding_failure",
-		"cascading_failure",
-		"coordination_deadlock",
-		"sandbox_escape",
-		// A declared-simulation run reaching the live internet is
-		// the same incident class as an escape attempt: from the
-		// third party's side they are the same event.
-		"environment_misapprehension":
-		return Critical
-	case "cost_velocity",
-		"time_budget",
-		"step_count",
-		"infrastructure_throttled",
-		"context_overflow",
-		"token_waste",
-		"provider_incident",
-		"hitl_timeout",
-		"hitl_rejection_spike",
-		// An investigative counter, not a confirmed attack: distinct
-		// runs sharing a destination warrants a look, and paging on
-		// it would teach operators to ignore it.
-		"covert_coordination":
-		return Warning
-	case "loops",
-		"identical_call_loop",
-		"similar_call_loop",
-		"semantic_loop",
-		"drift":
-		return Info
-	default:
-		return Warning
+	if sev, ok := classDefaults[strings.ToLower(failureClass)]; ok {
+		return sev
 	}
+	return Warning
+}
+
+// HasExplicitDefault reports whether a class has its own entry rather than
+// falling through to warning. Every failure class must have one; a test
+// checks it against store.AllFailureClasses (added 2026-11-16, when
+// record_integrity was found to fall through, outside review finding E16).
+func HasExplicitDefault(failureClass string) bool {
+	_, ok := classDefaults[strings.ToLower(failureClass)]
+	return ok
+}
+
+var classDefaults = map[string]Severity{
+	"crashes":               Critical,
+	"tool_failures":         Critical,
+	"validator_failures":    Critical,
+	"prompt_injection":      Critical,
+	"data_leakage":          Critical,
+	"tool_schema_drift":     Critical,
+	"grounding_failure":     Critical,
+	"cascading_failure":     Critical,
+	"coordination_deadlock": Critical,
+	"sandbox_escape":        Critical,
+	// A declared-simulation run reaching the live internet is the same
+	// incident class as an escape attempt: from the third party's side
+	// they are the same event.
+	"environment_misapprehension": Critical,
+
+	"cost_velocity":            Warning,
+	"time_budget":              Warning,
+	"step_count":               Warning,
+	"infrastructure_throttled": Warning,
+	"context_overflow":         Warning,
+	"token_waste":              Warning,
+	"provider_incident":        Warning,
+	"hitl_timeout":             Warning,
+	"hitl_rejection_spike":     Warning,
+	// An investigative counter, not a confirmed attack: distinct runs
+	// sharing a destination warrants a look, and paging on it would
+	// teach operators to ignore it.
+	"covert_coordination": Warning,
+	// Explicit since 2026-11-16; it was already warning by fall-through.
+	// A gap, a duplicate or an event after anchoring is worth a look but
+	// is not, on its own, an incident.
+	"record_integrity": Warning,
+
+	"loops":               Info,
+	"identical_call_loop": Info,
+	"similar_call_loop":   Info,
+	"semantic_loop":       Info,
+	"drift":               Info,
 }
 
 // FromSDKValue maps the SDK's per-event severity string (one of

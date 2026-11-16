@@ -30,10 +30,10 @@ package api
 //     map-ordered tree would produce a different root on every run for
 //     identical data, and the second run would look like tampering.
 //
-// NOT WIRED INTO main YET, deliberately. Once the Verdifax caller is
-// injected this worker spends a real transparency-log submission every
-// interval, and a scheduler that starts spending the moment it merges
-// is not a decision anyone made.
+// Wired into main in cmd/api/background_workers.go. It builds and stores
+// checkpoints whenever it runs, and publishes them only when an anchorer
+// is configured, so starting the backend never submits to a public log
+// by itself.
 
 import (
 	"context"
@@ -155,6 +155,17 @@ func (s *CheckpointScheduler) run(ctx context.Context) {
 		return
 	case <-time.After(30 * time.Second):
 	}
+	// Before the first tick: store digests for hours sealed before
+	// migration 063, while their records can still prove them. Failure
+	// is logged and the chain carries on; the next start retries the
+	// leaves still unhandled.
+	if stored, gaps, err := s.BackfillDigestHistory(ctx); err != nil {
+		s.Logger.Error("checkpoint_scheduler: digest history backfill failed",
+			"error", err.Error(), "stored", stored, "gaps", gaps)
+	} else if stored+gaps > 0 {
+		s.Logger.Info("checkpoint_scheduler: digest history backfilled",
+			"stored", stored, "labelled_records_changed", gaps)
+	}
 	if err := s.tick(ctx); err != nil {
 		s.Logger.Error("checkpoint_scheduler: first tick failed", "error", err.Error())
 	}
@@ -271,7 +282,7 @@ func (s *CheckpointScheduler) closeNextInterval(ctx context.Context, now time.Ti
 		return false, nil // nothing to close yet
 	}
 
-	leaves, err := s.buildLeaves(ctx, start, end)
+	leaves, digests, err := s.buildLeaves(ctx, start, end)
 	if err != nil {
 		return false, err
 	}
@@ -290,7 +301,15 @@ func (s *CheckpointScheduler) closeNextInterval(ctx context.Context, now time.Ti
 			start.Format(time.RFC3339), end.Format(time.RFC3339), err)
 	}
 
-	if err := s.Store.InsertCheckpoint(ctx, cp, leaves); err != nil {
+	// Store every execution's digest with its checkpoint, so exports read
+	// the anchored value instead of recomputing it from records that may
+	// since have changed or been purged (findings E3, E4).
+	for project := range digests {
+		for i := range digests[project] {
+			digests[project][i].CheckpointSeq = cp.Seq
+		}
+	}
+	if err := s.Store.InsertCheckpointWithDigests(ctx, cp, leaves, digests); err != nil {
 		return false, fmt.Errorf("insert checkpoint %d: %w", cp.Seq, err)
 	}
 	s.Logger.Info("checkpoint_scheduler: interval closed",
@@ -337,16 +356,16 @@ func (s *CheckpointScheduler) nextInterval(head *attest.Checkpoint, now time.Tim
 // interval, in a deterministic order.
 func (s *CheckpointScheduler) buildLeaves(
 	ctx context.Context, start, end time.Time,
-) ([]attest.TenantLeaf, error) {
+) ([]attest.TenantLeaf, map[string][]store.ExecutionDigest, error) {
 	counts, err := s.Store.CountSealedByProject(ctx, start, end)
 	if err != nil {
-		return nil, fmt.Errorf("count sealed by project: %w", err)
+		return nil, nil, fmt.Errorf("count sealed by project: %w", err)
 	}
 	if len(counts) == 0 {
 		// Empty interval. Returning nil, not an error: the checkpoint
 		// still gets built, because an interval with no checkpoint is
 		// indistinguishable from a suppressed one.
-		return nil, nil
+		return nil, map[string][]store.ExecutionDigest{}, nil
 	}
 
 	// SORTED, never map order. Go randomises map iteration, so ranging
@@ -360,17 +379,20 @@ func (s *CheckpointScheduler) buildLeaves(
 	sort.Strings(projects)
 
 	leaves := make([]attest.TenantLeaf, 0, len(projects))
+	digests := make(map[string][]store.ExecutionDigest, len(projects)) // max: one entry per project sealed this hour
 	for _, projectID := range projects {
-		root, n, err := s.projectIntervalRoot(ctx, projectID, start, end)
+		root, projectDigests, err := s.projectIntervalRoot(ctx, projectID, start, end)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		n := len(projectDigests)
+		digests[projectID] = projectDigests
 		if n == 0 {
 			// Counted but produced no executions: the two queries
 			// disagree, which means the window shifted underneath us.
 			// Refuse rather than anchor a leaf that does not describe
 			// its own interval.
-			return nil, fmt.Errorf(
+			return nil, nil, fmt.Errorf(
 				"project %s was counted in [%s, %s) but produced no executions; "+
 					"refusing to anchor a leaf that contradicts its own count",
 				projectID, start.Format(time.RFC3339), end.Format(time.RFC3339))
@@ -380,7 +402,7 @@ func (s *CheckpointScheduler) buildLeaves(
 		var prevCumulative uint64
 		prev, err := s.Store.LatestTenantLeaf(ctx, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("latest leaf for %s: %w", projectID, err)
+			return nil, nil, fmt.Errorf("latest leaf for %s: %w", projectID, err)
 		}
 		if prev != nil {
 			prevHash = attest.TenantLeafHash(*prev)
@@ -395,7 +417,7 @@ func (s *CheckpointScheduler) buildLeaves(
 			PrevLeafHash:    prevHash,
 		})
 	}
-	return leaves, nil
+	return leaves, digests, nil
 }
 
 // projectIntervalRoot computes one project's Merkle root over the
@@ -406,49 +428,93 @@ func (s *CheckpointScheduler) buildLeaves(
 // on it, and a differently-ordered rebuild would not match.
 func (s *CheckpointScheduler) projectIntervalRoot(
 	ctx context.Context, projectID string, start, end time.Time,
-) (string, int, error) {
+) (string, []store.ExecutionDigest, error) {
 	ids, err := s.Store.ListSealedExecutionIDs(ctx, projectID, start, end)
 	if err != nil {
-		return "", 0, fmt.Errorf("list sealed executions for %s: %w", projectID, err)
+		return "", nil, fmt.Errorf("list sealed executions for %s: %w", projectID, err)
 	}
-	if len(ids) == 0 {
-		return "", 0, nil
-	}
+	return s.digestFold(ctx, projectID, ids)
+}
 
+// digestFold digests each execution in fold order and returns the
+// interval root with the per-execution digests. Shared by the hourly build
+// and BackfillDigestHistory, so history is computed exactly one way.
+//
+// ComputeForChain, not Compute: an execution with no events gets an
+// honest no-events digest rather than stalling the chain (2026-09-04).
+// ListDigestEventsForExecution, not ListEventsForExecution: events that
+// arrived after a digest was stored are outside the anchored record.
+func (s *CheckpointScheduler) digestFold(
+	ctx context.Context, projectID string, ids []string,
+) (string, []store.ExecutionDigest, error) {
+	if len(ids) == 0 {
+		return "", nil, nil
+	}
+	out := make([]store.ExecutionDigest, 0, len(ids))
 	roots := make([]string, 0, len(ids))
-	for _, execID := range ids {
-		evts, err := s.Store.ListEventsForExecution(ctx, execID)
+	for i, execID := range ids {
+		evts, err := s.Store.ListDigestEventsForExecution(ctx, execID)
 		if err != nil {
-			return "", 0, fmt.Errorf("events for %s: %w", execID, err)
+			return "", nil, fmt.Errorf("events for %s: %w", execID, err)
 		}
-		// ComputeForChain, not Compute. An execution with no events gets
-		// a distinct, domain-separated digest rather than an error.
-		//
-		// This line was the outage of 2026-09-04. Compute refuses an
-		// empty event list, correctly, so the digest endpoint can answer
-		// 404 instead of letting an empty root stand in for a record ,
-		// but the chain cannot refuse. One execution created and crashed
-		// 452 microseconds later, before emitting anything, stopped
-		// checkpoint construction for EVERY tenant on every tick, and it
-		// would never have recovered, because that execution will never
-		// acquire events. Any customer could trigger it by accident.
-		//
-		// Refusing the interval is still right for a real digest failure,
-		// so that path is unchanged below. Only the empty case moved.
 		d, err := attest.ComputeForChain(execID, evts)
 		if err != nil {
-			// Refuse the whole interval rather than silently dropping the
-			// execution: a leaf whose count includes an execution the
-			// root does not cover is a lie the chain would then anchor.
-			return "", 0, fmt.Errorf("digest execution %s: %w", execID, err)
+			return "", nil, fmt.Errorf("digest execution %s: %w", execID, err)
 		}
 		roots = append(roots, d.Root)
+		out = append(out, store.ExecutionDigest{
+			ExecutionID: execID, ProjectID: projectID, Position: i,
+			Root: d.Root, LeafCount: d.LeafCount, Algorithm: d.Algorithm,
+		})
 	}
 	root, err := attest.RootOverExecutionDigests(roots)
 	if err != nil {
-		return "", 0, fmt.Errorf("interval root for %s: %w", projectID, err)
+		return "", nil, fmt.Errorf("interval root for %s: %w", projectID, err)
 	}
-	return root, len(ids), nil
+	return root, out, nil
+}
+
+// BackfillDigestHistory stores digests for leaves sealed before
+// migration 063 (2026-11-16), wherever they can still be proven.
+//
+// For each such leaf it recomputes the project's digests from today's
+// records, in the order the leaf was built. If they fold exactly to the
+// anchored IntervalRoot they are stored, and that hour is protected from
+// then on. If not (records purged by retention or changed since), the
+// hour is labelled "records changed before digests were stored" and is
+// never re-anchored or silently repaired (Robert's decision, 2026-11-16).
+// Idempotent: a handled leaf is never visited again.
+func (s *CheckpointScheduler) BackfillDigestHistory(ctx context.Context) (stored, gaps int, err error) {
+	for {
+		batch, err := s.Store.ListLeavesMissingDigests(ctx, 200)
+		if err != nil {
+			return stored, gaps, err
+		}
+		if len(batch) == 0 {
+			return stored, gaps, nil
+		}
+		for _, l := range batch {
+			ids, err := s.Store.ListSealedExecutionIDs(ctx, l.ProjectID, l.IntervalStart, l.IntervalEnd)
+			if err != nil {
+				return stored, gaps, fmt.Errorf("backfill checkpoint %d: %w", l.Seq, err)
+			}
+			root, digests, ferr := s.digestFold(ctx, l.ProjectID, ids)
+			if ferr == nil && len(digests) == l.ExecutionCount && root == l.IntervalRoot {
+				for i := range digests {
+					digests[i].CheckpointSeq = l.Seq
+				}
+				if err := s.Store.StoreHistoricalDigests(ctx, l.Seq, l.ProjectID, digests); err != nil {
+					return stored, gaps, err
+				}
+				stored++
+				continue
+			}
+			if err := s.Store.RecordDigestHistoryGap(ctx, l.Seq, l.ProjectID, store.HistoryGapRecordsChanged, s.now()); err != nil {
+				return stored, gaps, err
+			}
+			gaps++
+		}
+	}
 }
 
 // previousTreeSize reports how large the log's tree was when checkpoint

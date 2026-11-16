@@ -11,6 +11,7 @@ package playbooks
 
 import (
 	"encoding/hex"
+	"io/fs"
 	"strings"
 	"testing"
 )
@@ -350,5 +351,40 @@ func TestReviewedSignaturesReachTheirPlaybook(t *testing.T) {
 		if got, ok := Resolve(in[0], in[1]); !ok || got != want {
 			t.Errorf("Resolve(%q, %q) = %q, %v; want %q", in[0], in[1], got, ok, want)
 		}
+	}
+}
+
+// Playbook pages are customer-facing text, so the house rule against em
+// dashes applies. Nine of them shipped in record_integrity's playbook
+// before 2026-11-16 because nothing checked this content (outside review
+// finding E25).
+func TestPlaybookContentHasNoEmDashes(t *testing.T) {
+	entries, err := fs.ReadDir(content, "content")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, dir := range entries {
+		if !dir.IsDir() {
+			continue
+		}
+		files, err := fs.ReadDir(content, "content/"+dir.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			path := "content/" + dir.Name() + "/" + f.Name()
+			b, err := fs.ReadFile(content, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checked++
+			if strings.ContainsRune(string(b), '—') {
+				t.Errorf("%s contains an em dash", path)
+			}
+		}
+	}
+	if checked < 20 {
+		t.Fatalf("checked only %d playbook files; the walk is broken", checked)
 	}
 }

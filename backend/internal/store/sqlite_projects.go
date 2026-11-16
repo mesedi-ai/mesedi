@@ -790,6 +790,11 @@ var sqliteProjectCascadeStatements = []string{
 	`DELETE FROM tool_contract_pins WHERE project_id = ?`,
 	`DELETE FROM system_events WHERE project_id = ?`,
 	`DELETE FROM request_log WHERE project_id = ?`,
+	// Stored execution digests and history labels (migration 063).
+	// Deleted with the account: the checkpoint leaves stay, so other
+	// projects' proofs are unaffected (Robert's decision, 2026-11-16).
+	`DELETE FROM execution_digests WHERE project_id = ?`,
+	`DELETE FROM digest_history_gaps WHERE project_id = ?`,
 	`DELETE FROM executions WHERE project_id = ?`,
 	`DELETE FROM failure_groups WHERE project_id = ?`,
 	`DELETE FROM api_keys WHERE project_id = ?`,

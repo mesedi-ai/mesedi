@@ -393,7 +393,6 @@ var ErrProjectStillActive = errors.New("project still active; close it before GD
 // the expected prior state. The transition matrix is enforced at
 // the store layer (rather than purely in the handler) so the
 // invariant holds even if a future caller bypasses the HTTP API
-// ().
 var ErrInvalidLifecycleTransition = errors.New("invalid lifecycle transition")
 
 // ErrAlreadyAccepted is returned by MarkInviteAccepted when the

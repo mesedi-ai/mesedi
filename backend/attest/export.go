@@ -26,6 +26,12 @@ import (
 // would report failures that are really format drift.
 const ChainExportFormatV1 = "mesedi.chain-export.v1"
 
+// ChainExportFormatV2 adds stored digests (2026-11-16): an execution can
+// carry records_deleted, and an interval can carry digests_unavailable.
+// A v1 verifier would report a v2 interval with no digests as tampering,
+// so the identifier changes; this verifier reads both.
+const ChainExportFormatV2 = "mesedi.chain-export.v2"
+
 // ExportedExecution is one sealed execution's identity and digest.
 //
 // The digest root, not the events. An auditor can fold these roots and
@@ -37,6 +43,11 @@ const ChainExportFormatV1 = "mesedi.chain-export.v1"
 type ExportedExecution struct {
 	ExecutionID string `json:"execution_id"`
 	DigestRoot  string `json:"digest_root"`
+	// RecordsDeleted is true when the execution's events and record were
+	// deleted under the project's retention setting. Its digest is the
+	// stored, anchored one, so it still folds; only its contents can no
+	// longer be opened (v2; outside review finding E4).
+	RecordsDeleted bool `json:"records_deleted,omitempty"`
 }
 
 // ExportedInterval is one hour: the checkpoint, where it was anchored,
@@ -120,6 +131,12 @@ type ExportedInterval struct {
 	// Order is load-bearing: RootOverExecutionDigests is order-dependent,
 	// so a re-sorted list produces a different root and reads as tampering.
 	Executions []ExportedExecution `json:"executions,omitempty"`
+	// DigestsUnavailable, when set, says why this interval carries no
+	// execution digests although the project has a leaf: it was sealed
+	// before digests were stored (2026-11-16) and its records no longer
+	// fold to the anchored value. Reported as unverified, never as a
+	// failure, because nothing shows the anchored record was wrong (v2).
+	DigestsUnavailable string `json:"digests_unavailable,omitempty"`
 }
 
 // ChainExport is the whole document handed to an auditor.
@@ -200,10 +217,10 @@ func (v *ExportVerification) add(name string, ok bool, format string, args ...an
 func VerifyChainExport(e ChainExport) ExportVerification {
 	v := ExportVerification{OK: true}
 
-	if e.Format != ChainExportFormatV1 {
+	if e.Format != ChainExportFormatV1 && e.Format != ChainExportFormatV2 {
 		v.add("file format", false,
-			"export claims format %q, this verifier understands %q",
-			e.Format, ChainExportFormatV1)
+			"export claims format %q, this verifier understands %q and %q",
+			e.Format, ChainExportFormatV1, ChainExportFormatV2)
 		return v
 	}
 	v.add("file format", true, "%s", e.Format)
@@ -311,9 +328,9 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		}
 		if cp.PrevLogEntryID != prev.LogEntryID {
 			badLinks = append(badLinks, fmt.Sprintf(
-				"hour %d says the hour before it was published at position %q, but hour %d "+
-					"was published at %q", cp.Seq, cp.PrevLogEntryID,
-				prev.Checkpoint.Seq, prev.LogEntryID))
+				"%s says the hour before it was published at position %q, but %s "+
+					"was published at %q", checkLabel(cp), cp.PrevLogEntryID,
+				checkLabel(prev.Checkpoint), prev.LogEntryID))
 			continue
 		}
 		linkedToPrev++
@@ -328,9 +345,14 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		v.add("publication never skipped", true,
 			"only one hour is covered here, so there is no earlier hour to link it to")
 	default:
+		// Until 2026-11-16 this said "Publishing even one hour late or not
+		// at all would break this". Late publishing does not break it:
+		// catch-up after downtime anchors hours late by design. What this
+		// shows is that no hour was skipped; when each hour was published
+		// is a separate check against the log (outside review finding E5).
 		detail := fmt.Sprintf("each of %s names the exact public-log position of the "+
-			"hour before it, and every one matched. Publishing even one hour late or not "+
-			"at all would break this",
+			"hour before it, and every one matched, so no hour was skipped. When each "+
+			"hour was published is checked separately, against the public log",
 			plural(linkedToPrev, "hour", "hours"))
 		if firstUnchecked {
 			detail += ". The earliest hour in this file has no earlier hour here to link " +
@@ -344,13 +366,23 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		leaves       []TenantLeaf
 		withActivity int
 		emptyForUs   int
+		// lastLeaf is the index of the last interval carrying this
+		// project's leaf, for the trailing-hours line (finding E7).
+		lastLeaf    = -1
+		unprovable  []string
+		listedRuns  int
+		deletedRuns int
 	)
+	for i, iv := range e.Intervals {
+		if iv.Leaf != nil {
+			lastLeaf = i
+		}
+	}
 	for _, iv := range e.Intervals {
-		seq := iv.Checkpoint.Seq
 
 		if iv.Leaf == nil {
 			if iv.Proof != nil || len(iv.Executions) > 0 {
-				v.add(fmt.Sprintf("hour %d consistency", seq), false,
+				v.add(checkLabel(iv.Checkpoint)+" consistency", false,
 					"no leaf for this project, but the export still carries a proof "+
 						"or executions for it")
 			}
@@ -360,7 +392,7 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		withActivity++
 
 		if iv.Leaf.ProjectID != e.ProjectID {
-			v.add(fmt.Sprintf("hour %d ownership", seq), false,
+			v.add(checkLabel(iv.Checkpoint)+" ownership", false,
 				"export is for project %q but this leaf belongs to %q",
 				e.ProjectID, iv.Leaf.ProjectID)
 			continue
@@ -368,13 +400,30 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		leaves = append(leaves, *iv.Leaf)
 
 		if iv.Proof == nil {
-			v.add(fmt.Sprintf("hour %d inclusion", seq), false,
+			v.add(checkLabel(iv.Checkpoint)+" inclusion", false,
 				"leaf present but no inclusion proof, so it cannot be tied to the "+
 					"anchored root")
 			continue
 		}
 		if err := VerifyTenantLeafInclusion(iv.Checkpoint, *iv.Leaf, *iv.Proof); err != nil {
-			v.add(fmt.Sprintf("hour %d inclusion", seq), false, "%v", err)
+			v.add(checkLabel(iv.Checkpoint)+" inclusion", false, "%v", err)
+			continue
+		}
+
+		// 4a. An hour sealed before digests were stored whose records no
+		// longer fold: say so, as unverified. Its inclusion and its place in
+		// the sub-chain are still checked above and below.
+		if iv.DigestsUnavailable != "" {
+			if len(iv.Executions) > 0 {
+				v.add(checkLabel(iv.Checkpoint)+" consistency", false,
+					"marked as having no digests (%s) but lists %d", iv.DigestsUnavailable, len(iv.Executions))
+				continue
+			}
+			unprovable = append(unprovable, checkLabel(iv.Checkpoint))
+			v.add(checkLabel(iv.Checkpoint), true,
+				"%s for this project, published inside the checkpoint. Its individual "+
+					"runs cannot be listed: %s", plural(iv.Leaf.ExecutionCount, "agent run", "agent runs"),
+				iv.DigestsUnavailable)
 			continue
 		}
 
@@ -387,26 +436,32 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		}
 		got, err := RootOverExecutionDigests(roots)
 		if err != nil {
-			v.add(fmt.Sprintf("hour %d combined fingerprint", seq), false,
+			v.add(checkLabel(iv.Checkpoint)+" combined fingerprint", false,
 				"cannot fold %d execution digests: %v", len(roots), err)
 			continue
 		}
 		if got != iv.Leaf.IntervalRoot {
-			v.add(fmt.Sprintf("hour %d combined fingerprint", seq), false,
+			v.add(checkLabel(iv.Checkpoint)+" combined fingerprint", false,
 				"the %d executions listed fold to %s, but the anchored leaf "+
 					"committed to %s", len(roots), short(got), short(iv.Leaf.IntervalRoot))
 			continue
 		}
 		if iv.Leaf.ExecutionCount != len(iv.Executions) {
-			v.add(fmt.Sprintf("hour %d run count", seq), false,
+			v.add(checkLabel(iv.Checkpoint)+" run count", false,
 				"leaf claims %d executions, export lists %d",
 				iv.Leaf.ExecutionCount, len(iv.Executions))
 			continue
 		}
 
-		v.add(fmt.Sprintf("hour %d", seq), true,
-			"%d agent runs, whose combined fingerprint matches this project's entry "+
-				"for the hour, inside the published checkpoint", len(iv.Executions))
+		for _, x := range iv.Executions {
+			if x.RecordsDeleted {
+				deletedRuns++
+			}
+		}
+		listedRuns += len(iv.Executions)
+		v.add(checkLabel(iv.Checkpoint), true,
+			"%s, whose combined fingerprint matches this project's entry for the hour, "+
+				"inside the published checkpoint", plural(len(iv.Executions), "agent run", "agent runs"))
 	}
 
 	// 5. The tenant sub-chain. Each of this project's leaves names the
@@ -443,42 +498,88 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		// "complete from your first execution" and "starts partway, with
 		// 4,812 executions before it" is the difference the reader needs.
 		first := leaves[0]
-		priorExecutions := first.CumulativeCount - uint64(first.ExecutionCount)
 		atGenesis := first.PrevLeafHash == ZeroHash
-
-		switch {
-		case atGenesis && priorExecutions == 0:
-			v.add("coverage", true,
-				"starts at this project's first published activity, so nothing "+
-					"earlier is missing")
-
-		case atGenesis && priorExecutions > 0:
-			// Self-contradictory: claims to be the first leaf while its own
-			// running total says otherwise. One of the two was edited.
+		// A running total smaller than the leaf's own count is impossible.
+		// Until 2026-11-16 the subtraction below wrapped instead and
+		// reported "18446744073709551615 earlier agent runs" as a pass
+		// (outside review finding E18).
+		if first.ExecutionCount < 0 || first.CumulativeCount < uint64(first.ExecutionCount) {
 			v.add("coverage", false,
-				"the earliest leaf claims to be this project's first, but its "+
-					"cumulative total of %d exceeds its own count of %d, so %d "+
-					"executions preceded it",
-				first.CumulativeCount, first.ExecutionCount, priorExecutions)
+				"the earliest leaf's running total of %d is smaller than its own count of %d, "+
+					"which no honest chain can produce", first.CumulativeCount, first.ExecutionCount)
+		} else {
+			priorExecutions := first.CumulativeCount - uint64(first.ExecutionCount)
 
-		default:
-			v.add("coverage", true,
-				"starts partway through: %d earlier agent runs were published but "+
-					"are not covered here",
-				priorExecutions)
-			v.Unverified = append(v.Unverified, fmt.Sprintf(
-				"This file starts partway through the project's history. %d earlier "+
-					"agent runs were published and are NOT covered here. Ask for the "+
-					"full range to check them.",
-				priorExecutions))
+			switch {
+			case atGenesis && priorExecutions == 0:
+				v.add("coverage", true,
+					"starts at this project's first published activity, so nothing "+
+						"earlier is missing")
+
+			case atGenesis && priorExecutions > 0:
+				// Self-contradictory: claims to be the first leaf while its own
+				// running total says otherwise. One of the two was edited.
+				v.add("coverage", false,
+					"the earliest leaf claims to be this project's first, but its "+
+						"cumulative total of %d exceeds its own count of %d, so %d "+
+						"executions preceded it",
+					first.CumulativeCount, first.ExecutionCount, priorExecutions)
+
+			default:
+				v.add("coverage", true,
+					"starts partway through: %d earlier agent runs were published but "+
+						"are not covered here",
+					priorExecutions)
+				v.Unverified = append(v.Unverified, fmt.Sprintf(
+					"This file starts partway through the project's history. %d earlier "+
+						"agent runs were published and are NOT covered here. Ask for the "+
+						"full range to check them.",
+					priorExecutions))
+			}
 		}
 	}
 
-	if emptyForUs > 0 {
+	// Quiet hours. An empty hour BEFORE this project's last leaf is
+	// covered: the next leaf names the previous one, so a leaf left out
+	// there breaks the sub-chain. An empty hour AFTER the last leaf is
+	// not: nothing later in the file can show a leaf was left out. Until
+	// 2026-11-16 both were called "normal and not a gap" (finding E7).
+	trailing := 0
+	if lastLeaf >= 0 {
+		trailing = len(e.Intervals) - 1 - lastLeaf
+	} else {
+		trailing = len(e.Intervals)
+	}
+	interior := emptyForUs - trailing
+	if interior > 0 {
 		v.add("quiet hours", true,
-			"%d of %d hours held no agent runs for this project. That is normal and "+
-				"not a gap: the hourly records still exist and still link up",
-			emptyForUs, len(e.Intervals))
+			"%s before this project's last entry held no agent runs. That is not a gap: "+
+				"the entry after each one names the entry before it, so a removed entry "+
+				"would break that link", plural(interior, "hour", "hours"))
+	}
+	if trailing > 0 {
+		v.Unverified = append(v.Unverified, fmt.Sprintf(
+			"The last %s in this file show no agent runs for this project. Activity in "+
+				"them can be neither confirmed nor ruled out from this file. Compare with a "+
+				"later export or with the dashboard.", plural(trailing, "hour", "hours")))
+	}
+	if deletedRuns > 0 {
+		v.add("retention", true,
+			"%d of %s listed had their records deleted under the project's retention "+
+				"setting. Their fingerprints are the published ones and still verify",
+			deletedRuns, plural(listedRuns, "agent run", "agent runs"))
+		v.Unverified = append(v.Unverified, fmt.Sprintf(
+			"%s were deleted under retention, so their contents can no longer be "+
+				"opened, only shown to be part of the published record.",
+			plural(deletedRuns, "agent run's records", "agent runs' records")))
+	}
+	if len(unprovable) > 0 {
+		v.Unverified = append(v.Unverified, fmt.Sprintf(
+			"%s cannot list their individual agent runs: they were recorded before "+
+				"Mesedi stored each run's fingerprint, and their records changed since. "+
+				"The hours themselves are published and link up; the runs inside them "+
+				"cannot be checked one by one: %s.",
+			plural(len(unprovable), "hour", "hours"), strings.Join(unprovable, ", ")))
 	}
 
 	// The limits, always, whether or not anything failed.
@@ -494,4 +595,11 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 	)
 
 	return v
+}
+
+// checkLabel names a checkpoint for a reader: its sequence and the hour
+// it covers. Until 2026-11-16 reports said "hour N" while printing the
+// sequence number, which is not an hour (outside review finding E24).
+func checkLabel(cp Checkpoint) string {
+	return fmt.Sprintf("checkpoint %d (%s UTC)", cp.Seq, cp.IntervalStart.UTC().Format("2006-01-02 15:04"))
 }

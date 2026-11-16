@@ -81,7 +81,7 @@ const (
 // three categories:
 //
 //  1. Running: `started`. The agent is actively working.
-//  2. Paused: `awaiting_human` (). The agent is suspended,
+//  2. Paused: `awaiting_human`. The agent is suspended,
 //     typically because it called the HITL request helper, and is
 //     waiting on a human decision before it can continue. Paused
 //     executions are NOT terminal: detectors do not fire on them
@@ -129,7 +129,7 @@ func (s ExecutionStatus) IsTerminal() bool {
 // IsPaused reports whether the supplied status represents a paused
 // (non-terminal) execution. Distinct from `started` because the
 // detector chain treats paused runs as "not in a position to be
-// evaluated yet" rather than "actively making progress" ().
+// evaluated yet" rather than "actively making progress".
 func (s ExecutionStatus) IsPaused() bool {
 	return s == StatusAwaitingHuman
 }

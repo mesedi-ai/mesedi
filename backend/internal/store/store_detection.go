@@ -129,7 +129,7 @@ type DetectionStore interface {
 	CountCheckpointEventsForProject(ctx context.Context, projectID string) (count int, lastAt *time.Time, err error)
 	// CountLLMCallsByProviderSince returns provider → llm_call count
 	// for the project over the given window. Used by detector-status
-	// () to detect Ollama-only projects and render skip-
+	// to detect Ollama-only projects and render skip-
 	// reason chips on the 3 N/A detectors (provider_incident,
 	// infrastructure_throttled, cost_velocity).
 	CountLLMCallsByProviderSince(ctx context.Context, projectID string, since time.Time) (map[string]int, error)
@@ -302,8 +302,8 @@ type DetectionStore interface {
 	// signature.
 	GroupHITLTimeout(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// CountHITLOutcomesInWindow aggregates human_intervention
-	// event verdicts across the project's recent executions
-	// (). Returns counts of distinct executions that
+	// event verdicts across the project's recent executions.
+	// Returns counts of distinct executions that
 	// asked for human input in the window plus the subsets that
 	// got at least one "rejected" and "edited" response.
 	CountHITLOutcomesInWindow(

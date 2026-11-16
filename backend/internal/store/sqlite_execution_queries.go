@@ -176,16 +176,27 @@ func scanExecutionRows(rows *sql.Rows) ([]*events.Execution, error) {
 // ListEventsForExecution returns the events recorded against a single
 // execution, sorted by sequence ASC (oldest first, matching the order
 // they were emitted by the agent).
-func (s *SQLiteStore) ListEventsForExecution(
-	ctx context.Context,
-	executionID string,
-) ([]*events.Event, error) {
+func (s *SQLiteStore) ListEventsForExecution(ctx context.Context, executionID string) ([]*events.Event, error) {
+	return s.listEventsForExecution(ctx, executionID, false)
+}
+
+// ListDigestEventsForExecution returns the events a digest covers: all
+// but those that arrived after the execution's digest was stored.
+func (s *SQLiteStore) ListDigestEventsForExecution(ctx context.Context, executionID string) ([]*events.Event, error) {
+	return s.listEventsForExecution(ctx, executionID, true)
+}
+
+func (s *SQLiteStore) listEventsForExecution(ctx context.Context, executionID string, digestOnly bool) ([]*events.Event, error) {
+	filter := ""
+	if digestOnly {
+		filter = " AND after_digest = 0"
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			event_id, execution_id, event_type, sequence,
 			timestamp, duration_ms, payload
 		FROM events
-		WHERE execution_id = ?
+		WHERE execution_id = ?`+filter+`
 		ORDER BY sequence ASC
 	`, executionID)
 	if err != nil {

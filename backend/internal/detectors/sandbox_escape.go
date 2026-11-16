@@ -306,39 +306,12 @@ func DetectSandboxEscapeWithCustom(
 	toolPayloads []json.RawMessage,
 	custom []*CustomPattern,
 ) (signature, matchedPatternID string, fired bool) {
-	if len(toolPayloads) == 0 {
+	// The first result of the function the pipeline calls, so there is
+	// one implementation and these tests exercise it. Until 2026-11-16
+	// this was a separate copy of the logic (outside review finding E27).
+	matches := DetectSandboxEscapeAllMatchesWithCustom(toolPayloads, custom)
+	if len(matches) == 0 {
 		return "", "", false
 	}
-	for _, raw := range toolPayloads {
-		// Decode just the fields we care about. arguments and
-		// return_value are arbitrary JSON; coerce to string by
-		// re-marshalling.
-		var p struct {
-			Arguments   json.RawMessage `json:"arguments,omitempty"`
-			ReturnValue json.RawMessage `json:"return_value,omitempty"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			continue
-		}
-		for _, sp := range sandboxPatterns {
-			if len(p.Arguments) > 0 && sp.regex.Match(p.Arguments) {
-				return "sandbox_escape:" + sp.id, "", true
-			}
-			if len(p.ReturnValue) > 0 && sp.regex.Match(p.ReturnValue) {
-				return "sandbox_escape:" + sp.id, "", true
-			}
-		}
-		for _, c := range custom {
-			if c == nil || c.Compiled == nil {
-				continue
-			}
-			if len(p.Arguments) > 0 && c.Compiled.Match(p.Arguments) {
-				return "sandbox_escape:custom:" + c.PatternID, c.PatternID, true
-			}
-			if len(p.ReturnValue) > 0 && c.Compiled.Match(p.ReturnValue) {
-				return "sandbox_escape:custom:" + c.PatternID, c.PatternID, true
-			}
-		}
-	}
-	return "", "", false
+	return matches[0].Signature, matches[0].MatchedPatternID, true
 }

@@ -228,8 +228,8 @@ type APIKey struct {
 	Name       string     `json:"name,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	// UserID is the org-member identity this key authenticates as
-	//. Required for per-member role enforcement. Migration 014
+	// UserID is the org-member identity this key authenticates as.
+	// Required for per-member role enforcement. Migration 014
 	// added the column nullable so pre-014 keys still work; auth
 	// middleware falls back to project.owner_user_id when UserID is
 	// empty so existing customer integrations don't break overnight.
@@ -501,10 +501,10 @@ type WebhookDelivery struct {
 }
 
 // Failure-class constants. One value per detector that produces a
-// failure_group. Crashes is the only class wired into the backend
-// detector today; loops / tool_failures / etc. come online as their
-// Phase-3+ detectors land. Keep this list in sync with the SDK side
-// (mesedi-python events.EventType) when adding new classes.
+// failure_group; every one is wired into the backend today. Add each new
+// class to AllFailureClasses (failure_classes.go) as well: a test fails
+// otherwise, and the webhook filter, severity defaults and the detector
+// coverage gate all read that list. Classes are not SDK event types.
 const (
 	FailureClassCrashes      = "crashes"
 	FailureClassLoops        = "loops"
@@ -695,8 +695,8 @@ type FailureGroup struct {
 	TotalTokensOut    *int64 `json:"total_tokens_out,omitempty"`
 	TotalTokens       *int64 `json:"total_tokens,omitempty"`
 	SampleExecutionID string `json:"sample_execution_id,omitempty"`
-	// AnalysisMarkdown is the LLM-generated root-cause analysis
-	// (). Nil when no analysis has been generated for
+	// AnalysisMarkdown is the LLM-generated root-cause analysis.
+	// Nil when no analysis has been generated for
 	// this group yet. Rendered as Markdown on the dashboard.
 	AnalysisMarkdown *string `json:"analysis_markdown,omitempty"`
 	// AnalyzedAt is the timestamp the analysis was produced. Nil
@@ -764,8 +764,8 @@ type ListFailureGroupsOpts struct {
 	Offset int
 }
 
-// TopologyNode is one entry in a multi-agent execution topology
-// (). The topology is a directed tree rooted at the
+// TopologyNode is one entry in a multi-agent execution topology.
+// The topology is a directed tree rooted at the
 // execution that has no parent in the project; every node carries
 // enough metadata to render the tree in the dashboard and to feed
 // downstream detectors (cascading_failure + coordination_deadlock
@@ -927,6 +927,7 @@ type Store interface {
 	DetectionStore
 	BillingLifecycleStore
 	CheckpointStore
+	ExecutionDigestStore
 
 	// Lifecycle.
 	Close() error

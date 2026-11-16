@@ -206,10 +206,9 @@ func main() {
 	// startup log, not in a slide. A locally-built binary without
 	// GOFIPS140 set will honestly report enabled=false.
 	//
-	// Only Enabled() is used here. fips140.Version() would name the exact
-	// module build, but it requires go1.26 and this module declares go1.25.
-	// Add it if and when the go directive moves.
-	logger.Info("fips 140-3 posture", "enabled", fips140.Enabled())
+	// fips140.Version() names the exact module build. It needs go1.26; the
+	// go directive moved to 1.27.4 on 2026-11-16, so it is logged too.
+	logger.Info("fips 140-3 posture", "enabled", fips140.Enabled(), "module_version", fips140.Version())
 
 	// ── persistence ─────────────────────────────────────────────────
 	// Dispatch by which DSN is set:

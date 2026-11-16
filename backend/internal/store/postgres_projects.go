@@ -688,6 +688,11 @@ var postgresProjectCascadeStatements = []string{
 	`DELETE FROM tool_contract_pins WHERE project_id = $1`,
 	`DELETE FROM system_events WHERE project_id = $1`,
 	`DELETE FROM request_log WHERE project_id = $1`,
+	// Stored execution digests and history labels (migration 063).
+	// Deleted with the account: the checkpoint leaves stay, so other
+	// projects' proofs are unaffected (Robert's decision, 2026-11-16).
+	`DELETE FROM execution_digests WHERE project_id = $1`,
+	`DELETE FROM digest_history_gaps WHERE project_id = $1`,
 	`DELETE FROM executions WHERE project_id = $1`,
 	`DELETE FROM failure_groups WHERE project_id = $1`,
 	`DELETE FROM api_keys WHERE project_id = $1`,

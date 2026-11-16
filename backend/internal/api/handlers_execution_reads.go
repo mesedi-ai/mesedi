@@ -206,11 +206,22 @@ func (h *Handlers) HandleGetExecutionDigest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	evts, err := h.Store.ListEventsForExecution(r.Context(), executionID)
+	// The events the anchored digest covers: everything except events that
+	// arrived after the execution's digest was stored with its checkpoint
+	// (2026-11-16). Those are kept but sit outside the anchored record, so
+	// including them would produce a root, and proofs, that the published
+	// checkpoint never committed to (outside review finding E3).
+	evts, err := h.Store.ListDigestEventsForExecution(r.Context(), executionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list events failed: "+err.Error())
 		return
 	}
+	late, err := h.Store.CountEventsAfterDigest(r.Context(), []string{executionID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "count late events failed: "+err.Error())
+		return
+	}
+	afterAnchoring := late[executionID]
 
 	digest, err := attest.Compute(executionID, evts)
 	if err != nil {
@@ -229,6 +240,9 @@ func (h *Handlers) HandleGetExecutionDigest(w http.ResponseWriter, r *http.Reque
 	resp := map[string]any{
 		"ok":     true,
 		"digest": digest,
+		// Events received after this record was anchored. Not covered by
+		// the digest; zero for almost every execution.
+		"events_after_anchoring": afterAnchoring,
 	}
 
 	// Optional inclusion proof for a single leaf. Present so a

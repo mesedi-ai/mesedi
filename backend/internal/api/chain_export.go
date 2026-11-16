@@ -68,9 +68,19 @@ func (h *Handlers) buildChainExport(
 	if err != nil {
 		return attest.ChainExport{}, err
 	}
+	// Leave out the checkpoints at the end of the range that are built but
+	// not yet published. That is normal for seconds after each hour, and
+	// for as long as anchoring is stalled; a pending anchor is not
+	// tampering, and until 2026-11-16 the verifier reported it as a failure
+	// (outside review finding E19). Only the chain head can be unpublished,
+	// because the scheduler builds nothing on an unanchored checkpoint, so
+	// an unpublished checkpoint in the middle still fails verification.
+	for len(cps) > 0 && cps[len(cps)-1].Anchor.LogEntryID == "" {
+		cps = cps[:len(cps)-1]
+	}
 	if len(cps) == 0 {
 		return attest.ChainExport{}, fmt.Errorf(
-			"no checkpoints in range [%d, %d]", fromSeq, toSeq)
+			"no published checkpoints in range [%d, %d]", fromSeq, toSeq)
 	}
 
 	// All tenants' leaves, because an inclusion proof needs the whole
@@ -91,7 +101,7 @@ func (h *Handlers) buildChainExport(
 	}
 
 	out := attest.ChainExport{
-		Format:          attest.ChainExportFormatV1,
+		Format:          attest.ChainExportFormatV2,
 		GeneratedAt:     time.Now().UTC(),
 		ProjectID:       projectID,
 		IntervalSeconds: int(interval.Seconds()),
@@ -137,8 +147,7 @@ func (h *Handlers) buildChainExport(
 				"prove leaf for %s in checkpoint %d: %w", projectID, cp.Seq, err)
 		}
 
-		execs, err := h.exportedExecutions(
-			ctx, projectID, cp.IntervalStart, cp.IntervalEnd)
+		execs, unavailable, err := h.exportedExecutions(ctx, projectID, cp)
 		if err != nil {
 			return attest.ChainExport{}, fmt.Errorf(
 				"executions for checkpoint %d: %w", cp.Seq, err)
@@ -156,60 +165,83 @@ func (h *Handlers) buildChainExport(
 		iv.Leaf = &leafCopy
 		iv.Proof = &proof
 		iv.Executions = execs
+		iv.DigestsUnavailable = unavailable
 		out.Intervals = append(out.Intervals, iv)
 	}
 
 	return out, nil
 }
 
-// exportedExecutions recomputes one project's execution digests for an
-// interval, in the same order the leaf's root was folded over.
+// exportedExecutions returns one project's execution digests for one
+// checkpoint, in the order its leaf's root was folded over.
 //
-// Order is load-bearing and comes from ListSealedExecutionIDs, which is
-// the same call and the same ordering the scheduler used when it built
-// the leaf. Re-sorting here would produce a different fold and the export
-// would accuse itself of tampering.
+// The STORED digests (migration 063, 2026-11-16): the values anchored
+// with the checkpoint. Until then this recomputed them from current
+// events, so one late event (outside review finding E3) or a retention
+// purge (E4) made an honest export report tampering. Executions whose
+// records retention has since deleted keep their stored digest and are
+// marked records_deleted.
 //
-// Recomputed rather than stored. The scheduler computes these roots to
-// build the leaf and then discards them, so this repeats that work. A
-// deliberate trade: storing them would be a schema change and a second
-// copy of a value that must agree with the chain, and a stored copy that
-// silently disagreed would be worse than redoing the arithmetic. Revisit
-// if exports become slow.
+// A leaf sealed before migration 063 has stored digests only where the
+// history backfill could prove them. One it could not is returned with
+// the recorded reason and no digests. One not yet visited by the
+// backfill (it runs at scheduler start) falls back to recomputing, which
+// is what every export did before this change.
 func (h *Handlers) exportedExecutions(
-	ctx context.Context, projectID string, start, end time.Time,
-) ([]attest.ExportedExecution, error) {
-	ids, err := h.Store.ListSealedExecutionIDs(ctx, projectID, start, end)
+	ctx context.Context, projectID string, cp attest.Checkpoint,
+) ([]attest.ExportedExecution, string, error) {
+	stored, err := h.Store.ListExecutionDigests(ctx, projectID, cp.Seq)
 	if err != nil {
-		return nil, fmt.Errorf("list sealed executions: %w", err)
+		return nil, "", fmt.Errorf("stored digests: %w", err)
+	}
+	if len(stored) > 0 {
+		ids := make([]string, len(stored))
+		for i, d := range stored {
+			ids[i] = d.ExecutionID
+		}
+		exists, err := h.Store.ExistingExecutionIDs(ctx, ids)
+		if err != nil {
+			return nil, "", fmt.Errorf("check retained executions: %w", err)
+		}
+		out := make([]attest.ExportedExecution, len(stored))
+		for i, d := range stored {
+			out[i] = attest.ExportedExecution{
+				ExecutionID:    d.ExecutionID,
+				DigestRoot:     d.Root,
+				RecordsDeleted: !exists[d.ExecutionID],
+			}
+		}
+		return out, "", nil
 	}
 
+	if reason, found, err := h.Store.GetDigestHistoryGap(ctx, cp.Seq, projectID); err != nil {
+		return nil, "", fmt.Errorf("digest history gap: %w", err)
+	} else if found {
+		return nil, reason, nil
+	}
+
+	// Not yet backfilled: recompute, in the order the leaf was built.
+	ids, err := h.Store.ListSealedExecutionIDs(ctx, projectID, cp.IntervalStart, cp.IntervalEnd)
+	if err != nil {
+		return nil, "", fmt.Errorf("list sealed executions: %w", err)
+	}
 	out := make([]attest.ExportedExecution, 0, len(ids))
 	for _, execID := range ids {
-		evts, err := h.Store.ListEventsForExecution(ctx, execID)
+		evts, err := h.Store.ListDigestEventsForExecution(ctx, execID)
 		if err != nil {
-			return nil, fmt.Errorf("events for %s: %w", execID, err)
+			return nil, "", fmt.Errorf("events for %s: %w", execID, err)
 		}
 		// ComputeForChain, not Compute: an execution with no events must
-		// still appear here. Compute refuses an empty event list by
-		// design, and this path used the same call as the scheduler, so
-		// the stall that stopped checkpoint construction on 2026-09-04
-		// would have reappeared in the export the moment an interval
-		// containing an event-less execution was requested.
+		// still appear (the 2026-09-04 stall). Refuse rather than omit an
+		// execution: an export missing one the leaf counts is exactly the
+		// omission this system exists to make visible.
 		d, err := attest.ComputeForChain(execID, evts)
 		if err != nil {
-			// Refuse the export rather than omit the execution. An export
-			// missing an execution the leaf's count includes is exactly
-			// the omission this system exists to make visible, and
-			// producing one here would be doing it to ourselves.
-			return nil, fmt.Errorf("digest execution %s: %w", execID, err)
+			return nil, "", fmt.Errorf("digest execution %s: %w", execID, err)
 		}
-		out = append(out, attest.ExportedExecution{
-			ExecutionID: execID,
-			DigestRoot:  d.Root,
-		})
+		out = append(out, attest.ExportedExecution{ExecutionID: execID, DigestRoot: d.Root})
 	}
-	return out, nil
+	return out, "", nil
 }
 
 func parseSeq(raw string) (uint64, error) {

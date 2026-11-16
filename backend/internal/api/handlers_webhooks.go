@@ -18,38 +18,25 @@ import (
 )
 
 // validFailureClasses is the allowlist of class names accepted in the
-// `enabled_classes` field on POST /webhooks. Must stay in sync with
-// the FailureClass* constants in store.go so that every class the
-// detector emits is also acceptable in a webhook filter. The PL2
-// fix on 2026-06-13 unblocked the 13 newer classes that had drifted
-// since the webhook layer was first written; the dashboard's
+// `enabled_classes` field on POST /webhooks: every class a detector can
+// emit, built from store.AllFailureClasses. A fix on 2026-06-13
+// unblocked 13 classes that had drifted since the webhook layer was
+// first written, and it drifted again until 2026-11-16; the dashboard's
 // /app/webhooks form no longer renders chips at all (routing for
 // individual classes is configured under /app/settings, severity
 // routing), so the only consumer of this list now is API-direct
 // users posting to /webhooks via curl or SDK.
-var validFailureClasses = map[string]struct{}{
-	store.FailureClassCrashes:              {},
-	store.FailureClassLoops:                {},
-	store.FailureClassToolFailures:         {},
-	store.FailureClassValidator:            {},
-	store.FailureClassDrift:                {},
-	store.FailureClassCostVelocity:         {},
-	store.FailureClassInjection:            {},
-	store.FailureClassInfraThrottled:       {},
-	store.FailureClassDataLeakage:          {},
-	store.FailureClassSemanticLoop:         {},
-	store.FailureClassToolSchemaDrift:      {},
-	store.FailureClassContextOverflow:      {},
-	store.FailureClassTokenWaste:           {},
-	store.FailureClassSandboxEscape:        {},
-	store.FailureClassGroundingFailure:     {},
-	store.FailureClassCascadingFailure:     {},
-	store.FailureClassCoordinationDeadlock: {},
-	store.FailureClassProviderIncident:     {},
-	store.FailureClassHITLTimeout:          {},
-	store.FailureClassHITLRejectionSpike:   {},
-	store.FailureClassRecordIntegrity:      {},
-}
+var validFailureClasses = func() map[string]struct{} {
+	// Built from store.AllFailureClasses since 2026-11-16. The hand-kept
+	// map this replaced had drifted twice; the second time it was missing
+	// environment_misapprehension and covert_coordination, so subscribing
+	// to either was rejected as unknown (outside review finding E8).
+	m := make(map[string]struct{}, len(store.AllFailureClasses)) // max: fixed, one entry per failure class
+	for _, c := range store.AllFailureClasses {
+		m[c] = struct{}{}
+	}
+	return m
+}()
 
 // HandleListWebhooks returns the calling project's webhooks. The
 // `secret` field is never serialized, it's only ever shown once at
@@ -178,7 +165,7 @@ func (h *Handlers) HandleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	for _, c := range body.EnabledClasses {
 		if _, known := validFailureClasses[c]; !known {
 			writeError(w, http.StatusBadRequest,
-				"unknown failure_class: "+c+" (valid: crashes, loops, tool_failures, validator_failures, drift, cost_velocity, prompt_injection)")
+				"unknown failure_class: "+c+" (valid: "+strings.Join(store.AllFailureClasses, ", ")+")")
 			return
 		}
 	}

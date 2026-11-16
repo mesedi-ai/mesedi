@@ -87,8 +87,8 @@ var injectionPatterns = []InjectionPattern{
 // positives are far worse than false negatives for an alerting
 // surface.
 //
-// For customer-supplied custom patterns, use DetectInjectionWithCustom
-// (). This function is preserved for the unit tests that
+// For customer-supplied custom patterns, use DetectInjectionWithCustom.
+// This function is preserved for the unit tests that
 // pin the built-in behavior; production code paths now go through
 // the With Custom variant.
 //

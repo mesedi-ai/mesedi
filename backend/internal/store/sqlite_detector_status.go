@@ -64,7 +64,7 @@ func (s *SQLiteStore) CountCheckpointEventsForProject(
 // CountLLMCallsByProviderSince, SQLite implementation. Returns a
 // map of provider → count of llm_call events for the project over
 // the last `since` window. Used by the detector-status surface
-// () to determine whether a project is Ollama-only and
+// to determine whether a project is Ollama-only and
 // should show skip-reason chips on the 3 N/A detectors
 // (provider_incident, infrastructure_throttled, cost_velocity).
 // Empty map → no llm_call activity in the window.

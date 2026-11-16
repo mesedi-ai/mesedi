@@ -170,41 +170,12 @@ func DetectHITLTimeoutAllMatchesWithThresholds(
 // tests. The handler now uses DetectHITLTimeoutAllMatches per the
 // all-matches-recorded wave (hitl_timeout.G3).
 func DetectHITLTimeout(payloads []json.RawMessage) (signature string, detected bool) {
-	if len(payloads) == 0 {
+	// The first result of the function the pipeline calls, so there is
+	// one implementation and these tests exercise it. Until 2026-11-16
+	// this was a separate copy of the logic (outside review finding E27).
+	sigs := DetectHITLTimeoutAllMatchesWithThresholds(payloads, DefaultHITLTimeoutThresholds())
+	if len(sigs) == 0 {
 		return "", false
 	}
-	// First pass: explicit timeout. response_kind == "timeout" is
-	// the strongest signal because it is the customer's own
-	// declaration, not our heuristic.
-	for _, raw := range payloads {
-		var p struct {
-			ResponseKind string `json:"response_kind"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			continue
-		}
-		if p.ResponseKind == "timeout" {
-			return "hitl_timeout:explicit", true
-		}
-	}
-	// Second pass: SLA exceeded. Only fires when sla_seconds is
-	// set (we cannot detect a breach without a customer-declared
-	// SLA). The wait_duration_ms is computed by the SDK at
-	// response time and stored on the event.
-	for _, raw := range payloads {
-		var p struct {
-			SLASeconds     int64 `json:"sla_seconds"`
-			WaitDurationMs int64 `json:"wait_duration_ms"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			continue
-		}
-		if p.SLASeconds <= 0 {
-			continue
-		}
-		if p.WaitDurationMs > p.SLASeconds*1000 {
-			return "hitl_timeout:sla_exceeded", true
-		}
-	}
-	return "", false
+	return sigs[0], true
 }

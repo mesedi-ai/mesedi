@@ -180,7 +180,7 @@ func (s *SQLiteStore) DeleteProjectPattern(
 }
 
 // IncrementPatternMatchCount adds delta to match_count AND updates
-// last_matched_at to NOW() (). The dashboard surfaces
+// last_matched_at to NOW(). The dashboard surfaces
 // the timestamp as a 'dormant' badge on rows that haven't matched
 // in 30 days; without the synchronous write, the badge would be
 // stale or wrong.

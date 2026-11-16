@@ -54,7 +54,7 @@ func (h *Handlers) runCostVelocityDetectors(r *http.Request, executionID, authPr
 	// durable audit_event so persistent failures surface in
 	// the dashboard config-fallback chip.
 	//
-	// Migration 044 () adds the rate-based ($/min)
+	// Migration 044 adds the rate-based ($/min)
 	// detector immediately after this block. Both can fire on
 	// the same execution because they answer different
 	// questions (single expensive call vs sustained burn

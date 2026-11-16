@@ -424,7 +424,7 @@ const MaxEventPayloadCharsInPrompt = 500
 //
 //  2. The specific failure group's metadata + sample executions.
 //
-//  3. () Sample events from the first sample execution, with
+//  3. Sample events from the first sample execution, with
 //     each event's payload truncated to MaxEventPayloadCharsInPrompt
 //     chars. This is where the model gets actual data to reason
 //     about, tool_call return shapes, llm_call prompts/responses,
@@ -501,7 +501,7 @@ func buildFailureGroupAnalysisPrompt(
 		}
 	}
 
-	// Part 3 (): sample events from the first execution. This
+	// Part 3: sample events from the first execution. This
 	// is the data layer that makes the AI analysis structurally
 	// different from the static playbook, the model can now point
 	// to specific tool_call return shapes, llm_call prompt/response

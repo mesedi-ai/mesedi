@@ -27,7 +27,6 @@ package detectors
 
 import (
 	"encoding/json"
-	"fmt"
 )
 
 // DetectGroundingFailure scans the supplied eval_score payloads on
@@ -224,77 +223,12 @@ func DetectGroundingFailureWithThresholds(
 	payloads []json.RawMessage,
 	t GroundingFailureThresholds,
 ) (signature string, detected bool) {
-	if len(payloads) == 0 {
+	// The first result of the function the pipeline calls, so there is
+	// one implementation and these tests exercise it. Until 2026-11-16
+	// this was a separate copy of the logic (outside review finding E27).
+	sigs := DetectGroundingFailureAllMatchesWithThresholds(payloads, t)
+	if len(sigs) == 0 {
 		return "", false
 	}
-	// First pass: any explicit passed=false. The first failing
-	// evaluator wins so the signature is deterministic across
-	// rerunsorderings.
-	for _, raw := range payloads {
-		var p struct {
-			EvaluatorID string `json:"evaluator_id"`
-			MetricType  string `json:"metric_type"`
-			Passed      bool   `json:"passed"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			continue
-		}
-		if !p.Passed && p.EvaluatorID != "" {
-			return fmt.Sprintf("grounding_failure:%s:%s", p.EvaluatorID, p.MetricType), true
-		}
-	}
-	// Second pass: mean-below-floor heuristic, grouped per
-	// (evaluator, metric) so a single bad evaluator doesn't drag
-	// the others down. Only consider higher_is_better=true runs;
-	// inverse metrics like hallucination_rate need their own
-	// threshold semantics.
-	type rollup struct {
-		sum   float64
-		count int
-	}
-	per := map[string]*rollup{}
-	for _, raw := range payloads {
-		var p struct {
-			EvaluatorID    string  `json:"evaluator_id"`
-			MetricType     string  `json:"metric_type"`
-			Score          float64 `json:"score"`
-			HigherIsBetter bool    `json:"higher_is_better"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			continue
-		}
-		if !p.HigherIsBetter || p.EvaluatorID == "" {
-			continue
-		}
-		key := p.EvaluatorID + ":" + p.MetricType
-		r, ok := per[key]
-		if !ok {
-			r = &rollup{}
-			per[key] = r
-		}
-		r.sum += p.Score
-		r.count++
-	}
-	// Use lexicographic order over key for deterministic tie-break.
-	var firingKey string
-	for key, r := range per {
-		if r.count == 0 {
-			continue
-		}
-		mean := r.sum / float64(r.count)
-		// Per-evaluator floor lookup (extensions wave ,
-		// closes grounding_failure.G3). Falls back to MeanFloor when
-		// no per-evaluator override exists for this key.
-		floor := t.effectiveFloor(key)
-		if mean >= floor {
-			continue
-		}
-		if firingKey == "" || key < firingKey {
-			firingKey = key
-		}
-	}
-	if firingKey == "" {
-		return "", false
-	}
-	return "grounding_failure:" + firingKey, true
+	return sigs[0], true
 }

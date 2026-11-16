@@ -207,7 +207,14 @@ func CanonicalLeaf(e *events.Event) []byte {
 	appendField("execution_id", e.ExecutionID)
 	appendField("event_type", string(e.EventType))
 	appendField("sequence", fmt.Sprintf("%d", e.Sequence))
-	appendField("timestamp", e.Timestamp.UTC().Format("2006-01-02T15:04:05.000000000Z"))
+	// Truncated to storagePrecision (microseconds), the precision Postgres
+	// keeps, so the same record digests the same on both databases. Until
+	// 2026-11-16 nanoseconds were hashed, and SQLite (which keeps them) and
+	// Postgres (which drops them) produced different roots for one record
+	// (outside review finding E12). The nine-digit layout stays: every
+	// anchored v1 digest was computed from Postgres values, already whole
+	// microseconds, so truncation leaves each of them unchanged.
+	appendField("timestamp", e.Timestamp.UTC().Truncate(storagePrecision).Format("2006-01-02T15:04:05.000000000Z"))
 	appendField("duration_ms", fmt.Sprintf("%d", e.DurationMs))
 	appendField("payload_sha256", hex.EncodeToString(payloadDigest[:]))
 

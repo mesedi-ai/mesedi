@@ -41,7 +41,9 @@ type fakeChainStore struct {
 
 	sealCalls int
 	insertErr error
-	countErr  error
+	// digests[seq][projectID] as passed to InsertCheckpointWithDigests.
+	digests  map[uint64]map[string][]store.ExecutionDigest
+	countErr error
 }
 
 func newFakeChain() *fakeChainStore {
@@ -95,6 +97,25 @@ func (f *fakeChainStore) ListEventsForExecution(_ context.Context, executionID s
 		Timestamp:   time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC),
 		Payload:     []byte(`{"k":"v"}`),
 	}}, nil
+}
+
+func (f *fakeChainStore) ListDigestEventsForExecution(ctx context.Context, executionID string) ([]*events.Event, error) {
+	return f.ListEventsForExecution(ctx, executionID)
+}
+
+// InsertCheckpointWithDigests records the digests the scheduler stored
+// with each checkpoint, so tests can check them.
+func (f *fakeChainStore) InsertCheckpointWithDigests(
+	ctx context.Context, cp attest.Checkpoint, leaves []attest.TenantLeaf, digests map[string][]store.ExecutionDigest,
+) error {
+	if err := f.InsertCheckpoint(ctx, cp, leaves); err != nil {
+		return err
+	}
+	if f.digests == nil {
+		f.digests = map[uint64]map[string][]store.ExecutionDigest{}
+	}
+	f.digests[cp.Seq] = digests
+	return nil
 }
 
 func (f *fakeChainStore) LatestCheckpoint(context.Context) (*attest.Checkpoint, error) {

@@ -161,12 +161,12 @@ var patterns = []pattern{
 	{"context_overflow", "", "context_overflow/_default.md"},
 	{"token_waste", "", "token_waste/_default.md"},
 
-	// ── Tier 2 failure-detection depth (-) ──────────
+	// ── Tier 2 failure-detection depth ──────────
 	{"semantic_loop", "", "semantic_loop/_default.md"},
 	{"tool_schema_drift", "", "tool_schema_drift/_default.md"},
 	{"grounding_failure", "", "grounding_failure/_default.md"},
 
-	// ── Tier 3 multi-agent + security (-) ─────────
+	// ── Tier 3 multi-agent + security ─────────
 	{"cascading_failure", "", "cascading_failure/_default.md"},
 	{"coordination_deadlock", "", "coordination_deadlock/_default.md"},
 	{"provider_incident", "", "provider_incident/_default.md"},
@@ -189,7 +189,7 @@ var patterns = []pattern{
 	{"environment_misapprehension", "", "environment_misapprehension/_default.md"},
 	{"covert_coordination", "", "covert_coordination/_default.md"},
 
-	// ── Tier 4 HITL (-) ───────────────────────────
+	// ── Tier 4 HITL ───────────────────────────
 	{"hitl_timeout", "", "hitl_timeout/_default.md"},
 	{"hitl_rejection_spike", "", "hitl_rejection_spike/_default.md"},
 	{"record_integrity", "", "record_integrity/_default.md"},

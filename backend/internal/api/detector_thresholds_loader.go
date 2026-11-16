@@ -30,8 +30,8 @@ import (
 )
 
 // DetectorThresholdAuditWriter is the minimal callback the loader
-// uses to promote fallback warnings to durable audit_events rows
-// (). Same shape as the `config_fallback` action shipped
+// uses to promote fallback warnings to durable audit_events rows.
+// Same shape as the `config_fallback` action shipped
 // by for the existing per-project primitives. Detector +
 // threshold_key + reason name the fallback; metadata carries the
 // underlying error string when applicable. The handler call site
@@ -83,8 +83,8 @@ type ProjectDetectorThresholds struct {
 	// DetectHITLTimeoutAllMatchesWithThresholds to control which
 	// timeout modes promote to failure_groups.
 	HITLTimeout detectors.HITLTimeoutThresholds
-	// Pricing carries the per-project custom_model_pricing override
-	// (). Not really a "detector threshold", pricing is
+	// Pricing carries the per-project custom_model_pricing override.
+	// Not really a "detector threshold", pricing is
 	// read at execution close by ComputeLLMCostWithOverrides, but it
 	// rides this same per-project config table because the
 	// architectural shape (model-keyed JSON map) is identical to

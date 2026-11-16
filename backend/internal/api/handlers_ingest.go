@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mesedi-ai/mesedi/backend/attest/events"
+	"mesedi/backend/internal/store"
 )
 
 // HandleCreateExecution accepts an Execution at the agent's entry point
@@ -198,6 +199,8 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.signalEventsAfterDigest(r, authProjectID, accepted)
+
 	for _, evt := range accepted {
 		h.Logger.Info("event ingested",
 			"event_id", evt.EventID,
@@ -214,4 +217,55 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 		"accepted": len(accepted),
 		"rejected": rejected,
 	})
+}
+
+// RecordIntegritySigAfterDigest is the record_integrity signature for an
+// execution that received events after its digest was stored with its
+// checkpoint, that is, after its record was anchored.
+const RecordIntegritySigAfterDigest = "record_integrity:events_after_anchoring"
+
+// signalEventsAfterDigest groups every execution in the batch that now
+// holds events which arrived after its digest was stored. Those events are
+// kept but sit outside the anchored record (Robert's decision, 2026-11-16;
+// outside review finding E3), and the customer is told so through the
+// record_integrity class rather than finding out from a failed export.
+// Best effort: a grouping error is logged and the ingest still succeeds.
+//
+// One count query per batch, not one per run: this runs on every ingest,
+// and almost always finds nothing.
+func (h *Handlers) signalEventsAfterDigest(r *http.Request, projectID string, batch []events.Event) {
+	seen := make(map[string]bool, len(batch)) // max: one entry per event in this batch
+	ids := make([]string, 0, len(batch))
+	for _, evt := range batch {
+		if !seen[evt.ExecutionID] {
+			seen[evt.ExecutionID] = true
+			ids = append(ids, evt.ExecutionID)
+		}
+	}
+	late, err := h.Store.CountEventsAfterDigest(r.Context(), ids)
+	if err != nil {
+		h.Logger.Warn("count events after digest failed (continuing)", "error", err.Error())
+		return
+	}
+	// One grouping write per run that did receive late events, normally
+	// none; in ids order so the log reads in arrival order.
+	for _, id := range ids {
+		if n := late[id]; n > 0 {
+			h.groupEventsAfterAnchoring(r, projectID, id, n)
+		}
+	}
+}
+
+// groupEventsAfterAnchoring records one execution's late events as a
+// record_integrity group and fires the class's webhook when it is new.
+func (h *Handlers) groupEventsAfterAnchoring(r *http.Request, projectID, executionID string, n int) {
+	isNew, gErr := h.Store.GroupRecordIntegrity(r.Context(), executionID, projectID, RecordIntegritySigAfterDigest)
+	if gErr != nil {
+		h.Logger.Warn("record-integrity grouping failed (continuing)",
+			"execution_id", executionID, "signature", RecordIntegritySigAfterDigest, "error", gErr.Error())
+		return
+	}
+	h.Logger.Info("record integrity signal",
+		"execution_id", executionID, "signature", RecordIntegritySigAfterDigest, "events_after_anchoring", n)
+	h.maybeFireWebhook(r, projectID, store.FailureClassRecordIntegrity, RecordIntegritySigAfterDigest, isNew, gErr)
 }

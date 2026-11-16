@@ -154,12 +154,26 @@ func scanExecutionRowsPg(rows *sql.Rows) ([]*events.Execution, error) {
 }
 
 func (s *PostgresStore) ListEventsForExecution(ctx context.Context, executionID string) ([]*events.Event, error) {
+	return s.listEventsForExecution(ctx, executionID, false)
+}
+
+// ListDigestEventsForExecution returns the events a digest covers: all
+// but those that arrived after the execution's digest was stored.
+func (s *PostgresStore) ListDigestEventsForExecution(ctx context.Context, executionID string) ([]*events.Event, error) {
+	return s.listEventsForExecution(ctx, executionID, true)
+}
+
+func (s *PostgresStore) listEventsForExecution(ctx context.Context, executionID string, digestOnly bool) ([]*events.Event, error) {
+	filter := ""
+	if digestOnly {
+		filter = " AND NOT after_digest"
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			event_id, execution_id, event_type, sequence,
 			timestamp, duration_ms, payload
 		FROM events
-		WHERE execution_id = $1
+		WHERE execution_id = $1`+filter+`
 		ORDER BY sequence ASC
 	`, executionID)
 	if err != nil {

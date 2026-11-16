@@ -1,11 +1,12 @@
 # Record integrity
 
-The event record for this execution contradicts itself. Every other failure class in Mesedi tells you something about what your agent did. This one tells you something about the evidence — that the record you are reading is not complete, and therefore that any conclusion drawn from it may be drawn from a partial picture.
+The event record for this execution contradicts itself. Every other failure class in Mesedi tells you something about what your agent did. This one tells you something about the evidence: that the record you are reading is not complete, and therefore that any conclusion drawn from it may be drawn from a partial picture.
 
-Two signatures, and both can fire on the same execution:
+Three signatures, and more than one can fire on the same execution:
 
-- **`record_integrity:sequence_gap`** — the events carry sequence numbers with at least one value missing between the lowest and highest observed. Events were produced that this record does not contain.
-- **`record_integrity:duplicate_sequence`** — two or more events claim the same sequence number. One position in the record was written more than once, so at most one of them is the original.
+- **`record_integrity:sequence_gap`**: the events carry sequence numbers with at least one value missing between the lowest and highest observed. Events were produced that this record does not contain.
+- **`record_integrity:duplicate_sequence`**: two or more events claim the same sequence number. One position in the record was written more than once, so at most one of them is the original.
+- **`record_integrity:events_after_anchoring`**: events arrived after this run's record was anchored with its hourly checkpoint. They are kept and shown, but they are not part of the published record, so they cannot be proven against it. Usually a late SDK flush or a retry after a timeout; check whether the run kept working after it was sealed.
 
 Ordering is deterministic: gap appears before duplicate when both fire.
 
@@ -13,9 +14,9 @@ Ordering is deterministic: gap appears before duplicate when both fire.
 
 **This is not a tampering alert, and treating it as one will waste your time.** A missing sequence number is far more often a dropped HTTP request, an SDK process killed before its buffer flushed, or a retry that landed twice than it is anybody removing anything.
 
-There is a harder reason too, and it is structural rather than statistical: **the detector's only input is supplied by the caller.** Sequence numbers arrive inside the event body, and Mesedi's ingest endpoint authenticates the project key, not the content. Anyone able to post events chooses the sequence numbers — so an actor concealing something does not leave a gap. They post a dense stream, and this detector reports a clean record.
+There is a harder reason too, and it is structural rather than statistical: **the detector's only input is supplied by the caller.** Sequence numbers arrive inside the event body, and Mesedi's ingest endpoint authenticates the project key, not the content. Anyone able to post events chooses the sequence numbers, so an actor concealing something does not leave a gap. They post a dense stream, and this detector reports a clean record.
 
-The scope is therefore: **it sees records that were damaged, not records that were authored.** Loss, crash and retry it catches. Fabrication it does not, and no detector reading the same unsigned stream could — that would be asking the data whether the data is trustworthy.
+The scope is therefore: **it sees records that were damaged, not records that were authored.** Loss, crash and retry it catches. Fabrication it does not, and no detector reading the same unsigned stream could: that would be asking the data whether the data is trustworthy.
 
 What the detector establishes is narrower and still worth having: *this record is not complete, and here is the exact position that is missing or doubled.* Whether that is infrastructure or intent is a question this data cannot answer.
 
@@ -27,7 +28,7 @@ Ranked roughly by how often each turns out to be the cause:
 
 **Transport loss.** An event POST failed and was never retried. Check your SDK's error logs for the window covering the execution. This is the single most common explanation and the easiest to confirm.
 
-**Process death mid-flush.** The agent was killed — OOM, container eviction, deploy rollout, timeout kill — while events were buffered and not yet sent. Look for the execution ending in `crashed`, `timeout`, or with no terminal status at all. If the gap sits at the *end* of the surviving range, this is usually why.
+**Process death mid-flush.** The agent was killed (OOM, container eviction, deploy rollout, timeout kill) while events were buffered and not yet sent. Look for the execution ending in `crashed`, `timeout`, or with no terminal status at all. If the gap sits at the *end* of the surviving range, this is usually why.
 
 **Duplicate delivery.** A retry succeeded after the original also succeeded, and both were written. Produces `duplicate_sequence` without a gap. Usually harmless to the agent's actual behaviour, but it means anything counting events for this execution is counting one too many.
 
@@ -57,6 +58,6 @@ Ranked roughly by how often each turns out to be the cause:
 
 ## Why this class exists at all
 
-If nothing in your stack is watching for holes, a lossy pipeline looks exactly like a healthy one. The events that arrive render fine. The dashboard totals up whatever it has. A missing event and an event that never happened are indistinguishable — unless something is checking that the record accounts for itself.
+If nothing in your stack is watching for holes, a lossy pipeline looks exactly like a healthy one. The events that arrive render fine. The dashboard totals up whatever it has. A missing event and an event that never happened are indistinguishable, unless something is checking that the record accounts for itself.
 
-That matters more the more weight the record carries. Telemetry used to tune a prompt can absorb some loss. A record used to demonstrate what a system did, to an auditor, a regulator, or a customer disputing an outcome, cannot — and there the question stops being "is this complete" and becomes "can you prove it was not changed." That question needs the record to have been signed and chained when it was written, which is a different mechanism than this one.
+That matters more the more weight the record carries. Telemetry used to tune a prompt can absorb some loss. A record used to demonstrate what a system did, to an auditor, a regulator, or a customer disputing an outcome, cannot. There the question stops being "is this complete" and becomes "can you prove it was not changed." That question needs the record to have been signed and chained when it was written, which is a different mechanism than this one.

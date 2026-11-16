@@ -744,7 +744,7 @@ func scanForInjection(
 // drift / cost-velocity) only fire on terminal statuses, running
 // executions don't have a final duration yet.
 // isTerminalStatus delegates to events.ExecutionStatus.IsTerminal so
-// `started` and `awaiting_human` () are both treated as
+// `started` and `awaiting_human` are both treated as
 // non-terminal. The handler keeps its own thin wrapper so the
 // detector-chain guard expressions stay readable at the call sites.
 func isTerminalStatus(s events.ExecutionStatus) bool {
