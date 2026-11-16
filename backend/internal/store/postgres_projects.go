@@ -575,27 +575,7 @@ func (s *PostgresStore) DeleteProjectCascade(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	stmts := []string{
-		`DELETE FROM webhook_deliveries WHERE project_id = $1`,
-		`DELETE FROM project_webhooks WHERE project_id = $1`,
-		`DELETE FROM project_class_severities WHERE project_id = $1`,
-		`DELETE FROM abuse_signals WHERE project_id = $1`,
-		`DELETE FROM events WHERE project_id = $1`,
-		`DELETE FROM executions WHERE project_id = $1`,
-		`DELETE FROM failure_groups WHERE project_id = $1`,
-		`DELETE FROM api_keys WHERE project_id = $1`,
-		`DELETE FROM organization_members WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
-		`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
-		`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1)`,
-		// Email-verification purge, twin of the SQLite cascade. See
-		// the comment there for the decision and the guard: the
-		// verified_emails row dies only with the LAST project owned
-		// by its email, and tokens go first so a stale emailed link
-		// cannot recreate verification for an address whose last
-		// account is gone.
-		`DELETE FROM email_verification_tokens WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND project_id <> $1)`,
-		`DELETE FROM verified_emails WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND project_id <> $1)`,
-	}
+	stmts := postgresProjectCascadeStatements
 	// Postgres aborts the entire transaction on ANY query error
 	// (SQLSTATE 25P02): subsequent queries all return "current
 	// transaction is aborted" until ROLLBACK. SQLite is more
@@ -612,8 +592,12 @@ func (s *PostgresStore) DeleteProjectCascade(
 		_, qerr := tx.ExecContext(ctx, q, projectID)
 		if qerr != nil {
 			msg := qerr.Error()
-			if strings.Contains(msg, "does not exist") ||
-				strings.Contains(msg, "42P01") {
+			// Only a missing TABLE (SQLSTATE 42P01) is skipped. Until
+			// 2026-11-16 any "does not exist" was, which also swallowed
+			// "column does not exist" (42703): the events statement named
+			// a column events never had, and Postgres skipped it silently
+			// while SQLite failed (outside review finding E1).
+			if strings.Contains(msg, "SQLSTATE 42P01") {
 				// Missing relation: roll back this savepoint and move on.
 				if _, rbErr := tx.ExecContext(ctx,
 					"ROLLBACK TO SAVEPOINT "+spName); rbErr != nil {
@@ -677,4 +661,45 @@ func (s *PostgresStore) UpdateProjectBillingCap(
 		return ErrNotFound
 	}
 	return nil
+}
+
+// postgresProjectCascadeStatements empties every table that holds the project's data, deepest
+// children first, before the project row itself is deleted. A test
+// (TestProjectCascadeCoversEveryProjectTable) fails when a table with a
+// project_id or execution_id column is neither listed here, removed by a
+// foreign key, nor named as kept on purpose.
+var postgresProjectCascadeStatements = []string{
+	`DELETE FROM webhook_deliveries WHERE project_id = $1`,
+	`DELETE FROM project_webhooks WHERE project_id = $1`,
+	`DELETE FROM project_class_severities WHERE project_id = $1`,
+	`DELETE FROM abuse_signals WHERE project_id = $1`,
+	// events has no project_id column; it is reached through its
+	// execution. Until 2026-11-16 this read "WHERE project_id" and
+	// failed on both databases, so no account could be closed
+	// (outside review finding E1).
+	`DELETE FROM events WHERE execution_id IN (SELECT execution_id FROM executions WHERE project_id = $1)`,
+	// Customer configuration and logs with no foreign key to
+	// projects, so nothing removed them on close. Robert's decision,
+	// 2026-11-16: only the audit log outlives a closed account
+	// (and checkpoint leaves, until the evidence-chain batch).
+	`DELETE FROM project_patterns WHERE project_id = $1`,
+	`DELETE FROM project_detector_allowlist WHERE project_id = $1`,
+	`DELETE FROM detector_thresholds WHERE project_id = $1`,
+	`DELETE FROM tool_contract_pins WHERE project_id = $1`,
+	`DELETE FROM system_events WHERE project_id = $1`,
+	`DELETE FROM request_log WHERE project_id = $1`,
+	`DELETE FROM executions WHERE project_id = $1`,
+	`DELETE FROM failure_groups WHERE project_id = $1`,
+	`DELETE FROM api_keys WHERE project_id = $1`,
+	`DELETE FROM organization_members WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
+	`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1))`,
+	`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = $1)`,
+	// Email-verification purge, twin of the SQLite cascade. See
+	// the comment there for the decision and the guard: the
+	// verified_emails row dies only with the LAST project owned
+	// by its email, and tokens go first so a stale emailed link
+	// cannot recreate verification for an address whose last
+	// account is gone.
+	`DELETE FROM email_verification_tokens WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND project_id <> $1)`,
+	`DELETE FROM verified_emails WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = $1) AND project_id <> $1)`,
 }

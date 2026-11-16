@@ -26,6 +26,11 @@ var playbookDocSlugs = map[string]string{
 	// Security section (underscored).
 	"data_leakage":   "security/data_leakage",
 	"sandbox_escape": "security/sandbox_escape",
+	// The two egress-derived classes live in the security section too.
+	// Until 2026-11-16 they fell to the observability default and linked
+	// to pages that do not exist (outside review finding D54).
+	"environment_misapprehension": "security/environment_misapprehension",
+	"covert_coordination":         "security/covert_coordination",
 }
 
 // docsBaseURL resolves the docs-site origin, mirroring the fallback

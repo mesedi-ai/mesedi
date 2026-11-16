@@ -83,6 +83,10 @@ func (s *SQLiteStore) ListCheckpointRange(
 	// only way to write that is to copy its body, including the hash
 	// check, which is precisely the line that must never exist twice.
 	// Two round trips for a whole range is still O(1), which was the point.
+	from, to, err := seqRangeArgs(fromSeq, toSeq)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT seq, format, prev_checkpoint_hash, prev_log_entry_id,
 		       interval_start, interval_end, tenant_leaf_count, merkle_root,
@@ -90,7 +94,7 @@ func (s *SQLiteStore) ListCheckpointRange(
 		  FROM checkpoints
 		 WHERE seq >= ? AND seq <= ?
 		 ORDER BY seq
-	`, int64(fromSeq), int64(toSeq))
+	`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("list checkpoints [%d, %d]: %w", fromSeq, toSeq, err)
 	}
@@ -124,12 +128,16 @@ func (s *SQLiteStore) ListCheckpointRange(
 func (s *SQLiteStore) listCheckpointAnchorRange(
 	ctx context.Context, fromSeq, toSeq uint64,
 ) (map[uint64]CheckpointAnchor, error) {
+	from, to, err := seqRangeArgs(fromSeq, toSeq)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT seq, anchored_at, log_entry_id, ledger_backend, leaf_preimage,
 		       anchor_proof_json
 		  FROM checkpoints
 		 WHERE seq >= ? AND seq <= ?
-	`, int64(fromSeq), int64(toSeq))
+	`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("list checkpoint anchors [%d, %d]: %w", fromSeq, toSeq, err)
 	}
@@ -179,13 +187,17 @@ func (s *SQLiteStore) ListCheckpointLeavesRange(
 		return nil, err
 	}
 
+	from, to, err := seqRangeArgs(fromSeq, toSeq)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT checkpoint_seq, project_id, interval_root, execution_count,
 		       cumulative_count, prev_leaf_hash, leaf_hash
 		  FROM checkpoint_tenant_leaves
 		 WHERE checkpoint_seq >= ? AND checkpoint_seq <= ?
 		 ORDER BY checkpoint_seq, position
-	`, int64(fromSeq), int64(toSeq))
+	`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("list checkpoint leaves [%d, %d]: %w", fromSeq, toSeq, err)
 	}

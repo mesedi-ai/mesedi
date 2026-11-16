@@ -24,8 +24,10 @@ func TestPlaybookDocURL_IrregularSlugs(t *testing.T) {
 func TestPlaybookDocURL_SecuritySection(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"data_leakage":   "https://mesedi.ai/docs/security/data_leakage",
-		"sandbox_escape": "https://mesedi.ai/docs/security/sandbox_escape",
+		"data_leakage":                "https://mesedi.ai/docs/security/data_leakage",
+		"sandbox_escape":              "https://mesedi.ai/docs/security/sandbox_escape",
+		"environment_misapprehension": "https://mesedi.ai/docs/security/environment_misapprehension",
+		"covert_coordination":         "https://mesedi.ai/docs/security/covert_coordination",
 	}
 	for class, want := range cases {
 		if got := playbookDocURL("https://mesedi.ai/docs", class); got != want {

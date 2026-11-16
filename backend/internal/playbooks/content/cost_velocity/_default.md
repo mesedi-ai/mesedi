@@ -1,8 +1,8 @@
 # Cost velocity
 
-An execution in this project tripped one of Mesedi's two cost-velocity detectors. Both detectors fire under the same `cost_velocity` failure_class but answer different questions, and they can BOTH fire on the same execution.
+An execution in this project tripped one of Mesedi's three cost-velocity signals. All three fire under the same `cost_velocity` failure_class but answer different questions, and more than one can fire on the same execution.
 
-## The two signals
+## The three signals
 
 **Absolute single-execution cost.** An individual execution's cost crossed the per-project `cost_velocity_threshold_usd` (default `$1.00`). Catches "this one run was unusually expensive." Signature buckets by order-of-magnitude USD:
 
@@ -21,6 +21,12 @@ An execution in this project tripped one of Mesedi's two cost-velocity detectors
 - `rate_$100+_per_min`, between $100 and $1000/min
 - `rate_$1000+_per_min`, $1000/min or more
 
+**Burn rate against this project's own normal.** Mesedi learns the project's usual burn rate over the last 7 days and fires when the current rate is at least 10 times that normal. It stays quiet until the project is 72 hours old and has 50 runs in the window, and below $0.50 a minute, because a near-idle project jumping to a few cents a minute is not an incident. Signature buckets:
+
+- `baseline_x10+`, 10 to 100 times normal
+- `baseline_x100+`, 100 to 1000 times normal
+- `baseline_x1000+`, 1000 times normal or more
+
 The bucket on this failure group tells you in dollars what your agent is spending. Use that as the triage signal, a `cost_$0.10+` group in a project where the median execution costs $0.001 means specific executions are 100× more expensive than the population, and those are where the spend leaks live.
 
 ## What's usually happening
@@ -34,6 +40,8 @@ Match the signature to the diagnosis:
 - **`cost_$1+`** is almost always a structural problem. Either the agent is in a loop (cross-reference with `loops/*` failure_groups on the same executions), the context window is growing unbounded across turns (scratchpad accumulation), or the agent is calling a much more expensive model than intended.
 
 - **`cost_$10+`** in a single execution is rare and indicates an emergency-class bug. An infinite loop, a corrupted retry path, a model upgrade that nobody noticed. Look at the affected execution immediately.
+
+- **`baseline_x*`** signatures mean spend jumped against this project's own history, whatever the absolute amount. Check what changed when the jump began: a deploy, a new model, a new customer, or a retry storm.
 
 - **`rate_*_per_min`** signatures point at volume, not magnitude. A `rate_$10+_per_min` group from a workload where individual executions cost cents means the call volume is the problem, not any one call. Cross-reference with the timeline of recent executions in the project: is there a spike, or is it sustained?
 

@@ -26,6 +26,10 @@ func (s *PostgresStore) ListCheckpointRange(
 		return nil, err
 	}
 
+	from, to, err := seqRangeArgs(fromSeq, toSeq)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT seq, format, prev_checkpoint_hash, prev_log_entry_id,
 		       interval_start, interval_end, tenant_leaf_count, merkle_root,
@@ -33,7 +37,7 @@ func (s *PostgresStore) ListCheckpointRange(
 		  FROM checkpoints
 		 WHERE seq >= $1 AND seq <= $2
 		 ORDER BY seq
-	`, int64(fromSeq), int64(toSeq))
+	`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("list checkpoints [%d, %d]: %w", fromSeq, toSeq, err)
 	}
@@ -89,12 +93,16 @@ func (s *PostgresStore) ListCheckpointRange(
 func (s *PostgresStore) listCheckpointAnchorRange(
 	ctx context.Context, fromSeq, toSeq uint64,
 ) (map[uint64]CheckpointAnchor, error) {
+	from, to, err := seqRangeArgs(fromSeq, toSeq)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT seq, anchored_at, log_entry_id, ledger_backend, leaf_preimage,
 		       anchor_proof_json
 		  FROM checkpoints
 		 WHERE seq >= $1 AND seq <= $2
-	`, int64(fromSeq), int64(toSeq))
+	`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("list checkpoint anchors [%d, %d]: %w", fromSeq, toSeq, err)
 	}
@@ -134,13 +142,17 @@ func (s *PostgresStore) ListCheckpointLeavesRange(
 		return nil, err
 	}
 
+	from, to, err := seqRangeArgs(fromSeq, toSeq)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT checkpoint_seq, project_id, interval_root, execution_count,
 		       cumulative_count, prev_leaf_hash, leaf_hash
 		  FROM checkpoint_tenant_leaves
 		 WHERE checkpoint_seq >= $1 AND checkpoint_seq <= $2
 		 ORDER BY checkpoint_seq, position
-	`, int64(fromSeq), int64(toSeq))
+	`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("list checkpoint leaves [%d, %d]: %w", fromSeq, toSeq, err)
 	}

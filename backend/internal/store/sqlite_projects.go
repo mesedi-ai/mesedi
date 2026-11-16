@@ -700,35 +700,7 @@ func (s *SQLiteStore) DeleteProjectCascade(
 	// version used "webhooks", "class_severities", "project_settings",
 	// "project_retention" - none of which exist). Retention is a column
 	// on projects (migration 012, 020), not its own table.
-	stmts := []string{
-		`DELETE FROM webhook_deliveries WHERE project_id = ?`,
-		`DELETE FROM project_webhooks WHERE project_id = ?`,
-		`DELETE FROM project_class_severities WHERE project_id = ?`,
-		`DELETE FROM abuse_signals WHERE project_id = ?`,
-		`DELETE FROM events WHERE project_id = ?`,
-		`DELETE FROM executions WHERE project_id = ?`,
-		`DELETE FROM failure_groups WHERE project_id = ?`,
-		`DELETE FROM api_keys WHERE project_id = ?`,
-		`DELETE FROM organization_members WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?))`,
-		`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?))`,
-		`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?)`,
-		// Email-verification purge. The verified_emails row is keyed
-		// to the ADDRESS, not the account (one row per email that
-		// ever proved mailbox ownership; deletion of an account
-		// deliberately left it behind so re-signup skipped
-		// re-verification). Decision recorded 2026-09-24: once the
-		// LAST project owned by an email is deleted, that row and
-		// any in-flight verification tokens are retained personal
-		// data with no account behind them, so they are deleted
-		// with the account. The NOT EXISTS guard keeps the row
-		// while any OTHER live project still relies on this email's
-		// verified status for its auth gate. Tokens go first so a
-		// stale emailed link cannot recreate verification for an
-		// address whose last account is gone. Numbered ?1
-		// placeholders: the loop binds one arg for every statement.
-		`DELETE FROM email_verification_tokens WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND project_id <> ?1)`,
-		`DELETE FROM verified_emails WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND project_id <> ?1)`,
-	}
+	stmts := sqliteProjectCascadeStatements
 	for _, q := range stmts {
 		if _, qerr := tx.ExecContext(ctx, q, projectID); qerr != nil {
 			// SQLite reports missing tables as "no such table: X". Ignore
@@ -791,4 +763,53 @@ func (s *SQLiteStore) UpdateProjectBillingCap(
 		return ErrNotFound
 	}
 	return nil
+}
+
+// sqliteProjectCascadeStatements empties every table that holds the project's data, deepest
+// children first, before the project row itself is deleted. A test
+// (TestProjectCascadeCoversEveryProjectTable) fails when a table with a
+// project_id or execution_id column is neither listed here, removed by a
+// foreign key, nor named as kept on purpose.
+var sqliteProjectCascadeStatements = []string{
+	`DELETE FROM webhook_deliveries WHERE project_id = ?`,
+	`DELETE FROM project_webhooks WHERE project_id = ?`,
+	`DELETE FROM project_class_severities WHERE project_id = ?`,
+	`DELETE FROM abuse_signals WHERE project_id = ?`,
+	// events has no project_id column; it is reached through its
+	// execution. Until 2026-11-16 this read "WHERE project_id" and
+	// failed on both databases, so no account could be closed
+	// (outside review finding E1).
+	`DELETE FROM events WHERE execution_id IN (SELECT execution_id FROM executions WHERE project_id = ?)`,
+	// Customer configuration and logs with no foreign key to
+	// projects, so nothing removed them on close. Robert's decision,
+	// 2026-11-16: only the audit log outlives a closed account
+	// (and checkpoint leaves, until the evidence-chain batch).
+	`DELETE FROM project_patterns WHERE project_id = ?`,
+	`DELETE FROM project_detector_allowlist WHERE project_id = ?`,
+	`DELETE FROM detector_thresholds WHERE project_id = ?`,
+	`DELETE FROM tool_contract_pins WHERE project_id = ?`,
+	`DELETE FROM system_events WHERE project_id = ?`,
+	`DELETE FROM request_log WHERE project_id = ?`,
+	`DELETE FROM executions WHERE project_id = ?`,
+	`DELETE FROM failure_groups WHERE project_id = ?`,
+	`DELETE FROM api_keys WHERE project_id = ?`,
+	`DELETE FROM organization_members WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?))`,
+	`DELETE FROM organization_invites WHERE org_id IN (SELECT org_id FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?))`,
+	`DELETE FROM organizations WHERE created_by_user_id IN (SELECT owner_user_id FROM projects WHERE project_id = ?)`,
+	// Email-verification purge. The verified_emails row is keyed
+	// to the ADDRESS, not the account (one row per email that
+	// ever proved mailbox ownership; deletion of an account
+	// deliberately left it behind so re-signup skipped
+	// re-verification). Decision recorded 2026-09-24: once the
+	// LAST project owned by an email is deleted, that row and
+	// any in-flight verification tokens are retained personal
+	// data with no account behind them, so they are deleted
+	// with the account. The NOT EXISTS guard keeps the row
+	// while any OTHER live project still relies on this email's
+	// verified status for its auth gate. Tokens go first so a
+	// stale emailed link cannot recreate verification for an
+	// address whose last account is gone. Numbered ?1
+	// placeholders: the loop binds one arg for every statement.
+	`DELETE FROM email_verification_tokens WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND project_id <> ?1)`,
+	`DELETE FROM verified_emails WHERE email = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND NOT EXISTS (SELECT 1 FROM projects WHERE LOWER(TRIM(owner_email)) = (SELECT LOWER(TRIM(owner_email)) FROM projects WHERE project_id = ?1) AND project_id <> ?1)`,
 }

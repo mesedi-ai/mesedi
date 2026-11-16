@@ -315,3 +315,40 @@ func Test_CovertCoordination_HonestyPins(t *testing.T) {
 		}
 	}
 }
+
+// Every failure class must resolve every signature to a playbook that
+// exists. Until 2026-11-16 cost_velocity's rate_ and baseline_x signals,
+// a project's custom prompt-injection patterns (custom:<id>), and any
+// unforeseen drift or loops signature resolved to nothing (outside
+// review). A catch-all per class makes that impossible for signatures
+// nobody has invented yet; this test fails for a class without one.
+func TestEveryClassResolvesAnySignature(t *testing.T) {
+	classes := map[string]bool{}
+	for _, p := range patterns {
+		classes[p.failureClass] = true
+	}
+	samples := []string{"", "custom:pat_123", "baseline_x10+", "rate_$0.10+_per_min", "a-signature-nobody-has-invented"}
+	for class := range classes {
+		for _, sig := range samples {
+			if _, err := Load(class, sig); err != nil {
+				t.Errorf("%s %q resolves to no playbook: %v", class, sig, err)
+			}
+		}
+	}
+}
+
+func TestReviewedSignaturesReachTheirPlaybook(t *testing.T) {
+	cases := map[[2]string]string{
+		{"cost_velocity", "baseline_x10+"}:       "cost_velocity/_default.md",
+		{"cost_velocity", "rate_$0.10+_per_min"}: "cost_velocity/_default.md",
+		{"cost_velocity", "cost_$1+|agent-a"}:    "cost_velocity/_default.md",
+		{"prompt_injection", "custom:abc"}:       "prompt_injection/_default.md",
+		{"prompt_injection", "role_override"}:    "prompt_injection/role_override.md",
+		{"loops", "step_count_200"}:              "loops/step_count.md",
+	}
+	for in, want := range cases {
+		if got, ok := Resolve(in[0], in[1]); !ok || got != want {
+			t.Errorf("Resolve(%q, %q) = %q, %v; want %q", in[0], in[1], got, ok, want)
+		}
+	}
+}

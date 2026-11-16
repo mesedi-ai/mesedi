@@ -116,6 +116,8 @@ var patterns = []pattern{
 	{"loops", "similar_call_", "loops/similar_call.md"},
 	{"loops", "time_budget_", "loops/time_budget.md"},
 	{"loops", "step_count_", "loops/step_count.md"},
+	// Catch-all, added 2026-11-16, so no loops signature falls through.
+	{"loops", "", "loops/_default.md"},
 
 	// ── tool / validator failures ───────────────────────────────
 	// Empty prefix = catch-all for the class. The content explains
@@ -136,13 +138,22 @@ var patterns = []pattern{
 	{"prompt_injection", "developer_mode", "prompt_injection/developer_mode.md"},
 	{"prompt_injection", "role_override", "prompt_injection/role_override.md"},
 	{"prompt_injection", "ignore_instructions", "prompt_injection/ignore_instructions.md"},
+	// Catch-all, added 2026-11-16: a project's own patterns signal as
+	// "custom:<pattern_id>" and had no playbook (outside review).
+	{"prompt_injection", "", "prompt_injection/_default.md"},
 
 	// ── cost_velocity, single class-wide playbook ──────────────
 	{"cost_velocity", "cost_", "cost_velocity/_default.md"},
+	// The same playbook for the rate_ and baseline_x signals. Until
+	// 2026-11-16 only "cost_" was routed, so rate and baseline groups
+	// had no playbook. The "cost_" row stays so its API key is unchanged.
+	{"cost_velocity", "", "cost_velocity/_default.md"},
 
 	// ── drift, one playbook per signal type ────────────────────
 	{"drift", "new_model:", "drift/new_model.md"},
 	{"drift", "lexical_drift_", "drift/lexical_drift.md"},
+	// Catch-all, added 2026-11-16, so no drift signature falls through.
+	{"drift", "", "drift/_default.md"},
 
 	// ── Tier 1 commercial-value detectors (-, , ) ──
 	{"data_leakage", "", "data_leakage/_default.md"},
