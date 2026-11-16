@@ -14,7 +14,7 @@ than one, or a set names a class the backend does not have.
 
 It needs both repositories side by side (mesedi/ and mesedi-web/), as
 tools/check-tier-constants.sh does, and runs from mesedi-web's
-tier-drift workflow, which checks this public repository out without a
+Guard tests workflow, which checks this public repository out without a
 token.
 
 Run:  python3 tools/check_dashboard_failure_classes.py [path/to/failureClass.ts]
