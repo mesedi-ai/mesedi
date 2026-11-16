@@ -88,6 +88,22 @@ jobs:
       - name: go test (attest module)
         working-directory: backend/attest
         run: go test ./...
+      # govulncheck, because Dependabot does not see Go itself.
+      #
+      # On 2026-11-16 Dependabot showed two Go alerts (OpenTelemetry), while
+      # govulncheck found 15 known vulnerabilities the code actually
+      # reaches: in the Go standard library (go.mod pinned 1.27.1; fixed in
+      # 1.27.2 to 1.27.4), x/net and klauspost/compress. go-version-file
+      # installs exactly the go.mod version, so nothing would ever have
+      # moved it. govulncheck fails only on vulnerabilities the code calls,
+      # so a finding here is a real one. Fix by raising the version it
+      # names, not by skipping the step.
+      - name: govulncheck
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: govulncheck (attest module)
+        working-directory: backend/attest
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   sdk-python:
     name: sdk-python (pytest)
@@ -152,6 +168,16 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: sdk-typescript/package-lock.json
+      # Overrides must be floors, and none may hold a high or critical
+      # advisory. Until 2026-11-16 they were exact versions ("hono":
+      # "4.13.7"), which routine updates cannot move, so the pins written
+      # to stop alerts became the vulnerable versions. The script's header
+      # has the history; its own tests run first so a broken check cannot
+      # pass silently. Reads the lockfile, so it runs before the install.
+      - name: npm override check (tests)
+        run: python3 tools/test_check_npm_pins.py
+      - name: npm override check
+        run: python3 tools/check_npm_pins.py sdk-typescript
       - name: Install
         working-directory: sdk-typescript
         run: npm ci
