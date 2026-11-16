@@ -12,8 +12,9 @@
 // The value appears only when the digest is anchored somewhere Mesedi
 // does not control, a public transparency log. Then the claim becomes
 // checkable: "this exact record existed at the time that log entry was
-// integrated, and has not changed since." That anchoring is Verdifax's
-// job and is deliberately NOT in this package. What lives here is the
+// integrated, and has not changed since." That anchoring is the
+// checkpoint scheduler's job (internal/api) and is deliberately NOT in
+// this package. What lives here is the
 // half Mesedi is entitled to compute: the canonical summary of what it
 // received.
 //
@@ -32,12 +33,11 @@
 //
 // # WHY RFC 6962 SPECIFICALLY
 //
-// The construction here is byte-for-byte the one already implemented in
-// verdifax-orchestrator/internal/adapters/airgap_checkpoint.go, and the
-// one Sigstore Rekor uses: leaves prefixed 0x00, internal nodes 0x01,
-// an odd node at any level promoted unchanged.
+// The construction here is RFC 6962's (section 2.1), the one Sigstore
+// Rekor uses: leaves prefixed 0x00, internal nodes 0x01, an odd node at
+// any level promoted unchanged.
 //
-// Copying it exactly is deliberate. Two nearly-identical tree
+// Following it exactly is deliberate. Two nearly-identical tree
 // implementations that disagree on one edge case, usually the odd-node
 // rule, produce roots that differ only for some inputs, which is the
 // worst possible failure: it works in testing and fails in production
@@ -93,6 +93,14 @@ type Digest struct {
 // because a verifier that assumes v1 rules would otherwise silently
 // compute a different root and report tampering that did not happen.
 const AlgorithmV1 = "mesedi-exec-merkle-v1/rfc6962-sha256"
+
+// AlgorithmIntervalV1 identifies an inclusion proof in an hour's tree of
+// tenant leaves (ProveTenantLeaf), a different tree from an execution's
+// tree of events. Until 2026-11-16 those proofs were stamped AlgorithmV1,
+// the execution tree's name (the outside review of 2026-11-15). Exports made
+// before then still carry AlgorithmV1 on interval proofs, and
+// VerifyTenantLeafInclusion accepts both.
+const AlgorithmIntervalV1 = "mesedi-interval-merkle-v1/rfc6962-sha256"
 
 // AlgorithmNoEventsV1 identifies the digest of an execution that
 // recorded no events at all. A different construction from AlgorithmV1
@@ -211,7 +219,7 @@ func CanonicalLeaf(e *events.Event) []byte {
 	// keeps, so the same record digests the same on both databases. Until
 	// 2026-11-16 nanoseconds were hashed, and SQLite (which keeps them) and
 	// Postgres (which drops them) produced different roots for one record
-	// (outside review finding E12). The nine-digit layout stays: every
+	// (the outside review of 2026-11-15). The nine-digit layout stays: every
 	// anchored v1 digest was computed from Postgres values, already whole
 	// microseconds, so truncation leaves each of them unchanged.
 	appendField("timestamp", e.Timestamp.UTC().Truncate(storagePrecision).Format("2006-01-02T15:04:05.000000000Z"))
@@ -430,9 +438,8 @@ func VerifyInclusion(p InclusionProof) (bool, error) {
 
 // ── RFC 6962 primitives ──────────────────────────────────────────────
 //
-// Copied deliberately from verdifax-orchestrator's
-// internal/adapters/airgap_checkpoint.go so both sides of the eventual
-// anchor agree byte-for-byte. If either changes, both must.
+// As RFC 6962 section 2.1 defines them. Any verifier of these trees must
+// compute them byte for byte the same way.
 
 // merkleLeafHash is SHA-256(0x00 || data). The prefix is what stops a
 // leaf being reinterpreted as an internal node.

@@ -63,7 +63,7 @@ func TestEveryTypeMintedInTheAPIPackageIsListedHere(t *testing.T) {
 	// internal/api, from backend/attest/events. Until 2026-11-16 this read
 	// "../api", a folder that stopped existing when attest became its own
 	// module, and it skipped on the error, so the guard never ran (outside
-	// review finding E9). A missing folder now fails: a guard that cannot
+	// the outside review of 2026-11-15). A missing folder now fails: a guard that cannot
 	// find what it guards must say so, not pass quietly.
 	root := filepath.Join("..", "..", "internal", "api")
 	entries, err := os.ReadDir(root)

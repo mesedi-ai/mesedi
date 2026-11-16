@@ -1,7 +1,7 @@
 package attest
 
 // Chain export v2 and the report fixes of 2026-11-16 (outside review
-// findings E4, E5, E7, E18, E24, E30).
+// the outside review of 2026-11-15).
 
 import (
 	"strings"

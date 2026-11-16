@@ -87,7 +87,7 @@ func ProveTenantLeaf(c Checkpoint, leaves []TenantLeaf, projectID string) (Inclu
 		TreeSize:  len(leafHex),
 		Root:      c.MerkleRoot,
 		Path:      path,
-		Algorithm: AlgorithmV1,
+		Algorithm: AlgorithmIntervalV1,
 	}, nil
 }
 
@@ -102,6 +102,12 @@ func ProveTenantLeaf(c Checkpoint, leaves []TenantLeaf, projectID string) (Inclu
 // the leaf it claims to describe is rejected, otherwise an attacker could
 // pair a genuine proof with a fabricated leaf.
 func VerifyTenantLeafInclusion(c Checkpoint, leaf TenantLeaf, p InclusionProof) error {
+	// A proof names the tree it walks. An execution-tree name other than
+	// the one interval proofs carried before 2026-11-16 means a proof built
+	// for a different tree, and is refused rather than walked.
+	if p.Algorithm != AlgorithmIntervalV1 && p.Algorithm != AlgorithmV1 {
+		return fmt.Errorf("attest: proof names construction %q, not an interval tree", p.Algorithm)
+	}
 	want := TenantLeafHash(leaf)
 	if p.LeafHash != want {
 		return fmt.Errorf("attest: proof is for leaf %s but the supplied leaf hashes to %s",

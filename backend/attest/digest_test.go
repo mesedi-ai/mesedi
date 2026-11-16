@@ -437,7 +437,7 @@ func TestSingleLeafTreeVerifies(t *testing.T) {
 
 // The same record digests the same on Postgres (microseconds) and SQLite
 // (nanoseconds). Until 2026-11-16 the sub-microsecond digits were hashed,
-// so one record produced two roots (outside review finding E12).
+// so one record produced two roots (the outside review of 2026-11-15).
 func TestDigestIgnoresSubMicrosecondPrecision(t *testing.T) {
 	ns := time.Date(2026, 9, 2, 12, 0, 0, 123456789, time.UTC)
 	us := ns.Truncate(time.Microsecond)
