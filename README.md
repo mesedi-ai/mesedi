@@ -42,7 +42,7 @@ The customer-facing marketing site, pricing, signup, and live dashboard live in 
 
 Prerequisites:
 
-- Go 1.22+
+- Go 1.21 or later (go.mod asks for 1.27.4, which Go downloads automatically)
 - Python 3.9+
 - Node 18+
 - A local SQLite (bundled, no install)
@@ -51,8 +51,10 @@ Start the backend (Terminal 1):
 
 ```bash
 cd backend
-go run ./cmd/api
+MESEDI_DEV_BOOTSTRAP=1 go run ./cmd/api
 ```
+
+`MESEDI_DEV_BOOTSTRAP=1` creates the local dev project and its public key, which the sandboxes below use. Use it for local development only; see `backend/README.md`.
 
 Run a sample Python agent (Terminal 2):
 
@@ -77,7 +79,7 @@ Open the dashboard:
 http://localhost:8080/ui/
 ```
 
-You should see executions, events, failure groups, the playbook surface per failure class, the webhook escalation page, and the API-key management page. Default bootstrap API key for local dev: `mesedi_sk_dev_local_only`.
+You should see executions, events, failure groups, the playbook surface per failure class, the webhook escalation page, and the API-key management page. Local dev API key, created only with `MESEDI_DEV_BOOTSTRAP=1`: `mesedi_sk_dev_local_only`.
 
 ## Status
 

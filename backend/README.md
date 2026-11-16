@@ -6,17 +6,20 @@ Go HTTP service that ingests AI agent execution telemetry, runs detection engine
 
 ## Quickstart (local development)
 
-Prerequisites: Go 1.25+ installed (`brew install go` on macOS).
+Prerequisites: Go 1.21 or later (`brew install go` on macOS). go.mod asks for Go 1.27.4, and Go downloads that version automatically on first run.
 
 ```bash
 cd backend
 
 # First run only: fetch deps
-go mod tidy
+go mod download
 
-# Run the service (creates mesedi-dev.db + runs migrations + bootstraps dev project on first run)
-go run cmd/api/main.go
+# Run the service with the local dev project switched on
+# (creates mesedi-dev.db, runs migrations, creates the dev project and key)
+MESEDI_DEV_BOOTSTRAP=1 go run ./cmd/api
 ```
+
+`MESEDI_DEV_BOOTSTRAP=1` is for local development only. Without it, the dev project is not created, and the dev key below is removed on start if it exists, because its value is public. It is ignored on Fly.
 
 ### Verify `/health` (public, no auth)
 
@@ -27,7 +30,7 @@ curl http://localhost:8080/health
 
 ### Verify auth-required endpoints
 
-The local dev environment auto-bootstraps a fixed API key for testing. **This key is non-secret and is hardcoded, never use it for anything other than local development.**
+With `MESEDI_DEV_BOOTSTRAP=1`, the server creates a fixed API key for testing, with a verified local owner email so the requests below are accepted. **This key is non-secret and is hardcoded, never use it for anything other than local development.**
 
 ```bash
 # The dev API key

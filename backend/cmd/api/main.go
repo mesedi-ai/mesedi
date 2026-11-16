@@ -132,47 +132,6 @@ type runtimeConfig struct {
 	TOTPEncryptionKey string
 }
 
-// bootstrapDevProject creates a default "dev" project and a fixed test
-// API key on first run. Idempotent, repeated runs return early when
-// the project already exists. The test key value is intentionally
-// non-secret and hardcoded; never use this pattern in production.
-//
-// Takes store.Store so it works against either SQLite or Postgres. On
-// the Postgres backend during Phase 1, CreateAPIKey returns
-// ErrPostgresNotYetPorted, the caller logs the warning and continues.
-// Once Phase 2 ports CreateAPIKey this restriction goes away.
-func bootstrapDevProject(ctx context.Context, st store.Store, logger *slog.Logger) error {
-	const devProjectID = "proj-dev"
-	const devKeyID = "key-dev"
-	// SHA-256 of the literal string "mesedi_sk_dev_local_only", fixed so
-	// SDK smoke tests can authenticate without per-run key minting during
-	// local dev. Verify via: echo -n "mesedi_sk_dev_local_only" | sha256sum
-	const devKeyHash = "63aee0bafbf5a68577021746b028842f70d922c2809776e1a1de0ecf6fc7fb33"
-
-	if _, err := st.GetProject(ctx, devProjectID); err == nil {
-		logger.Debug("dev project already exists", "project_id", devProjectID)
-		return nil
-	}
-
-	if err := st.CreateProject(ctx, &store.Project{
-		ProjectID: devProjectID,
-		Name:      "Local Dev",
-	}); err != nil {
-		return fmt.Errorf("create dev project: %w", err)
-	}
-	if err := st.CreateAPIKey(ctx, &store.APIKey{
-		KeyID:     devKeyID,
-		ProjectID: devProjectID,
-		KeyHash:   devKeyHash,
-		KeyPrefix: "mesedi_sk_dev",
-		Name:      "Local dev key (no auth enforced in Phase 1.5)",
-	}); err != nil {
-		return fmt.Errorf("create dev api key: %w", err)
-	}
-	logger.Info("dev project bootstrapped", "project_id", devProjectID, "key_id", devKeyID)
-	return nil
-}
-
 // bootstrapAdminProject ensures the synthetic project that holds
 // admin-scope API keys exists. Idempotent: a no-op once the row is
 // present. Unlike bootstrapDevProject, this runs in production too
@@ -296,10 +255,12 @@ func main() {
 	// key from the original Fly+SQLite production DB, so the Postgres
 	// cutover doesn't accidentally re-introduce the backdoor on a
 	// fresh Neon database.
-	if os.Getenv("FLY_APP_NAME") != "" {
-		logger.Info("bootstrap dev project skipped (production, FLY_APP_NAME set)")
-	} else if err := bootstrapDevProject(context.Background(), st, logger); err != nil {
-		logger.Warn("bootstrap dev project failed (continuing)", "error", err.Error())
+	//
+	// Since 2026-11-16 the dev project is opt-in (MESEDI_DEV_BOOTSTRAP=1);
+	// see reconcileDevProject for why.
+	if err := reconcileDevProject(context.Background(), st, logger,
+		os.Getenv(devBootstrapEnv) == "1", os.Getenv("FLY_APP_NAME") != ""); err != nil {
+		logger.Warn("dev project reconcile failed (continuing)", "error", err.Error())
 	}
 
 	// Bootstrap the synthetic _admin project that holds admin-scope API
