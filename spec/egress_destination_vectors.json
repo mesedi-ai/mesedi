@@ -15,7 +15,17 @@
     "never leave the process (outside review finding D13).",
     "",
     "Every input containing SECRET must produce output without it; both test",
-    "files assert that for every case, not only the expected value."
+    "files assert that for every case, not only the expected value.",
+    "",
+    "Round 3 (17 November 2026, finding M2): 'https://host:8080/a@b' was recorded",
+    "as 'b'. A host and all-digit port followed later by an '@' cannot be told",
+    "apart from a user and an all-digit password ('alice:1234/x@db'), so such an",
+    "address is recorded as 'unreadable' by default (owner decision). A team",
+    "whose addresses never contain passwords can turn on the SDK setting",
+    "addresses_never_contain_passwords (Python) / addressesNeverContainPasswords",
+    "(TypeScript), and the host and port are recorded instead. 'out_no_passwords'",
+    "is the expected value with that setting on; where it is absent it equals",
+    "'out'."
   ],
   "cases": [
     {"in": "https://api.example.com/v1/users?token=SECRET", "out": "api.example.com", "why": "path and query dropped"},
@@ -28,10 +38,10 @@
     {"in": "u:SECRET@h:5432", "out": "h:5432", "why": "credentials without a scheme dropped"},
     {"in": "https://alice@h.example.com", "out": "h.example.com", "why": "a username alone is dropped too"},
     {"in": "https://u:pa/SECRET@h", "out": "h", "why": "malformed: an unencoded slash in the password; nothing before the @ survives, the host after it is kept"},
-    {"in": "https://alice:12/SECRET@db.example.com/x", "out": "db.example.com", "why": "round 2: a password with a slash and digits before it is not sent as a port"},
-    {"in": "https://alice:9876?SECRET@db.example.com", "out": "db.example.com", "why": "round 2: a password with a question mark"},
-    {"in": "https://alice:12#SECRET@db.example.com:5432", "out": "db.example.com:5432", "why": "round 2: a password with a hash; the real port is kept"},
-    {"in": "https://a:1/2/SECRET@h.example.com:5432/x", "out": "h.example.com:5432", "why": "a password with several slashes"},
+    {"in": "https://alice:12/SECRET@db.example.com/x", "out": "unreadable", "why": "M2: user:digits or host:port before a later @ is ambiguous; unreadable by default, never a guess", "out_no_passwords": "alice:12"},
+    {"in": "https://alice:9876?SECRET@db.example.com", "out": "unreadable", "why": "M2: the same ambiguity with a question mark", "out_no_passwords": "alice:9876"},
+    {"in": "https://alice:12#SECRET@db.example.com:5432", "out": "unreadable", "why": "M2: the same ambiguity with a hash", "out_no_passwords": "alice:12"},
+    {"in": "https://a:1/2/SECRET@h.example.com:5432/x", "out": "unreadable", "why": "M2: the same ambiguity with several slashes", "out_no_passwords": "a:1"},
     {"in": "https://u:SECRET/x@", "out": "unreadable", "why": "possible credentials and no host after them: recorded as unreadable, never guessed"},
     {"in": "https://registry.npmjs.org:443/@types/node", "out": "registry.npmjs.org:443", "why": "an @ that starts a path segment is not a credential, even with a port"},
     {"in": "https://h.example.com:8443/x/@scope/pkg", "out": "h.example.com:8443", "why": "an @ deeper in the path is not a credential"},
@@ -44,6 +54,11 @@
     {"in": "https://[2001:db8::1]:443/x", "out": "[2001:db8::1]:443", "why": "IPv6 URL with port"},
     {"in": "https://[2001:db8::1]/x", "out": "[2001:db8::1]", "why": "IPv6 URL without port"},
     {"in": "redis:6379", "out": "redis:6379", "why": "service name with port"},
-    {"in": "", "out": "", "why": "empty stays empty"}
+    {"in": "", "out": "", "why": "empty stays empty"},
+    {"in": "https://host.example.com:8080/a@b", "out": "unreadable", "out_no_passwords": "host.example.com:8080", "why": "M2, the reviewer's case: a port and a later @ in the path"},
+    {"in": "https://api.example.com:443/users/me@example.com", "out": "unreadable", "out_no_passwords": "api.example.com:443", "why": "M2: an email address in a path after a port"},
+    {"in": "https://host:443/?r=https://u:p@evil.example/x", "out": "unreadable", "out_no_passwords": "host:443", "why": "M2, reviewer's case: a URL with credentials inside the query is never taken for the host"},
+    {"in": "https://h.example:80/x@y:z@w", "out": "unreadable", "out_no_passwords": "h.example:80", "why": "M2, reviewer's case: two @ signs after a port"},
+    {"in": "https://host:8080/a/@b", "out": "host:8080", "why": "M2, reviewer's case: an @ starting a path segment is still not a credential"}
   ]
 }

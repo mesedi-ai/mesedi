@@ -32,10 +32,21 @@ def test_every_shared_vector_normalizes_as_specified() -> None:
         assert got == case["out"], f"{case['in']!r} -> {got!r}, want {case['out']!r} ({case['why']})"
 
 
+def test_every_shared_vector_with_the_no_passwords_setting() -> None:
+    """Round 3, M2: with addresses_never_contain_passwords on, a host and
+    port before a later '@' are kept; every other case is unchanged."""
+    for case in _cases():
+        want = case.get("out_no_passwords", case["out"])
+        got = _normalize_egress_destination(case["in"], addresses_never_contain_passwords=True)
+        assert got == want, f"{case['in']!r} -> {got!r}, want {want!r} ({case['why']})"
+
+
 def test_no_secret_ever_survives_normalization() -> None:
     for case in _cases():
         if "SECRET" in case["in"]:
-            assert "SECRET" not in _normalize_egress_destination(case["in"]), case["in"]
+            for setting in (False, True):
+                got = _normalize_egress_destination(case["in"], addresses_never_contain_passwords=setting)
+                assert "SECRET" not in got, (case["in"], setting)
 
 
 def test_the_vectors_cover_the_credentials_case() -> None:
@@ -49,8 +60,11 @@ def test_a_password_containing_a_cut_character_never_leaves() -> None:
     '/', '?' or '#' ended the host early and its first part was sent as
     'alice:12'. The host after the credentials is kept instead, and with
     no host the destination is recorded as unreadable, never guessed."""
-    assert _normalize_egress_destination("https://alice:12/34@db.example.com/x") == "db.example.com"
-    assert _normalize_egress_destination("https://alice:9876?x@db.example.com") == "db.example.com"
+    # Since round 3 (M2) these are unreadable by default: "alice:12"
+    # could equally be a host and port.
+    assert _normalize_egress_destination("https://alice:12/34@db.example.com/x") == UNREADABLE_DESTINATION
+    assert _normalize_egress_destination("https://alice:9876?x@db.example.com") == UNREADABLE_DESTINATION
+    assert _normalize_egress_destination("https://alice:pw/x@db.example.com") == "db.example.com"
     assert _normalize_egress_destination("https://u:pw/x@") == UNREADABLE_DESTINATION
 
 

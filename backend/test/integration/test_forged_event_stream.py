@@ -43,6 +43,17 @@ signing key lives on a customer's agent host, what happens when it
 leaks, how key rotation works mid-execution, and what the SDK does when
 it cannot sign — none of which should be settled in the same commit as
 the test that proves the gap exists.
+
+UPDATE 17 NOVEMBER 2026: REPORT CHAINING AND OPTIONAL SIGNING
+
+Each report from a current SDK carries the fingerprint of the one sent
+before it in the same run, and a team can sign reports with a key held
+by a reporting process the agent cannot reach. The tests above still
+pass, deliberately: reports from SDKs that predate chaining are still
+accepted, and the run is marked unchained. What changed is shown by
+test_a_report_slipped_into_a_chained_run_is_flagged below. Whoever
+holds every key can still invent a run that links perfectly; chaining
+catches changes after sending, and signing narrows who can send.
 """
 
 from __future__ import annotations
@@ -269,3 +280,191 @@ def test_backdated_events_are_accepted(backend: Backend):
         f"expected the backdated event to be accepted: "
         f"{resp.status_code} {resp.text}"
     )
+
+
+def _chain_hash(event: dict, payload_bytes: bytes) -> str:
+    """mesedi-report-chain-v1, written here from the spec rather than
+    imported, so this test is a second implementation of it."""
+    import hashlib
+
+    fields = [
+        ("algorithm", "mesedi-report-chain-v1"),
+        ("event_id", event["event_id"]),
+        ("execution_id", event["execution_id"]),
+        ("event_type", event["event_type"]),
+        ("sequence", str(event["sequence"])),
+        ("timestamp", event["timestamp"]),
+        ("duration_ms", "0"),
+        ("payload_sha256", hashlib.sha256(payload_bytes).hexdigest()),
+        ("chain_prev", event["chain_prev"]),
+    ]
+    buf = b""
+    for label, value in fields:
+        v = value.encode()
+        buf += label.encode() + b":" + str(len(v)).encode() + b":" + v + b"\n"
+    return hashlib.sha256(buf).hexdigest()
+
+
+def _post_raw_events(backend: Backend, events_with_payloads: list) -> None:
+    """POST /events with each payload as exact bytes, the way the SDKs
+    send them, so the fingerprints computed above match."""
+    import json
+
+    parts = []
+    for event, payload_bytes in events_with_payloads:
+        head = json.dumps({k: v for k, v in event.items()}, separators=(",", ":"))
+        parts.append(head[:-1] + ',"payload":' + payload_bytes.decode() + "}")
+    resp = requests.post(f"{backend.base_url}/events",
+                         headers={**_auth(backend), "Content-Type": "application/json"},
+                         data="[" + ",".join(parts) + "]", timeout=5.0)
+    assert resp.status_code in (200, 201, 202), resp.text
+    assert resp.json().get("rejected") == 0, resp.text
+
+
+def test_a_report_slipped_into_a_chained_run_is_flagged(backend: Backend):
+    """A chained run of two reports, then a third sent later that claims
+    the first as its predecessor: an attempt to slip a report into the
+    record. The run is marked broken and a record_integrity group opens.
+    Before chaining, the same report was indistinguishable."""
+    import hashlib
+
+    from conftest import await_failure_group
+
+    execution_id = f"exec-{uuid.uuid4().hex[:12]}"
+    resp = requests.post(f"{backend.base_url}/executions", headers=_auth(backend),
+                         json={"execution_id": execution_id, "status": "started"}, timeout=5.0)
+    assert resp.status_code in (200, 201), resp.text
+
+    genesis = hashlib.sha256(
+        ("mesedi-report-chain-v1 genesis\n" + execution_id).encode()).hexdigest()
+
+    def report(seq: int, prev: str, tool: str):
+        event = {"event_id": f"evt-{uuid.uuid4().hex[:12]}", "execution_id": execution_id,
+                 "event_type": "tool_call", "sequence": seq,
+                 "timestamp": f"2026-11-17T12:00:0{seq}.000000Z", "chain_prev": prev}
+        payload = ('{"tool_name":"%s","return_value":"ok"}' % tool).encode()
+        return event, payload, _chain_hash(event, payload)
+
+    e1, p1, h1 = report(1, genesis, "read_ticket")
+    e2, p2, _ = report(2, h1, "reply")
+    _post_raw_events(backend, [(e1, p1), (e2, p2)])
+    forged, pf, _ = report(3, h1, "approve_refund")
+    _post_raw_events(backend, [(forged, pf)])
+
+    resp = requests.patch(f"{backend.base_url}/executions/{execution_id}", headers=_auth(backend),
+                          json={"status": "completed"}, timeout=5.0)
+    assert resp.status_code == 200, resp.text
+
+    await_failure_group(backend, failure_class="record_integrity",
+                        signature_prefix="record_integrity:report_chain_broken")
+    detail = requests.get(f"{backend.base_url}/executions/{execution_id}",
+                          headers=_auth(backend), timeout=5.0).json()
+    assert detail.get("report_chain", {}).get("status") == "broken", detail.get("report_chain")
+
+
+def test_an_intact_chained_run_is_marked_chained(backend: Backend):
+    """The control: the same two reports with nothing slipped in."""
+    import hashlib
+
+    execution_id = f"exec-{uuid.uuid4().hex[:12]}"
+    resp = requests.post(f"{backend.base_url}/executions", headers=_auth(backend),
+                         json={"execution_id": execution_id, "status": "started"}, timeout=5.0)
+    assert resp.status_code in (200, 201), resp.text
+    prev = hashlib.sha256(("mesedi-report-chain-v1 genesis\n" + execution_id).encode()).hexdigest()
+    batch = []
+    for seq, tool in ((1, "read_ticket"), (2, "reply")):
+        event = {"event_id": f"evt-{uuid.uuid4().hex[:12]}", "execution_id": execution_id,
+                 "event_type": "tool_call", "sequence": seq,
+                 "timestamp": f"2026-11-17T12:00:0{seq}.000000Z", "chain_prev": prev}
+        payload = ('{"tool_name":"%s","return_value":"ok"}' % tool).encode()
+        batch.append((event, payload))
+        prev = _chain_hash(event, payload)
+    _post_raw_events(backend, batch)
+    resp = requests.patch(f"{backend.base_url}/executions/{execution_id}", headers=_auth(backend),
+                          json={"status": "completed"}, timeout=5.0)
+    assert resp.status_code == 200, resp.text
+    detail = requests.get(f"{backend.base_url}/executions/{execution_id}",
+                          headers=_auth(backend), timeout=5.0).json()
+    assert detail.get("report_chain", {}).get("status") == "chained", detail.get("report_chain")
+
+
+def test_the_python_sdk_sends_an_intact_chain(backend: Backend, configured_sdk):
+    """The real SDK, the real backend: a run with tool calls, an LLM-free
+    MCP call and a declaration comes out chained. Proves the SDK hashes
+    the exact bytes it sends and the backend agrees with it."""
+    mesedi = configured_sdk
+
+    @mesedi.tool
+    def lookup(customer: str = "c-1"):
+        return {"customer": customer, "note": "café ✓"}
+
+    holder = {}
+
+    @mesedi.wrap
+    def chained_agent():
+        from mesedi._context import current_execution_context
+
+        holder["id"] = current_execution_context().execution_id
+        mesedi.declare_effects(["crm:customers"])
+        lookup()
+        mesedi.emit_mcp_call(server_name="crm", method="find", return_value={"rows": 1},
+                             latency_ms=3)
+        lookup("c-2")
+
+    chained_agent()
+    mesedi.flush(timeout=5.0)
+
+    import time as _time
+
+    deadline = _time.time() + 10
+    chain = None
+    while _time.time() < deadline:
+        detail = requests.get(f"{backend.base_url}/executions/{holder['id']}",
+                              headers=_auth(backend), timeout=5.0).json()
+        chain = detail.get("report_chain")
+        if chain:
+            break
+        _time.sleep(0.2)
+    assert chain == {"status": "chained"}, (
+        chain, detail.get("execution", {}).get("status"), len(detail.get("events") or []),
+        mesedi.stats())
+
+
+def test_the_single_run_file_downloads_from_the_real_server(backend: Backend, configured_sdk):
+    """GET /executions/{id}/export answers on the real binary, with the
+    run's reports and one chain record per chained report."""
+    mesedi = configured_sdk
+    holder = {}
+
+    @mesedi.wrap
+    def agent():
+        from mesedi._context import current_execution_context
+
+        holder["id"] = current_execution_context().execution_id
+        mesedi.emit_mcp_call(server_name="crm", method="find", return_value={"rows": 1})
+
+    agent()
+    mesedi.flush(timeout=5.0)
+    r = requests.get(f"{backend.base_url}/executions/{holder['id']}/export", headers=_auth(backend), timeout=5.0)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["format"] == "mesedi.run-export.v1"
+    assert len(body["events"]) >= 1 and len(body["report_chain"]) == len(body["events"])
+
+
+# The revoke route, as registered: /me/report-signing-keys/{key_id}.
+REVOKE_ROUTE = "/me/report-signing-keys/{key_id}"
+
+
+def test_an_api_key_cannot_manage_report_signing_keys(backend: Backend):
+    """Adding or revoking a signing key needs an admin signed in to the
+    dashboard. An API key, which the agent may hold, is refused, or the
+    agent could register its own key and sign forged reports. Listing
+    is allowed."""
+    r = requests.get(f"{backend.base_url}/me/report-signing-keys", headers=_auth(backend), timeout=5.0)
+    assert r.status_code == 200 and "keys" in r.json(), r.text
+    r = requests.post(f"{backend.base_url}/me/report-signing-keys", headers=_auth(backend), timeout=5.0,
+                      json={"key_id": "agent-key", "public_key": "I5GcdkmWQrHK+PfTpmEL1vZE+kA84duLcvpn+jeR4BY="})
+    assert r.status_code == 403, r.text
+    r = requests.delete(backend.base_url + REVOKE_ROUTE.format(key_id="agent-key"), headers=_auth(backend), timeout=5.0)
+    assert r.status_code == 403, r.text

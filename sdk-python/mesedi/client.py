@@ -33,6 +33,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from mesedi._chain import ReportSigner
+
 from mesedi._shipper import EventShipper
 from mesedi._truncate import DEFAULT_MAX_PAYLOAD_BYTES
 from mesedi.events import Event, Execution
@@ -70,6 +72,8 @@ class MesediClient:
         max_queue: int = 10_000,
         max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
         shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
+        addresses_never_contain_passwords: bool = False,
+        report_signer: Optional[ReportSigner] = None,
     ):
         if not api_key:
             raise ValueError("api_key is required")
@@ -84,6 +88,8 @@ class MesediClient:
 
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
+        # Egress addresses: see egress._normalize_egress_destination.
+        self.addresses_never_contain_passwords = addresses_never_contain_passwords
         self._http = httpx.Client(
             base_url=self.base_url,
             headers={
@@ -101,6 +107,7 @@ class MesediClient:
             max_payload_bytes=max_payload_bytes,
             shutdown_timeout=shutdown_timeout,
             endpoint=self.base_url,
+            report_signer=report_signer,
         )
 
     # ── context-manager sugar ─────────────────────────────────────────
@@ -200,6 +207,8 @@ def configure(
     flush_interval_ms: int = 250,
     batch_size: int = 100,
     shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
+    addresses_never_contain_passwords: Optional[bool] = None,
+    report_signer: Optional[ReportSigner] = None,
 ) -> MesediClient:
     """Configure the module-level default client.
 
@@ -215,6 +224,23 @@ def configure(
     for telemetry not yet delivered (default 5). Telemetry never holds
     your program open longer than that; anything still undelivered is
     reported in one warning naming the count and the backend.
+
+    ``addresses_never_contain_passwords`` (default False, or
+    MESEDI_ADDRESSES_NEVER_CONTAIN_PASSWORDS=1): an egress address with
+    a host, an all-digit port and a later '@' ("host:8080/a@b") cannot
+    be told apart from one carrying a numeric password, so it is
+    recorded as "unreadable". Set this only if your addresses never
+    carry passwords, and the host and port are recorded instead.
+
+    Every report is chained to the one sent before it in the same run,
+    so the backend can tell when one was removed, changed or slipped in
+    after sending. ``report_signer`` (optional) also signs each report:
+    a callable taking the report's 32-byte fingerprint and returning
+    ``(key_id, ed25519_signature)``, for example
+    ``mesedi.ed25519_signer(key_id, private_key)``. Use it only
+    in a reporting process the agent cannot reach, and register the
+    public key in the dashboard. A run with one signed report is a
+    signed run: the backend refuses unsigned reports for it.
     """
     global _default_client
 
@@ -236,6 +262,12 @@ def configure(
         except Exception:
             pass
 
+    if addresses_never_contain_passwords is None:
+        addresses_never_contain_passwords = (
+            os.environ.get("MESEDI_ADDRESSES_NEVER_CONTAIN_PASSWORDS", "").strip().lower()
+            in ("1", "true", "yes")
+        )
+
     _default_client = MesediClient(
         api_key=api_key,
         base_url=base_url,
@@ -243,6 +275,8 @@ def configure(
         flush_interval_ms=flush_interval_ms,
         batch_size=batch_size,
         shutdown_timeout=shutdown_timeout,
+        addresses_never_contain_passwords=addresses_never_contain_passwords,
+        report_signer=report_signer,
     )
     return _default_client
 

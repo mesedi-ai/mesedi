@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mesedi"
-version = "0.9.1"
+version = "0.10.0"
 description = "Mesedi SDK: guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -41,15 +41,29 @@ dependencies = [
     "zstandard>=0.22",
 ]
 
+[project.scripts]
+# Compare a provider's bill with the spend Mesedi saw, on the customer's
+# own computer; the provider's admin key never reaches Mesedi.
+mesedi-spend-check = "mesedi.spend_check:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "mypy>=1.0",
+    # So the shared report-signature vector runs in CI rather than
+    # skipping (tests/test_report_chain.py).
+    "cryptography>=42",
+]
+# Report signing with a local Ed25519 key (mesedi.ed25519_signer),
+# for a reporting process kept apart from the agent. Not needed for
+# report chaining, which uses only the standard library.
+signing = [
+    "cryptography>=42",
 ]
 # Framework adapter extras. The adapter modules under
 # mesedi.integrations.* import the third-party framework only when
 # instantiated, so importing `mesedi` never requires any of these.
-# Install the extra you need — e.g. `pip install mesedi[langchain]`.
+# Install the extra you need, for example `pip install mesedi[langchain]`.
 #
 # LangChain's `langchain-core` is the minimum needed; many users will
 # also have `langchain` itself (full chain library) installed, and our

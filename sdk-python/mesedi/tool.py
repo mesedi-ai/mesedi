@@ -30,11 +30,12 @@ import functools
 import json
 import time
 import uuid
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from mesedi._context import current_execution_context
 from mesedi._jcs import input_schema_hash
 from mesedi.client import get_client
+from mesedi.effects import _current_effects
 from mesedi.events import Event, EventType, utcnow_rfc3339
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -355,6 +356,10 @@ def tool(func: F) -> F:
             ctx.budget_tracker.increment_steps()
 
         start_wall = time.perf_counter()
+        # Collects mesedi.record_effects() calls made by the tool body
+        # (effects.py); sent as the call's "effects".
+        effects: List[str] = []
+        effects_token = _current_effects.set(effects)
         try:
             result = func(*args, **kwargs)
         except BaseException as exc:
@@ -370,6 +375,9 @@ def tool(func: F) -> F:
                 payload["tool_description"] = tool_description
             if schema_hash:
                 payload["input_schema_hash"] = schema_hash
+            # A failed call may still have changed something.
+            if effects:
+                payload["effects"] = list(effects)
             client.submit_event(Event(
                 event_id=event_id,
                 execution_id=ctx.execution_id,
@@ -380,6 +388,8 @@ def tool(func: F) -> F:
                 payload=payload,
             ))
             raise
+        finally:
+            _current_effects.reset(effects_token)
 
         duration_ms = _elapsed_ms(start_wall)
         payload: Dict[str, Any] = {
@@ -403,6 +413,8 @@ def tool(func: F) -> F:
         structured = _structured_return_value(result)
         if structured is not None:
             payload["return_value"] = structured
+        if effects:
+            payload["effects"] = list(effects)
         client.submit_event(Event(
             event_id=event_id,
             execution_id=ctx.execution_id,

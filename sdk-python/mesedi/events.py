@@ -78,6 +78,10 @@ class EventType:
     # once near start. The environment_misapprehension detector
     # compares later observations against this declared boundary.
     ENVIRONMENT_DECLARATION: ClassVar[str] = "environment_declaration"
+    #  where this run may make changes, optionally by which tools.
+    # Read with the effects field on tool and MCP calls by the
+    # effect_aliasing detector. See effects.py.
+    EFFECT_DECLARATION: ClassVar[str] = "effect_declaration"
 
 
 class Status:
@@ -114,7 +118,7 @@ class Execution:
     total_tokens_out: Optional[int] = None
     estimated_cost_usd: Optional[float] = None
     sdk_language: str = "python"
-    sdk_version: str = "0.9.1"
+    sdk_version: str = "0.10.0"
     crash_signature: Optional[str] = None
     #  optional per-execution tenant identifier from the
     # host SaaS application. When set, it surfaces in the
@@ -131,6 +135,9 @@ class Execution:
     # crash_signature hash so the crash allowlist can match the type
     # people know (the outside review of 2026-11-15). Needs a backend from 2026-11-16 or later.
     crash_type: Optional[str] = None
+    # The run's declared end, set by the shipper as the run-finished
+    # message leaves the queue (_chain.py), never by the caller.
+    report_chain_end: Optional[Dict[str, Any]] = None
 
     def start_payload(self) -> Dict[str, Any]:
         """Body for POST /executions (only the fields valid at start)."""
@@ -168,6 +175,8 @@ class Execution:
             out["crash_signature"] = self.crash_signature
         if self.crash_type is not None:
             out["crash_type"] = self.crash_type
+        if self.report_chain_end is not None:
+            out["report_chain_end"] = self.report_chain_end
         return out
 
 
@@ -189,6 +198,10 @@ class Event:
     timestamp: str = field(default_factory=utcnow_rfc3339)
     duration_ms: Optional[int] = None
     payload: Dict[str, Any] = field(default_factory=dict)
+    # Report chaining (mesedi._chain): set by the shipper as the event
+    # leaves the queue, never by the caller.
+    chain_prev: Optional[str] = None
+    signature: Optional[Dict[str, str]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Wire-format dict, drop None duration_ms to keep the body lean."""
@@ -202,4 +215,8 @@ class Event:
         }
         if self.duration_ms is not None:
             out["duration_ms"] = self.duration_ms
+        if self.chain_prev is not None:
+            out["chain_prev"] = self.chain_prev
+        if self.signature is not None:
+            out["signature"] = self.signature
         return out

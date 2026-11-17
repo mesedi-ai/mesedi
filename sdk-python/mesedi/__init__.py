@@ -76,6 +76,8 @@ from mesedi.egress import (
     emit_egress,
     emit_environment_declaration,
 )
+from mesedi._chain import ed25519_signer
+from mesedi.effects import declare_effects, record_effects
 from mesedi.observe import (
     HumanInterventionHandle,
     checkpoint,
@@ -93,7 +95,7 @@ from mesedi.observe import (
 from mesedi.tool import tool
 from mesedi.wrap import wrap
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"
 
 __all__ = [
     "Budget",
@@ -105,6 +107,8 @@ __all__ = [
     "Status",
     "checkpoint",
     "configure",
+    "declare_effects",
+    "ed25519_signer",
     "emit_agent_handoff",
     "emit_egress",
     "emit_environment_declaration",
@@ -125,6 +129,7 @@ __all__ = [
     "instrument_openai",
     "instrument_vertex_gemini",
     "pause_for_human",
+    "record_effects",
     "request_human_intervention",
     "resume_for_agent",
     "tool",

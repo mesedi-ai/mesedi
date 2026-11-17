@@ -82,3 +82,48 @@ def test_both_emitters_are_noops_outside_wrap() -> None:
         egress.emit_egress("api.example.com")
         egress.emit_environment_declaration("live")
     assert client.events == []
+
+
+def test_the_no_passwords_setting_reaches_recorded_addresses() -> None:
+    """Round 3, M2: "host:8080/a@b" is unreadable by default and keeps
+    its host and port only when the client says addresses never carry
+    passwords."""
+    for setting, want in ((False, "unreadable"), (True, "host.example.com:8080")):
+        client = _CaptureClient()
+        client.addresses_never_contain_passwords = setting  # type: ignore[attr-defined]
+        token = push_execution_context("exec-egress-m2")
+        try:
+            with patch.object(egress, "get_client", return_value=client):
+                egress.emit_egress("https://host.example.com:8080/a@b")
+        finally:
+            pop_execution_context(token)
+        assert client.events[0].payload["destination"] == want, setting
+
+
+def test_configure_reads_the_no_passwords_setting(monkeypatch: Any) -> None:
+    import mesedi.client as client_mod
+
+    monkeypatch.setenv("MESEDI_ADDRESSES_NEVER_CONTAIN_PASSWORDS", "1")
+    c = client_mod.configure(api_key="mesedi_sk_test_m2", base_url="http://127.0.0.1:9")
+    try:
+        assert c.addresses_never_contain_passwords is True
+        c2 = client_mod.configure(api_key="mesedi_sk_test_m2", base_url="http://127.0.0.1:9",
+                                  addresses_never_contain_passwords=False)
+        assert c2.addresses_never_contain_passwords is False
+    finally:
+        client_mod._default_client.close()
+        client_mod._default_client = None
+
+
+def test_addresses_never_contain_passwords_reads_the_client() -> None:
+    class _C:
+        addresses_never_contain_passwords = True
+
+    with patch.object(egress, "get_client", return_value=_C()):
+        assert egress._addresses_never_contain_passwords() is True
+
+    def _unconfigured() -> Any:
+        raise RuntimeError("not configured")
+
+    with patch.object(egress, "get_client", side_effect=_unconfigured):
+        assert egress._addresses_never_contain_passwords() is False

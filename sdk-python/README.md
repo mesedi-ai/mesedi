@@ -106,7 +106,58 @@ Two details worth knowing:
   Nothing else changes.
 
 Descriptions are truncated at 2000 characters with an inline
-`...[truncated]` marker, and are only ever hashed for comparison.
+`...[truncated]` marker. Mesedi compares them with the description it
+first recorded for the tool and with the tool's recent history, and
+scans them for injected instructions; a match keeps a short passage
+around it as evidence.
+
+## Changes, MCP calls, signing and spend (0.10.0)
+
+**Where a run may make changes.** Declare it near the start of a run,
+and report what each tool call changed; the backend's effect_aliasing
+check flags a change to a place not declared, or reached by a tool not
+listed for it:
+
+```python
+mesedi.declare_effects([
+    {"destination": "github.com/acme/app", "via": ["push_branch"]},
+    "s3://acme-reports/*",
+])
+
+@mesedi.tool
+def push_branch(repo: str) -> str:
+    ...
+    mesedi.record_effects(f"github.com/{repo}")
+    return "ok"
+```
+
+**MCP calls** take `tool_description=` (the description the server
+advertises) and `effects=` on `mesedi.emit_mcp_call(...)`.
+
+**Report chaining** is automatic: every report carries the fingerprint
+of the one sent before it in the same run, and the run-finished message
+declares the last one, so the backend can tell when a report was
+removed, changed or slipped in. **Signing** is optional, for a
+reporting process the agent cannot reach:
+`mesedi.configure(report_signer=mesedi.ed25519_signer("k1", private_key_bytes))`
+(`pip install "mesedi[signing]"`). Register the public key in the
+dashboard; only a signed-in admin can.
+
+**Egress addresses.** An address with a host, an all-digit port and a
+later `@` (`https://host:8080/a@b`) is recorded as `unreadable`, because
+it cannot be told apart from one carrying a password. If your addresses
+never carry passwords, pass `addresses_never_contain_passwords=True` to
+`configure` (or set `MESEDI_ADDRESSES_NEVER_CONTAIN_PASSWORDS=1`).
+
+**Spend outside monitored runs**, a stolen key included, never reaches
+Mesedi. `mesedi-spend-check --provider anthropic --days 30` compares
+your provider's bill with what Mesedi saw, on your computer; the
+provider admin key is read from the environment and sent only to the
+provider.
+
+**Backend version.** Python 0.10.0 sends new fields that a Mesedi
+backend older than 17 November 2026 refuses (it rejects unknown fields),
+so upgrade the backend first if you host your own.
 
 ## Optional: hard-halt with local budgets
 

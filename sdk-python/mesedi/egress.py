@@ -16,7 +16,9 @@ from mesedi.client import get_client
 from mesedi.events import Event, EventType, utcnow_rfc3339
 
 
-def _normalize_egress_destination(destination: str) -> str:
+def _normalize_egress_destination(
+    destination: str, addresses_never_contain_passwords: bool = False
+) -> str:
     """Reduce a destination to host or host:port. A full URL loses its
     scheme, path, query, fragment and any user:password@ part here on
     purpose: identical services must cluster, and query strings and
@@ -33,7 +35,15 @@ def _normalize_egress_destination(destination: str) -> str:
     is kept.
     With no host after it, the destination is recorded as "unreadable"
     rather than guessed. Owner decision, 17 November 2026: never send a
-    possible password."""
+    possible password.
+
+    Round 3 (finding M2): when the part before the cut is a host and an
+    all-digit port, the later '@' may end a password ("alice:1234/x@db")
+    or sit in a path ("host:8080/a@b", which used to be recorded as
+    "b"). The two cannot be told apart, so the destination is recorded
+    as "unreadable" by default (owner decision, 17 November 2026). A
+    team whose addresses never contain passwords sets
+    addresses_never_contain_passwords, and the host and port are kept."""
     d = destination.strip()
     if "://" in d:
         d = d.split("://", 1)[1]
@@ -41,6 +51,9 @@ def _normalize_egress_destination(destination: str) -> str:
     authority = d if cut < 0 else d[:cut]
     if cut >= 0 and "@" not in authority and ":" in authority:
         at = _credential_at(d, cut)
+        if at >= 0 and _host_and_numeric_port(authority) == authority:
+            # host:digits then a later '@': a port, or a numeric password.
+            return authority if addresses_never_contain_passwords else UNREADABLE_DESTINATION
         if at >= 0:
             d = d[at + 1 :]
             for c in ("/", "?", "#"):
@@ -63,6 +76,15 @@ def _credential_at(d: str, cut: int) -> int:
     while at >= 0 and d[at - 1] == "/":
         at = d.find("@", at + 1)
     return at
+
+
+def _addresses_never_contain_passwords() -> bool:
+    """The configured client's setting; False when none is configured,
+    so an unconfigured process takes the safe default."""
+    try:
+        return bool(getattr(get_client(), "addresses_never_contain_passwords", False))
+    except RuntimeError:
+        return False
 
 
 # Recorded when an address carried possible credentials and no host can be
@@ -119,7 +141,9 @@ def emit_egress(
         ctx.budget_tracker.increment_steps()
 
     payload: Dict[str, Any] = {
-        "destination": _normalize_egress_destination(destination),
+        "destination": _normalize_egress_destination(
+            destination, _addresses_never_contain_passwords()
+        ),
     }
     if protocol:
         payload["protocol"] = protocol

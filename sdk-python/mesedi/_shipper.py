@@ -49,8 +49,21 @@ from typing import Any, List, Optional, Union
 import httpx
 
 from mesedi._compress import maybe_compress
+from mesedi._chain import ReportChainer, ReportSigner
 from mesedi._truncate import DEFAULT_MAX_PAYLOAD_BYTES, maybe_truncate
 from mesedi.events import Event, Execution
+
+
+# The longest a 429's Retry-After is honoured, per attempt.
+_MAX_RETRY_AFTER_SECONDS = 30.0
+
+
+def _retry_after_seconds(r: Any) -> float:
+    """The Retry-After header in seconds, 0 when absent or unreadable."""
+    try:
+        return max(0.0, float(r.headers.get("Retry-After", "0")))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 @dataclass(frozen=True)
@@ -120,8 +133,13 @@ class EventShipper:
         max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
         shutdown_timeout: float = 5.0,
         endpoint: str = "",
+        report_signer: Optional[ReportSigner] = None,
     ):
         self._http = http
+        # Report chaining (and signing, when a signer is configured),
+        # applied in this shipper's worker thread as each event leaves
+        # the queue, in send order. See _chain.py.
+        self._chainer = ReportChainer(report_signer)
         # How long shutdown() waits for undelivered items at exit, and
         # where they were going, so the exit warning can say both.
         self._shutdown_timeout = shutdown_timeout
@@ -303,6 +321,7 @@ class EventShipper:
 
             if item.kind == "event":
                 assert isinstance(item.body, Event)
+                self._chainer.chain(item.body)
                 self._pending_events.append(item.body)
                 if len(self._pending_events) >= self._batch_size:
                     batch, self._pending_events = self._pending_events, []
@@ -330,6 +349,10 @@ class EventShipper:
                 if item.kind == "create_execution":
                     self._send_create_execution(item.body)
                 elif item.kind == "update_execution":
+                    # The run's declared end, so a run whose last reports
+                    # go missing is caught; every earlier event of the
+                    # run has already been chained, in send order.
+                    item.body.report_chain_end = self._chainer.end(item.body.execution_id)
                     self._send_update_execution(item.body)
                 else:
                     logger.warning("mesedi: unknown item kind %r", item.kind)
@@ -406,7 +429,19 @@ class EventShipper:
                 if r.status_code < 400:
                     self._delivered_count += 1
                     return  # success
-                if 400 <= r.status_code < 500:
+                if r.status_code == 429:
+                    # Rate limited: temporary, not a rejection. Until
+                    # 0.10.0 a 429 was dropped as permanent, losing the
+                    # batch and, with report chaining, breaking the run's
+                    # chain. Wait as the server asks, capped, and retry
+                    # within the same budget. This runs in the shipper
+                    # thread, never on the agent's own calls.
+                    last_err = "HTTP 429"
+                    if attempt < self._max_retries:
+                        wait = min(_retry_after_seconds(r), _MAX_RETRY_AFTER_SECONDS)
+                        if wait > backoffs[attempt]:
+                            time.sleep(wait - backoffs[attempt])
+                elif 400 <= r.status_code < 500:
                     # Permanent failure: retrying won't help.
                     self._rejected_count += 1
                     logger.warning(

@@ -10,11 +10,12 @@ existing import keeps working.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, Optional
 
 from mesedi._context import current_execution_context
 from mesedi._jcs import input_schema_hash
 from mesedi.client import get_client
+from mesedi.effects import clean_effects
 from mesedi.events import Event, EventType, utcnow_rfc3339
 
 __all__ = ["emit_mcp_call"]
@@ -30,6 +31,8 @@ def emit_mcp_call(
     error: str = "",
     error_class: str = "",
     input_schema: Any = None,
+    tool_description: str = "",
+    effects: Optional[Iterable[str]] = None,
 ) -> None:
     """Emit an ``mcp_call`` event for one Model Context Protocol
     server invocation.
@@ -94,6 +97,16 @@ def emit_mcp_call(
             copy cached at startup, a poisoned server swaps the
             definition between calls and a cached copy hides exactly
             that swap.
+        tool_description: Optional. The description the server
+            advertises for this method, the text the model reads.
+            Checked against the first description Mesedi recorded for
+            "server/method" and scanned for injected instructions.
+            Pass it fresh from the server's current tool listing, for
+            the same reason as input_schema.
+        effects: Optional. The places this call changed ("what this
+            call changed"), in your own names: a repository, a table,
+            a bucket path. Read with the run's effect declaration by
+            the effect_aliasing check (see mesedi.declare_effects).
     """
     ctx = current_execution_context()
     if ctx is None:
@@ -121,6 +134,10 @@ def emit_mcp_call(
         payload["error_class"] = error_class
     if schema_hash := input_schema_hash(input_schema):
         payload["input_schema_hash"] = schema_hash
+    if tool_description and tool_description.strip():
+        payload["tool_description"] = tool_description
+    if cleaned := clean_effects(effects):
+        payload["effects"] = cleaned
 
     client = get_client()
     client.submit_event(Event(
