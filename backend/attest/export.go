@@ -48,6 +48,11 @@ type ExportedExecution struct {
 	// stored, anchored one, so it still folds; only its contents can no
 	// longer be opened (v2; the outside review of 2026-11-15).
 	RecordsDeleted bool `json:"records_deleted,omitempty"`
+	// EventsAfterAnchoring counts events this execution received after
+	// its hour was anchored. They are kept, but the anchored digest does
+	// not cover them, so a reader of the export must be told (the outside
+	// review's round 2, 17 November 2026). Zero for almost every run.
+	EventsAfterAnchoring int `json:"events_after_anchoring,omitempty"`
 }
 
 // ExportedTimestamp is one calendar's OpenTimestamps receipt for a

@@ -367,6 +367,27 @@ func (t *OTSTimestamp) BitcoinClaims() []OTSBitcoinClaim {
 	return out
 }
 
+// InvalidBitcoinAttestations counts Bitcoin block attestations whose
+// payload does not read as a block height. BitcoinClaims leaves them out,
+// so without this count a corrupted attestation would read as a receipt
+// still pending rather than as a bad one (the outside review's round 2,
+// 17 November 2026). A receipt with any is false evidence.
+func (t *OTSTimestamp) InvalidBitcoinAttestations() int {
+	n := 0
+	t.walk(func(node *OTSTimestamp) {
+		for _, a := range node.Attestations {
+			if a.Tag != OTSTagBitcoin {
+				continue
+			}
+			r := &otsReader{b: a.Payload}
+			if _, err := r.varuint(); err != nil || len(r.b) != 0 {
+				n++
+			}
+		}
+	})
+	return n
+}
+
 // PendingClaims lists every calendar still to be asked for its result.
 func (t *OTSTimestamp) PendingClaims() []OTSPendingClaim {
 	var out []OTSPendingClaim
