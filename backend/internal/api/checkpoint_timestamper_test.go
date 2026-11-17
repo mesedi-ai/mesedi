@@ -26,6 +26,7 @@ type fakeCalendar struct {
 	mined     bool
 	down      bool
 	garbage   bool
+	badBlock  bool // its Bitcoin attestations carry a payload that does not read
 	requests  int
 	upgradeOf map[string][]byte
 }
@@ -77,7 +78,15 @@ func (c *fakeCalendar) handle(w http.ResponseWriter, r *http.Request) {
 		body.WriteByte(attest.OTSOpAppend)
 		writeOTSVarbytes(&body, nonce)
 		body.WriteByte(attest.OTSOpSHA256)
-		body.Write(otsAttestationBytes(attest.OTSTagPending, uri.Bytes()))
+		if c.badBlock {
+			// A fork: a valid pending attestation, and a Bitcoin one that
+			// does not read.
+			body.WriteByte(0xff)
+			body.Write(otsAttestationBytes(attest.OTSTagPending, uri.Bytes()))
+			body.Write(otsAttestationBytes(attest.OTSTagBitcoin, []byte{0xa0, 0xf7, 0x36, 0xff}))
+		} else {
+			body.Write(otsAttestationBytes(attest.OTSTagPending, uri.Bytes()))
+		}
 		_, _ = w.Write(body.Bytes())
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/timestamp/"):
 		if !c.mined {
@@ -88,7 +97,16 @@ func (c *fakeCalendar) handle(w http.ResponseWriter, r *http.Request) {
 		body.WriteByte(attest.OTSOpPrepend)
 		writeOTSVarbytes(&body, []byte("block"))
 		body.WriteByte(attest.OTSOpSHA256)
-		body.Write(otsAttestationBytes(attest.OTSTagBitcoin, []byte{0xa0, 0xf7, 0x36})) // varuint 900000
+		if c.badBlock {
+			// A fork: a valid block attestation beside one whose payload
+			// does not read, so only the invalid-attestation check can
+			// refuse the upgrade.
+			body.WriteByte(0xff)
+			body.Write(otsAttestationBytes(attest.OTSTagBitcoin, []byte{0xa0, 0xf7, 0x36}))
+			body.Write(otsAttestationBytes(attest.OTSTagBitcoin, []byte{0xa0, 0xf7, 0x36, 0xff}))
+		} else {
+			body.Write(otsAttestationBytes(attest.OTSTagBitcoin, []byte{0xa0, 0xf7, 0x36})) // varuint 900000
+		}
 		_, _ = w.Write(body.Bytes())
 	default:
 		http.NotFound(w, r)
@@ -261,5 +279,38 @@ func TestExportsCarryTheAnchorKindAndEveryReceipt(t *testing.T) {
 	}
 	if complete != 1 {
 		t.Errorf("%d receipts complete, want 1 (only one calendar was mined)", complete)
+	}
+}
+
+// A receipt carrying a Bitcoin attestation that does not read is false
+// evidence: it is refused when first issued, and an upgrade carrying one
+// is never stored as complete (the outside review's round 2, 17 November
+// 2026).
+func TestAReceiptWithAnUnreadableBitcoinAttestationIsNeverStored(t *testing.T) {
+	bad := newFakeCalendar(t)
+	bad.badBlock = true
+	f, _ := timestamperFixture(t, bad)
+	f.runOne("exec-ts")
+	head, _ := f.st.LatestCheckpoint(f.ctx)
+	if got := receiptsFor(t, f, head.Seq); len(got) != 0 {
+		t.Fatalf("a receipt with an unreadable Bitcoin attestation was stored at submission: %v", keys(got))
+	}
+}
+
+func TestAnUpgradeWithAnUnreadableBitcoinAttestationIsNotStored(t *testing.T) {
+	cal := newFakeCalendar(t)
+	f, _ := timestamperFixture(t, cal)
+	f.runOne("exec-ts")
+	head, _ := f.st.LatestCheckpoint(f.ctx)
+	cal.mined, cal.badBlock = true, true
+	if err := f.sch.tick(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := f.st.ListCheckpointTimestamps(f.ctx, head.Seq, head.Seq)
+	if len(all[head.Seq]) != 1 {
+		t.Fatalf("%d receipts stored, want the one pending receipt", len(all[head.Seq]))
+	}
+	if all[head.Seq][0].Complete {
+		t.Fatal("an upgrade carrying an unreadable Bitcoin attestation was stored as complete")
 	}
 }

@@ -152,6 +152,19 @@ func TestStoredDigestsSurviveALateEvent(t *testing.T) {
 	if exp.Format != attest.ChainExportFormatV2 {
 		t.Errorf("export format %q, want %q", exp.Format, attest.ChainExportFormatV2)
 	}
+	// The export itself says the run received an event after anchoring,
+	// because the export is what an auditor holds (round 2, 17 November 2026).
+	marked := 0
+	for _, iv := range exp.Intervals {
+		for _, x := range iv.Executions {
+			if x.ExecutionID == "exec-1" {
+				marked = x.EventsAfterAnchoring
+			}
+		}
+	}
+	if marked != 1 {
+		t.Errorf("the export marks exec-1 with %d events after anchoring, want 1", marked)
+	}
 	if late, _ := f.st.CountEventsAfterDigest(f.ctx, []string{"exec-1", "exec-unknown"}); late["exec-1"] != 1 || len(late) != 1 {
 		t.Errorf("late events counted %v, want exec-1: 1 and nothing else", late)
 	}

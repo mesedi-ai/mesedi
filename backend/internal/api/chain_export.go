@@ -213,12 +213,21 @@ func (h *Handlers) exportedExecutions(
 		if err != nil {
 			return nil, "", fmt.Errorf("check retained executions: %w", err)
 		}
+		// Events that arrived after the hour was anchored are kept but not
+		// covered by its digest. The export says so per run, because the
+		// export, not the dashboard, is what an auditor holds (the outside
+		// review's round 2, 17 November 2026).
+		late, err := h.Store.CountEventsAfterDigest(ctx, ids)
+		if err != nil {
+			return nil, "", fmt.Errorf("count events after anchoring: %w", err)
+		}
 		out := make([]attest.ExportedExecution, len(stored))
 		for i, d := range stored {
 			out[i] = attest.ExportedExecution{
-				ExecutionID:    d.ExecutionID,
-				DigestRoot:     d.Root,
-				RecordsDeleted: !exists[d.ExecutionID],
+				ExecutionID:          d.ExecutionID,
+				DigestRoot:           d.Root,
+				RecordsDeleted:       !exists[d.ExecutionID],
+				EventsAfterAnchoring: late[d.ExecutionID],
 			}
 		}
 		return out, "", nil

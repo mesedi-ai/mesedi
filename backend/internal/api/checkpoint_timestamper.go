@@ -163,6 +163,9 @@ func (ts *CheckpointTimestamper) submitToCalendar(ctx context.Context, cal strin
 	if len(t.PendingClaims()) == 0 && len(t.BitcoinClaims()) == 0 {
 		return nil, errors.New("the receipt makes no attestation")
 	}
+	if t.InvalidBitcoinAttestations() > 0 {
+		return nil, errors.New("the receipt carries a Bitcoin attestation that does not read")
+	}
 	return t.Serialize(), nil
 }
 
@@ -187,6 +190,11 @@ func (ts *CheckpointTimestamper) upgradeOne(ctx context.Context, p store.Checkpo
 		}
 	}
 	if !changed || len(receipt.BitcoinClaims()) == 0 {
+		return
+	}
+	if receipt.InvalidBitcoinAttestations() > 0 {
+		ts.Logger.Warn("checkpoint_timestamper: upgraded receipt carries a Bitcoin attestation that does not read",
+			"seq", p.CheckpointSeq, "calendar", p.CalendarURL)
 		return
 	}
 	full := receipt.Serialize()
