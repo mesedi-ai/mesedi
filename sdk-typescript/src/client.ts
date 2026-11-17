@@ -30,6 +30,7 @@
  */
 
 import { sendUnref } from "./_transport.js";
+import { ReportChainer, type ReportSigner } from "./chain.js";
 import { maybeCompress } from "./compress.js";
 import { DEFAULT_MAX_PAYLOAD_BYTES, maybeTruncate } from "./truncate.js";
 import {
@@ -105,6 +106,26 @@ export interface ConfigureOptions {
    * to disable truncation entirely.
    */
   maxPayloadBytes?: number;
+  /**
+   * Egress addresses (round 3, finding M2): an address with a host, an
+   * all-digit port and a later "@" ("host:8080/a@b") cannot be told
+   * apart from one carrying a numeric password, so it is recorded as
+   * "unreadable". Set true only if your addresses never carry
+   * passwords, and the host and port are recorded instead. Defaults to
+   * `MESEDI_ADDRESSES_NEVER_CONTAIN_PASSWORDS` ("1" or "true"), else
+   * false.
+   */
+  addressesNeverContainPasswords?: boolean;
+  /**
+   * Every report is chained to the one sent before it in the same run,
+   * so the backend can tell when one was removed, changed or slipped
+   * in after sending. `reportSigner` (optional) also signs each report
+   * (see chain.ts and `ed25519Signer`). Use it only in a reporting
+   * process the agent cannot reach, and register the public key in
+   * the dashboard. A run with one signed report is a signed run: the
+   * backend refuses unsigned reports for it.
+   */
+  reportSigner?: ReportSigner;
 }
 
 /**
@@ -117,11 +138,17 @@ type ShipItem =
   | { kind: "event"; body: Event }
   | { kind: "barrier"; body: () => void };
 
+// The longest a 429's Retry-After is honoured, per attempt. The wait is
+// in the background shipper, never on the agent's own calls.
+const MAX_RETRY_AFTER_MS = 30_000;
+
 export class MesediClient {
   readonly apiKey: string;
   readonly baseUrl: string;
   readonly timeoutMs: number;
   readonly shutdownTimeoutMs: number;
+  readonly addressesNeverContainPasswords: boolean;
+  private readonly chainer: ReportChainer;
   private readonly flushIntervalMs: number;
   private readonly batchSize: number;
   private readonly maxQueue: number;
@@ -174,6 +201,10 @@ export class MesediClient {
     this.batchSize = opts.batchSize ?? 100;
     this.maxQueue = opts.maxQueue ?? 10_000;
     this.maxPayloadBytes = opts.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES;
+    const envNoPasswords = (process.env["MESEDI_ADDRESSES_NEVER_CONTAIN_PASSWORDS"] ?? "").trim().toLowerCase();
+    this.addressesNeverContainPasswords =
+      opts.addressesNeverContainPasswords ?? ["1", "true", "yes"].includes(envNoPasswords);
+    this.chainer = new ReportChainer(opts.reportSigner);
 
     // Start the periodic flush timer. unref() so it doesn't keep the
     // event loop alive on its own, the process can exit when the
@@ -345,6 +376,8 @@ export class MesediClient {
     while (this.queue.length > 0) {
       const item = this.queue.shift()!;
       if (item.kind === "event") {
+        // Report chaining, in send order (chain.ts).
+        await this.chainer.chain(item.body);
         this.pendingEvents.push(item.body);
         if (this.pendingEvents.length >= this.batchSize) {
           await this.flushPendingEvents();
@@ -358,6 +391,11 @@ export class MesediClient {
         if (item.kind === "create_execution") {
           await this.sendCreateExecution(item.body);
         } else if (item.kind === "update_execution") {
+          // The run's declared end, so a run whose last reports go
+          // missing is caught; every earlier event of the run has
+          // already been chained, in send order.
+          const end = await this.chainer.end(item.body.execution_id);
+          if (end) item.body.report_chain_end = end;
           await this.sendUpdateExecution(item.body);
         } else if (item.kind === "barrier") {
           item.body();
@@ -456,6 +494,20 @@ export class MesediClient {
           this.deliveredCount++;
           return; // success
         }
+        if (resp.status === 429) {
+          // Rate limited: temporary, not a rejection. Until 0.12.0 a 429
+          // was dropped as permanent, losing the batch and, with report
+          // chaining, breaking the run's chain. Wait as the server asks,
+          // capped, and retry within the same budget.
+          lastErr = `HTTP 429`;
+          if (attempt < backoffs.length) {
+            const waitMs = Math.min((resp.retryAfterSeconds ?? 0) * 1000, MAX_RETRY_AFTER_MS);
+            if (waitMs > (backoffs[attempt] ?? 0)) {
+              await new Promise<void>((r) => setTimeout(r, waitMs - (backoffs[attempt] ?? 0)).unref());
+            }
+          }
+          continue;
+        }
         if (resp.status >= 400 && resp.status < 500) {
           // Permanent failure, retrying won't help.
           this.rejectedCount++;
@@ -493,7 +545,11 @@ export class MesediClient {
       (this.queue.length > 0 || this.pendingEvents.length > 0) &&
       Date.now() < deadline
     ) {
-      await this.processOnce();
+      // Through the same serialized chain as tick(), so a shutdown
+      // drain never runs beside a timer tick: two loops taking from
+      // one queue at once would send, and chain, events out of order.
+      this.inflight = this.inflight.then(() => this.processOnce());
+      await this.inflight;
     }
   }
 }

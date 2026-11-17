@@ -19,7 +19,10 @@ import { Event, EventType, utcNowRfc3339 } from "./events.js";
  * the Python SDK). Exported only for that test; not re-exported from
  * index.ts, so it is not part of the public API.
  */
-export function normalizeEgressDestination(destination: string): string {
+export function normalizeEgressDestination(
+  destination: string,
+  addressesNeverContainPasswords = false,
+): string {
   let d = destination.trim();
   const schemeIdx = d.indexOf("://");
   if (schemeIdx >= 0) d = d.slice(schemeIdx + 3);
@@ -39,6 +42,14 @@ export function normalizeEgressDestination(destination: string): string {
     // "/@types/node" is a path, not a credential.
     let at = d.indexOf("@", cut + 1);
     while (at >= 0 && d[at - 1] === "/") at = d.indexOf("@", at + 1);
+    // Round 3 (finding M2): a host and all-digit port before a later
+    // "@" ("host:8080/a@b", once recorded as "b") cannot be told apart
+    // from a user and a numeric password ("alice:1234/x@db"). Recorded
+    // as "unreadable" unless the team says its addresses never carry
+    // passwords (owner decision, 17 November 2026).
+    if (at >= 0 && hostAndNumericPort(authority) === authority) {
+      return addressesNeverContainPasswords ? authority : UNREADABLE_DESTINATION;
+    }
     if (at >= 0) {
       let rest = d.slice(at + 1);
       for (const c of ["/", "?", "#"]) {
@@ -55,6 +66,15 @@ export function normalizeEgressDestination(destination: string): string {
   const at = d.lastIndexOf("@");
   if (at >= 0) d = d.slice(at + 1);
   return hostAndNumericPort(d);
+}
+
+/** The configured client's setting; false when none is configured. */
+function addressesNeverContainPasswords(): boolean {
+  try {
+    return getClient().addressesNeverContainPasswords;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -111,7 +131,7 @@ export function emitEgress(destination: string, opts: EgressOptions = {}): void 
   if (!ctx) return;
 
   const payload: Record<string, unknown> = {
-    destination: normalizeEgressDestination(destination),
+    destination: normalizeEgressDestination(destination, addressesNeverContainPasswords()),
   };
   if (opts.protocol) payload["protocol"] = opts.protocol;
   if (opts.toolName) payload["tool_name"] = opts.toolName;

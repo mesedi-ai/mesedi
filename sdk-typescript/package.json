@@ -1,6 +1,6 @@
 {
   "name": "mesedi",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "Mesedi SDK: guardians for autonomous AI agents. Detect failures, halt runaways, escalate first occurrence.",
   "license": "MIT",
   "homepage": "https://mesedi.ai",
@@ -73,6 +73,9 @@
     "@langchain/core": {
       "optional": true
     }
+  },
+  "bin": {
+    "mesedi-spend-check": "dist/spend_check_cli.js"
   },
   "files": [
     "dist",

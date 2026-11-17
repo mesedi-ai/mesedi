@@ -22,6 +22,7 @@ import {
   currentExecutionContext,
   newEventId,
 } from "./context.js";
+import { effectsStorage } from "./effects.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
 import { inputSchemaHash } from "./jcs.js";
 
@@ -135,8 +136,11 @@ export function tool<TArgs extends unknown[], TResult>(
     const argsSummary = summarizeArgs(args);
     const start = performance.now();
 
+    // Collects recordEffects() calls made by the tool body (effects.ts);
+    // sent as the call's "effects".
+    const effects: string[] = [];
     try {
-      const result = await fn(...args);
+      const result = await effectsStorage.run(effects, () => fn(...args));
       const durationMs = Math.round(performance.now() - start);
       const payload: Record<string, unknown> = {
         tool_name: toolName,
@@ -164,6 +168,9 @@ export function tool<TArgs extends unknown[], TResult>(
       const structured = structuredReturnValue(result);
       if (structured !== undefined) {
         payload.return_value = structured;
+      }
+      if (effects.length) {
+        payload.effects = [...effects];
       }
       const event: Event = {
         event_id: eventId,
@@ -198,6 +205,8 @@ export function tool<TArgs extends unknown[], TResult>(
             MAX_EXC_MSG,
           ),
           ...(toolDescription ? { tool_description: toolDescription } : {}),
+          // A failed call may still have changed something.
+          ...(effects.length ? { effects: [...effects] } : {}),
           ...((): Record<string, unknown> => {
             const schemaHash = inputSchemaHash(opts.inputSchema);
             return schemaHash ? { input_schema_hash: schemaHash } : {};

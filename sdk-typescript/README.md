@@ -117,7 +117,53 @@ sent as an empty string, and description drift simply never fires for
 that tool. Nothing else changes.
 
 Descriptions are truncated at 2000 characters with an inline
-`...[truncated]` marker, and are only ever hashed for comparison.
+`...[truncated]` marker. Mesedi compares them with the description it
+first recorded for the tool and with the tool's recent history, and
+scans them for injected instructions; a match keeps a short passage
+around it as evidence.
+
+## Changes, MCP calls, signing and spend (0.12.0)
+
+**Where a run may make changes.** Declare it near the start of a run,
+and report what each tool call changed; the backend's effect_aliasing
+check flags a change to a place not declared, or reached by a tool not
+listed for it:
+
+```typescript
+import { declareEffects, recordEffects, tool } from "mesedi";
+
+declareEffects([
+  { destination: "github.com/acme/app", via: ["pushBranch"] },
+  "s3://acme-reports/*",
+]);
+
+const pushBranch = tool(async function pushBranch(repo: string) {
+  // ...
+  recordEffects(`github.com/${repo}`);
+  return "ok";
+});
+```
+
+**MCP calls** take `toolDescription` (the description the server
+advertises) and `effects` in `emitMcpCall(server, method, { ... })`.
+
+**Report chaining** is automatic: every report carries the fingerprint
+of the one sent before it in the same run, and the run-finished message
+declares the last one, so the backend can tell when a report was
+removed, changed or slipped in. **Signing** is optional, for a
+reporting process the agent cannot reach:
+`configure({ reportSigner: ed25519Signer("k1", privateKeySeed) })`.
+Register the public key in the dashboard; only a signed-in admin can.
+
+**Egress addresses.** An address with a host, an all-digit port and a
+later `@` (`https://host:8080/a@b`) is recorded as `unreadable`, because
+it cannot be told apart from one carrying a password. If your addresses
+never carry passwords, pass `addressesNeverContainPasswords: true` to
+`configure` (or set `MESEDI_ADDRESSES_NEVER_CONTAIN_PASSWORDS=1`).
+
+**Backend version.** TypeScript 0.12.0 sends new fields that a Mesedi
+backend older than 17 November 2026 refuses (it rejects unknown fields),
+so upgrade the backend first if you host your own.
 
 ## Optional: hard-halt with local budgets
 

@@ -21,6 +21,8 @@ import { request as httpsRequest } from "node:https";
 export interface TransportResponse {
   status: number;
   text: string;
+  /** The Retry-After header, in seconds, when the server sent one. */
+  retryAfterSeconds?: number;
 }
 
 export interface TransportRequest {
@@ -49,9 +51,14 @@ export function sendUnref(url: string, req: TransportRequest): Promise<Transport
     r.on("response", (res: IncomingMessage) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
-      res.on("end", () =>
-        resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") }),
-      );
+      res.on("end", () => {
+        const ra = Number(res.headers["retry-after"]);
+        resolve({
+          status: res.statusCode ?? 0,
+          text: Buffer.concat(chunks).toString("utf8"),
+          ...(Number.isFinite(ra) && ra >= 0 ? { retryAfterSeconds: ra } : {}),
+        });
+      });
       res.on("error", reject);
     });
     r.end(req.body);

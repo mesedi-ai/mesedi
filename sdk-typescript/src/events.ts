@@ -72,6 +72,10 @@ export const EventType = {
   // once near start. The environment_misapprehension detector
   // compares later observations against this declared boundary.
   ENVIRONMENT_DECLARATION: "environment_declaration",
+  // Where this run may make changes, optionally by which tools. Read
+  // with the effects field on tool and MCP calls by the effect_aliasing
+  // detector. See effects.ts.
+  EFFECT_DECLARATION: "effect_declaration",
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 
@@ -124,6 +128,8 @@ export interface Execution {
    * Needs a backend from 2026-11-16 or later.
    */
   crash_type?: string;
+  /** The run's declared end, set by the client as the run-finished message is sent (chain.ts). */
+  report_chain_end?: { hash: string; signature?: { key_id: string; sig: string } };
 }
 
 /**
@@ -139,6 +145,10 @@ export interface Event {
   timestamp: string;
   duration_ms?: number;
   payload: Record<string, unknown>;
+  /** Report chaining (chain.ts): set by the shipper, never by the caller. */
+  chain_prev?: string;
+  /** Report signature (chain.ts): set by the shipper when signing. */
+  signature?: { key_id: string; sig: string };
 }
 
 /**
@@ -171,6 +181,7 @@ export function executionEndPayload(e: Execution): Record<string, unknown> {
   if (e.estimated_cost_usd !== undefined) out["estimated_cost_usd"] = e.estimated_cost_usd;
   if (e.crash_signature !== undefined) out["crash_signature"] = e.crash_signature;
   if (e.crash_type !== undefined) out["crash_type"] = e.crash_type;
+  if (e.report_chain_end !== undefined) out["report_chain_end"] = e.report_chain_end;
   return out;
 }
 
@@ -187,5 +198,7 @@ export function eventToWire(e: Event): Record<string, unknown> {
     payload: e.payload,
   };
   if (e.duration_ms !== undefined) out["duration_ms"] = e.duration_ms;
+  if (e.chain_prev !== undefined) out["chain_prev"] = e.chain_prev;
+  if (e.signature !== undefined) out["signature"] = e.signature;
   return out;
 }

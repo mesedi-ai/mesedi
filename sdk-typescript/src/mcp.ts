@@ -8,6 +8,7 @@
 
 import { getClient } from "./client.js";
 import { currentExecutionContext, newEventId } from "./context.js";
+import { cleanEffects } from "./effects.js";
 import { Event, EventType, utcNowRfc3339 } from "./events.js";
 import { inputSchemaHash } from "./jcs.js";
 
@@ -38,6 +39,21 @@ export interface McpCallOptions {
    * between calls and a cached copy hides exactly that swap.
    */
   inputSchema?: unknown;
+  /**
+   * The description the server advertises for this method, the text
+   * the model reads. Checked against the first description Mesedi
+   * recorded for "server/method" and scanned for injected
+   * instructions. Pass it fresh from the server's current tool
+   * listing, for the same reason as inputSchema.
+   */
+  toolDescription?: string;
+  /**
+   * The places this call changed ("what this call changed"), in your
+   * own names: a repository, a table, a bucket path. Read with the
+   * run's effect declaration by the effect_aliasing check (see
+   * declareEffects).
+   */
+  effects?: string[];
 }
 
 /**
@@ -74,6 +90,13 @@ export function emitMcpCall(
   {
     const schemaHash = inputSchemaHash(opts.inputSchema);
     if (schemaHash) payload["input_schema_hash"] = schemaHash;
+  }
+  if (opts.toolDescription && opts.toolDescription.trim()) {
+    payload["tool_description"] = opts.toolDescription;
+  }
+  {
+    const effects = cleanEffects(opts.effects);
+    if (effects.length) payload["effects"] = effects;
   }
 
   const client = getClient();
