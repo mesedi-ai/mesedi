@@ -87,7 +87,7 @@ export type { Budget, HaltTrigger } from "./halt.js";
 // The package version. tools/check_sdk_versions.py keeps it equal to
 // package.json and the wire sdk_version; until 2026-11-16 it said
 // 0.0.4 while the package was 0.9.0 (outside review).
-export const VERSION = "0.11.0";
+export const VERSION = "0.11.1";
 
 export {
   emitEgress,

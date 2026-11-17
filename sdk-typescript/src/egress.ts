@@ -23,16 +23,45 @@ export function normalizeEgressDestination(destination: string): string {
   let d = destination.trim();
   const schemeIdx = d.indexOf("://");
   if (schemeIdx >= 0) d = d.slice(schemeIdx + 3);
-  for (const cut of ["/", "?", "#"]) {
-    const i = d.indexOf(cut);
-    if (i >= 0) d = d.slice(0, i);
+  const cuts = ["/", "?", "#"].map((c) => d.indexOf(c)).filter((i) => i >= 0);
+  const cut = cuts.length ? Math.min(...cuts) : -1;
+  const authority = cut < 0 ? d : d.slice(0, cut);
+  // A password may itself contain "/", "?" or "#", which ends the host
+  // part early: "alice:12/34@db.example.com" used to be sent as
+  // "alice:12" (the outside review's round 2, 17 November 2026). When the
+  // part before the first cut has a ":" and an "@" follows the cut, not at
+  // the start of a path segment, everything up to that "@" is possible
+  // credentials and the host after it is kept; with no host after it, the
+  // destination is "unreadable" rather than a guess. Owner decision, 17 November 2026:
+  // never send a possible password.
+  if (cut >= 0 && !authority.includes("@") && authority.includes(":")) {
+    // The first "@" after the cut that does not start a path segment:
+    // "/@types/node" is a path, not a credential.
+    let at = d.indexOf("@", cut + 1);
+    while (at >= 0 && d[at - 1] === "/") at = d.indexOf("@", at + 1);
+    if (at >= 0) {
+      let rest = d.slice(at + 1);
+      for (const c of ["/", "?", "#"]) {
+        const i = rest.indexOf(c);
+        if (i >= 0) rest = rest.slice(0, i);
+      }
+      const host = hostAndNumericPort(rest);
+      return host ? host : UNREADABLE_DESTINATION;
+    }
   }
+  d = authority;
   // Everything up to the last @ is userinfo (user, or user:password).
   // Until 2026-11-15 it was kept and sent (the outside review of 2026-11-15).
   const at = d.lastIndexOf("@");
   if (at >= 0) d = d.slice(at + 1);
   return hostAndNumericPort(d);
 }
+
+/**
+ * Recorded when an address carried possible credentials and no host can
+ * be read safely after them.
+ */
+export const UNREADABLE_DESTINATION = "unreadable";
 
 /**
  * Keep host, plus :port only when the port is all ASCII digits.

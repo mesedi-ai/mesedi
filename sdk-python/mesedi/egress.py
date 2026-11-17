@@ -21,20 +21,53 @@ def _normalize_egress_destination(destination: str) -> str:
     scheme, path, query, fragment and any user:password@ part here on
     purpose: identical services must cluster, and query strings and
     userinfo are where secrets ride. A port survives only if it is all
-    digits, so a malformed URL cannot smuggle part of a password out as
-    a "port". Cases: spec/egress_destination_vectors.json (shared with
-    the TypeScript SDK)."""
+    digits. Cases: spec/egress_destination_vectors.json (shared with
+    the TypeScript SDK).
+
+    A password may itself contain '/', '?' or '#', which ends the host
+    part early: "alice:12/34@db.example.com" used to be sent as
+    "alice:12" (the outside review's round 2, 17 November 2026). So when
+    the part before the first '/', '?' or '#' has a ':' and an '@'
+    follows that cut, not at the start of a path segment, everything up
+    to that '@' is treated as possible credentials and the host after it
+    is kept.
+    With no host after it, the destination is recorded as "unreadable"
+    rather than guessed. Owner decision, 17 November 2026: never send a
+    possible password."""
     d = destination.strip()
     if "://" in d:
         d = d.split("://", 1)[1]
-    for cut in ("/", "?", "#"):
-        if cut in d:
-            d = d.split(cut, 1)[0]
+    cut = min((d.find(c) for c in "/?#" if c in d), default=-1)
+    authority = d if cut < 0 else d[:cut]
+    if cut >= 0 and "@" not in authority and ":" in authority:
+        at = _credential_at(d, cut)
+        if at >= 0:
+            d = d[at + 1 :]
+            for c in ("/", "?", "#"):
+                d = d.split(c, 1)[0]
+            host = _host_and_numeric_port(d)
+            return host if host else UNREADABLE_DESTINATION
+    d = authority
     # Everything up to the last @ is userinfo (user, or user:password).
     # Until 2026-11-15 it was kept and sent (the outside review of 2026-11-15).
     if "@" in d:
         d = d.rsplit("@", 1)[1]
     return _host_and_numeric_port(d)
+
+
+def _credential_at(d: str, cut: int) -> int:
+    """The first '@' after the cut that could end a password: one that
+    does not start a path segment, so "/@types/node" is a path, not a
+    credential. -1 when there is none."""
+    at = d.find("@", cut + 1)
+    while at >= 0 and d[at - 1] == "/":
+        at = d.find("@", at + 1)
+    return at
+
+
+# Recorded when an address carried possible credentials and no host can be
+# read safely after them.
+UNREADABLE_DESTINATION = "unreadable"
 
 
 def _host_and_numeric_port(d: str) -> str:
