@@ -125,10 +125,9 @@ func (s *SQLiteStore) ListToolCallCountsForProject(
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT json_extract(ev.payload, '$.tool_name') AS tool_name,
 		       COUNT(*) AS call_count
-		FROM events ev
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = ?
-		  AND ev.event_type = 'tool_call'
 		  AND COALESCE(json_extract(ev.payload, '$.status'), 'ok') != 'failed'
 		  AND json_extract(ev.payload, '$.tool_name') IS NOT NULL
 		GROUP BY json_extract(ev.payload, '$.tool_name')

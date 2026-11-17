@@ -237,6 +237,14 @@ type DetectionStore interface {
 	// failure_class=covert_coordination and the detector-supplied
 	// signature.
 	GroupCovertCoordination(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// GroupEffectAliasing upserts a failure_group with
+	// failure_class=effect_aliasing and the detector-supplied
+	// signature.
+	GroupEffectAliasing(ctx context.Context, executionID, projectID, signature string) (bool, error)
+	// GroupNewTool files the info-level new_tool notice. Unlike every
+	// other Group* writer it never takes the run's primary
+	// classification: the run is only linked to the notice.
+	GroupNewTool(ctx context.Context, executionID, projectID, signature string) (bool, error)
 	// ListEvalScorePayloads returns every eval_score event payload
 	// on the execution in sequence order. Used by the
 	// grounding_failure detector.

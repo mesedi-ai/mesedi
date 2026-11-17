@@ -15,8 +15,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,13 +48,35 @@ func openToolDescriptionStore(t *testing.T) *SQLiteStore {
 			event_id     TEXT PRIMARY KEY,
 			execution_id TEXT NOT NULL,
 			event_type   TEXT NOT NULL,
+			sequence     INTEGER NOT NULL DEFAULT 0,
 			timestamp    TIMESTAMP NOT NULL,
 			payload      TEXT
 		);
 	`); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
+	createToolEventsView(t, db)
 	return &SQLiteStore{db: db}
+}
+
+// createToolEventsView adds the tool_events view the tool queries read,
+// from the real migration rather than a copy, so a hand-built test
+// schema cannot drift from production. The migration's last statement
+// records its version in schema_migrations, which these minimal
+// schemas do not have, so only the view statement is run.
+func createToolEventsView(t *testing.T, db *sql.DB) {
+	t.Helper()
+	body, err := fs.ReadFile(migrationsFS, "migrations/065_tool_events_view.sql")
+	if err != nil {
+		t.Fatalf("read tool_events migration: %v", err)
+	}
+	stmt := string(body)
+	if i := strings.Index(stmt, "INSERT OR IGNORE INTO schema_migrations"); i >= 0 {
+		stmt = stmt[:i]
+	}
+	if _, err := db.Exec(stmt); err != nil {
+		t.Fatalf("create tool_events view: %v", err)
+	}
 }
 
 // insertToolCall writes one tool_call event. payload is written raw so

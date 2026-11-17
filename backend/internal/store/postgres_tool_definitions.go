@@ -20,12 +20,11 @@ func (s *PostgresStore) ListToolInputSchemaHashes(
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ev.payload->>'input_schema_hash'
-		FROM events ev
+		SELECT ev.payload::jsonb->>'input_schema_hash'
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = $1
-		  AND ev.event_type = 'tool_call'
-		  AND ev.payload->>'tool_name' = $2
+		  AND ev.payload::jsonb->>'tool_name' = $2
 		  AND ev.execution_id != $3
 		ORDER BY ev.timestamp DESC
 		LIMIT $4

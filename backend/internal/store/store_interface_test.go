@@ -40,7 +40,16 @@ import (
 // 271 since 2026-09-30: approval-time tool contract pins added
 // GetToolContractPins, ListToolContractPins, UpsertToolContractPin
 // and DeleteToolContractPin (migration 062), all deliberate.
-const StoreMethodCount = 285
+// 290 since 2026-11-17: first-seen tool contracts added
+// GetToolFirstSeen, RecordToolFirstSeen, EarliestToolContract,
+// LatestToolContractInExecution (migration 066) and GroupNewTool, all
+// deliberate. 291 the same day: GroupEffectAliasing for the
+// effect_aliasing class, deliberate. 300 the same day: report chaining
+// and signing added nine methods (migration 067), deliberate. 301 the
+// same day: ListReportChainStatuses for the hourly export, deliberate.
+// 302 the same day: ListLLMCallCostsInRange for the daily spend report
+// the self-run spend check reads, deliberate.
+const StoreMethodCount = 302
 
 func TestStoreInterfaceIsComplete(t *testing.T) {
 	got := reflect.TypeOf((*Store)(nil)).Elem().NumMethod()

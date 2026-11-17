@@ -461,6 +461,29 @@ func init() {
 			return v, nil
 		},
 	})
+	// prompt_injection: scan what tools and MCP servers return, and
+	// their descriptions, for injected instructions. On by default;
+	// a project whose agent reads its own trusted documents that
+	// quote attack phrases can turn it off. Prompts are still scanned.
+	registerThresholdSpec(&DetectorThresholdSpec{
+		Detector:     "prompt_injection",
+		ThresholdKey: "scan_tool_output",
+		ValueType:    "bool",
+		Description: "When true, what tool and MCP calls return, and " +
+			"their descriptions, are scanned at ingest for injected " +
+			"instructions, and a match is recorded and alerted as " +
+			"prompt_injection. Default true. Set false if the agent " +
+			"routinely reads trusted text that quotes attack phrases; " +
+			"the scan of prompts is unaffected.",
+		Default: true,
+		Parse: func(valueJSON, _ string) (any, error) { // any: the registry's Parse signature, shared by every spec
+			v, err := parseBoolJSON(valueJSON)
+			if err != nil {
+				return nil, err
+			}
+			return v, nil
+		},
+	})
 	// context_overflow.G3, per-project custom model windows. Unlocks
 	// detection coverage for Ollama / fine-tuned models that aren't
 	// in the static models.ContextWindow registry. Customer overrides

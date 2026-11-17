@@ -99,6 +99,10 @@ var classDefaults = map[string]Severity{
 	// incident class as an escape attempt: from the third party's side
 	// they are the same event.
 	"environment_misapprehension": Critical,
+	// A change outside what the run declared it may change. Filed as a
+	// correctness failure, not a security one (the defining incidents
+	// had no adversary), but a change nobody approved warrants a page.
+	"effect_aliasing": Critical,
 
 	"cost_velocity":            Warning,
 	"time_budget":              Warning,
@@ -123,6 +127,9 @@ var classDefaults = map[string]Severity{
 	"similar_call_loop":   Info,
 	"semantic_loop":       Info,
 	"drift":               Info,
+	// A notice, not a failure: the first run that used a tool the
+	// project had not used before. Worth seeing, never worth a page.
+	"new_tool": Info,
 }
 
 // FromSDKValue maps the SDK's per-event severity string (one of

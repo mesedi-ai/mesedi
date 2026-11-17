@@ -48,6 +48,7 @@ func openMinimalToolReturnValueStatsStore(t *testing.T) *SQLiteStore {
 	`); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
+	createToolEventsView(t, db)
 	return &SQLiteStore{db: db}
 }
 

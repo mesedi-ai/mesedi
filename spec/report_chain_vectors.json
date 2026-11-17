@@ -1,0 +1,41 @@
+{
+  "_README": [
+    "Shared test vectors for mesedi-report-chain-v1, the fingerprint each",
+    "report carries of the report sent before it in the same run. The backend",
+    "(backend/attest/report_chain_test.go), the Python SDK",
+    "(sdk-python/tests/test_report_chain.py) and the TypeScript SDK",
+    "(sdk-typescript/src/report_chain.test.ts) all check every value below,",
+    "so the three implementations cannot drift apart.",
+    "",
+    "fingerprint = SHA-256 over lines 'label:length:value\\n' for: algorithm,",
+    "event_id, execution_id, event_type, sequence, timestamp (UTC,",
+    "microseconds, 2006-01-02T15:04:05.000000Z), duration_ms (0 when absent),",
+    "payload_sha256 (hex SHA-256 of the payload bytes exactly as sent),",
+    "chain_prev. The first report's chain_prev is the genesis value:",
+    "SHA-256('mesedi-report-chain-v1 genesis\\n' + execution_id).",
+    "",
+    "payload is given as the exact bytes sent. The first holds the six ASCII",
+    "characters of a JSON escape, not the character it stands for. The second",
+    "event's timestamp is sent with a +02:00 offset; the fingerprint uses the",
+    "UTC instant."
+  ],
+  "execution_id": "exec-vector-1",
+  "genesis": "aa5e34801b6470b5c0c1b2dd18940faa69c6a78d3cc0b8e8b22147b67ac8ca38",
+  "events": [
+    {"event_id": "evt-1", "event_type": "tool_call", "sequence": 1, "timestamp": "2026-11-17T12:00:00.123456Z", "duration_ms": null, "payload": "{\"tool_name\":\"search\",\"return_value\":\"caf\\u00e9\"}", "fingerprint": "ab93fdf9da9815714c444157c23face182b1374657894ce6495e8ce478f4de80"},
+    {"event_id": "evt-2", "event_type": "llm_call", "sequence": 2, "timestamp": "2026-11-17T14:00:01.5+02:00", "duration_ms": 42, "payload": "{\"model\":\"m\",\"user_message\":\"hi\"}", "fingerprint": "794d6cd3b0003ee7b0db118645c7e77c28bd7687b89eb1e908584462a1735a6c"}
+  ],
+  "signature": {
+    "_README": "A TEST key, derived from a public phrase: anyone can sign with it, so it proves nothing about real reports. Ed25519 is deterministic, so every implementation must produce exactly this signature over the first event's 32-byte fingerprint.",
+    "private_key_seed_hex": "06fdce25a41e202db77b015914026773182e22090beea7d55b349a415c8e111d",
+    "public_key_b64": "I5GcdkmWQrHK+PfTpmEL1vZE+kA84duLcvpn+jeR4BY=",
+    "signs_event": "evt-1",
+    "signature_b64": "EbBk62BuAOxneQ/vtCSlZmQqZZdWkS5uCmqvwFs6rOtJhfZn60254WoJhDBObpSy+gBqESzLxvodoy79EHMrBA=="
+  },
+  "end": {
+    "_README": "The run-finished message declares the last report: its fingerprint, and for a signed run a signature over end_message = SHA-256('mesedi-report-chain-v1 end\\n' + execution_id + '\\n' + last fingerprint), never over the fingerprint itself, so a report's own signature cannot be replayed as an end. The signature uses the test key above.",
+    "last_fingerprint": "794d6cd3b0003ee7b0db118645c7e77c28bd7687b89eb1e908584462a1735a6c",
+    "end_message_hex": "009a9f5332bc2ce2d8f752771e2912c07e635a2ba942bc4555e143d819d4859e",
+    "signature_b64": "rvjEfzdRasrb2LiSMkqTQmQOuF5Q/3zIsp0FPlUGW1wYwt+Od6wSp0/aDr52F6+fV0rewY6Ef4dcJTG56I/YDA=="
+  }
+}

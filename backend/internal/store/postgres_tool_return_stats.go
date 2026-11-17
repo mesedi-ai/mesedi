@@ -56,10 +56,9 @@ func (s *PostgresStore) GetToolReturnValueStats(
 				WHEN octet_length(ev.payload::jsonb->>'return_value') > $1
 				THEN 1 ELSE 0
 			END), 0) AS oversized
-		FROM events ev
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = $2
-		  AND ev.event_type = 'tool_call'
 		  AND COALESCE(ev.payload::jsonb->>'status', 'ok') != 'failed'
 		  AND ev.timestamp >= $3
 	`,

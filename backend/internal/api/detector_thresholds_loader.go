@@ -83,6 +83,10 @@ type ProjectDetectorThresholds struct {
 	// DetectHITLTimeoutAllMatchesWithThresholds to control which
 	// timeout modes promote to failure_groups.
 	HITLTimeout detectors.HITLTimeoutThresholds
+	// PromptInjection carries the switch for scanning tool and MCP
+	// output for injected instructions (default on). Read at ingest
+	// by scanToolOutputForInjection, one query per batch.
+	PromptInjection detectors.PromptInjectionThresholds
 	// Pricing carries the per-project custom_model_pricing override.
 	// Not really a "detector threshold", pricing is
 	// read at execution close by ComputeLLMCostWithOverrides, but it
@@ -120,6 +124,7 @@ func DefaultProjectDetectorThresholds() ProjectDetectorThresholds {
 		HITLRejectionSpike: detectors.DefaultHITLRejectionSpikeThresholds(),
 		DataLeakage:        detectors.DefaultDataLeakageThresholds(),
 		HITLTimeout:        detectors.DefaultHITLTimeoutThresholds(),
+		PromptInjection:    detectors.DefaultPromptInjectionThresholds(),
 	}
 }
 
@@ -157,6 +162,7 @@ func LoadProjectDetectorThresholds(
 		"hitl_rejection_spike",
 		"data_leakage",
 		"hitl_timeout",
+		"prompt_injection",
 	} {
 		rows, err := st.ListProjectDetectorThresholds(ctx, projectID, detector)
 		if err != nil {
@@ -332,6 +338,12 @@ func applyDetectorThresholdValue(
 		if key == "fire_modes" {
 			if v, ok := value.([]string); ok {
 				out.HITLTimeout.FireModes = v
+			}
+		}
+	case "prompt_injection":
+		if key == "scan_tool_output" {
+			if v, ok := value.(bool); ok {
+				out.PromptInjection.ScanToolOutput = v
 			}
 		}
 	}

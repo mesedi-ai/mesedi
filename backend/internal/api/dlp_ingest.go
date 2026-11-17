@@ -71,6 +71,14 @@ var scanFieldKeys = map[events.EventType][]string{
 		"error",
 		"exception_message",
 	},
+	// MCP calls carry the same secret-bearing fields under the same
+	// names. Until 2026-11-17 they were not scanned at all, so a secret
+	// in an MCP call's arguments or answer was stored raw (radar gap G29).
+	events.EventTypeMCPCall: {
+		"arguments",
+		"return_value",
+		"error",
+	},
 	// (closes validator_failures.G2): scan the validator's
 	// reason / message field on failed validator_result events.
 	// Customers' validators sometimes echo the failing slice of the
@@ -439,6 +447,8 @@ func buildDLPScanResultEvent(parent events.Event, hits []dlp.Hit, highest dlp.Se
 		scanLayer = "llm_prompt"
 	case events.EventTypeToolCall:
 		scanLayer = "tool_arguments"
+	case events.EventTypeMCPCall:
+		scanLayer = "mcp_call"
 	}
 	payload := events.DLPScanResultPayload{
 		ScanLayer:       scanLayer,

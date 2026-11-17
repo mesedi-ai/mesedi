@@ -788,6 +788,10 @@ var sqliteProjectCascadeStatements = []string{
 	`DELETE FROM project_detector_allowlist WHERE project_id = ?`,
 	`DELETE FROM detector_thresholds WHERE project_id = ?`,
 	`DELETE FROM tool_contract_pins WHERE project_id = ?`,
+	`DELETE FROM tool_first_seen WHERE project_id = ?`,
+	`DELETE FROM report_chain WHERE project_id = ?`,
+	`DELETE FROM report_chain_status WHERE project_id = ?`,
+	`DELETE FROM report_signing_keys WHERE project_id = ?`,
 	`DELETE FROM system_events WHERE project_id = ?`,
 	`DELETE FROM request_log WHERE project_id = ?`,
 	// Stored execution digests and history labels (migration 063).

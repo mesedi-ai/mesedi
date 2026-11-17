@@ -221,6 +221,12 @@ func (h *Handlers) exportedExecutions(
 		if err != nil {
 			return nil, "", fmt.Errorf("count events after anchoring: %w", err)
 		}
+		// Each run's report-chain verdict, so the auditor sees which runs
+		// are signed and can ask for their single-run files.
+		chain, err := h.Store.ListReportChainStatuses(ctx, ids)
+		if err != nil {
+			return nil, "", fmt.Errorf("report chain statuses: %w", err)
+		}
 		out := make([]attest.ExportedExecution, len(stored))
 		for i, d := range stored {
 			out[i] = attest.ExportedExecution{
@@ -228,6 +234,7 @@ func (h *Handlers) exportedExecutions(
 				DigestRoot:           d.Root,
 				RecordsDeleted:       !exists[d.ExecutionID],
 				EventsAfterAnchoring: late[d.ExecutionID],
+				ReportChain:          chain[d.ExecutionID],
 			}
 		}
 		return out, "", nil

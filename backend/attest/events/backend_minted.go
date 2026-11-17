@@ -6,8 +6,10 @@ package events
 //
 // Almost every event in an execution is the customer's claim about what
 // their agent did. A few are not: Mesedi mints them during ingest to
-// record something Mesedi observed. Today that is one type, the sibling
-// event written when a DLP scan finds a critical or high-severity hit.
+// record something Mesedi observed. Today there are two: the sibling
+// event written when a DLP scan finds a critical or high-severity hit,
+// and the one written when a tool's output or description carries
+// injected instructions.
 //
 // Those two kinds of event must be told apart, because checks that ask
 // "does this customer's record contradict itself?" have to run over the
@@ -44,7 +46,7 @@ package events
 // claim. Do not add a type here that customers legitimately send.
 func IsBackendMinted(t EventType) bool {
 	switch t {
-	case EventTypeDLPScanResult:
+	case EventTypeDLPScanResult, EventTypeInjectionScanResult:
 		return true
 	default:
 		return false

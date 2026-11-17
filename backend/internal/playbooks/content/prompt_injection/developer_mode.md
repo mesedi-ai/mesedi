@@ -1,6 +1,6 @@
 # Prompt injection, developer / admin / jailbreak mode
 
-An `llm_call` event in this execution had a `user_message` invoking a **mode-override persona**, strings like "developer mode," "jailbreak mode," or "admin mode." Mesedi treats this as a Tier-2 signal: the phrases are distinctive enough to be a strong injection signal in user input, but they can appear legitimately in developer-tool contexts and in conversations about LLM behavior.
+An `llm_call` event in this execution had a `user_message` or `system_prompt` invoking a **mode-override persona**, strings like "developer mode," "jailbreak mode," or "admin mode." Mesedi treats this as a Tier-2 signal: the phrases are distinctive enough to be a strong injection signal in user input, but they can appear legitimately in developer-tool contexts and in conversations about LLM behavior.
 
 ## What this means
 

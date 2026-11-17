@@ -63,10 +63,9 @@ func (s *SQLiteStore) GetToolReturnValueStats(
 				WHEN length(json_extract(ev.payload, '$.return_value')) > ?
 				THEN 1 ELSE 0
 			END), 0) AS oversized
-		FROM events ev
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = ?
-		  AND ev.event_type = 'tool_call'
 		  AND COALESCE(json_extract(ev.payload, '$.status'), 'ok') != 'failed'
 		  AND ev.timestamp >= datetime('now', ?)
 	`,

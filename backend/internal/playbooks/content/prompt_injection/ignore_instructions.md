@@ -1,6 +1,6 @@
 # Prompt injection, ignore-previous-instructions
 
-An `llm_call` event in this execution had a `user_message` matching the **ignore-previous-instructions catch-all**, phrases like "ignore the previous instructions," "disregard the above," "ignore all prior rules." Mesedi treats this as a Tier-4 (broadest, lowest-precision) signal, it's the last pattern checked in the detector chain, so a user_message classified here didn't match any of the more-specific patterns.
+An `llm_call` event in this execution had a `user_message` or `system_prompt` matching the **ignore-previous-instructions catch-all**, phrases like "ignore the previous instructions," "disregard the above," "ignore all prior rules." Mesedi treats this as a Tier-4 (broadest, lowest-precision) signal, it's the last pattern checked in the detector chain, so a user_message classified here didn't match any of the more-specific patterns.
 
 ## What this means
 

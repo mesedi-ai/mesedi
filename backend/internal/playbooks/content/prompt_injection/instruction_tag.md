@@ -1,6 +1,6 @@
 # Prompt injection, instruction-tag spoofing
 
-An `llm_call` event in this execution had a `user_message` containing **literal chat-template control tokens**, `[INST]`, `[/INST]`, `<<SYS>>`, or `<</SYS>>`. These strings are the Llama-family instruction-tuning sentinels; some other model families have their own. Mesedi's prompt-injection detector treats them as a Tier-1 (high-precision) signal because they almost never appear in benign user input.
+An `llm_call` event in this execution had a `user_message` or `system_prompt` containing **literal chat-template control tokens**, `[INST]`, `[/INST]`, `<<SYS>>`, or `<</SYS>>`. These strings are the Llama-family instruction-tuning sentinels; some other model families have their own. Mesedi's prompt-injection detector treats them as a Tier-1 (high-precision) signal because they almost never appear in benign user input.
 
 ## What this means
 

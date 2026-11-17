@@ -1,6 +1,6 @@
 # Prompt injection, role override
 
-An `llm_call` event in this execution had a `user_message` matching a **role-override pattern**, phrases like "you are now ..." or "from now on, you ...". Mesedi treats this as a Tier-3 signal: lower precision than literal sentinels because the phrasing can appear in benign roleplay and creative writing, but high enough recall to be worth flagging.
+An `llm_call` event in this execution had a `user_message` or `system_prompt` matching a **role-override pattern**, phrases like "you are now ..." or "from now on, you ...". Mesedi treats this as a Tier-3 signal: lower precision than literal sentinels because the phrasing can appear in benign roleplay and creative writing, but high enough recall to be worth flagging.
 
 ## What this means
 

@@ -19,9 +19,8 @@ func (s *PostgresStore) FindFirstFailedTool(ctx context.Context, executionID str
 	err = s.db.QueryRowContext(ctx, `
 		SELECT (payload::jsonb->>'tool_name'),
 		       (payload::jsonb->>'exception_type')
-		FROM events
+		FROM tool_events
 		WHERE execution_id = $1
-		  AND event_type = 'tool_call'
 		  AND (payload::jsonb->>'status') = 'failed'
 		ORDER BY sequence ASC
 		LIMIT 1
@@ -173,10 +172,9 @@ func (s *PostgresStore) ListSuccessfulToolReturns(
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT (ev.payload::jsonb->>'return_value')
-		FROM events ev
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = $1
-		  AND ev.event_type = 'tool_call'
 		  AND (ev.payload::jsonb->>'tool_name') = $2
 		  AND COALESCE(ev.payload::jsonb->>'status', 'ok') != 'failed'
 		  AND ev.execution_id != $3
@@ -219,10 +217,9 @@ func (s *PostgresStore) ListToolDescriptions(
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT (ev.payload::jsonb->>'tool_description')
-		FROM events ev
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = $1
-		  AND ev.event_type = 'tool_call'
 		  AND (ev.payload::jsonb->>'tool_name') = $2
 		  AND ev.execution_id != $3
 		ORDER BY ev.timestamp DESC
@@ -254,9 +251,8 @@ func (s *PostgresStore) ListToolDescriptions(
 func (s *PostgresStore) ListToolNamesInExecution(ctx context.Context, executionID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT DISTINCT (payload::jsonb->>'tool_name')
-		FROM events
+		FROM tool_events
 		WHERE execution_id = $1
-		  AND event_type = 'tool_call'
 		  AND COALESCE(payload::jsonb->>'status', 'ok') != 'failed'
 	`, executionID)
 	if err != nil {
@@ -282,9 +278,8 @@ func (s *PostgresStore) ListToolNamesInExecution(ctx context.Context, executionI
 func (s *PostgresStore) ListAllToolCallPayloads(ctx context.Context, executionID string) ([][]byte, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT payload
-		FROM events
+		FROM tool_events
 		WHERE execution_id = $1
-		  AND event_type = 'tool_call'
 		ORDER BY sequence ASC
 	`, executionID)
 	if err != nil {

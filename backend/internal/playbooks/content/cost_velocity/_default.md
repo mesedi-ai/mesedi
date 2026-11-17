@@ -80,6 +80,23 @@ Both knobs defend against bad config by rejecting out-of-range values at write t
 
 Mesedi computes cost server-side at execution close from per-event input/output token counts (shipped by the SDK) multiplied by a backend-maintained pricing table. Pricing changes ship with a backend deploy. No SDK release wait. The table version is exposed at `GET /me/pricing-info` so customers can verify which prices Mesedi is using. Models not in the backend pricing table fall back to the SDK-shipped per-event `estimated_cost_usd`; when that happens a `pricing_unknown_model` system_event surfaces the unrecognized identifier in the dashboard.
 
+## What this cannot see: spend outside monitored runs
+
+Every signal above is computed from the runs your SDK reports. Spend that never passes through a monitored run is invisible to Mesedi: an app you have not instrumented, a batch job run by hand, or a key someone else is using from somewhere else. A stolen key is the costliest case on record, and it is exactly the one this playbook cannot alert on, because the attacker's calls never reach Mesedi.
+
+Two things cover it:
+
+1. **Set a spending limit at the provider, where it offers one.** Look in the provider console's billing or limits settings for a monthly cap and threshold alerts. A limit stops the loss; nothing that watches after the fact can.
+2. **Compare the bill with what Mesedi saw.** The free `mesedi-spend-check` command (in the Python SDK, `pip install mesedi`) reads your provider's daily bill with your admin key and Mesedi's daily monitored spend (`GET /me/spend/daily`), and flags days where the bill exceeds what monitored runs account for. It runs on your computer: the admin key is read from an environment variable and sent only to the provider, never to Mesedi, because a provider admin key can manage your whole AI account and has no read-only kind.
+
+```
+export MESEDI_API_KEY=mesedi_sk_...
+export ANTHROPIC_ADMIN_KEY=...        # or OPENAI_ADMIN_KEY
+mesedi-spend-check --provider anthropic --days 30
+```
+
+A flagged day means spend no monitored run accounts for. Whether it is an uninstrumented app or someone else's use of your key is for you to find out, usually from the provider's per-key usage page. Mesedi's figure is estimated from token counts at list prices, so it will not match the bill to the cent; the check ignores differences under a dollar and under ten percent of the day's bill by default.
+
 ## A cost-aware product pattern
 
 For high-volume products, instrument cost per request as a first-class metric in your own observability (not just Mesedi). Set a per-request soft budget and a per-request hard limit at the application layer. When the soft budget is hit, log a warning; when the hard limit is hit, return an error before making the call. Mesedi will still classify the run, but you'll prevent the most expensive failures from completing.

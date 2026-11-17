@@ -1,6 +1,6 @@
 # Prompt injection, DAN-style jailbreak
 
-An `llm_call` event in this execution had a `user_message` invoking the **DAN ("Do Anything Now") persona** or close variants. The matching regex catches `do anything now`, the literal `DAN` token, and `act as DAN`. Mesedi treats this as a Tier-2 signal because the strings are highly distinctive, they show up in plain user prose almost never.
+An `llm_call` event in this execution had a `user_message` or `system_prompt` invoking the **DAN ("Do Anything Now") persona** or close variants. The matching regex catches `do anything now`, the literal `DAN` token, and `act as DAN`. Mesedi treats this as a Tier-2 signal because the strings are highly distinctive, they show up in plain user prose almost never.
 
 ## What this means
 

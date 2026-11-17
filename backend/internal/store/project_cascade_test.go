@@ -95,8 +95,15 @@ func (c cascadeTarget) projectTables(t *testing.T) map[string]bool {
 		rows, err := c.db.QueryContext(ctx, `
 			SELECT DISTINCT col.table_name
 			  FROM information_schema.columns col
+			  JOIN information_schema.tables tab
+			    ON tab.table_schema = col.table_schema
+			   AND tab.table_name = col.table_name
 			 WHERE col.table_schema = current_schema()
+			   AND tab.table_type = 'BASE TABLE'
 			   AND col.column_name IN ('project_id', 'execution_id')`)
+		// Base tables only, as the SQLite half below lists only
+		// type 'table': a view (tool_events, migration 065) holds no
+		// rows of its own, so there is nothing for a close to delete.
 		if err != nil {
 			t.Fatalf("list tables: %v", err)
 		}

@@ -246,6 +246,9 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// Phase 3b, read-side execution surface for the dashboard.
 	mux.HandleFunc("GET /executions", h.HandleListExecutions)
 	mux.HandleFunc("GET /executions/{id}", h.HandleGetExecution)
+	// The single-run file, for checking one run's reports, chain and
+	// signatures with mesedi-verify (run_export.go).
+	mux.HandleFunc("GET /executions/{id}/export", h.HandleRunExport)
 	mux.HandleFunc("GET /executions/{id}/digest", h.HandleGetExecutionDigest)
 	// multi-agent topology graph.
 	mux.HandleFunc("GET /executions/{id}/topology", h.HandleGetExecutionTopology)
@@ -277,6 +280,9 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// per-project time_budget detector threshold (ms).
 	mux.HandleFunc("GET /me/time-budget-config", h.HandleGetTimeBudgetConfig)
 	mux.HandleFunc("PUT /me/time-budget-config", h.HandleSetTimeBudgetConfig)
+	// Monitored spend per day and provider, for the self-run spend
+	// check that compares it with the provider's bill (spend_daily.go).
+	mux.HandleFunc("GET /me/spend/daily", h.HandleSpendDaily)
 	mux.HandleFunc("GET /me/cost-velocity-config", h.HandleGetCostVelocityConfig)
 	mux.HandleFunc("PUT /me/cost-velocity-config", h.HandleSetCostVelocityConfig)
 	mux.HandleFunc("GET /me/cost-velocity-rate-config", h.HandleGetCostVelocityRateConfig)
@@ -310,6 +316,16 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	// an audit_event; the routes ride privateHandler's global
 	// rateLimit with no per-tier gating, since pins are a safety
 	// control every tier gets.
+	// Report signing keys: listing for any caller; adding and revoking
+	// only for an admin signed in to the dashboard, enforced by
+	// requireSignedInAdmin (requireRole "admin" plus no API key), under
+	// the global rate limit every private route has. Idempotency for
+	// adding: a retry of the same key_id and key answers as the first
+	// request did. Each add and revoke writes an audit_event
+	// (report_chain.go).
+	mux.HandleFunc("GET /me/report-signing-keys", h.HandleListReportSigningKeys)
+	mux.HandleFunc("POST /me/report-signing-keys", h.HandleCreateReportSigningKey)
+	mux.HandleFunc("DELETE /me/report-signing-keys/{key_id}", h.HandleRevokeReportSigningKey)
 	mux.HandleFunc("GET /me/tool-pins", h.HandleListToolContractPins)
 	mux.HandleFunc("PUT /me/tool-pins/{tool_name}/{kind}", h.HandleSetToolContractPin)
 	mux.HandleFunc("DELETE /me/tool-pins/{tool_name}/{kind}", h.HandleDeleteToolContractPin)
@@ -572,45 +588,13 @@ func computeExecutionCost(
 		if len(e.Payload) == 0 {
 			continue
 		}
-		var p struct {
-			Model            string  `json:"model"`
-			InputTokens      int     `json:"input_tokens"`
-			OutputTokens     int     `json:"output_tokens"`
-			EstimatedCostUSD float64 `json:"estimated_cost_usd"`
-		}
+		var p llmCostFields
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			continue
 		}
-		// Defensive: negative token counts coerced to 0. SDK never
-		// ships negatives but bug-class protection.
-		if p.InputTokens < 0 {
-			p.InputTokens = 0
-		}
-		if p.OutputTokens < 0 {
-			p.OutputTokens = 0
-		}
-		//, per-project override wins outright, even
-		// when the model is otherwise unknown to the canonical
-		// priceTable. This is the path that lets a customer running
-		// a fine-tuned variant of a model Mesedi never shipped
-		// pricing for (e.g. "my-llama-3-fine-tune") declare a real
-		// rate and have cost_velocity work correctly for it.
-		if _, hasOverride := customPricing[p.Model]; hasOverride {
-			totalUSD += pricing.ComputeLLMCostWithOverrides(
-				p.Model, p.InputTokens, p.OutputTokens, customPricing,
-			)
-			continue
-		}
-		if pricing.IsKnownModel(p.Model) {
-			totalUSD += pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens)
-			continue
-		}
-		// Unknown to backend table, fall back to SDK-shipped cost
-		// on this event. Treat negative or NaN as 0 defensively.
-		if p.EstimatedCostUSD > 0 {
-			totalUSD += p.EstimatedCostUSD
-		}
-		if p.Model != "" {
+		cost, known := llmCallCost(p, customPricing)
+		totalUSD += cost
+		if !known && p.Model != "" {
 			if _, dup := seenUnknown[p.Model]; !dup {
 				seenUnknown[p.Model] = struct{}{}
 				unknownModels = append(unknownModels, p.Model)
@@ -618,6 +602,47 @@ func computeExecutionCost(
 		}
 	}
 	return totalUSD, unknownModels
+}
+
+// llmCostFields are the llm_call payload fields cost is computed from.
+type llmCostFields struct {
+	Model            string  `json:"model"`
+	Provider         string  `json:"provider"`
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
+}
+
+// llmCallCost prices one model call, the single rule shared by a run's
+// cost and the daily spend report (spend_daily.go), so the two cannot
+// disagree. known is false when neither an override nor the price
+// table knows the model and the SDK's own estimate was used.
+func llmCallCost(p llmCostFields, customPricing map[string]pricing.ModelPriceOverride) (usd float64, known bool) {
+	// Defensive: negative token counts coerced to 0. SDK never ships
+	// negatives but bug-class protection.
+	if p.InputTokens < 0 {
+		p.InputTokens = 0
+	}
+	if p.OutputTokens < 0 {
+		p.OutputTokens = 0
+	}
+	// A per-project override wins outright, even when the model is
+	// otherwise unknown to the canonical priceTable. This is the path
+	// that lets a customer running a fine-tuned variant of a model
+	// Mesedi never shipped pricing for declare a real rate and have
+	// cost_velocity work correctly for it.
+	if _, hasOverride := customPricing[p.Model]; hasOverride {
+		return pricing.ComputeLLMCostWithOverrides(p.Model, p.InputTokens, p.OutputTokens, customPricing), true
+	}
+	if pricing.IsKnownModel(p.Model) {
+		return pricing.ComputeLLMCost(p.Model, p.InputTokens, p.OutputTokens), true
+	}
+	// Unknown to the backend table: the SDK-shipped cost on this event.
+	// Negative or NaN treated as 0 defensively.
+	if p.EstimatedCostUSD > 0 {
+		return p.EstimatedCostUSD, false
+	}
+	return 0, false
 }
 
 // extractLLMUserMessages walks the event list and returns the
@@ -698,21 +723,29 @@ func scanForIdenticalCalls(evts []*events.Event, threshold int) (string, bool) {
 	return "", false
 }
 
-// scanForInjection walks llm_call events looking for known prompt-
-// injection signatures in the user_message and system_prompt fields.
-// Returns the first matching pattern's name plus true; ("", false) if
-// nothing matched. The scan is ordered by event sequence so the first
-// injection chronologically wins.
+// scanForInjection walks a run's events in sequence order looking for
+// injected instructions, and returns the first one found.
 //
-// Both user_message and system_prompt are scanned because injections
-// can come from either side, a compromised system prompt is rarer
-// but more dangerous, so we want it caught.
+// Two sources are read:
+//   - llm_call events: the user_message and system_prompt are scanned
+//     here with the injection rules. Both, because injections can come
+//     from either side; a compromised system prompt is rarer but more
+//     dangerous.
+//   - injection_scan_result events: written at ingest when a tool or
+//     MCP call's output or description matched (tool_output_injection.go).
+//     Their signature is "tool_output:<rule>" or
+//     "tool_description:<rule>", so the group says where the attack
+//     came in. matchedPatternID is "" for these: the custom rule's
+//     match was already counted at ingest.
 func scanForInjection(
 	evts []*events.Event,
 	custom []*detectors.CustomPattern,
 ) (signature, matchedPatternID string, found bool) {
 	for _, e := range evts {
-		if e.EventType != events.EventTypeLLMCall {
+		if sig, ok := toolOutputInjectionSignature(e); ok {
+			return sig, "", true
+		}
+		if e == nil || e.EventType != events.EventTypeLLMCall {
 			continue
 		}
 		if len(e.Payload) == 0 {

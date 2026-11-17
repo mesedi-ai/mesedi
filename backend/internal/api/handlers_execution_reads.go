@@ -146,6 +146,22 @@ func (h *Handlers) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 	if failureGroup != nil {
 		resp["failure_group"] = failureGroup
 	}
+	// The run's report-chain verdict (unchained, chained, signed or
+	// broken), recorded at completion; absent while the run is open.
+	if row, err := h.Store.GetReportChainStatus(r.Context(), executionID); err == nil {
+		chain := map[string]any{"status": row.Status}
+		if row.Detail != "" {
+			chain["detail"] = row.Detail
+		}
+		// Whether the SDK declared the run's last report. A chained run
+		// without it (an older SDK, or a run the server closed, such as
+		// a timeout) could be missing its last reports unseen, and the
+		// run's page says so.
+		if row.Status != store.ReportChainUnchained {
+			chain["end_confirmed"] = row.EndHash != ""
+		}
+		resp["report_chain"] = chain
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

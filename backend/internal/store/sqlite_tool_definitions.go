@@ -8,7 +8,10 @@ package store
 // input_schema_hash, a SHA-256 of the RFC 8785 canonicalized
 // declared input schema, on tool_call and mcp_call events where a
 // declared schema exists (MCP tools and framework adapters; a plain
-// function has no schema to declare and sends nothing).
+// function has no schema to declare and sends nothing). The MCP half
+// was sent but never read until 17 November 2026: these queries read
+// only tool_call. They now read the tool_events view (migration 065),
+// which includes MCP calls as "server/method".
 //
 // Same event-extraction pattern as ListToolDescriptions: no new
 // table, the hash rides the payload and is read back with
@@ -36,10 +39,9 @@ func (s *SQLiteStore) ListToolInputSchemaHashes(
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT json_extract(ev.payload, '$.input_schema_hash')
-		FROM events ev
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = ?
-		  AND ev.event_type = 'tool_call'
 		  AND json_extract(ev.payload, '$.tool_name') = ?
 		  AND ev.execution_id != ?
 		ORDER BY ev.timestamp DESC

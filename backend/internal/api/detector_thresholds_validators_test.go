@@ -56,6 +56,8 @@ func Test_DetectorThresholds_RegistryHasExpectedDetectors(t *testing.T) {
 		// at execution close, not by any specific detector). Rides
 		// the same JSON-keyed-map shape as custom_model_windows.
 		"pricing:custom_model_pricing",
+		// Tool and MCP output injection scan, on by default.
+		"prompt_injection:scan_tool_output",
 	}
 	for _, key := range want {
 		if _, ok := detectorThresholdRegistry[key]; !ok {

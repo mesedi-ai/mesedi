@@ -669,6 +669,15 @@ func main() {
 	// requirement as every /me/* family above: without these the
 	// routes registered on privateMux inside RegisterRoutes would
 	// 404 at the outer mux before reaching the auth chain.
+	// Report signing keys (report_chain.go): adding and revoking need a
+	// signed-in admin, never an API key; the handler enforces it.
+	mux.Handle("GET /me/report-signing-keys", privateHandler)
+	mux.Handle("POST /me/report-signing-keys", privateHandler)
+	mux.Handle("DELETE /me/report-signing-keys/{key_id}", privateHandler)
+	// The single-run file the checker opens with --run (run_export.go).
+	mux.Handle("GET /executions/{id}/export", privateHandler)
+	// Monitored spend per day, for the self-run spend check.
+	mux.Handle("GET /me/spend/daily", privateHandler)
 	mux.Handle("GET /me/tool-pins", privateHandler)
 	mux.Handle("PUT /me/tool-pins/{tool_name}/{kind}", privateHandler)
 	mux.Handle("DELETE /me/tool-pins/{tool_name}/{kind}", privateHandler)

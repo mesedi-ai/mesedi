@@ -21,13 +21,23 @@ func TestDLPScanResultIsBackendMinted(t *testing.T) {
 // The far more dangerous direction. Marking a type backend-minted makes
 // ingest REJECT it, so a type customers legitimately send would stop
 // being accepted at all, a silent, total data-loss bug for that type.
+// Same reason as the DLP sibling: Mesedi writes it beside the call it
+// was found in, and a customer must not be able to forge or suppress it.
+func TestInjectionScanResultIsBackendMinted(t *testing.T) {
+	if !IsBackendMinted(EventTypeInjectionScanResult) {
+		t.Error("injection_scan_result is written by Mesedi during ingest; if it is " +
+			"not reserved, a customer could submit forged ones")
+	}
+}
+
 func TestCustomerEventTypesAreNotBackendMinted(t *testing.T) {
 	customerTypes := []EventType{
 		EventTypeLLMCall, EventTypeToolCall, EventTypeCheckpoint,
 		EventTypeException, EventTypeValidatorResult, EventTypeDriftSignal,
 		EventTypeInjectionAlert, EventTypeInfrastructure, EventTypeMCPCall,
 		EventTypeEvalScore, EventTypeMemoryOperation, EventTypeAgentHandoff,
-		EventTypeHumanIntervention,
+		EventTypeHumanIntervention, EventTypeEgress, EventTypeEnvironmentDeclaration,
+		EventTypeEffectDeclaration,
 	}
 	for _, tt := range customerTypes {
 		if IsBackendMinted(tt) {
@@ -103,7 +113,7 @@ func TestEveryTypeMintedInTheAPIPackageIsListedHere(t *testing.T) {
 			"stopped checking anything and must be repaired, not deleted")
 	}
 
-	known := map[string]bool{"EventTypeDLPScanResult": true}
+	known := map[string]bool{"EventTypeDLPScanResult": true, "EventTypeInjectionScanResult": true}
 	for name, file := range found {
 		if !known[name] {
 			t.Errorf("internal/api/%s constructs an event of type %s, but that type "+

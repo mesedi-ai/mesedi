@@ -175,6 +175,13 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 	// whole transaction.
 	accepted, rejected := validateIngestBatch(batch, h.Logger)
 
+	// Report chaining and signing, before anything rewrites a payload:
+	// each chained report is fingerprinted exactly as received, and a
+	// signed run refuses unsigned or badly signed reports. See
+	// report_chain.go.
+	accepted, chainRows, chainRefused := h.prepareReportChain(r.Context(), authProjectID, accepted)
+	rejected += chainRefused
+
 	// +  scan + redact outbound LLM /
 	// tool payloads against the DLP rule registry (built-ins) plus
 	// the project's custom data_leakage patterns. Matched secrets
@@ -191,6 +198,24 @@ func (h *Handlers) HandleIngestEvents(w http.ResponseWriter, r *http.Request) {
 	// "fired on N executions" than "matched N times across executions").
 	for _, pid := range uniqueStrings(customMatched) {
 		h.incrementCustomPatternMatch(r.Context(), authProjectID, pid)
+	}
+
+	// Injected instructions in what tools and MCP servers returned, or
+	// in their descriptions. Runs after redaction so the recorded
+	// excerpt never holds a secret. See tool_output_injection.go.
+	var injectionMatched []string
+	accepted, injectionMatched = h.scanToolOutputForInjection(r.Context(), authProjectID, accepted)
+	for _, pid := range uniqueStrings(injectionMatched) {
+		h.incrementCustomPatternMatch(r.Context(), authProjectID, pid)
+	}
+
+	// Chain rows go first. A batch whose events then fail to save is
+	// retried by the SDK, and the rows are idempotent; the completion
+	// check counts only rows whose report was stored.
+	if err := h.Store.SaveReportChainRows(r.Context(), chainRows); err != nil {
+		h.Logger.Error("save report chain failed", "error", err.Error(), "batch_size", len(chainRows))
+		writeError(w, http.StatusInternalServerError, "persist failed: "+err.Error())
+		return
 	}
 
 	if err := h.Store.SaveEvents(r.Context(), accepted); err != nil {

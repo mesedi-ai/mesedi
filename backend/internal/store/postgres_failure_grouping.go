@@ -16,6 +16,16 @@ func (s *PostgresStore) groupExecutionInternalPg(
 	ctx context.Context,
 	executionID, projectID, failureClass, signature string,
 ) (isNew bool, err error) {
+	return s.groupExecutionPg(ctx, executionID, projectID, failureClass, signature, true)
+}
+
+// groupExecutionPg is the Postgres twin of SQLiteStore.groupExecution:
+// mayClaimPrimary false links the run without classifying it.
+func (s *PostgresStore) groupExecutionPg(
+	ctx context.Context,
+	executionID, projectID, failureClass, signature string,
+	mayClaimPrimary bool,
+) (isNew bool, err error) {
 	// Postgres twin of sqlite.go groupExecutionInternal. The order
 	// of operations is CRITICAL: failure_groups must be upserted
 	// BEFORE the link insert because the link table has a foreign
@@ -40,7 +50,7 @@ func (s *PostgresStore) groupExecutionInternalPg(
 	if err != nil {
 		return false, fmt.Errorf("read execution failure_group_id: %w", err)
 	}
-	isPrimary := !primaryExisting.Valid || primaryExisting.String == ""
+	isPrimary := mayClaimPrimary && (!primaryExisting.Valid || primaryExisting.String == "")
 
 	groupID := deriveGroupID(projectID, failureClass, signature)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -247,6 +257,24 @@ func (s *PostgresStore) GroupEnvironmentMisapprehension(ctx context.Context, exe
 		return false, fmt.Errorf("signature required")
 	}
 	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassEnvironmentMisapprehension, signature)
+}
+
+// GroupEffectAliasing is the Postgres twin of the SQLite method of
+// the same name.
+func (s *PostgresStore) GroupEffectAliasing(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternalPg(ctx, executionID, projectID, FailureClassEffectAliasing, signature)
+}
+
+// GroupNewTool is the Postgres twin of the SQLite method of the same
+// name: never the run's primary classification.
+func (s *PostgresStore) GroupNewTool(ctx context.Context, executionID, projectID, signature string) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionPg(ctx, executionID, projectID, FailureClassNewTool, signature, false)
 }
 
 // GroupCovertCoordination is the Postgres twin of the SQLite method

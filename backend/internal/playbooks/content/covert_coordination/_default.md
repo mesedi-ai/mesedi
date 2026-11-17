@@ -10,6 +10,15 @@ The cheap counter, and honestly labeled as such: when one of this run's egress d
 
 It counts convergence; it does not read intent. Three runs sharing a destination is a rendezvous OR a shared dependency the window hasn't aged out, which is why this class defaults to Warning rather than Critical: it warrants a look, not a page. And it sees only egress the host application or sandbox REPORTED via egress events; a connection nobody reports is invisible, exactly as the sandbox_escape coverage boundary describes.
 
+## Channels that look harmless
+
+A rendezvous does not need an unusual destination. Two kinds recur in the incident reports and are easy to wave through as shared dependencies:
+
+- **Link shorteners.** A short link is a pointer whose target its owner can change at any time, after every run has already resolved it. Several runs fetching the same short link can each receive different instructions, and the destination in the record is only the shortener's domain. Resolve a short link to its target before deciding it is benign, and prefer blocking shorteners in agent egress outright.
+- **Image hosts and other public upload sites.** Anyone can post to them and anyone can read back, which makes them a message board. Content can ride in an image's text, metadata or pixels, so the destination looks like ordinary media traffic.
+
+Both show up here only as their domain. A shortener or an image host shared by several unrelated runs deserves the same look as an unknown paste site, not a pass for being common.
+
 ## What to do as an operator
 
 Look at the destination first: a shared internal service or a common SaaS endpoint is a benign explanation and worth an allowlist note in your runbook. A destination none of your tooling should know about is not. Check which executions converged (the group lists them) and whether they share a tenant, a key, or a prompt source; convergence across UNRELATED tenants is the strongest version of this signal. If the destination is writable by the agents (a paste site, a repo, a bucket), read what they wrote.

@@ -11,9 +11,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/mesedi-ai/mesedi/backend/attest/events"
 	"mesedi/backend/internal/dlp"
@@ -145,4 +147,37 @@ func eventTypes(evts []events.Event) []string {
 		out[i] = string(e.EventType)
 	}
 	return out
+}
+
+// An MCP call's arguments and answer are scanned and redacted like an
+// ordinary tool call's (radar gap G29, 17 November 2026). Until then an
+// MCP call was not in scanFieldKeys, so a secret in it was stored raw.
+func Test_applyDLPToBatch_MCPCallIsScannedAndRedacted(t *testing.T) {
+	h := buildHandlersForDLPTest(t)
+	raw, _ := json.Marshal(map[string]any{
+		"server_name":  "crm",
+		"method":       "lookup",
+		"arguments":    map[string]any{"token": "TESTMEDSECRET_ABCD1234"},
+		"return_value": "ok",
+	})
+	batch := []events.Event{{EventID: "e-mcp", ExecutionID: "exec_test", EventType: events.EventTypeMCPCall,
+		Sequence: 1, Timestamp: time.Now(), Payload: raw}}
+	out, _ := h.applyDLPToBatch(context.Background(), "proj_test", batch)
+
+	var sibling *events.DLPScanResultPayload
+	for i := range out {
+		if out[i].EventType == events.EventTypeMCPCall && bytes.Contains(out[i].Payload, []byte("TESTMEDSECRET_ABCD1234")) {
+			t.Fatalf("the secret survived in the stored MCP call: %s", out[i].Payload)
+		}
+		if out[i].EventType == events.EventTypeDLPScanResult {
+			var p events.DLPScanResultPayload
+			if err := json.Unmarshal(out[i].Payload, &p); err != nil {
+				t.Fatal(err)
+			}
+			sibling = &p
+		}
+	}
+	if sibling == nil || sibling.ScanLayer != "mcp_call" || sibling.ParentEventType != string(events.EventTypeMCPCall) {
+		t.Fatalf("scan result for the MCP call = %+v; want one with scan layer mcp_call", sibling)
+	}
 }

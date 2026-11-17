@@ -55,52 +55,11 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 			// hardcoded constant, emitting a config_fallback
 			// system_event internally on store-layer errors.
 			maxBytes, _ := h.ResolveToolReturnValueMaxBytes(r.Context(), authProjectID)
+			// Every tool in the run gets its first-seen rows, and a
+			// brand-new tool its notice, before the loop below can stop
+			// at the first finding.
+			firstSeen := h.recordToolsFirstSeen(r, executionID, authProjectID, toolNames)
 			for _, toolName := range toolNames {
-				// Current-execution shape: query the most recent
-				// successful tool_call for this tool on THIS
-				// execution. The detector compares it against the
-				// project's historical roll-up.
-				currentReturns, err := h.Store.ListSuccessfulToolReturns(r.Context(), authProjectID, toolName, "", 1)
-				if err != nil || len(currentReturns) == 0 {
-					// "" excludes nothing, gets the most recent
-					// project-wide which includes the current
-					// execution. If it returns nothing, skip.
-					continue
-				}
-				if len(currentReturns[0]) > maxBytes {
-					// Exceeds the per-project cap; treat as
-					// non-comparable rather than hashing a partial
-					// or oversized structure.
-					continue
-				}
-				currentShape := detectors.ReturnShapeHash(json.RawMessage(currentReturns[0]))
-				if currentShape == "" {
-					continue
-				}
-				history, err := h.Store.ListSuccessfulToolReturns(r.Context(), authProjectID, toolName, executionID, 100)
-				if err != nil {
-					h.Logger.Warn("list tool-return history failed",
-						"execution_id", executionID,
-						"tool_name", toolName,
-						"error", err.Error(),
-					)
-					continue
-				}
-				shapeCounts := map[string]int{}
-				for _, raw := range history {
-					if len(raw) > maxBytes {
-						// Same cap for history rows, keeps
-						// fingerprint computation symmetric so a
-						// customer raising/lowering the cap sees
-						// consistent comparisons.
-						continue
-					}
-					shape := detectors.ReturnShapeHash(json.RawMessage(raw))
-					if shape == "" {
-						continue
-					}
-					shapeCounts[shape]++
-				}
 				// Approval-time pins, checked FIRST. A pin is the
 				// operator's statement of the approved contract, so a
 				// violation outranks every history-derived signal: it
@@ -121,6 +80,27 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 				if pinFired := h.checkToolContractPins(
 					r, executionID, authProjectID, toolName, pins,
 				); pinFired {
+					break
+				}
+
+				// First-seen contract, checked right after pins: the
+				// first description and declared schema Mesedi recorded
+				// for this tool, fixed for good, so a change on the
+				// second call fires and later traffic cannot outvote
+				// it. A pinned half is skipped inside. See
+				// tool_first_seen.go.
+				if sig, fired := h.detectFirstSeenContractDrift(
+					r.Context(), executionID, toolName, firstSeen[toolName], pins,
+				); fired {
+					isNew, gErr := h.Store.GroupToolSchemaDrift(r.Context(), executionID, authProjectID, sig)
+					if gErr != nil {
+						h.Logger.Warn("tool-first-seen-drift grouping failed (continuing)",
+							"execution_id", executionID,
+							"signature", sig,
+							"error", gErr.Error(),
+						)
+					}
+					h.maybeFireWebhook(r, authProjectID, store.FailureClassToolSchemaDrift, sig, isNew, gErr)
 					break
 				}
 
@@ -193,6 +173,57 @@ func (h *Handlers) runToolSchemaDriftDetector(r *http.Request, executionID, auth
 					break
 				}
 
+				// Return-shape drift, last. Its inputs are gathered here,
+				// after the contract checks, so a tool with no usable
+				// successful return still has its description and
+				// definition checked; the continues below skip only
+				// this step.
+				//
+				// Current-execution shape: query the most recent
+				// successful tool_call for this tool on THIS
+				// execution. The detector compares it against the
+				// project's historical roll-up.
+				currentReturns, err := h.Store.ListSuccessfulToolReturns(r.Context(), authProjectID, toolName, "", 1)
+				if err != nil || len(currentReturns) == 0 {
+					// "" excludes nothing, gets the most recent
+					// project-wide which includes the current
+					// execution. If it returns nothing, skip.
+					continue
+				}
+				if len(currentReturns[0]) > maxBytes {
+					// Exceeds the per-project cap; treat as
+					// non-comparable rather than hashing a partial
+					// or oversized structure.
+					continue
+				}
+				currentShape := detectors.ReturnShapeHash(json.RawMessage(currentReturns[0]))
+				if currentShape == "" {
+					continue
+				}
+				history, err := h.Store.ListSuccessfulToolReturns(r.Context(), authProjectID, toolName, executionID, 100)
+				if err != nil {
+					h.Logger.Warn("list tool-return history failed",
+						"execution_id", executionID,
+						"tool_name", toolName,
+						"error", err.Error(),
+					)
+					continue
+				}
+				shapeCounts := map[string]int{}
+				for _, raw := range history {
+					if len(raw) > maxBytes {
+						// Same cap for history rows, keeps
+						// fingerprint computation symmetric so a
+						// customer raising/lowering the cap sees
+						// consistent comparisons.
+						continue
+					}
+					shape := detectors.ReturnShapeHash(json.RawMessage(raw))
+					if shape == "" {
+						continue
+					}
+					shapeCounts[shape]++
+				}
 				if sig, fired := detectors.DetectSchemaDriftWithThresholds(toolName, currentShape, shapeCounts, driftThresholds); fired {
 					// Rank the drift before emitting anything. A
 					// removed or retyped field is not the same event

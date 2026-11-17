@@ -16,8 +16,10 @@ An honest detector for this class needs taint tracking: which inputs influenced 
 
 Adjacent layers of the same attack surface are covered, and several fire in practice during confused-deputy attempts:
 
-- **Description drift** (`tool_schema_drift`, `:desc:` signatures): a poisoned MCP server rewriting a tool's help text, the usual delivery vehicle for the steering instructions.
+- **Instructions in what a server returns or in its descriptions** (`prompt_injection`, `tool_output:` and `tool_description:` signatures): the steering text itself, when it uses phrasing the injection rules know, found in an MCP answer or a method's description and named by `server/method`.
+- **A description or definition changing from the one first seen** (`tool_schema_drift`, `first:` signatures), from the first changed call, and **history drift** (`:desc:` signatures): a poisoned MCP server rewriting a tool's help text, the usual delivery vehicle for the steering instructions. Since 17 November 2026 these read MCP calls too; before that, despite this page, no check read them. Pass `tool_description` and `input_schema` on each MCP call so there is something to compare.
 - **Definition drift** (`:def:` signatures): a server swapping a tool's declared parameters under an unchanged description, so a widened schema that suddenly accepts a `path` or `recipient` shows up.
+- **Effect aliasing**: when a run declares which tools may change a resource, a second route to the same resource, through a different server, fires `effect_aliasing`. That is the confused deputy's most common outcome, caught by where the change landed rather than by why.
 - **Sandbox escape**: attacker-steered code execution that touches host paths, sockets, or metadata endpoints, when it surfaces in tool-call arguments.
 - **Data leakage**: canary and secret patterns leaving through model inputs.
 - **Cost-velocity attribution**: a never-seen tenant or credential driving spend files its own group and fires escalation.

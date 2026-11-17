@@ -402,3 +402,38 @@ func TestVerifyChainExportCatchesAContradictoryInterval(t *testing.T) {
 		t.Fatal("an interval with no leaf but a leftover proof verified clean")
 	}
 }
+
+// Round 3, finding L2: the count of runs with events after anchoring is a
+// field a program can read, and the "complete and unaltered" sentence is
+// qualified when it is not the whole truth.
+func TestEventsAfterAnchoringIsAFieldAndQualifiesTheCaveat(t *testing.T) {
+	e := buildExport(t, []int{2, 1})
+	clean := VerifyChainExport(e)
+	if clean.RunsWithEventsAfterAnchoring != nil {
+		t.Fatalf("no late events, but the field is %+v", clean.RunsWithEventsAfterAnchoring)
+	}
+	if !containsLine(clean.Unverified, "complete and unaltered. It does not show") {
+		t.Errorf("the plain sentence is missing: %v", clean.Unverified)
+	}
+
+	e.Intervals[0].Executions[0].EventsAfterAnchoring = 3
+	late := VerifyChainExport(e)
+	got := late.RunsWithEventsAfterAnchoring
+	if got == nil || got.Runs != 1 || got.Events != 3 || len(got.Checkpoints) != 1 ||
+		got.Checkpoints[0] != e.Intervals[0].Checkpoint.Seq {
+		t.Fatalf("field = %+v", got)
+	}
+	if containsLine(late.Unverified, "complete and unaltered. It does not show") ||
+		!containsLine(late.Unverified, "as of each hour's anchoring; 1 run received events after that (3 events") {
+		t.Errorf("caveat not qualified: %v", late.Unverified)
+	}
+}
+
+func containsLine(lines []string, sub string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			return true
+		}
+	}
+	return false
+}

@@ -27,9 +27,8 @@ func (s *SQLiteStore) FindFirstFailedTool(
 	err = s.db.QueryRowContext(ctx, `
 		SELECT json_extract(payload, '$.tool_name'),
 		       json_extract(payload, '$.exception_type')
-		FROM events
+		FROM tool_events
 		WHERE execution_id = ?
-		  AND event_type = 'tool_call'
 		  AND json_extract(payload, '$.status') = 'failed'
 		ORDER BY sequence ASC
 		LIMIT 1
@@ -209,10 +208,9 @@ func (s *SQLiteStore) ListSuccessfulToolReturns(
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT json_extract(ev.payload, '$.return_value')
-		FROM events ev
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = ?
-		  AND ev.event_type = 'tool_call'
 		  AND json_extract(ev.payload, '$.tool_name') = ?
 		  AND COALESCE(json_extract(ev.payload, '$.status'), 'ok') != 'failed'
 		  AND ev.execution_id != ?
@@ -251,10 +249,9 @@ func (s *SQLiteStore) ListToolDescriptions(
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT json_extract(ev.payload, '$.tool_description')
-		FROM events ev
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = ?
-		  AND ev.event_type = 'tool_call'
 		  AND json_extract(ev.payload, '$.tool_name') = ?
 		  AND ev.execution_id != ?
 		ORDER BY ev.timestamp DESC
@@ -292,9 +289,8 @@ func (s *SQLiteStore) ListToolNamesInExecution(
 ) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT DISTINCT json_extract(payload, '$.tool_name')
-		FROM events
+		FROM tool_events
 		WHERE execution_id = ?
-		  AND event_type = 'tool_call'
 		  AND COALESCE(json_extract(payload, '$.status'), 'ok') != 'failed'
 	`, executionID)
 	if err != nil {
@@ -324,9 +320,8 @@ func (s *SQLiteStore) ListAllToolCallPayloads(
 ) ([][]byte, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT payload
-		FROM events
+		FROM tool_events
 		WHERE execution_id = ?
-		  AND event_type = 'tool_call'
 		ORDER BY sequence ASC
 	`, executionID)
 	if err != nil {

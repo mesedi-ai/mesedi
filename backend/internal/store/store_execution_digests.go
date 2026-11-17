@@ -97,6 +97,10 @@ type ExecutionDigestStore interface {
 	// stored. Executions with none are absent from the map. One query per
 	// 500 ids, so ingest asks once per batch rather than once per run.
 	CountEventsAfterDigest(ctx context.Context, executionIDs []string) (map[string]int, error)
+
+	// ListReportChainStatuses returns the recorded report-chain verdict
+	// of each given run that has one, for the hourly export.
+	ListReportChainStatuses(ctx context.Context, executionIDs []string) (map[string]string, error)
 }
 
 // validateDigestsFold checks that digests fold exactly to the leaf: same
@@ -383,6 +387,30 @@ func (r digestRepo) countEventsAfterDigest(ctx context.Context, ids []string) (m
 			return nil, fmt.Errorf("count events after digest scan: %w", err)
 		}
 		out[id] = n
+	}
+	return out, rows.Err()
+}
+
+// listReportChainStatuses returns each given run's recorded chain
+// verdict (migration 067). Runs with none recorded are absent.
+func (r digestRepo) listReportChainStatuses(ctx context.Context, ids []string) (map[string]string, error) {
+	sub, param, err := r.idsParam(ids)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.QueryContext(ctx, r.q(`SELECT execution_id, status FROM report_chain_status
+		WHERE execution_id IN (`+sub+`)`), param)
+	if err != nil {
+		return nil, fmt.Errorf("list report chain statuses: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]string) // max: one entry per id asked about
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, fmt.Errorf("report chain status scan: %w", err)
+		}
+		out[id] = status
 	}
 	return out, rows.Err()
 }

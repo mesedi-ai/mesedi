@@ -1,10 +1,10 @@
 # Prompt injection
 
-An `llm_call` event in this execution matched a prompt-injection pattern that has no playbook of its own. Most often that is one of **your project's custom patterns**: its signature reads `custom:<pattern_id>`, and the pattern ID is the one shown on your project's custom patterns page.
+A prompt in this execution matched a prompt-injection pattern that has no playbook of its own. Most often that is one of **your project's custom patterns**: its signature reads `custom:<pattern_id>`, and the pattern ID is the one shown on your project's custom patterns page.
 
 ## What this means
 
-Mesedi checks every `user_message` against its built-in injection patterns first, then against the custom patterns your project has added. A custom match means text arrived that your own rule describes as an attack. Mesedi does not know why you wrote the rule, so the judgement of how serious the match is stays with you.
+Mesedi checks the `user_message` and the `system_prompt` of every `llm_call` against its built-in injection patterns first, then against the custom patterns your project has added. What tools and MCP servers return, and their descriptions, are checked with the same patterns and have playbooks of their own. A custom match means text arrived that your own rule describes as an attack. Mesedi does not know why you wrote the rule, so the judgement of how serious the match is stays with you.
 
 ## What to do
 

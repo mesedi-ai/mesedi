@@ -1,6 +1,6 @@
 # Prompt injection, system-prompt injection
 
-An `llm_call` event in this execution had a `user_message` containing **a literal "system" boundary marker**, `<system>`, `<|system|>`, or a leading `system:` declaration on its own line. Mesedi's prompt-injection detector treats these as a Tier-1 (high-precision) signal because the only legitimate place these tokens appear is in your own server-side prompt construction code, never in user-supplied text.
+An `llm_call` event in this execution had a `user_message` or `system_prompt` containing **a literal "system" boundary marker**, `<system>`, `<|system|>`, or a leading `system:` declaration on its own line. Mesedi's prompt-injection detector treats these as a Tier-1 (high-precision) signal because the only legitimate place these tokens appear is in your own server-side prompt construction code, never in user-supplied text.
 
 ## What this means
 

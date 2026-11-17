@@ -53,6 +53,11 @@ type ExportedExecution struct {
 	// not cover them, so a reader of the export must be told (the outside
 	// review's round 2, 17 November 2026). Zero for almost every run.
 	EventsAfterAnchoring int `json:"events_after_anchoring,omitempty"`
+	// ReportChain is Mesedi's recorded verdict on the run's report chain
+	// (unchained, chained, signed or broken), empty for runs completed
+	// before report chaining existed or still open. Mesedi's statement;
+	// the single-run file (RunExport) lets a reader check it.
+	ReportChain string `json:"report_chain,omitempty"`
 }
 
 // ExportedTimestamp is one calendar's OpenTimestamps receipt for a
@@ -220,7 +225,44 @@ type ExportVerification struct {
 	// concludes the rest is straight.
 	Unverified []string `json:"unverified"`
 
+	// RunsWithEventsAfterAnchoring counts the runs that received events
+	// after their hour was anchored, for a program reading the report
+	// (round 3, finding L2): until then it was only a sentence. Nil when
+	// none did.
+	RunsWithEventsAfterAnchoring *EventsAfterAnchoringSummary `json:"runs_with_events_after_anchoring,omitempty"`
+
 	OK bool `json:"ok"`
+}
+
+// EventsAfterAnchoringSummary says how many runs, and events, arrived
+// after their hour's anchor, and in which checkpoints. The anchor does
+// not cover those events.
+type EventsAfterAnchoringSummary struct {
+	Runs        int      `json:"runs"`
+	Events      int      `json:"events"`
+	Checkpoints []uint64 `json:"checkpoints"`
+}
+
+// eventsAfterAnchoring totals EventsAfterAnchoring over the export.
+func eventsAfterAnchoring(e ChainExport) *EventsAfterAnchoringSummary {
+	s := &EventsAfterAnchoringSummary{Checkpoints: []uint64{}}
+	for _, iv := range e.Intervals {
+		hit := false
+		for _, x := range iv.Executions {
+			if x.EventsAfterAnchoring > 0 {
+				s.Runs++
+				s.Events += x.EventsAfterAnchoring
+				hit = true
+			}
+		}
+		if hit {
+			s.Checkpoints = append(s.Checkpoints, iv.Checkpoint.Seq)
+		}
+	}
+	if s.Runs == 0 {
+		return nil
+	}
+	return s
 }
 
 func (v *ExportVerification) add(name string, ok bool, format string, args ...any) {
@@ -250,6 +292,7 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		return v
 	}
 	v.add("file format", true, "%s", e.Format)
+	v.RunsWithEventsAfterAnchoring = eventsAfterAnchoring(e)
 
 	if e.ProjectID == "" {
 		v.add("project identity", false, "export names no project")
@@ -613,14 +656,28 @@ func VerifyChainExport(e ChainExport) ExportVerification {
 		"Transparency log entries were NOT resolved. This check confirms the export "+
 			"is internally consistent; it does not confirm the checkpoints were "+
 			"published. Re-run with network access to check the log.",
-		"The agent runs themselves were not opened. This shows the set of runs is "+
-			"complete and unaltered. It does not show what any individual run did, "+
-			"which needs the underlying records.",
+		runsNotOpenedCaveat(v.RunsWithEventsAfterAnchoring),
 		"Nothing here judges whether the AI was right. A passing report means the "+
 			"record is intact, not that the decisions in it were good.",
 	)
 
 	return v
+}
+
+// runsNotOpenedCaveat says what the folded run digests show, qualified
+// when some runs received events after their hour was anchored (round 3,
+// finding L2): "complete and unaltered" must not stand unqualified above
+// a note saying some runs changed afterwards.
+func runsNotOpenedCaveat(after *EventsAfterAnchoringSummary) string {
+	shown := "This shows the set of runs is complete and unaltered."
+	if after != nil {
+		shown = fmt.Sprintf("This shows the set of runs is complete and unaltered as of "+
+			"each hour's anchoring; %s received events after that (%s, in checkpoints %v), "+
+			"which the anchor does not cover.",
+			plural(after.Runs, "run", "runs"), plural(after.Events, "event", "events"), after.Checkpoints)
+	}
+	return "The agent runs themselves were not opened. " + shown + " It does not show what " +
+		"any individual run did, which needs the underlying records."
 }
 
 // checkLabel names a checkpoint for a reader: its sequence and the hour

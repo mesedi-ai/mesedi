@@ -49,6 +49,17 @@ func (s *SQLiteStore) groupExecutionInternal(
 	ctx context.Context,
 	executionID, projectID, failureClass, signature string,
 ) (isNew bool, err error) {
+	return s.groupExecution(ctx, executionID, projectID, failureClass, signature, true)
+}
+
+// groupExecution is groupExecutionInternal with the primary slot made
+// a choice. mayClaimPrimary false links the run to the group without
+// ever making it the run's classification (the new_tool notice).
+func (s *SQLiteStore) groupExecution(
+	ctx context.Context,
+	executionID, projectID, failureClass, signature string,
+	mayClaimPrimary bool,
+) (isNew bool, err error) {
 	if executionID == "" || projectID == "" || failureClass == "" || signature == "" {
 		return false, fmt.Errorf("executionID, projectID, failureClass, signature all required")
 	}
@@ -67,7 +78,7 @@ func (s *SQLiteStore) groupExecutionInternal(
 	if err != nil {
 		return false, fmt.Errorf("read execution failure_group_id: %w", err)
 	}
-	isPrimary := !primaryExisting.Valid || primaryExisting.String == ""
+	isPrimary := mayClaimPrimary && (!primaryExisting.Valid || primaryExisting.String == "")
 
 	groupID := deriveGroupID(projectID, failureClass, signature)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -447,6 +458,30 @@ func (s *SQLiteStore) GroupEnvironmentMisapprehension(
 		return false, fmt.Errorf("signature required")
 	}
 	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassEnvironmentMisapprehension, signature)
+}
+
+// GroupEffectAliasing upserts a failure_group with
+// failure_class=effect_aliasing.
+func (s *SQLiteStore) GroupEffectAliasing(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecutionInternal(ctx, executionID, projectID, FailureClassEffectAliasing, signature)
+}
+
+// GroupNewTool files the info-level new_tool notice without taking
+// the run's primary classification.
+func (s *SQLiteStore) GroupNewTool(
+	ctx context.Context,
+	executionID, projectID, signature string,
+) (isNew bool, err error) {
+	if signature == "" {
+		return false, fmt.Errorf("signature required")
+	}
+	return s.groupExecution(ctx, executionID, projectID, FailureClassNewTool, signature, false)
 }
 
 // GroupCovertCoordination upserts a failure_group with

@@ -407,6 +407,34 @@ func DetectPinnedContractDrift(
 	if currentHash == pinnedHash {
 		return "", false
 	}
+	return contractChangeSignature(toolName, "pin", kind, currentHash), true
+}
+
+// DetectFirstSeenContractDrift compares the current run's contract
+// hash for one kind against the first one Mesedi recorded for the
+// tool (tool_first_seen, migration 066). Fires on any difference, from
+// the first changed call: no history floor and no majority, because
+// the baseline is fixed and cannot be outvoted by later traffic.
+// Declines when either hash is empty, for the same reason the pin
+// check does.
+//
+// The "first:" marker keeps these in their own failure group, apart
+// from pins and from history-based drift: "search:first:desc:1a2b3c4d"
+// says the description differs from the one this tool started with.
+func DetectFirstSeenContractDrift(
+	toolName, kind, currentHash, firstSeenHash string,
+) (signature string, detected bool) {
+	if toolName == "" || currentHash == "" || firstSeenHash == "" {
+		return "", false
+	}
+	if currentHash == firstSeenHash {
+		return "", false
+	}
+	return contractChangeSignature(toolName, "first", kind, currentHash), true
+}
+
+// contractChangeSignature builds "<tool>:<baseline>:<desc|def>:<hash8>".
+func contractChangeSignature(toolName, baseline, kind, currentHash string) string {
 	marker := "def"
 	if kind == PinKindDescription {
 		marker = "desc"
@@ -415,5 +443,5 @@ func DetectPinnedContractDrift(
 	if len(suffix) > 8 {
 		suffix = suffix[:8]
 	}
-	return fmt.Sprintf("%s:pin:%s:%s", toolName, marker, suffix), true
+	return fmt.Sprintf("%s:%s:%s:%s", toolName, baseline, marker, suffix)
 }

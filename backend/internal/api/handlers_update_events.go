@@ -71,6 +71,12 @@ func (h *Handlers) runEventsPostProcessing(r *http.Request, executionID, authPro
 				}
 			}
 
+			// Report chain: the run's chained reports must form one
+			// unbroken path, and a signed run must be signed
+			// throughout. Records the run's verdict either way. See
+			// report_chain.go.
+			h.runReportChainCheck(r, executionID, authProjectID, evts, patch.ReportChainEnd)
+
 			// Sub-slice 12: cost computation., backend is now
 			// the source of truth for known models. The SDK-shipped
 			// per-event estimated_cost_usd is fallback only for models
@@ -210,6 +216,12 @@ func (h *Handlers) runEventsPostProcessing(r *http.Request, executionID, authPro
 				h.maybeFireWebhook(r, authProjectID, store.FailureClassInjection, pattern, isNew, gErr)
 				h.incrementCustomPatternMatch(r.Context(), authProjectID, matchedPatternID)
 			}
+
+			// effect_aliasing: a change to a place the run did not
+			// declare, or by a tool not listed for it. Reads the same
+			// event list; a run with no effect declaration is not
+			// checked. See effect_aliasing.go.
+			h.runEffectAliasingDetector(r, executionID, authProjectID, evts)
 
 			// Cost-velocity detection, both forms, lives in
 			// handlers_update_cost.go since the split's first carve.

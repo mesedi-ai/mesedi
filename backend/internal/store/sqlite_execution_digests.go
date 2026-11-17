@@ -37,3 +37,7 @@ func (s *SQLiteStore) ExistingExecutionIDs(ctx context.Context, ids []string) (m
 func (s *SQLiteStore) CountEventsAfterDigest(ctx context.Context, executionIDs []string) (map[string]int, error) {
 	return s.digests().countEventsAfterDigest(ctx, executionIDs)
 }
+
+func (s *SQLiteStore) ListReportChainStatuses(ctx context.Context, executionIDs []string) (map[string]string, error) {
+	return s.digests().listReportChainStatuses(ctx, executionIDs)
+}

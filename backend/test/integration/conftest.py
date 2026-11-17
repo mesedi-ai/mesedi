@@ -26,6 +26,36 @@ import requests
 # Repository roots, derived from this file's location. The integration
 # tests live at backend/test/integration/, so backend/ is two parents
 # up, and the repo root is three parents up.
+
+# The backend rate-limits each project (a burst of 100 requests, then 10
+# a second; internal/api/ratelimit.go), and this suite runs as one
+# project. Past about a hundred direct HTTP calls in one burst the tests
+# themselves were refused with 429 and failed for a reason unrelated to
+# what they test. A real client waits as Retry-After asks, so the
+# suite's direct calls do too; the SDKs do the same since Python 0.10.0
+# and TypeScript 0.12.0.
+import time as _time
+
+import requests as _requests
+
+_original_session_request = _requests.sessions.Session.request
+
+
+def _request_waiting_out_rate_limits(self, method, url, *args, **kwargs):
+    for _ in range(8):
+        resp = _original_session_request(self, method, url, *args, **kwargs)
+        if resp.status_code != 429:
+            return resp
+        try:
+            wait = float(resp.headers.get("Retry-After", "1"))
+        except ValueError:
+            wait = 1.0
+        _time.sleep(min(max(wait, 0.2), 10.0))
+    return resp
+
+
+_requests.sessions.Session.request = _request_waiting_out_rate_limits
+
 HERE = Path(__file__).resolve().parent
 BACKEND_DIR = HERE.parent.parent
 REPO_ROOT = BACKEND_DIR.parent

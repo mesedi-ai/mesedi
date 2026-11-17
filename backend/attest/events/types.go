@@ -36,9 +36,15 @@ const (
 	EventTypeInjectionAlert  EventType = "injection_alert"
 	EventTypeInfrastructure  EventType = "infrastructure_event"
 	EventTypeDLPScanResult   EventType = "dlp_scan_result"
-	EventTypeMCPCall         EventType = "mcp_call"
-	EventTypeEvalScore       EventType = "eval_score"
-	EventTypeMemoryOperation EventType = "memory_operation"
+	// EventTypeInjectionScanResult is written by Mesedi, never by a
+	// customer: the record that ingest found injected instructions in
+	// what a tool or MCP server returned, or in a tool's description.
+	// It carries InjectionAlertPayload. EventTypeInjectionAlert stays
+	// the customer's own type, for guardrails they run themselves.
+	EventTypeInjectionScanResult EventType = "injection_scan_result"
+	EventTypeMCPCall             EventType = "mcp_call"
+	EventTypeEvalScore           EventType = "eval_score"
+	EventTypeMemoryOperation     EventType = "memory_operation"
 	// EventTypeAgentHandoff. Emitted when one agent
 	// delegates a task to another agent (sub-agent invocation,
 	// supervisor/worker handoff, plan/execute split). The payload
@@ -75,6 +81,14 @@ const (
 	// detectors read events, and a declaration is a claim made at a
 	// moment in time, which is exactly what an event is.
 	EventTypeEnvironmentDeclaration EventType = "environment_declaration"
+	// EventTypeEffectDeclaration. The operator's statement of where
+	// this run may make changes, and optionally which tools may make
+	// each one. Read with the Effects field on tool and MCP calls by
+	// the effect_aliasing detector: a change recorded somewhere not
+	// declared, or reached by a tool not listed for that place, is
+	// the event. Like the environment declaration, a claim made at a
+	// moment in time, so an event.
+	EventTypeEffectDeclaration EventType = "effect_declaration"
 )
 
 // ExecutionStatus is the lifecycle state of an Execution. There are
@@ -200,6 +214,10 @@ type Execution struct {
 	// which fires when a single execution accumulates an
 	// abnormal number of human-intervention cycles within its run.
 	PauseCount int `json:"pause_count,omitempty"`
+	// ReportChainEnd arrives on the run's final update from SDKs that
+	// chain reports; never stored on the execution row itself (it is
+	// kept with the run's chain verdict).
+	ReportChainEnd *ReportChainEnd `json:"report_chain_end,omitempty"`
 }
 
 // Event is the polymorphic envelope for every recorded step in an execution.
@@ -216,6 +234,33 @@ type Event struct {
 	Timestamp   time.Time       `json:"timestamp"`
 	DurationMs  int64           `json:"duration_ms,omitempty"`
 	Payload     json.RawMessage `json:"payload"`
+	// ChainPrev is the fingerprint of the report the SDK sent before
+	// this one in the same run (attest.ReportChainHash), or the run's
+	// genesis value (attest.ReportChainGenesis) for its first report.
+	// Empty from SDKs that predate report chaining: such a report is
+	// accepted and the run is marked unchained.
+	ChainPrev string `json:"chain_prev,omitempty"`
+	// Signature, when present, signs this report's own chain
+	// fingerprint with a key registered to the project. Written by a
+	// reporting process kept apart from the agent.
+	Signature *ReportSignature `json:"signature,omitempty"`
+}
+
+// ReportChainEnd is sent with a run's final update: the fingerprint of
+// the last report the SDK sent for the run, so a chain that stops short
+// of it shows that the run's last reports went missing. Signature, for
+// a signed run, signs attest.ReportChainEndMessage, not the fingerprint
+// itself, so a report's own signature cannot be replayed as an end.
+type ReportChainEnd struct {
+	Hash      string           `json:"hash"`
+	Signature *ReportSignature `json:"signature,omitempty"`
+}
+
+// ReportSignature is an Ed25519 signature over the 32 raw bytes of a
+// report's chain fingerprint, base64 (standard alphabet, padded).
+type ReportSignature struct {
+	KeyID string `json:"key_id"`
+	Sig   string `json:"sig"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -387,10 +432,13 @@ type AgentHandoffPayload struct {
 // so SREs can see "we spent $X on Anthropic MCP servers vs $Y on
 // third-party servers" without inspecting tool args.
 //
-// Per-call structure mirrors ToolCallPayload so the existing
-// tool_failures detector can pick up failed MCP calls without code
-// changes: ServerName + "." + Method is the cluster signature when
-// Error / ErrorClass is set.
+// Per-call structure mirrors ToolCallPayload. Until 17 November 2026
+// this comment said the tool_failures detector picked up failed MCP
+// calls without code changes; no detector read mcp_call at all. Since
+// then the backend's tool_events view (migration 065) presents each MCP
+// call to every tool check under the tool-call field names, named
+// "server/method", so failures, drift, loops, injected instructions in
+// answers and descriptions, secrets and effects are all checked.
 type MCPCallPayload struct {
 	ServerName string          `json:"server_name"`          // e.g. "filesystem", "github", "crm-mcp"
 	ServerURL  string          `json:"server_url,omitempty"` // e.g. "stdio:./filesystem-mcp" or "https://mcp.example.com"
@@ -403,6 +451,11 @@ type MCPCallPayload struct {
 	LatencyMs       int64           `json:"latency_ms,omitempty"`
 	Error           string          `json:"error,omitempty"`
 	ErrorClass      string          `json:"error_class,omitempty"` // "hard_error" | "soft_error" | "timeout" | "server_unreachable" | "method_not_found"
+	// ToolDescription: see ToolCallPayload.ToolDescription; for MCP it
+	// is the description the server advertised for this method.
+	ToolDescription string `json:"tool_description,omitempty"`
+	// Effects: see ToolCallPayload.Effects.
+	Effects []string `json:"effects,omitempty"`
 }
 
 // EgressPayload is one outbound network contact by the agent's
@@ -433,6 +486,27 @@ type EnvironmentDeclarationPayload struct {
 	Note       string `json:"note,omitempty"`
 }
 
+// EffectDeclarationPayload is the operator's statement of where a run
+// may make changes. Every destination a call reports in Effects must
+// match one of Destinations; a destination entry with Via set may be
+// changed only by the tools listed there (MCP tools as
+// "server/method"). Several declarations in one run add up. A run
+// with no declaration is not checked.
+type EffectDeclarationPayload struct {
+	Destinations []EffectDestination `json:"destinations"`
+	DeclaredBy   string              `json:"declared_by,omitempty"` // "operator" | "harness" | ...
+	Note         string              `json:"note,omitempty"`
+}
+
+// EffectDestination is one place a run may change. Destination is
+// compared exactly, after surrounding spaces are trimmed; a value
+// ending in "*" matches every destination that starts with the text
+// before it ("github.com/acme/*").
+type EffectDestination struct {
+	Destination string   `json:"destination"`
+	Via         []string `json:"via,omitempty"`
+}
+
 // ToolCallPayload is one invocation of a developer-registered tool.
 type ToolCallPayload struct {
 	ToolName  string          `json:"tool_name"`
@@ -446,6 +520,15 @@ type ToolCallPayload struct {
 	LatencyMs       int64           `json:"latency_ms,omitempty"`
 	Error           string          `json:"error,omitempty"`
 	ErrorClass      string          `json:"error_class,omitempty"` // "hard_error" | "soft_error" | "timeout" | "hallucinated_name" | "malformed_args"
+	// ToolDescription is the description the model was shown for this
+	// tool. Read by description drift and scanned for injected
+	// instructions. Empty when the SDK or framework has none.
+	ToolDescription string `json:"tool_description,omitempty"`
+	// Effects names the places this call changed ("what this call
+	// changed"), as the customer's own destination strings: a repo, a
+	// table, a bucket path. Optional; read by effect_aliasing against
+	// the run's EffectDeclarationPayload.
+	Effects []string `json:"effects,omitempty"`
 }
 
 // CheckpointPayload captures the agent's working state at a step boundary.
@@ -555,13 +638,24 @@ type DLPScanResultPayload struct {
 }
 
 // InjectionAlertPayload is the outcome of one prompt-injection / boundary-
-// violation scan, fired by the input-scan, tool-return-scan, or output-
-// scan layer of §4.7 detection.
+// violation scan. Two event types carry it:
+//
+//   - injection_alert, sent by a customer's own guardrail, with any
+//     scan layer it chooses;
+//   - injection_scan_result, written by Mesedi at ingest when a tool or
+//     MCP call's output or description matches an injection rule, with
+//     scan layer "tool_return" or "tool_description", ParentEventID set
+//     to the call it was found in, and Source naming the tool.
 type InjectionAlertPayload struct {
-	ScanLayer       string  `json:"scan_layer"` // "input" | "tool_return" | "output"
+	ScanLayer       string  `json:"scan_layer"` // "input" | "tool_return" | "tool_description" | "output"
 	SignatureMatch  string  `json:"signature_match,omitempty"`
 	ClassifierScore float64 `json:"classifier_score,omitempty"`
 	Confidence      float64 `json:"confidence"`
 	Action          string  `json:"action"`            // "alerted" | "stripped" | "wrapped" | "halted"
 	Excerpt         string  `json:"excerpt,omitempty"` // redacted/truncated content
+	// Source names where the injected text came from: the tool name, or
+	// "server/method" for an MCP call.
+	Source string `json:"source,omitempty"`
+	// ParentEventID is the event the injected text was found in.
+	ParentEventID string `json:"parent_event_id,omitempty"`
 }

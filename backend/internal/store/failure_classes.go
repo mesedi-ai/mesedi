@@ -33,4 +33,6 @@ var AllFailureClasses = []string{
 	FailureClassHITLTimeout,
 	FailureClassHITLRejectionSpike,
 	FailureClassRecordIntegrity,
+	FailureClassNewTool,
+	FailureClassEffectAliasing,
 }

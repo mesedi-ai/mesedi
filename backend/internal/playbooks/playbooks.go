@@ -128,7 +128,7 @@ var patterns = []pattern{
 
 	// ── prompt_injection, one playbook per detection pattern ───
 	// Signatures emitted by detectors/injection.go. Order doesn't
-	// matter here (signatures are exact-match within a class) but
+	// matter here (no prefix below is a prefix of another) but
 	// reflects the tier ordering from the detector for readability:
 	// literal sentinels first, then named jailbreaks, then semantic
 	// overrides, then broad catch-alls.
@@ -138,6 +138,11 @@ var patterns = []pattern{
 	{"prompt_injection", "developer_mode", "prompt_injection/developer_mode.md"},
 	{"prompt_injection", "role_override", "prompt_injection/role_override.md"},
 	{"prompt_injection", "ignore_instructions", "prompt_injection/ignore_instructions.md"},
+	// Injections found in what tools returned, or in their
+	// descriptions, at ingest (api/tool_output_injection.go). Their
+	// signatures carry the place as a prefix, so these match by prefix.
+	{"prompt_injection", "tool_output:", "prompt_injection/tool_output.md"},
+	{"prompt_injection", "tool_description:", "prompt_injection/tool_description.md"},
 	// Catch-all, added 2026-11-16: a project's own patterns signal as
 	// "custom:<pattern_id>" and had no playbook (outside review).
 	{"prompt_injection", "", "prompt_injection/_default.md"},
@@ -193,6 +198,14 @@ var patterns = []pattern{
 	{"hitl_timeout", "", "hitl_timeout/_default.md"},
 	{"hitl_rejection_spike", "", "hitl_rejection_spike/_default.md"},
 	{"record_integrity", "", "record_integrity/_default.md"},
+
+	// ── effect_aliasing, single class-wide playbook ────────────
+	// Credits the LangChain community thread and digline.dev, where
+	// the class was defined.
+	{"effect_aliasing", "", "effect_aliasing/_default.md"},
+
+	// ── new_tool, the info-level first-use notice ──────────────
+	{"new_tool", "", "new_tool/_default.md"},
 
 	// ── crashes ────────────────────────────────────────────────
 	// Catch-all generic crashes playbook. Earlier versions

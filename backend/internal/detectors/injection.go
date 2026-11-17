@@ -115,25 +115,53 @@ func DetectInjectionWithCustom(
 	text string,
 	custom []*CustomPattern,
 ) (signature, matchedPatternID string, fired bool) {
+	signature, matchedPatternID, _, _, fired = DetectInjectionSpan(text, custom)
+	return signature, matchedPatternID, fired
+}
+
+// DetectInjectionSpan is DetectInjectionWithCustom plus the byte range
+// of the first match, so a caller can record the matched passage as
+// evidence. Same order: built-ins first, then custom patterns.
+func DetectInjectionSpan(
+	text string,
+	custom []*CustomPattern,
+) (signature, matchedPatternID string, start, end int, fired bool) {
 	if text == "" {
-		return "", "", false
+		return "", "", 0, 0, false
 	}
 	for _, p := range injectionPatterns {
-		if p.Pattern.MatchString(text) {
-			return p.Name, "", true
+		if loc := p.Pattern.FindStringIndex(text); loc != nil {
+			return p.Name, "", loc[0], loc[1], true
 		}
 	}
 	for _, c := range custom {
 		if c == nil || c.Compiled == nil {
 			continue
 		}
-		if c.Compiled.MatchString(text) {
+		if loc := c.Compiled.FindStringIndex(text); loc != nil {
 			// Custom matches cluster under a per-pattern_id
 			// signature so the dashboard surfaces customer-defined
 			// rules separately from built-ins (less noise on shared
 			// failure_group rows, easier to A/B custom patterns).
-			return "custom:" + c.PatternID, c.PatternID, true
+			return "custom:" + c.PatternID, c.PatternID, loc[0], loc[1], true
 		}
 	}
-	return "", "", false
+	return "", "", 0, 0, false
+}
+
+// PromptInjectionThresholds holds the per-project prompt_injection
+// settings.
+type PromptInjectionThresholds struct {
+	// ScanToolOutput turns on the scan of what tool and MCP calls
+	// return, and of their descriptions, for injected instructions.
+	// Default true. A project that feeds the agent its own trusted
+	// documents full of phrases like "ignore the above" can turn it
+	// off; the scan of prompts is unaffected.
+	ScanToolOutput bool
+}
+
+// DefaultPromptInjectionThresholds returns the defaults: tool output
+// is scanned.
+func DefaultPromptInjectionThresholds() PromptInjectionThresholds {
+	return PromptInjectionThresholds{ScanToolOutput: true}
 }

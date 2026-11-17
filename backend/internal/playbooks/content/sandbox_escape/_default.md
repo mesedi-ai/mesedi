@@ -1,10 +1,10 @@
 # Sandbox escape
 
-A code-execution tool on this execution attempted behavior that matches one of Mesedi's twelve sandbox-escape patterns. The detector scans both arguments and return values of every `tool_call` (regardless of whether the call itself succeeded) and fires when any of the patterns match.
+A code-execution tool on this execution attempted behavior that matches one of Mesedi's thirteen sandbox-escape patterns. The detector scans both arguments and return values of every `tool_call` (regardless of whether the call itself succeeded) and fires when any of the patterns match.
 
 The signature is `sandbox_escape:<pattern_id>` for built-in patterns and `sandbox_escape:custom:<pattern_id>` for per-project custom patterns. Distinct attempt patterns cluster separately. The production detector emits ALL matching signatures per execution (capped at 20), so an execution that hits multiple escape vectors produces multiple failure_groups, one per vector, rather than collapsing them into the first match.
 
-The twelve built-in pattern ids:
+The thirteen built-in pattern ids:
 
 - `python_os_import`: `import os` or `from os import` from the sandboxed Python runtime.
 - `python_subprocess_import`: `import subprocess` or `from subprocess import`.
@@ -18,6 +18,7 @@ The twelve built-in pattern ids:
 - `proc_sys_access`: `/proc/self`, `/proc/1`, `/sys/kernel`, `/sys/class`.
 - `privilege_escalation`: `chmod <numeric>`, `chown root`, `setuid(0)`. Does not match `sudo` or `su -` directly; those need a custom pattern.
 - `host_secret_read`: `.aws/credentials`, `.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/known_hosts`, `/etc/passwd`, `/etc/shadow`.
+- `resolver_override`: `/etc/hosts` or `/etc/resolv.conf`, which change what a hostname resolves to. Allowlist outbound traffic by the resolved address and check it again at connect time, not by hostname pattern: a host file edit can point an allowlisted-looking name at any address.
 
 ## What's usually happening
 

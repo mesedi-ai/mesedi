@@ -659,6 +659,21 @@ const (
 	// Proving a record was not altered after the fact requires it to
 	// have been signed when written, which this service does not do.
 	FailureClassRecordIntegrity = "record_integrity"
+	// FailureClassNewTool is an info-level notice, not a failure: the
+	// first run in a project that used a tool Mesedi had not seen
+	// before. Signature is the tool name ("server/method" for MCP).
+	// Filed with GroupNewTool, which never takes a run's primary
+	// classification, so a notice cannot stand in for a real finding.
+	FailureClassNewTool = "new_tool"
+	// FailureClassEffectAliasing groups runs where a call changed a
+	// place the run did not declare, or reached a declared place by a
+	// tool not listed for it: two paths reach the same side effect and
+	// only one is watched. The class and its one-line spec come from a
+	// LangChain community thread and Alessandro Prandini's digline.dev
+	// writeup; see detectors/effect_aliasing.go. Signatures:
+	// "outside_scope:<destination>" and
+	// "unlisted_path:<destination>:via:<tool>".
+	FailureClassEffectAliasing = "effect_aliasing"
 )
 
 // FailureGroup is a deduplicated cluster of failures sharing the same

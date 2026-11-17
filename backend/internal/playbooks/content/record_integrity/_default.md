@@ -2,11 +2,14 @@
 
 The event record for this execution contradicts itself. Every other failure class in Mesedi tells you something about what your agent did. This one tells you something about the evidence: that the record you are reading is not complete, and therefore that any conclusion drawn from it may be drawn from a partial picture.
 
-Three signatures, and more than one can fire on the same execution:
+Five signatures, and more than one can fire on the same execution:
 
 - **`record_integrity:sequence_gap`**: the events carry sequence numbers with at least one value missing between the lowest and highest observed. Events were produced that this record does not contain.
 - **`record_integrity:duplicate_sequence`**: two or more events claim the same sequence number. One position in the record was written more than once, so at most one of them is the original.
 - **`record_integrity:events_after_anchoring`**: events arrived after this run's record was anchored with its hourly checkpoint. They are kept and shown, but they are not part of the published record, so they cannot be proven against it. Usually a late SDK flush or a retry after a timeout; check whether the run kept working after it was sealed.
+
+- **`record_integrity:report_chain_broken`**: the run's reports were chained by the SDK, and the links do not form one unbroken path to the end the SDK declared. The run's page shows which way: the first report is missing, a report links to one Mesedi does not hold, two reports claim the same predecessor (one was slipped in), the run's last report is missing, or a report in the run carries no chain at all.
+- **`record_integrity:report_signature_missing`**: the run is signed, and some of its reports, or its declared end, are not signed. Unsigned reports for a signed run are refused on arrival; this fires when one arrived before the run's first signed report, or when the end was not signed.
 
 Ordering is deterministic: gap appears before duplicate when both fire.
 
@@ -17,6 +20,10 @@ Ordering is deterministic: gap appears before duplicate when both fire.
 There is a harder reason too, and it is structural rather than statistical: **the detector's only input is supplied by the caller.** Sequence numbers arrive inside the event body, and Mesedi's ingest endpoint authenticates the project key, not the content. Anyone able to post events chooses the sequence numbers, so an actor concealing something does not leave a gap. They post a dense stream, and this detector reports a clean record.
 
 The scope is therefore: **it sees records that were damaged, not records that were authored.** Loss, crash and retry it catches. Fabrication it does not, and no detector reading the same unsigned stream could: that would be asking the data whether the data is trustworthy.
+
+**Report chaining changes part of this.** Current SDKs give every report the fingerprint of the report they sent before it in the same run, and Mesedi takes each fingerprint from the report exactly as it arrived, before anything is redacted. A report removed, changed or slipped into a run after sending now breaks the chain, at its start, in the middle, or at its end: when a run finishes, the SDK declares the fingerprint of the last report it sent, so a run whose last reports went missing is caught too. A run the server closed itself, such as a timeout, declares no end, and its page says the end was not confirmed. What chaining does not change: whoever holds the project key can still send a whole invented run that links perfectly, because the chain proves the record is what the reporting process sent, not that the reports are true.
+
+**Signing narrows who can do that.** A team can register an Ed25519 public key (only a signed-in admin can, never an API key, because the agent may hold one) and have a reporting process the agent cannot reach sign every report. A signed run refuses unsigned or badly signed reports. Whoever holds every key can still invent reports; signing moves that power from anyone with the project key to whoever holds the signing key. Each run's page shows its verdict: unchained (an SDK that predates chaining), chained, signed, or broken.
 
 What the detector establishes is narrower and still worth having: *this record is not complete, and here is the exact position that is missing or doubled.* Whether that is infrastructure or intent is a question this data cannot answer.
 
@@ -60,4 +67,4 @@ Ranked roughly by how often each turns out to be the cause:
 
 If nothing in your stack is watching for holes, a lossy pipeline looks exactly like a healthy one. The events that arrive render fine. The dashboard totals up whatever it has. A missing event and an event that never happened are indistinguishable, unless something is checking that the record accounts for itself.
 
-That matters more the more weight the record carries. Telemetry used to tune a prompt can absorb some loss. A record used to demonstrate what a system did, to an auditor, a regulator, or a customer disputing an outcome, cannot. There the question stops being "is this complete" and becomes "can you prove it was not changed." That question needs the record to have been signed and chained when it was written, which is a different mechanism than this one.
+That matters more the more weight the record carries. Telemetry used to tune a prompt can absorb some loss. A record used to demonstrate what a system did, to an auditor, a regulator, or a customer disputing an outcome, cannot. There the question stops being "is this complete" and becomes "can you prove it was not changed." That question needs the record to have been signed and chained when it was written. Report chaining and signing are that mechanism; the sequence checks above remain for records from SDKs that predate them, and for loss the chain alone would only report as broken.

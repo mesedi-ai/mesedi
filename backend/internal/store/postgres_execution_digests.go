@@ -37,3 +37,7 @@ func (s *PostgresStore) ExistingExecutionIDs(ctx context.Context, ids []string) 
 func (s *PostgresStore) CountEventsAfterDigest(ctx context.Context, executionIDs []string) (map[string]int, error) {
 	return s.digests().countEventsAfterDigest(ctx, executionIDs)
 }
+
+func (s *PostgresStore) ListReportChainStatuses(ctx context.Context, executionIDs []string) (map[string]string, error) {
+	return s.digests().listReportChainStatuses(ctx, executionIDs)
+}

@@ -91,10 +91,9 @@ func (s *PostgresStore) ListToolCallCountsForProject(
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT (ev.payload::jsonb->>'tool_name') AS tool_name,
 		       COUNT(*) AS call_count
-		FROM events ev
+		FROM tool_events ev
 		JOIN executions ex ON ex.execution_id = ev.execution_id
 		WHERE ex.project_id = $1
-		  AND ev.event_type = 'tool_call'
 		  AND COALESCE(ev.payload::jsonb->>'status', 'ok') != 'failed'
 		  AND (ev.payload::jsonb->>'tool_name') IS NOT NULL
 		GROUP BY (ev.payload::jsonb->>'tool_name')

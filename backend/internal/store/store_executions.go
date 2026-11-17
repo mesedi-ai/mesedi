@@ -273,6 +273,71 @@ type ExecutionStore interface {
 		projectID, detector, thresholdKey string,
 	) error
 
+	// GetToolFirstSeen returns kind -> hash of the first-seen rows for
+	// one tool: "tool" (hash ""), "description" and "definition".
+	// Empty map when the tool has never been recorded. Migration 066.
+	GetToolFirstSeen(
+		ctx context.Context,
+		projectID, toolName string,
+	) (map[string]string, error)
+	// RecordToolFirstSeen inserts a first-seen row and never updates
+	// one. inserted is false when the row already existed, which is
+	// how two runs finishing at once agree on a single "new tool"
+	// notice.
+	RecordToolFirstSeen(
+		ctx context.Context,
+		projectID, toolName, kind, hash, executionID string,
+	) (inserted bool, err error)
+	// EarliestToolContract returns what the oldest stored calls of a
+	// tool say: the run of its first call, its first non-empty
+	// description and its first non-empty declared-schema hash. Used
+	// once per tool, to set the first-seen baseline from history.
+	EarliestToolContract(
+		ctx context.Context,
+		projectID, toolName string,
+	) (ToolContract, error)
+	// LatestToolContractInExecution returns the description and
+	// declared-schema hash of the tool's last call in one run that
+	// carried each, empty where none did.
+	LatestToolContractInExecution(
+		ctx context.Context,
+		executionID, toolName string,
+	) (ToolContract, error)
+
+	// ListLLMCallCostsInRange returns the pricing inputs of every
+	// llm_call in the project with from <= timestamp < to, for the
+	// daily spend report.
+	ListLLMCallCostsInRange(ctx context.Context, projectID string, from, to time.Time) ([]LLMCallCost, error)
+
+	// SaveReportChainRows stores what the server computed for each
+	// chained report on arrival (migration 067). Idempotent per
+	// event_id, so a retried batch stores nothing twice.
+	SaveReportChainRows(ctx context.Context, rows []ReportChainRow) error
+	// ListReportChainRows returns every chained report of one run.
+	ListReportChainRows(ctx context.Context, executionID string) ([]ReportChainRow, error)
+	// ExecutionHasSignedReports reports whether any stored report of
+	// the run was signed, which makes the run signed: later unsigned
+	// reports for it are refused.
+	ExecutionHasSignedReports(ctx context.Context, executionID string) (bool, error)
+	// GetReportSigningKey returns one registered key, revoked or not;
+	// ErrNotFound when the project never registered it.
+	GetReportSigningKey(ctx context.Context, projectID, keyID string) (*ReportSigningKey, error)
+	// ListReportSigningKeys returns the project's keys, revoked ones
+	// included, ordered by key_id.
+	ListReportSigningKeys(ctx context.Context, projectID string) ([]*ReportSigningKey, error)
+	// InsertReportSigningKey registers a key; ErrReportSigningKeyExists
+	// when the key_id is taken, revoked or not.
+	InsertReportSigningKey(ctx context.Context, projectID, keyID, publicKey, createdBy string) error
+	// RevokeReportSigningKey marks a key revoked; ErrNotFound when no
+	// unrevoked key has that id.
+	RevokeReportSigningKey(ctx context.Context, projectID, keyID string) error
+	// SetReportChainStatus records a run's chain verdict and declared
+	// end at completion.
+	SetReportChainStatus(ctx context.Context, row ReportChainStatusRow) error
+	// GetReportChainStatus returns the recorded verdict and end;
+	// ErrNotFound before the run has completed.
+	GetReportChainStatus(ctx context.Context, executionID string) (ReportChainStatusRow, error)
+
 	// GetToolContractPins returns the approval-time pins for the
 	// (projectID, toolName) pair as a kind -> pinned_hash map,
 	// empty when nothing is pinned. One indexed query serves both
