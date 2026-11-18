@@ -3,7 +3,7 @@
 # Why this exists: before 2026-08-20 no workflow ran a single test.
 # fly-deploy.yml shipped straight to production on every push to main
 # with 562 Go tests and 228 Python tests gating nothing. The gap proved
-# itself the day this was written — publishing the Python SDK surfaced a
+# itself the day this was written: publishing the Python SDK surfaced a
 # staleness test that had been failing silently (a phantom
 # RetryableError entry in the Anthropic error map) because nothing ran
 # it.
@@ -64,6 +64,22 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      # A machine that cannot reach gitlab.com, where the SQLite driver is
+      # served, or proxy.golang.org could not build the backend; the outside
+      # reviewer's sandbox hit exactly that (2026-11-18). The bundle script
+      # packs every module into one file for such machines. This builds the
+      # backend from a fresh bundle with Go allowed no other source
+      # (GOPROXY=file:// only, an empty module cache), so the script cannot
+      # quietly stop working. Runs first, while the checkout is clean.
+      - name: Offline build from the module bundle
+        run: |
+          python3 tools/test_backend_module_bundle.py
+          python3 tools/backend_module_bundle.py --out "$RUNNER_TEMP/modules.tar.gz"
+          mkdir -p "$RUNNER_TEMP/modules" "$RUNNER_TEMP/emptycache"
+          tar -xzf "$RUNNER_TEMP/modules.tar.gz" -C "$RUNNER_TEMP/modules"
+          cd backend
+          GOMODCACHE="$RUNNER_TEMP/emptycache" GOFLAGS=-modcacherw \
+            GOPROXY="file://$RUNNER_TEMP/modules/download" GOSUMDB=off go build ./...
       - name: go build
         working-directory: backend
         run: go build ./...
@@ -77,7 +93,7 @@ jobs:
       # language-native formatters (gofmt / isort / Prettier)", and tells
       # the reader to wire those up. Nobody had. This job ran go build,
       # go vet and go test and never gofmt, so the delegation pointed at a
-      # job no automation performed — a check that correctly declines to
+      # job no automation performed: a check that correctly declines to
       # do something, and nobody else doing it.
       #
       # Found on 2026-09-04 because internal/webhooks/dispatcher.go had
@@ -178,7 +194,7 @@ jobs:
           # PINNED DELIBERATELY. Unpinned, CI resolves to whatever the
           # provider shipped that morning, so OpenAI or Anthropic
           # adding one exception class turns this build red with no
-          # commit from us — a bad failure mode in general and a very
+          # commit from us, a bad failure mode in general and a very
           # bad one during a launch week. Bumping these is a normal
           # reviewed change: raise the pin, run the suite, map whatever
           # new exception classes the coverage guard reports.

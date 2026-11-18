@@ -121,6 +121,33 @@ done | sort | uniq -c
 
 Storage is in-memory today (single-instance only). Per-project overrides will eventually come from columns on the `projects` table; multi-instance deployments will swap the in-memory map for a Redis-backed implementation behind the same interface.
 
+## Building without internet access
+
+The SQLite driver (`modernc.org/sqlite` and its libraries) is served from
+gitlab.com, and every module normally comes through proxy.golang.org. On a
+machine that can reach neither, pack the modules on a connected machine
+from a clean checkout:
+
+```bash
+python3 tools/backend_module_bundle.py
+```
+
+It writes `mesedi-backend-modules-<commit>.tar.gz` and prints its SHA-256.
+On the other machine, from a checkout of the same commit:
+
+```bash
+mkdir -p /tmp/mesedi-modules
+tar -xzf mesedi-backend-modules-<commit>.tar.gz -C /tmp/mesedi-modules
+cd backend
+GOPROXY=file:///tmp/mesedi-modules/download GOSUMDB=off go build ./...
+```
+
+Go checks every module it reads from the file against `backend/go.sum`
+from the checkout, so a file with an altered module is refused with
+"checksum mismatch". The file holds modules only: the machine needs the
+Go version in `go.mod`, or newer, already installed. CI builds the
+backend this way on every push.
+
 ## Configuration
 
 12-factor environment variables. Copy `.env.example` to `.env` and fill in values when needed. Flags override env vars.
