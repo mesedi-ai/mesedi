@@ -425,7 +425,9 @@ def test_the_python_sdk_sends_an_intact_chain(backend: Backend, configured_sdk):
         if chain:
             break
         _time.sleep(0.2)
-    assert chain == {"status": "chained"}, (
+    # The SDK declares the run's last report when the run finishes, so the
+    # run page can also say the end was confirmed.
+    assert chain == {"status": "chained", "end_confirmed": True}, (
         chain, detail.get("execution", {}).get("status"), len(detail.get("events") or []),
         mesedi.stats())
 
