@@ -1,10 +1,10 @@
--- Store the string Verdifax hashed to produce the anchored leaf.
+-- Store the string the anchoring service hashed to produce the anchored leaf.
 --
 -- Without it, the transparency log entry a checkpoint names cannot be
 -- checked by anyone. The log records sha256 of a canonical leaf built
 -- from a domain tag, an envelope id, the checkpoint hash, a binding
--- hash and a per-request nonce — and until 2026-09-04 that nonce was
--- generated inside Verdifax's /attest handler, used, and discarded. So
+-- hash and a per-request nonce, and until 2026-09-04 that nonce was
+-- generated inside the anchoring service, used, and discarded. So
 -- the published entry was the hash of a string that existed in no
 -- record anywhere, and comparing it against the checkpoint hash fails
 -- by construction. Running mesedi-verify against production is what

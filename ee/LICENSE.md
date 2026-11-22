@@ -7,7 +7,7 @@ With regard to the Mesedi Enterprise Edition Software located in this
 
 ## 1. Grant of Rights
 
-Subject to the terms of this Enterprise License, Verdifax, LLC d/b/a Mesedi
+Subject to the terms of this Enterprise License, Verdifax, LLC
 ("Mesedi") grants you a non-exclusive, non-transferable, revocable license
 to use the Enterprise Software solely in accordance with this Enterprise
 License and any separate agreement between you and Mesedi.

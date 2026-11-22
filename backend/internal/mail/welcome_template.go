@@ -83,7 +83,8 @@ CrewAI, OpenAI Agents SDK, and Vercel AI SDK adapters.
 Questions, corrections, or stuck somewhere? Reply to this email.
 
 Mesedi
-Verdifax, LLC d/b/a Mesedi
+Terms: https://mesedi.ai/terms
+Privacy: https://mesedi.ai/privacy
 `,
 		welcomeVerifyTextBlock(in),
 		in.ProjectName,
@@ -177,7 +178,7 @@ run_my_agent("hello")</pre>
 
         <tr>
           <td style="font-size:12px;color:#6b6b6b;padding:24px 0 0;border-top:1px solid #2a2a2a;">
-            Mesedi &middot; Verdifax, LLC d/b/a Mesedi
+            Mesedi &middot; <a href="https://mesedi.ai/terms" style="color:#888;">Terms</a> &middot; <a href="https://mesedi.ai/privacy" style="color:#888;">Privacy</a>
           </td>
         </tr>
       </table>

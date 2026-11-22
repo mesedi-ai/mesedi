@@ -139,8 +139,7 @@ func startBackgroundWorkers(
 // signed with the configured key, so it takes a deliberate secret to turn
 // on. MESEDI_REKOR_URL overrides the log address; empty means Sigstore's
 // public log. Until 2026-11-16 anchoring went through a third-party
-// service configured by VERDIFAX_BASE_URL and VERDIFAX_API_KEY; those
-// settings are no longer read.
+// service configured by two other settings; those are no longer read.
 func startCheckpointChain(ctx context.Context, st store.Store, logger *slog.Logger) {
 	keyPEM := strings.TrimSpace(os.Getenv("MESEDI_ANCHOR_SIGNING_KEY"))
 	if keyPEM == "" {

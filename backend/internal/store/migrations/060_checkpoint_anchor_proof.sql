@@ -1,4 +1,4 @@
--- Store the Merkle inclusion proof Verdifax gets back from the
+-- Store the Merkle inclusion proof the anchoring service gets back from the
 -- transparency log, so a checkpoint can be verified WITHOUT contacting
 -- the log at all.
 --
@@ -22,7 +22,7 @@
 --   inclusion_proof the sibling path, tree size, root hash and the
 --                   log's signed checkpoint over that root
 --
--- Kept as one opaque blob on purpose. These fields are Verdifax's and
+-- Kept as one opaque blob on purpose. These fields are the service's and
 -- the log's, not Mesedi's; splitting them into typed columns would mean
 -- Mesedi re-encoding somebody else's evidence, and any field added
 -- upstream would be silently dropped on the way through instead of

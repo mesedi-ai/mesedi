@@ -114,6 +114,3 @@ no artificial usage limits. The `ee/` directory is where features aimed at
 enterprise procurement (SAML SSO, advanced RBAC, seat management, SLA
 reporting, compliance packs) will live as they ship. At the time of the
 initial `ee/` scaffold commit this directory is intentionally empty.
-
-Mesedi is operated by Verdifax, LLC d/b/a Mesedi, a Delaware limited
-liability company.

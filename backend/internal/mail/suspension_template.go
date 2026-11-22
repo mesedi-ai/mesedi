@@ -52,7 +52,8 @@ View your project dashboard:
 %s
 
 Mesedi
-Verdifax, LLC d/b/a Mesedi
+Terms: https://mesedi.ai/terms
+Privacy: https://mesedi.ai/privacy
 `,
 		in.ProjectName,
 		in.SignalKind,
@@ -68,8 +69,8 @@ func suspensionWarningHTML(in SuspensionWarningInput) string {
 <meta charset="utf-8">
 <title>Action required on your Mesedi project</title>
 </head>
-<body style="margin:0;padding:0;background:a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e5e5e5;">
-<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:a0a0a;">
+<body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e5e5e5;">
+<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#0a0a0a;">
   <tr>
     <td align="center" style="padding:32px 16px;">
       <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%%;">
@@ -86,7 +87,7 @@ func suspensionWarningHTML(in SuspensionWarningInput) string {
         </tr>
         <tr>
           <td style="padding-bottom:20px;">
-            <table cellpadding="0" cellspacing="0" border="0" style="background:a1a1a;border:1px solid a2a2a;border-radius:6px;padding:14px;width:100%%;">
+            <table cellpadding="0" cellspacing="0" border="0" style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;padding:14px;width:100%%;">
               <tr>
                 <td style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.7;color:#fafafa;">
                   Kind: %s<br>
@@ -106,11 +107,11 @@ func suspensionWarningHTML(in SuspensionWarningInput) string {
         </tr>
         <tr>
           <td style="padding-bottom:24px;">
-            <a href="%s" style="display:inline-block;background:#f97316;color:a0a0a;text-decoration:none;font-weight:600;padding:12px 18px;border-radius:6px;font-size:14px;">Open dashboard &rarr;</a>
+            <a href="%s" style="display:inline-block;background:#f97316;color:#0a0a0a;text-decoration:none;font-weight:600;padding:12px 18px;border-radius:6px;font-size:14px;">Open dashboard &rarr;</a>
           </td>
         </tr>
         <tr>
-          <td style="font-size:15px;line-height:1.6;color:#b5b5b5;padding:20px 0 0;border-top:1px solid a2a2a;">
+          <td style="font-size:15px;line-height:1.6;color:#b5b5b5;padding:20px 0 0;border-top:1px solid #2a2a2a;">
             Most common causes: a client without backoff (rate_limit_sustained),
             an API key committed to a public repo (key_leak), a debug log
             wired into the event payload (oversized_payload), or many signups
@@ -123,8 +124,8 @@ func suspensionWarningHTML(in SuspensionWarningInput) string {
           </td>
         </tr>
         <tr>
-          <td style="font-size:12px;color:;padding:24px 0 0;border-top:1px solid a2a2a;">
-            Mesedi &middot; Verdifax, LLC d/b/a Mesedi
+          <td style="font-size:12px;color:#666;padding:24px 0 0;border-top:1px solid #2a2a2a;">
+            Mesedi &middot; <a href="https://mesedi.ai/terms" style="color:#888;">Terms</a> &middot; <a href="https://mesedi.ai/privacy" style="color:#888;">Privacy</a>
           </td>
         </tr>
       </table>
